@@ -99,7 +99,7 @@ def test_keyframes_short_shot_one_midpoint() -> None:
     """Shots < 2s → single keyframe at midpoint."""
     from pipeline.ingest.shots import _compute_keyframes
 
-    kf = _compute_keyframes(0.0, 1.0)
+    kf = _compute_keyframes(0.0, 1.0, threshold=2.0)
     assert len(kf) == 1
     assert kf[0] == pytest.approx(0.5)
 
@@ -108,7 +108,7 @@ def test_keyframes_exactly_2s_gets_three() -> None:
     """Shots >= 2s → 3 keyframes."""
     from pipeline.ingest.shots import _compute_keyframes
 
-    kf = _compute_keyframes(0.0, 2.0)
+    kf = _compute_keyframes(0.0, 2.0, threshold=2.0)
     assert len(kf) == 3
 
 
@@ -116,7 +116,7 @@ def test_keyframes_long_shot_at_25_50_75_percent() -> None:
     """Shots >= 2s → keyframes at 25%, 50%, 75% of [t_start, t_end]."""
     from pipeline.ingest.shots import _compute_keyframes
 
-    kf = _compute_keyframes(10.0, 20.0)  # 10s shot starting at 10s
+    kf = _compute_keyframes(10.0, 20.0, threshold=2.0)  # 10s shot starting at 10s
     assert kf[0] == pytest.approx(12.5)  # 10 + 0.25*10
     assert kf[1] == pytest.approx(15.0)  # 10 + 0.50*10
     assert kf[2] == pytest.approx(17.5)  # 10 + 0.75*10
@@ -126,7 +126,7 @@ def test_keyframes_non_zero_start() -> None:
     """Keyframe positions are correct for shots not starting at 0."""
     from pipeline.ingest.shots import _compute_keyframes
 
-    kf = _compute_keyframes(5.0, 5.5)  # 0.5s shot
+    kf = _compute_keyframes(5.0, 5.5, threshold=2.0)  # 0.5s shot
     assert len(kf) == 1
     assert kf[0] == pytest.approx(5.25)
 
@@ -141,7 +141,7 @@ def test_flash_filter_keeps_long_shots_unchanged() -> None:
     from pipeline.ingest.shots import _merge_flash_shots
 
     shots = [(0.0, 5.0), (5.0, 10.0)]
-    result = _merge_flash_shots(shots)
+    result = _merge_flash_shots(shots, threshold=0.5)
     assert len(result) == 2
     assert result[0] == pytest.approx((0.0, 5.0))
     assert result[1] == pytest.approx((5.0, 10.0))
@@ -153,7 +153,7 @@ def test_flash_filter_merges_short_shot_into_previous() -> None:
 
     # middle shot 5.0→5.3 is 0.3s (flash)
     shots = [(0.0, 5.0), (5.0, 5.3), (5.3, 10.0)]
-    result = _merge_flash_shots(shots)
+    result = _merge_flash_shots(shots, threshold=0.5)
     assert len(result) == 2
     assert result[0] == pytest.approx((0.0, 5.3))
     assert result[1] == pytest.approx((5.3, 10.0))
@@ -164,7 +164,7 @@ def test_flash_filter_keeps_shot_at_threshold() -> None:
     from pipeline.ingest.shots import _merge_flash_shots
 
     shots = [(0.0, 5.0), (5.0, 5.5), (5.5, 10.0)]  # middle = 0.5s
-    result = _merge_flash_shots(shots)
+    result = _merge_flash_shots(shots, threshold=0.5)
     assert len(result) == 3
 
 
@@ -172,7 +172,7 @@ def test_flash_filter_empty_input() -> None:
     """Empty list → empty list."""
     from pipeline.ingest.shots import _merge_flash_shots
 
-    assert _merge_flash_shots([]) == []
+    assert _merge_flash_shots([], threshold=0.5) == []
 
 
 def test_flash_filter_single_short_first_shot() -> None:
@@ -180,7 +180,7 @@ def test_flash_filter_single_short_first_shot() -> None:
     from pipeline.ingest.shots import _merge_flash_shots
 
     shots = [(0.0, 0.3), (0.3, 5.0)]
-    result = _merge_flash_shots(shots)
+    result = _merge_flash_shots(shots, threshold=0.5)
     # First shot < 0.5s but no predecessor; keep it
     # Implementation may vary; the key constraint is no zero-duration shots
     assert len(result) >= 1
@@ -237,7 +237,7 @@ def test_detect_shots_returns_list_of_shot(tmp_path: Path, config: Config) -> No
     total_frames = 100  # 10s * 10fps
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 99)], total_frames)
 
-    with patch("pipeline.ingest.shots.TransNetV2") as MockCls:
+    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
         instance = MockCls.return_value
         instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
         MockCls.predictions_to_scenes.return_value = scenes_np
@@ -256,7 +256,7 @@ def test_detect_shots_no_zero_duration_mocked(tmp_path: Path, config: Config) ->
     total_frames = 100
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 99)], total_frames)
 
-    with patch("pipeline.ingest.shots.TransNetV2") as MockCls:
+    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
         instance = MockCls.return_value
         instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
         MockCls.predictions_to_scenes.return_value = scenes_np
@@ -281,7 +281,7 @@ def test_detect_shots_sub_segments_have_parent_shot_id(
     total_frames = 300
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 299)], total_frames)
 
-    with patch("pipeline.ingest.shots.TransNetV2") as MockCls:
+    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
         instance = MockCls.return_value
         instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
         MockCls.predictions_to_scenes.return_value = scenes_np
@@ -304,7 +304,7 @@ def test_detect_shots_short_scene_no_parent_id(tmp_path: Path, config: Config) -
     total_frames = 50
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 49)], total_frames)
 
-    with patch("pipeline.ingest.shots.TransNetV2") as MockCls:
+    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
         instance = MockCls.return_value
         instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
         MockCls.predictions_to_scenes.return_value = scenes_np
@@ -323,7 +323,7 @@ def test_detect_shots_shot_id_format(tmp_path: Path, config: Config) -> None:
     total_frames = 50
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 49)], total_frames)
 
-    with patch("pipeline.ingest.shots.TransNetV2") as MockCls:
+    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
         instance = MockCls.return_value
         instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
         MockCls.predictions_to_scenes.return_value = scenes_np
@@ -349,7 +349,7 @@ def test_detect_shots_keyframe_times_populated(tmp_path: Path, config: Config) -
     total_frames = 100
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 99)], total_frames)
 
-    with patch("pipeline.ingest.shots.TransNetV2") as MockCls:
+    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
         instance = MockCls.return_value
         instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
         MockCls.predictions_to_scenes.return_value = scenes_np

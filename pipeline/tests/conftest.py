@@ -61,6 +61,8 @@ def config(tmp_path: Path) -> Config:
           scene_dialogue_gap: 2.5
           scene_max_duration: 300
           subsegment_min_duration: 20
+          flash_min_duration: 0.5
+          keyframe_short_shot_s: 2.0
 
         retrieval:
           weights:

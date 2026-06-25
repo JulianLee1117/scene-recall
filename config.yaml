@@ -15,6 +15,8 @@ thresholds:
   scene_dialogue_gap: 2.5         # seconds; subtitle continuity merge
   scene_max_duration: 300         # seconds; force scene break
   subsegment_min_duration: 20     # seconds; shots longer than this get sub-segmented
+  flash_min_duration: 0.5         # seconds; shots shorter than this are flash/strobe artifacts
+  keyframe_short_shot_s: 2.0      # seconds; shots shorter than this get 1 keyframe (midpoint)
 
 retrieval:
   weights: {img: 0.4, txt: 0.4, lex: 0.2}

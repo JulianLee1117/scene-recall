@@ -46,6 +46,8 @@ class ThresholdsConfig:
     scene_dialogue_gap: float
     scene_max_duration: int
     subsegment_min_duration: int
+    flash_min_duration: float = 0.5
+    keyframe_short_shot_s: float = 2.0
 
 
 @dataclass
@@ -151,6 +153,8 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         scene_dialogue_gap=float(t["scene_dialogue_gap"]),
         scene_max_duration=int(t["scene_max_duration"]),
         subsegment_min_duration=int(t["subsegment_min_duration"]),
+        flash_min_duration=float(t.get("flash_min_duration", 0.5)),
+        keyframe_short_shot_s=float(t.get("keyframe_short_shot_s", 2.0)),
     )
 
     # --- retrieval ---

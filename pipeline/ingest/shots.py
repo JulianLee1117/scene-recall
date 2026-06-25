@@ -12,13 +12,13 @@ Pipeline:
   1. Run TransNetV2 on the film file to get per-frame cut probabilities.
   2. Convert frame-level predictions to (start_frame, end_frame) scene pairs.
   3. Convert frame indices to timestamps in seconds using film.fps.
-  4. Flash/strobe filter: merge any shot whose duration < 0.5 s into the
-     preceding shot (handles single-frame flashes and strobe cuts).
+  4. Flash/strobe filter: merge any shot whose duration < config.thresholds.flash_min_duration
+     into the preceding shot (handles single-frame flashes and strobe cuts).
   5. Sub-segmentation: shots longer than config.thresholds.subsegment_min_duration
      are split into equal-length sub-segments.  Sub-segments carry the
      ``parent_shot_id`` of the original (unsplit) shot.
   6. Compute ``keyframe_times``:
-       - 1 keyframe (midpoint) for shots < 2 s
+       - 1 keyframe (midpoint) for shots < config.thresholds.keyframe_short_shot_s
        - 3 keyframes at 25 / 50 / 75 % for longer shots
 """
 
@@ -33,14 +33,6 @@ import numpy as np
 
 from pipeline.config import Config
 from pipeline.ingest.probe import FilmRecord
-
-# Lazy-import TransNetV2 at runtime so the module can be imported without
-# initialising the model (speeds up unit tests that mock the class).
-from transnetv2_pytorch import TransNetV2
-
-# Duration (seconds) below which a shot is treated as a flash/strobe artefact
-# and merged into the preceding shot.
-_FLASH_THRESHOLD_S: float = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +57,7 @@ class Shot:
         this shot is a sub-segment produced by sub-segmentation.
     keyframe_times:
         Representative frame times within the shot:
-        - 1 time (midpoint) when the shot duration is < 2 s
+        - 1 time (midpoint) when the shot duration is < config.thresholds.keyframe_short_shot_s
         - 3 times at the 25 / 50 / 75 % marks otherwise
     """
 
@@ -100,6 +92,8 @@ def detect_shots(film: FilmRecord, config: Config) -> list[Shot]:
         are contiguous and span the same range as the original shot.
     """
     # --- 1. Run TransNetV2 ---
+    from transnetv2_pytorch import TransNetV2
+
     model = TransNetV2()
     _video_frames, single_pred, _all_pred = model.predict_video(
         str(film.path), quiet=True
@@ -121,7 +115,7 @@ def detect_shots(film: FilmRecord, config: Config) -> list[Shot]:
             raw_shots.append((t_start, t_end))
 
     # --- 4. Flash/strobe filter ---
-    filtered = _merge_flash_shots(raw_shots)
+    filtered = _merge_flash_shots(raw_shots, config.thresholds.flash_min_duration)
 
     # --- 5. Sub-segment + assign Shot objects ---
     threshold = float(config.thresholds.subsegment_min_duration)
@@ -146,7 +140,7 @@ def detect_shots(film: FilmRecord, config: Config) -> list[Shot]:
                         t_start=sub_start,
                         t_end=sub_end,
                         parent_shot_id=parent_id,
-                        keyframe_times=_compute_keyframes(sub_start, sub_end),
+                        keyframe_times=_compute_keyframes(sub_start, sub_end, config.thresholds.keyframe_short_shot_s),
                     )
                 )
         else:
@@ -157,7 +151,7 @@ def detect_shots(film: FilmRecord, config: Config) -> list[Shot]:
                     t_start=t_start,
                     t_end=t_end,
                     parent_shot_id=None,
-                    keyframe_times=_compute_keyframes(t_start, t_end),
+                    keyframe_times=_compute_keyframes(t_start, t_end, config.thresholds.keyframe_short_shot_s),
                 )
             )
 
@@ -171,8 +165,9 @@ def detect_shots(film: FilmRecord, config: Config) -> list[Shot]:
 
 def _merge_flash_shots(
     shots: list[tuple[float, float]],
+    threshold: float,
 ) -> list[tuple[float, float]]:
-    """Merge shots shorter than :data:`_FLASH_THRESHOLD_S` into their predecessor.
+    """Merge shots shorter than *threshold* into their predecessor.
 
     If the very first shot is short and there is no predecessor, it is kept
     as-is to avoid losing the film's opening frames.
@@ -181,6 +176,9 @@ def _merge_flash_shots(
     ----------
     shots:
         Ordered list of ``(t_start, t_end)`` pairs.
+    threshold:
+        Duration (seconds) below which a shot is treated as a flash/strobe
+        artefact and merged into the preceding shot.
 
     Returns
     -------
@@ -194,7 +192,7 @@ def _merge_flash_shots(
 
     for t_start, t_end in shots[1:]:
         duration = t_end - t_start
-        if duration < _FLASH_THRESHOLD_S:
+        if duration < threshold:
             # Extend the previous shot to absorb the flash.
             prev_start, _prev_end = result[-1]
             result[-1] = (prev_start, t_end)
@@ -240,17 +238,20 @@ def _equal_split(
     return segments
 
 
-def _compute_keyframes(t_start: float, t_end: float) -> list[float]:
+def _compute_keyframes(t_start: float, t_end: float, threshold: float = 2.0) -> list[float]:
     """Return representative keyframe timestamps for a shot.
 
     Rules:
-    - Duration  < 2 s → 1 keyframe at the midpoint.
-    - Duration >= 2 s → 3 keyframes at 25 %, 50 %, 75 % of the shot.
+    - Duration  < *threshold* → 1 keyframe at the midpoint.
+    - Duration >= *threshold* → 3 keyframes at 25 %, 50 %, 75 % of the shot.
 
     Parameters
     ----------
     t_start, t_end:
         Shot boundaries in seconds.
+    threshold:
+        Duration (seconds) below which the shot gets 1 keyframe at the
+        midpoint; otherwise 3 keyframes are placed at 25/50/75% marks.
 
     Returns
     -------
@@ -258,7 +259,7 @@ def _compute_keyframes(t_start: float, t_end: float) -> list[float]:
         Ordered list of keyframe times within *[t_start, t_end]*.
     """
     duration = t_end - t_start
-    if duration < 2.0:
+    if duration < threshold:
         return [t_start + duration / 2.0]
     return [
         t_start + 0.25 * duration,
