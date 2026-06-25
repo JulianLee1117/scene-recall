@@ -53,6 +53,7 @@ def config(tmp_path: Path) -> Config:
           text_encoder: qwen3-embedding-0.6b
           annotator: gemini-3-flash
           router: qwen3:8b
+          whisper: large-v3
 
         thresholds:
           shot_dedup_cosine: 0.12

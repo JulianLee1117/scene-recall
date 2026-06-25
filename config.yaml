@@ -7,6 +7,7 @@ models:
   text_encoder: qwen3-embedding-0.6b
   annotator: gemini-3-flash       # gemini-3-flash | gemini-3.1-flash-lite | gemini-2.5-flash
   router: qwen3:8b                # ollama model tag; qwen3:4b if VRAM is tight
+  whisper: large-v3               # faster-whisper model for subtitle fallback
 
 thresholds:
   shot_dedup_cosine: 0.12         # within-scene cluster merge distance

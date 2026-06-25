@@ -36,6 +36,7 @@ class ModelsConfig:
     text_encoder: str
     annotator: str
     router: str
+    whisper: str = "large-v3"
 
 
 @dataclass
@@ -139,6 +140,7 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         text_encoder=m["text_encoder"],
         annotator=m["annotator"],
         router=m["router"],
+        whisper=m.get("whisper", "large-v3"),
     )
 
     # --- thresholds ---
