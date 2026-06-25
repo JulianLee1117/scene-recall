@@ -1,0 +1,26 @@
+paths:
+  films_dir: D:/films             # source files (immutable, any drive)
+  assets_dir: D:/cinema-assets    # derived: keyframes/, previews/, proxies/, db/
+
+models:
+  visual_encoder: pe_core_l14     # pe_core_l14 | siglip2_so400m
+  text_encoder: qwen3-embedding-0.6b
+  annotator: gemini-3-flash       # gemini-3-flash | gemini-3.1-flash-lite | gemini-2.5-flash
+  router: qwen3:8b                # ollama model tag; qwen3:4b if VRAM is tight
+
+thresholds:
+  shot_dedup_cosine: 0.12         # within-scene cluster merge distance
+  scene_visual_sim: 0.75          # adjacent-shot embedding similarity for merge
+  scene_dialogue_gap: 2.5         # seconds; subtitle continuity merge
+  scene_max_duration: 300         # seconds; force scene break
+  subsegment_min_duration: 20     # seconds; shots longer than this get sub-segmented
+
+retrieval:
+  weights: {img: 0.4, txt: 0.4, lex: 0.2}
+  diversity: {max_per_scene: 2, max_per_film: 4}
+  rerank_enabled: false
+
+scoring:
+  duration_weight: 0.05
+  motion_weight: 0.05
+  frame_worthiness_weight: 0.10

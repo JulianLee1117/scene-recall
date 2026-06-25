@@ -1,1 +1,8 @@
-docs/superpowers/\n.superpowers/
+docs/superpowers/
+.superpowers/
+pipeline/tests/fixtures/
+__pycache__/
+*.py[cod]
+.venv/
+.env
+assets/
