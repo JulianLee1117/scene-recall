@@ -20,7 +20,7 @@ from pathlib import Path
 from pipeline.config import Config
 
 # How many bytes to read from each end of the file for the content hash.
-_HASH_CHUNK = 4 * 1024 * 1024  # 4 MB
+_CONTENT_HASH_CHUNK_BYTES = 4 * 1024 * 1024  # 4 MB
 
 
 # ---------------------------------------------------------------------------
@@ -99,15 +99,15 @@ def _content_hash(path: Path) -> str:
     size = path.stat().st_size
 
     with path.open("rb") as fh:
-        if size <= _HASH_CHUNK * 2:
+        if size <= _CONTENT_HASH_CHUNK_BYTES * 2:
             # Small file: hash the whole thing.
             h.update(fh.read())
         else:
             # Large file: hash the head chunk.
-            h.update(fh.read(_HASH_CHUNK))
+            h.update(fh.read(_CONTENT_HASH_CHUNK_BYTES))
             # Seek to the last chunk and hash it.
-            fh.seek(-_HASH_CHUNK, 2)
-            h.update(fh.read(_HASH_CHUNK))
+            fh.seek(-_CONTENT_HASH_CHUNK_BYTES, 2)
+            h.update(fh.read(_CONTENT_HASH_CHUNK_BYTES))
 
     return h.hexdigest()
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -79,7 +80,7 @@ def test_probe_film_path_stored(test_clip: Path, config: Config) -> None:
     from pipeline.ingest.probe import probe_film
 
     record = probe_film(test_clip, config)
-    assert record.path == test_clip
+    assert record.path == test_clip.resolve()
 
 
 def test_probe_film_no_embedded_subs(test_clip: Path, config: Config) -> None:
@@ -105,3 +106,21 @@ def test_probe_film_duration_is_float(test_clip: Path, config: Config) -> None:
 
     record = probe_film(test_clip, config)
     assert isinstance(record.duration, float)
+
+
+def test_probe_film_has_embedded_subs_true(test_clip: Path, config: Config) -> None:
+    """probe_film sets has_embedded_subs=True when a subtitle stream is present."""
+    from pipeline.ingest.probe import probe_film
+
+    fake_meta = {
+        "format": {"duration": "30.0"},
+        "streams": [
+            {"codec_type": "video", "r_frame_rate": "30/1"},
+            {"codec_type": "subtitle"},
+        ],
+    }
+
+    with patch("pipeline.ingest.probe._ffprobe", return_value=fake_meta):
+        record = probe_film(test_clip, config)
+
+    assert record.has_embedded_subs is True
