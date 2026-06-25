@@ -112,7 +112,7 @@ def _extract_via_ffmpeg(film: FilmRecord) -> list[DialogueLine]:
 def _extract_via_whisper(film: FilmRecord, config: Config) -> list[DialogueLine]:
     """Transcribe *film* with faster-whisper and return segment-level DialogueLines."""
     model = WhisperModel(config.models.whisper, device="auto", compute_type="default")
-    segments, _info = model.transcribe(str(film.path), word_timestamps=True)
+    segments, _info = model.transcribe(str(film.path), word_timestamps=False)
 
     lines: list[DialogueLine] = []
     for seg in segments:
@@ -165,7 +165,8 @@ def _parse_srt(text: str) -> list[DialogueLine]:
             continue  # Malformed block — skip
 
         m = _TIMECODE_RE.match(block_lines[timecode_idx].strip())
-        assert m is not None  # guaranteed by loop above
+        if m is None:
+            continue
         start = _parse_srt_timestamp(m.group(1))
         end = _parse_srt_timestamp(m.group(2))
 
@@ -210,6 +211,7 @@ def _parse_srt_timestamp(ts: str) -> float:
 
 def _save_json(lines: list[DialogueLine], path: Path) -> None:
     """Serialise *lines* to *path* as a JSON array."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps([asdict(line) for line in lines], indent=2, ensure_ascii=False),
         encoding="utf-8",
