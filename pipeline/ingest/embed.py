@@ -12,7 +12,7 @@ Supported ``config.models.visual_encoder`` values
 
 Keyframe naming convention used by ``shot_embedding``
 ------------------------------------------------------
-    ``{asset_dir}/{shot.shot_id}/kf{i:04d}.jpg``
+    ``{asset_dir}/keyframes/{shot.shot_id}_{i}.webp``
 
 where ``i`` runs from 0 to ``len(shot.keyframe_times) - 1``.
 """
@@ -112,6 +112,26 @@ def _l2_normalize(arr: np.ndarray) -> np.ndarray:
     return (arr / norms).astype(np.float32)
 
 
+def _get_dim(config: Config) -> int:
+    """Return embedding dimension for the configured model without loading weights.
+
+    Uses the ``_DIMS`` lookup table so callers can obtain the dimension without
+    triggering a heavyweight model load.
+
+    Raises
+    ------
+    ValueError
+        If ``config.models.visual_encoder`` is not in ``_DIMS``.
+    """
+    model_name = config.models.visual_encoder
+    dim = _DIMS.get(model_name)
+    if dim is None:
+        raise ValueError(
+            f"Unknown visual_encoder {model_name!r}. Known models: {sorted(_DIMS)}"
+        )
+    return dim
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -132,7 +152,11 @@ def embed_images(paths: list[Path], config: Config) -> np.ndarray:
     -------
     np.ndarray
         Shape ``(N, D)``, dtype ``float32``, each row L2-normalised.
+        Returns shape ``(0, D)`` when *paths* is empty.
     """
+    if not paths:
+        return np.empty((0, _get_dim(config)), dtype=np.float32)
+
     model, processor, device = _load_model(config.models.visual_encoder)
     batches: list[np.ndarray] = []
 
@@ -167,7 +191,11 @@ def embed_text(texts: list[str], config: Config) -> np.ndarray:
     -------
     np.ndarray
         Shape ``(N, D)``, dtype ``float32``, each row L2-normalised.
+        Returns shape ``(0, D)`` when *texts* is empty.
     """
+    if not texts:
+        return np.empty((0, _get_dim(config)), dtype=np.float32)
+
     model, processor, device = _load_model(config.models.visual_encoder)
     batches: list[np.ndarray] = []
 
@@ -196,14 +224,16 @@ def shot_embedding(shot: Shot, asset_dir: Path, config: Config) -> np.ndarray:
 
     Keyframe paths are expected at::
 
-        {asset_dir}/{shot.shot_id}/kf{i:04d}.jpg
+        {asset_dir}/keyframes/{shot.shot_id}_{i}.webp
+
+    where ``i`` is 0-indexed (matching the output of ``media.py``).
 
     Parameters
     ----------
     shot:
         Shot dataclass with ``shot_id`` and ``keyframe_times``.
     asset_dir:
-        Root asset directory for the film (parent of per-shot sub-dirs).
+        Root asset directory for the film (``film.asset_dir``).
     config:
         Pipeline configuration.
 
@@ -211,18 +241,23 @@ def shot_embedding(shot: Shot, asset_dir: Path, config: Config) -> np.ndarray:
     -------
     np.ndarray
         Shape ``(D,)``, dtype ``float32``, L2-normalised.
+
+    Raises
+    ------
+    ValueError
+        If ``shot.keyframe_times`` is empty (no keyframes to embed).
     """
-    shot_dir = asset_dir / shot.shot_id
+    if not shot.keyframe_times:
+        raise ValueError(
+            f"Shot {shot.shot_id!r} has no keyframe_times; cannot compute embedding."
+        )
+
     paths = [
-        shot_dir / f"kf{i:04d}.jpg"
+        asset_dir / "keyframes" / f"{shot.shot_id}_{i}.webp"
         for i in range(len(shot.keyframe_times))
     ]
 
     embeddings = embed_images(paths, config)  # (K, D)
     mean_vec = embeddings.mean(axis=0).astype(np.float32)  # (D,)
 
-    norm = float(np.linalg.norm(mean_vec))
-    if norm > 0.0:
-        mean_vec = mean_vec / norm
-
-    return mean_vec
+    return _l2_normalize(mean_vec.reshape(1, -1))[0]

@@ -194,10 +194,10 @@ def test_shot_embedding_shape(tmp_path: Path, config: Config) -> None:
     from pipeline.ingest.embed import shot_embedding
 
     shot = _make_shot("abc_0001", n_keyframes=3)
-    shot_dir = tmp_path / shot.shot_id
-    shot_dir.mkdir()
+    kf_dir = tmp_path / "keyframes"
+    kf_dir.mkdir()
     for i in range(3):
-        _make_dummy_image(shot_dir, f"kf{i:04d}.jpg")
+        _make_dummy_image(kf_dir, f"{shot.shot_id}_{i}.webp")
 
     fake = _fake_loader(embed_dim=1024)
 
@@ -213,10 +213,10 @@ def test_shot_embedding_l2_norm(tmp_path: Path, config: Config) -> None:
     from pipeline.ingest.embed import shot_embedding
 
     shot = _make_shot("abc_0002", n_keyframes=3)
-    shot_dir = tmp_path / shot.shot_id
-    shot_dir.mkdir()
+    kf_dir = tmp_path / "keyframes"
+    kf_dir.mkdir()
     for i in range(3):
-        _make_dummy_image(shot_dir, f"kf{i:04d}.jpg")
+        _make_dummy_image(kf_dir, f"{shot.shot_id}_{i}.webp")
 
     fake = _fake_loader(embed_dim=1024)
 
@@ -233,9 +233,9 @@ def test_shot_embedding_single_keyframe_equals_frame_embedding(
     from pipeline.ingest.embed import shot_embedding
 
     shot = _make_shot("abc_0003", n_keyframes=1)
-    shot_dir = tmp_path / shot.shot_id
-    shot_dir.mkdir()
-    _make_dummy_image(shot_dir, "kf0000.jpg")
+    kf_dir = tmp_path / "keyframes"
+    kf_dir.mkdir()
+    _make_dummy_image(kf_dir, f"{shot.shot_id}_0.webp")
 
     # Fixed raw vector: norm=5, normalized = [0.6, 0.8, 0, ...]
     raw = np.zeros((1, 1024), dtype=np.float32)
@@ -261,9 +261,9 @@ def test_shot_embedding_dtype(tmp_path: Path, config: Config) -> None:
     from pipeline.ingest.embed import shot_embedding
 
     shot = _make_shot("abc_0004", n_keyframes=1)
-    shot_dir = tmp_path / shot.shot_id
-    shot_dir.mkdir()
-    _make_dummy_image(shot_dir, "kf0000.jpg")
+    kf_dir = tmp_path / "keyframes"
+    kf_dir.mkdir()
+    _make_dummy_image(kf_dir, f"{shot.shot_id}_0.webp")
 
     fake = _fake_loader()
 
@@ -308,3 +308,38 @@ def test_load_model_unknown_name_raises(config: Config) -> None:
 
     with pytest.raises(ValueError, match="Unknown"):
         embed._load_model("not_a_real_model")
+
+
+# ---------------------------------------------------------------------------
+# Empty-input guards
+# ---------------------------------------------------------------------------
+
+
+def test_embed_images_empty_paths(config: Config) -> None:
+    """embed_images with an empty list returns shape (0, D) float32 without loading model."""
+    from pipeline.ingest.embed import embed_images
+
+    result = embed_images([], config)
+
+    assert result.shape == (0, 1024)
+    assert result.dtype == np.float32
+
+
+def test_embed_text_empty_texts(config: Config) -> None:
+    """embed_text with an empty list returns shape (0, D) float32 without loading model."""
+    from pipeline.ingest.embed import embed_text
+
+    result = embed_text([], config)
+
+    assert result.shape == (0, 1024)
+    assert result.dtype == np.float32
+
+
+def test_shot_embedding_empty_keyframes_raises(tmp_path: Path, config: Config) -> None:
+    """shot_embedding raises ValueError when shot.keyframe_times is empty."""
+    from pipeline.ingest.embed import shot_embedding
+
+    shot = _make_shot("abc_0005", n_keyframes=0)
+
+    with pytest.raises(ValueError, match="keyframe"):
+        shot_embedding(shot, tmp_path, config)
