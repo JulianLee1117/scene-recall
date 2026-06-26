@@ -19,31 +19,31 @@
   query: "boy alone at window looking out at city streets below"
   intent: vibe
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 1200.0, t_end: 1260.0}
 
 - id: q002
   query: "silence and stillness in a quiet apartment at night"
   intent: vibe
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 3600.0, t_end: 3660.0}
 
 - id: q003
   query: "vast empty universe infinite loneliness floating"
   intent: vibe
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 3600.0, t_end: 3660.0}
 
 - id: q004
   query: "whimsical pastel hotel lobby bustling with eccentric guests"
   intent: vibe
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 300.0, t_end: 360.0}
 
 - id: q005
   query: "melancholic urban family dinner tension beneath politeness"
   intent: vibe
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 5400.0, t_end: 5460.0}
 
 # ---------------------------------------------------------------------------
 # Dialogue quotes (5)
@@ -53,31 +53,31 @@
   query: "why don't I know something about myself that everyone else does"
   intent: dialogue
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 7200.0, t_end: 7260.0}
 
 - id: q007
   query: "open the pod bay doors HAL I'm sorry Dave I can't do that"
   intent: dialogue
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 7200.0, t_end: 7260.0}
 
 - id: q008
   query: "I am the concierge I know everything that happens in this hotel"
   intent: dialogue
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 1200.0, t_end: 1260.0}
 
 - id: q009
   query: "my darling my darling my darling Zero you are my dear"
   intent: dialogue
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 2700.0, t_end: 2760.0}
 
 - id: q010
   query: "we could only see what happened but never why it happened"
   intent: dialogue
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 8100.0, t_end: 8160.0}
 
 # ---------------------------------------------------------------------------
 # Visual specifics (5)
@@ -87,31 +87,31 @@
   query: "astronaut in white spacesuit floating outside the spacecraft"
   intent: visual
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 5400.0, t_end: 5460.0}
 
 - id: q012
   query: "symmetrical overhead shot of elaborate pastry display case"
   intent: visual
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 3600.0, t_end: 3660.0}
 
 - id: q013
   query: "monolith black slab standing in prehistoric landscape at dawn"
   intent: visual
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 300.0, t_end: 360.0}
 
 - id: q014
   query: "boy photographing strangers with a disposable camera on the street"
   intent: visual
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 6300.0, t_end: 6360.0}
 
 - id: q015
   query: "funicular cable car ascending steep mountain snow-covered slope"
   intent: visual
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 4500.0, t_end: 4560.0}
 
 # ---------------------------------------------------------------------------
 # Plot moments (5)
@@ -121,28 +121,28 @@
   query: "discovery that a valuable painting has been stolen from the wall"
   intent: plot
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 5400.0, t_end: 5460.0}
 
 - id: q017
   query: "ape throws bone into the air that transforms into a spacecraft"
   intent: plot
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 600.0, t_end: 660.0}
 
 - id: q018
   query: "father visits the site of his father's grave and reflects on death"
   intent: plot
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 9000.0, t_end: 9060.0}
 
 - id: q019
   query: "hotel lobby chase scene through elaborate corridors and stairways"
   intent: plot
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 1800.0, t_end: 1860.0}
 
 - id: q020
   query: "child asks what does a person look like on the inside why can't we see"
   intent: plot
   acceptable:
-    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 4500.0, t_end: 4560.0}
