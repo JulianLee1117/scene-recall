@@ -1,0 +1,6 @@
+# Phase 1 Baseline — not yet generated
+# Run after ingesting Phase 1 films and filling gold_queries.yaml timestamps:
+#   python -m pipeline.cli eval > pipeline/eval/results/2026-06-25-baseline.txt
+#
+# Expected format when generated:
+# evaluated: N  skipped: 20  hit@5: 0.00  hit@10: 0.00
