@@ -24,6 +24,7 @@ from typing import Iterator
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from lancedb.expr import col, lit
 
 from pipeline.config import Config, load_config
 from pipeline.index.writer import open_db
@@ -77,12 +78,18 @@ def _parse_range(range_header: str, file_size: int) -> tuple[int, int]:
     HTTPException(416)
         If the header is malformed or the range is unsatisfiable.
     """
-    m = re.match(r"bytes=(\d*)-(\d*)", range_header.strip())
+    m = re.match(r"^bytes=(\d*)-(\d*)$", range_header.strip())
     if not m:
         raise HTTPException(416, detail="Invalid Range header")
     raw_start, raw_end = m.group(1), m.group(2)
-    start = int(raw_start) if raw_start else 0
-    end = int(raw_end) if raw_end else file_size - 1
+    if not raw_start and raw_end:
+        # Suffix range: bytes=-N means the last N bytes.
+        suffix_length = int(raw_end)
+        start = max(file_size - suffix_length, 0)
+        end = file_size - 1
+    else:
+        start = int(raw_start) if raw_start else 0
+        end = int(raw_end) if raw_end else file_size - 1
     if start > end or start >= file_size:
         raise HTTPException(416, detail="Range Not Satisfiable")
     end = min(end, file_size - 1)
@@ -121,7 +128,7 @@ async def unit_endpoint(unit_id: str, request: Request) -> dict:
     """Return the full unit record for *unit_id*."""
     db = request.app.state.db
     tbl = db.open_table("units")
-    rows = tbl.search().where(f"unit_id = '{unit_id}'").to_list()
+    rows = tbl.search().where(col("unit_id") == lit(unit_id)).to_list()
     if not rows:
         raise HTTPException(status_code=404, detail=f"Unit {unit_id!r} not found")
     return dict(rows[0])
@@ -152,7 +159,7 @@ async def video_endpoint(film_id: str, request: Request) -> StreamingResponse:
     """Stream a source video file with HTTP range-request support."""
     db = request.app.state.db
     tbl = db.open_table("films")
-    rows = tbl.search().where(f"film_id = '{film_id}'").to_list()
+    rows = tbl.search().where(col("film_id") == lit(film_id)).to_list()
     if not rows:
         raise HTTPException(status_code=404, detail=f"Film {film_id!r} not found")
 

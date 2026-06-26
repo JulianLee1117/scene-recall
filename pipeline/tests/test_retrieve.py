@@ -331,3 +331,154 @@ def test_api_preview_404_when_missing(config: Config) -> None:
             response = client.get("/media/preview/no_such_shot")
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Film mock DB helper
+# ---------------------------------------------------------------------------
+
+
+def _make_film_mock_db(rows: list[dict]) -> MagicMock:
+    """Mock DB for film lookup:
+    open_table("films").search().where(...).to_list()
+    """
+    chain = MagicMock()
+    chain.where.return_value = chain
+    chain.to_list.return_value = rows
+
+    tbl = MagicMock()
+    tbl.search.return_value = chain
+
+    db = MagicMock()
+    db.open_table.return_value = tbl
+    return db
+
+
+# ---------------------------------------------------------------------------
+# _parse_range
+# ---------------------------------------------------------------------------
+
+
+def test_parse_range_normal() -> None:
+    """bytes=0-999 on a 1000-byte file returns (0, 999)."""
+    from pipeline.api.main import _parse_range
+
+    start, end = _parse_range("bytes=0-999", 1000)
+    assert start == 0
+    assert end == 999
+
+
+def test_parse_range_open_end() -> None:
+    """bytes=100- returns start=100, end=file_size-1."""
+    from pipeline.api.main import _parse_range
+
+    start, end = _parse_range("bytes=100-", 1000)
+    assert start == 100
+    assert end == 999
+
+
+def test_parse_range_suffix() -> None:
+    """bytes=-500 means last 500 bytes: start=file_size-500, end=file_size-1."""
+    from pipeline.api.main import _parse_range
+
+    start, end = _parse_range("bytes=-500", 1000)
+    assert start == 500
+    assert end == 999
+
+
+def test_parse_range_invalid_returns_416() -> None:
+    """A malformed Range header raises HTTPException(416)."""
+    from fastapi import HTTPException
+
+    from pipeline.api.main import _parse_range
+
+    with pytest.raises(HTTPException) as exc_info:
+        _parse_range("totally-bogus", 1000)
+    assert exc_info.value.status_code == 416
+
+
+# ---------------------------------------------------------------------------
+# GET /video/{film_id}
+# ---------------------------------------------------------------------------
+
+
+def test_api_video_returns_200_with_accept_ranges(tmp_path: Path, config: Config) -> None:
+    """GET /video/{film_id} returns 200, Accept-Ranges header, and file content."""
+    from fastapi.testclient import TestClient
+
+    video_file = tmp_path / "test.mp4"
+    video_file.write_bytes(b"fake video content")
+
+    row = {"film_id": "film_test", "path": str(video_file)}
+    mock_db = _make_film_mock_db([row])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get("/video/film_test")
+
+    assert response.status_code == 200
+    assert response.headers.get("Accept-Ranges") == "bytes"
+    assert response.content == b"fake video content"
+
+
+def test_api_video_range_request_returns_206(tmp_path: Path, config: Config) -> None:
+    """GET /video/{film_id} with Range header returns 206 and Content-Range."""
+    from fastapi.testclient import TestClient
+
+    content = b"0123456789"  # 10 bytes
+    video_file = tmp_path / "test.mp4"
+    video_file.write_bytes(content)
+
+    row = {"film_id": "film_test", "path": str(video_file)}
+    mock_db = _make_film_mock_db([row])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get("/video/film_test", headers={"Range": "bytes=0-4"})
+
+    assert response.status_code == 206
+    assert response.headers.get("Content-Range") == "bytes 0-4/10"
+    assert response.content == b"01234"
+
+
+def test_api_video_film_not_in_db_returns_404(config: Config) -> None:
+    """GET /video/{film_id} returns 404 when film is absent from DB."""
+    from fastapi.testclient import TestClient
+
+    mock_db = _make_film_mock_db([])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app, raise_server_exceptions=False) as client:
+            response = client.get("/video/nonexistent_film")
+
+    assert response.status_code == 404
+
+
+def test_api_video_file_missing_on_disk_returns_404(tmp_path: Path, config: Config) -> None:
+    """GET /video/{film_id} returns 404 when the video file doesn't exist on disk."""
+    from fastapi.testclient import TestClient
+
+    row = {"film_id": "film_test", "path": str(tmp_path / "missing.mp4")}
+    mock_db = _make_film_mock_db([row])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app, raise_server_exceptions=False) as client:
+            response = client.get("/video/film_test")
+
+    assert response.status_code == 404
