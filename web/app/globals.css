@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0a0a0a;
+  --fg: #ededed;
+  --accent: #d4a96a;
+  --muted: #6b6b6b;
+  --gap: 3px;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-height: 100%;
+}
+
+/* masonry column layout */
+.masonry-grid {
+  columns: 2;
+  column-gap: var(--gap);
+}
+
+@media (min-width: 640px) {
+  .masonry-grid {
+    columns: 3;
+  }
+}
+
+@media (min-width: 1024px) {
+  .masonry-grid {
+    columns: 4;
+  }
+}
+
+@media (min-width: 1400px) {
+  .masonry-grid {
+    columns: 5;
+  }
+}
+
+.masonry-item {
+  break-inside: avoid;
+  margin-bottom: var(--gap);
+  display: block;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.masonry-item img,
+.masonry-item video {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+}
+
+/* modal backdrop */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
