@@ -32,7 +32,7 @@ from pipeline.config import Config
 from pipeline.index.writer import create_tables, open_db, write_film, write_unit
 from pipeline.ingest.annotate import annotate_shot
 from pipeline.ingest.dialogue import DialogueLine, extract_dialogue
-from pipeline.ingest.embed import embed_text, shot_embedding
+from pipeline.ingest.embed import embed_text, get_vector_dim, shot_embedding
 from pipeline.ingest.media import extract_media
 from pipeline.ingest.probe import FilmRecord, probe_film
 from pipeline.ingest.shots import detect_shots
@@ -101,7 +101,7 @@ def run_pipeline(film_path: Path, config: Config) -> FilmRecord:
     # Stages 5-7: Embed + Annotate + Write — always run (per shot)
     # ------------------------------------------------------------------
     db = open_db(config)
-    create_tables(db)
+    create_tables(db, vector_dim=get_vector_dim(config))
     write_film(db, film)
 
     t = time.perf_counter()
@@ -115,7 +115,11 @@ def run_pipeline(film_path: Path, config: Config) -> FilmRecord:
             line for line in dialogue
             if line.start < shot.t_end and line.end > shot.t_start
         ]
-        annotation = annotate_shot(shot, keyframes, shot_dialogue, config)
+        try:
+            annotation = annotate_shot(shot, keyframes, shot_dialogue, config)
+        except Exception as e:
+            print(f"  [annotate] shot {shot.shot_id} failed: {e}, skipping")
+            annotation = {"caption": "", "mood": [], "searchable_text": ""}
         txt_vec: np.ndarray = embed_text([annotation["searchable_text"]], config)[0]
         write_unit(
             db,

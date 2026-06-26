@@ -101,14 +101,16 @@ def annotate_shot(
     parts.append(types.Part.from_text(text=_PROMPT))
 
     # --- 3. Call Gemini ---
-    api_key = os.environ.get("GEMINI_API_KEY")
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=config.models.annotator,
-        contents=parts,
-    )
-
-    raw_text: str = response.text
+    try:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=config.models.annotator,
+            contents=parts,
+        )
+        raw_text: str = response.text
+    except Exception:
+        return {"caption": "", "mood": [], "searchable_text": ""}
 
     # --- 4. Parse the response ---
     caption, mood = _parse_response(raw_text)
@@ -144,7 +146,8 @@ def _parse_response(text: str) -> tuple[str, list[str]]:
     Parameters
     ----------
     text:
-        Raw text returned by Gemini.
+        Raw text returned by Gemini.  Empty or ``None``-ish values return
+        an empty caption and empty mood list.
 
     Returns
     -------
@@ -152,6 +155,9 @@ def _parse_response(text: str) -> tuple[str, list[str]]:
         ``(caption, mood_keywords)`` where ``caption`` is the joined non-Mood
         lines and ``mood_keywords`` is the parsed list (empty if no Mood: line).
     """
+    if not text:
+        return ("", [])
+
     lines = text.strip().splitlines()
     mood_keywords: list[str] = []
     caption_lines: list[str] = []
