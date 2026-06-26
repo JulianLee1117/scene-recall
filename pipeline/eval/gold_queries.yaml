@@ -1,0 +1,148 @@
+# gold_queries.yaml — 20 evaluation queries for Phase 1 films
+#
+# Films:
+#   Yi Yi (2000) — Edward Yang
+#   2001: A Space Odyssey (1968) — Stanley Kubrick
+#   The Grand Budapest Hotel (2014) — Wes Anderson
+#
+# To fill in real values after ingesting your films:
+#   1. Replace REPLACE_WITH_FILM_ID with the actual film_id hash
+#   2. Replace t_start / t_end with the actual timestamps in seconds
+#
+# Intent categories: vibe | dialogue | visual | plot
+
+# ---------------------------------------------------------------------------
+# Vibe queries (5)
+# ---------------------------------------------------------------------------
+
+- id: q001
+  query: "boy alone at window looking out at city streets below"
+  intent: vibe
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q002
+  query: "silence and stillness in a quiet apartment at night"
+  intent: vibe
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q003
+  query: "vast empty universe infinite loneliness floating"
+  intent: vibe
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q004
+  query: "whimsical pastel hotel lobby bustling with eccentric guests"
+  intent: vibe
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q005
+  query: "melancholic urban family dinner tension beneath politeness"
+  intent: vibe
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+# ---------------------------------------------------------------------------
+# Dialogue quotes (5)
+# ---------------------------------------------------------------------------
+
+- id: q006
+  query: "why don't I know something about myself that everyone else does"
+  intent: dialogue
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q007
+  query: "open the pod bay doors HAL I'm sorry Dave I can't do that"
+  intent: dialogue
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q008
+  query: "I am the concierge I know everything that happens in this hotel"
+  intent: dialogue
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q009
+  query: "my darling my darling my darling Zero you are my dear"
+  intent: dialogue
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q010
+  query: "we could only see what happened but never why it happened"
+  intent: dialogue
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+# ---------------------------------------------------------------------------
+# Visual specifics (5)
+# ---------------------------------------------------------------------------
+
+- id: q011
+  query: "astronaut in white spacesuit floating outside the spacecraft"
+  intent: visual
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q012
+  query: "symmetrical overhead shot of elaborate pastry display case"
+  intent: visual
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q013
+  query: "monolith black slab standing in prehistoric landscape at dawn"
+  intent: visual
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q014
+  query: "boy photographing strangers with a disposable camera on the street"
+  intent: visual
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q015
+  query: "funicular cable car ascending steep mountain snow-covered slope"
+  intent: visual
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+# ---------------------------------------------------------------------------
+# Plot moments (5)
+# ---------------------------------------------------------------------------
+
+- id: q016
+  query: "discovery that a valuable painting has been stolen from the wall"
+  intent: plot
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q017
+  query: "ape throws bone into the air that transforms into a spacecraft"
+  intent: plot
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q018
+  query: "father visits the site of his father's grave and reflects on death"
+  intent: plot
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q019
+  query: "hotel lobby chase scene through elaborate corridors and stairways"
+  intent: plot
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
+
+- id: q020
+  query: "child asks what does a person look like on the inside why can't we see"
+  intent: plot
+  acceptable:
+    - {film_id: "REPLACE_WITH_FILM_ID", t_start: 0.0, t_end: 30.0}
