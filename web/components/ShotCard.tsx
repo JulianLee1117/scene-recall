@@ -2,26 +2,11 @@
 
 import { useState, useRef, useCallback } from "react";
 import type { SearchResult } from "@/types/api";
+import { formatTime, filmLabel } from "@/lib/format";
 
 interface ShotCardProps {
   shot: SearchResult;
   onClick: (shot: SearchResult) => void;
-}
-
-function formatTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function filmLabel(filmId: string): string {
-  return filmId
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function ShotCard({ shot, onClick }: ShotCardProps) {
@@ -49,7 +34,7 @@ export default function ShotCard({ shot, onClick }: ShotCardProps) {
       onMouseLeave={handleMouseLeave}
       title={shot.caption}
     >
-      {/* keyframe — always rendered for layout */}
+      {/* keyframe — always in flow to hold card height */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={shot.keyframe_url}
@@ -61,13 +46,10 @@ export default function ShotCard({ shot, onClick }: ShotCardProps) {
           height: "auto",
           opacity: hovered ? 0 : 1,
           transition: "opacity 0.15s ease",
-          position: hovered ? "absolute" : "relative",
-          top: 0,
-          left: 0,
         }}
       />
 
-      {/* preview video — overlays keyframe on hover */}
+      {/* preview video — always absolutely positioned over the img */}
       <video
         ref={videoRef}
         src={shot.preview_url}
@@ -76,14 +58,14 @@ export default function ShotCard({ shot, onClick }: ShotCardProps) {
         playsInline
         preload="none"
         style={{
-          display: "block",
-          width: "100%",
-          height: "auto",
-          opacity: hovered ? 1 : 0,
-          transition: "opacity 0.15s ease",
-          position: hovered ? "relative" : "absolute",
+          position: "absolute",
           top: 0,
           left: 0,
+          width: "100%",
+          height: "100%",
+          opacity: hovered ? 1 : 0,
+          transition: "opacity 0.15s ease",
+          objectFit: "cover",
         }}
       />
 

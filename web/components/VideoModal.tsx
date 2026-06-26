@@ -2,36 +2,28 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import type { SearchResult } from "@/types/api";
+import { formatTime, filmLabel } from "@/lib/format";
 
 interface VideoModalProps {
   shot: SearchResult;
   onClose: () => void;
 }
 
-function formatTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function filmLabel(filmId: string): string {
-  return filmId
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 export default function VideoModal({ shot, onClose }: VideoModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hasSeenCanPlay = useRef(false);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
   const seekTarget = Math.max(0, shot.t_start - 1);
 
+  // Reset the one-shot guard whenever the shot changes
+  useEffect(() => {
+    hasSeenCanPlay.current = false;
+  }, [shot]);
+
   const handleCanPlay = useCallback(() => {
     const vid = videoRef.current;
-    if (!vid) return;
+    if (!vid || hasSeenCanPlay.current) return;
+    hasSeenCanPlay.current = true;
     vid.currentTime = seekTarget;
     vid.play().catch(() => {
       // autoplay blocked — user can press play
