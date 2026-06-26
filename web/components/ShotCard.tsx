@@ -9,6 +9,8 @@ interface ShotCardProps {
   onClick: (shot: SearchResult) => void;
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+
 export default function ShotCard({ shot, onClick }: ShotCardProps) {
   const [hovered, setHovered] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -37,7 +39,7 @@ export default function ShotCard({ shot, onClick }: ShotCardProps) {
       {/* keyframe — always in flow to hold card height */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={shot.keyframe_url}
+        src={`${API_URL}${shot.keyframe_url}`}
         alt={shot.caption}
         loading="lazy"
         style={{
@@ -52,7 +54,7 @@ export default function ShotCard({ shot, onClick }: ShotCardProps) {
       {/* preview video — always absolutely positioned over the img */}
       <video
         ref={videoRef}
-        src={shot.preview_url}
+        src={`${API_URL}${shot.preview_url}`}
         muted
         loop
         playsInline

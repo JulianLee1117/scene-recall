@@ -132,6 +132,32 @@ def _get_dim(config: Config) -> int:
     return dim
 
 
+def get_vector_dim(config: Config) -> int:
+    """Return the embedding dimension for the configured visual encoder.
+
+    Public alias for :func:`_get_dim`.  Use this to obtain the vector
+    dimension before opening a LanceDB connection so that
+    :func:`pipeline.index.writer.create_tables` receives the correct dim.
+
+    Parameters
+    ----------
+    config:
+        Pipeline configuration.  ``config.models.visual_encoder`` selects
+        the model (e.g. ``"pe_core_l14"`` → 1024, ``"siglip2_so400m"`` → 1152).
+
+    Returns
+    -------
+    int
+        Embedding dimension for the configured model.
+
+    Raises
+    ------
+    ValueError
+        If ``config.models.visual_encoder`` is not a recognised model name.
+    """
+    return _get_dim(config)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------

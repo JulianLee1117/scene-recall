@@ -28,7 +28,7 @@ import lancedb
 from pipeline.config import Config
 from pipeline.ingest.probe import FilmRecord
 from pipeline.ingest.shots import Shot
-from pipeline.index.schema import UNITS_SCHEMA, FILMS_SCHEMA
+from pipeline.index.schema import FILMS_SCHEMA, make_units_schema
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ def open_db(config: Config) -> lancedb.DBConnection:
     return lancedb.connect(str(db_path))
 
 
-def create_tables(db: lancedb.DBConnection) -> None:
+def create_tables(db: lancedb.DBConnection, vector_dim: int = 1024) -> None:
     """Create the ``units`` and ``films`` tables if they do not already exist.
 
     Safe to call multiple times; existing tables are left untouched.
@@ -65,8 +65,12 @@ def create_tables(db: lancedb.DBConnection) -> None:
     ----------
     db:
         Open LanceDB connection (from :func:`open_db`).
+    vector_dim:
+        Embedding dimension for ``img_vec`` and ``txt_vec`` columns.
+        Defaults to 1024 (PE core L/14).  Pass 1152 for SigLIP-2.
+        Ignored when the table already exists.
     """
-    db.create_table("units", schema=UNITS_SCHEMA, exist_ok=True)
+    db.create_table("units", schema=make_units_schema(vector_dim), exist_ok=True)
     db.create_table("films", schema=FILMS_SCHEMA, exist_ok=True)
 
 
