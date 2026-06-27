@@ -14,6 +14,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from pipeline.config import load_config
 from pipeline.ingest.pipeline import run_pipeline
