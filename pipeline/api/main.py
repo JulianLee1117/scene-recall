@@ -7,6 +7,9 @@ GET /unit/{unit_id}                 Full unit record from the LanceDB units tabl
 GET /media/keyframe/{shot_id}/{n}   Serve a WebP keyframe image
 GET /media/preview/{shot_id}        Serve a WebM preview clip
 GET /video/{film_id}                Stream source video with HTTP range support
+GET /library                        List all video files in films_dir with index status
+POST /ingest                        Start a background ingest job for a film
+GET /ingest/jobs                    Poll status of all active ingest jobs
 
 Start with::
 
@@ -15,23 +18,40 @@ Start with::
 
 from __future__ import annotations
 
+import asyncio
 import mimetypes
-
-from dotenv import load_dotenv
-load_dotenv()
 import re
+import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Iterator
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from lancedb.expr import col, lit
+from pydantic import BaseModel
 
 from pipeline.config import Config, load_config
 from pipeline.index.writer import open_db
+from pipeline.ingest.pipeline import run_pipeline
 from pipeline.search.retrieve import search as _search
+
+
+# ---------------------------------------------------------------------------
+# Module-level state
+# ---------------------------------------------------------------------------
+
+_ingest_jobs: dict[str, dict] = {}
+
+_VIDEO_EXTENSIONS: frozenset[str] = frozenset({
+    ".mkv", ".mp4", ".avi", ".mov", ".m4v", ".webm"
+})
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +129,15 @@ def _stream_file(path: Path, start: int, end: int) -> Iterator[bytes]:
                 break
             remaining -= len(chunk)
             yield chunk
+
+
+# ---------------------------------------------------------------------------
+# Request / response models
+# ---------------------------------------------------------------------------
+
+
+class IngestRequest(BaseModel):
+    path: str
 
 
 # ---------------------------------------------------------------------------
@@ -197,3 +226,99 @@ async def video_endpoint(film_id: str, request: Request) -> StreamingResponse:
             "Accept-Ranges": "bytes",
         },
     )
+
+
+@app.get("/library")
+async def library_endpoint(request: Request) -> list[dict]:
+    """Scan films_dir for video files and report index status for each."""
+    config: Config = request.app.state.config
+    db = request.app.state.db
+    films_dir: Path = config.paths.films_dir
+
+    if not films_dir.exists():
+        return []
+
+    # Collect all indexed paths from the films table (empty set if table absent).
+    indexed_paths: set[str] = set()
+    try:
+        if "films" in db.table_names():
+            films_tbl = db.open_table("films")
+            rows = films_tbl.search().limit(100_000).to_list()
+            indexed_paths = {row["path"] for row in rows}
+    except Exception:
+        pass
+
+    result: list[dict] = []
+    for f in films_dir.iterdir():
+        if f.suffix.lower() not in _VIDEO_EXTENSIONS:
+            continue
+        size_gb = round(f.stat().st_size / (1024 ** 3), 1)
+        status = "indexed" if str(f) in indexed_paths else "not_indexed"
+        result.append({
+            "filename": f.name,
+            "path": str(f),
+            "size_gb": size_gb,
+            "status": status,
+        })
+
+    result.sort(key=lambda x: x["filename"].lower())
+    return result
+
+
+@app.post("/ingest")
+async def ingest_endpoint(body: IngestRequest, request: Request) -> dict:
+    """Start a background ingest pipeline job for one film file."""
+    path = Path(body.path)
+
+    if not path.exists() or path.suffix.lower() not in _VIDEO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Path does not exist or is not a supported video file")
+
+    # Reject if a running job for this path already exists.
+    for job in _ingest_jobs.values():
+        if job["path"] == str(path) and job["status"] == "running":
+            raise HTTPException(status_code=409, detail="Already ingesting this file")
+
+    job_id = str(uuid.uuid4())[:8]
+    _ingest_jobs[job_id] = {
+        "job_id": job_id,
+        "path": str(path),
+        "filename": path.name,
+        "status": "running",
+        "started_at": time.time(),
+        "finished_at": None,
+        "error": None,
+    }
+
+    config: Config = request.app.state.config
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(None, run_pipeline, path, config)
+
+    def _on_done(fut: asyncio.Future) -> None:  # type: ignore[type-arg]
+        try:
+            fut.result()
+            _ingest_jobs[job_id]["status"] = "done"
+        except Exception as exc:
+            _ingest_jobs[job_id]["status"] = "error"
+            _ingest_jobs[job_id]["error"] = str(exc)
+        _ingest_jobs[job_id]["finished_at"] = time.time()
+
+    future.add_done_callback(_on_done)
+
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/ingest/jobs")
+async def ingest_jobs_endpoint() -> list[dict]:
+    """Return all active ingest jobs; prune completed jobs older than 5 minutes."""
+    now = time.time()
+    stale = [
+        jid
+        for jid, job in _ingest_jobs.items()
+        if job["status"] in ("done", "error")
+        and job["finished_at"] is not None
+        and (now - job["finished_at"]) > 300
+    ]
+    for jid in stale:
+        del _ingest_jobs[jid]
+
+    return list(_ingest_jobs.values())
