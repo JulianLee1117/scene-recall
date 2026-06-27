@@ -16,6 +16,9 @@ Start with::
 from __future__ import annotations
 
 import mimetypes
+
+from dotenv import load_dotenv
+load_dotenv()
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
