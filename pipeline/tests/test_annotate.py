@@ -1,22 +1,26 @@
-"""Tests for pipeline/ingest/annotate.py — written before implementation (TDD).
+"""Tests for pipeline/ingest/annotate.py.
 
-All Gemini API calls are mocked.  No real network calls are made.
+All provider API calls are mocked. No real network calls are made.
 
 Test coverage:
-  - annotate_shot returns dict with required keys
-  - searchable_text is a non-empty string
-  - caption and mood are parsed correctly from the Gemini response
+  - annotate_shot returns dict with caption, mood, facets, searchable_text
+  - both providers return the same structured contract
+  - facet values outside the vocabulary degrade to "unknown", never abort
   - dialogue lines within the shot's time range are included in searchable_text
   - dialogue lines outside the shot's time range are excluded
   - the model name is taken from config.models.annotator (not hardcoded)
-  - _parse_response handles the Mood: prefix correctly
+  - the durable cache reuses hosted output and invalidates on input changes
 """
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
+import openai
 import pytest
 from PIL import Image
 
@@ -30,11 +34,25 @@ from pipeline.ingest.shots import Shot
 # ---------------------------------------------------------------------------
 
 
-FAKE_RESPONSE_TEXT = (
-    "A tense nighttime scene with two figures silhouetted against glowing city lights. "
-    "The composition is tight, emphasising isolation in the urban environment.\n"
-    "Mood: tense, noir, dramatic, nighttime"
-)
+FAKE_ANNOTATION: dict = {
+    "caption": (
+        "A tense nighttime scene with two figures silhouetted against glowing "
+        "city lights. The composition is tight, emphasising isolation in the "
+        "urban environment."
+    ),
+    "mood": ["tense", "noir", "dramatic", "nighttime"],
+    "framing": "wide",
+    "setting": "exterior",
+    "time_of_day": "night",
+    "people_count": 2,
+    "energy": "calm",
+    "camera_motion": "unknown",
+    "palette": ["neon blue", "black"],
+    "subjects": ["two silhouetted figures", "city skyline"],
+    "on_screen_text": "",
+}
+
+FAKE_RESPONSE_TEXT = json.dumps(FAKE_ANNOTATION)
 
 
 def _make_jpeg(parent: Path, name: str = "frame.jpg") -> Path:
@@ -89,6 +107,18 @@ def test_annotate_shot_returns_required_keys(tmp_path: Path, config: Config) -> 
     assert "caption" in result
     assert "mood" in result
     assert "searchable_text" in result
+    for facet in (
+        "framing",
+        "setting",
+        "time_of_day",
+        "people_count",
+        "energy",
+        "camera_motion",
+        "palette",
+        "subjects",
+        "on_screen_text",
+    ):
+        assert facet in result
 
 
 def test_annotate_shot_searchable_text_is_nonempty(tmp_path: Path, config: Config) -> None:
@@ -280,49 +310,568 @@ def test_annotate_shot_uses_model_from_config(tmp_path: Path, config: Config) ->
 
 
 # ---------------------------------------------------------------------------
-# _parse_response — unit tests for the parsing helper
+# Durable annotation cache
 # ---------------------------------------------------------------------------
 
 
-def test_parse_response_basic() -> None:
-    """_parse_response extracts caption and mood from a well-formed response."""
-    from pipeline.ingest.annotate import _parse_response
+def test_annotation_cache_reuses_hosted_response_and_rebuilds_dialogue(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A retry does not repay for a shot, while current dialogue stays fresh."""
+    from pipeline.ingest.annotate import annotate_shot
 
-    text = "A dark and stormy shot.\nMood: dark, stormy, dramatic"
-    caption, mood = _parse_response(text)
+    shot = _make_shot()
+    keyframes = [_make_jpeg(tmp_path, "kf0.jpg")]
+    cache_dir = tmp_path / "annotations"
+    first_dialogue = [
+        DialogueLine(start=12.0, end=13.0, text="First transcript.")
+    ]
+    retry_dialogue = [
+        DialogueLine(start=12.0, end=13.0, text="Corrected transcript.")
+    ]
+    mock_client = _make_mock_client()
 
-    assert caption == "A dark and stormy shot."
-    assert mood == ["dark", "stormy", "dramatic"]
+    with patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client):
+        first = annotate_shot(
+            shot,
+            keyframes,
+            first_dialogue,
+            config,
+            cache_dir=cache_dir,
+        )
+        retry = annotate_shot(
+            shot,
+            keyframes,
+            retry_dialogue,
+            config,
+            cache_dir=cache_dir,
+        )
+
+    assert mock_client.models.generate_content.call_count == 1
+    assert first["caption"] == retry["caption"]
+    assert "Corrected transcript." in retry["searchable_text"]
+    assert "First transcript." not in retry["searchable_text"]
+
+    cache_path = cache_dir / f"{shot.shot_id}.json"
+    cache_text = cache_path.read_text(encoding="utf-8")
+    assert "Corrected transcript." not in cache_text
+    assert "First transcript." not in cache_text
 
 
-def test_parse_response_multiline_caption() -> None:
-    """_parse_response handles a multi-line caption."""
-    from pipeline.ingest.annotate import _parse_response
+def test_annotation_cache_invalidates_when_model_changes(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Changing a hosted annotation input produces a deliberate cache miss."""
+    from pipeline.ingest.annotate import annotate_shot
 
-    text = "Line one of caption.\nLine two of caption.\nMood: sad, quiet"
-    caption, mood = _parse_response(text)
+    shot = _make_shot()
+    keyframes = [_make_jpeg(tmp_path)]
+    cache_dir = tmp_path / "annotations"
+    mock_client = _make_mock_client()
 
-    assert "Line one of caption." in caption
-    assert "Line two of caption." in caption
-    assert mood == ["sad", "quiet"]
+    with patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client):
+        annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
+        config.models.annotator = "gemini-other-model"
+        annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
 
-
-def test_parse_response_no_mood_line() -> None:
-    """_parse_response returns empty mood list when Mood: line is absent."""
-    from pipeline.ingest.annotate import _parse_response
-
-    text = "Just a paragraph with no mood line."
-    caption, mood = _parse_response(text)
-
-    assert caption == "Just a paragraph with no mood line."
-    assert mood == []
+    assert mock_client.models.generate_content.call_count == 2
 
 
-def test_parse_response_mood_keywords_stripped() -> None:
-    """_parse_response strips whitespace from each mood keyword."""
-    from pipeline.ingest.annotate import _parse_response
+def test_failed_annotation_does_not_create_resume_cache(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Only a fully validated provider response is safe to resume from."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
 
-    text = "Caption.\nMood:  happy ,  bright ,  light "
-    _caption, mood = _parse_response(text)
+    shot = _make_shot()
+    keyframes = [_make_jpeg(tmp_path)]
+    cache_dir = tmp_path / "annotations"
+    mock_client = _make_mock_client(response_text="")
 
-    assert mood == ["happy", "bright", "light"]
+    with (
+        patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client),
+        pytest.raises(AnnotationError, match="empty annotation"),
+    ):
+        annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
+
+    assert not (cache_dir / f"{shot.shot_id}.json").exists()
+
+
+def test_corrupt_cache_refuses_to_repeat_hosted_request(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A damaged cache must be resolved explicitly rather than repaid blindly."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    shot = _make_shot()
+    keyframes = [_make_jpeg(tmp_path)]
+    cache_dir = tmp_path / "annotations"
+    cache_dir.mkdir()
+    (cache_dir / f"{shot.shot_id}.json").write_text("{broken", encoding="utf-8")
+    mock_client = _make_mock_client()
+
+    with (
+        patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client),
+        pytest.raises(AnnotationError, match="corrupt.*refusing"),
+    ):
+        annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
+
+    mock_client.models.generate_content.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# OpenAI provider
+# ---------------------------------------------------------------------------
+
+
+def _openai_response(
+    *,
+    caption: str = "Two figures cross a rain-soaked street under neon light.",
+    mood: list[str] | None = None,
+    **facets: object,
+) -> SimpleNamespace:
+    from pipeline.ingest.annotate import _ShotAnnotation
+
+    annotation = _ShotAnnotation(
+        caption=caption,
+        mood=mood if mood is not None else ["noir", "lonely", "rainy"],
+        framing=facets.get("framing", "medium"),
+        setting=facets.get("setting", "exterior"),
+        time_of_day=facets.get("time_of_day", "night"),
+        people_count=facets.get("people_count", 2),
+        energy=facets.get("energy", "calm"),
+        camera_motion=facets.get("camera_motion", "unknown"),
+        palette=facets.get("palette", ["neon red", "black"]),
+        subjects=facets.get("subjects", ["two figures", "wet street"]),
+        on_screen_text=facets.get("on_screen_text", ""),
+    )
+    return SimpleNamespace(
+        status="completed",
+        output=[],
+        output_parsed=annotation,
+        incomplete_details=None,
+        error=None,
+    )
+
+
+def _select_openai(config: Config) -> None:
+    config.models.annotator_provider = "openai"
+    config.models.annotator = "gpt-5.6-luna"
+    config.models.annotator_image_detail = "low"
+    config.models.annotator_reasoning_effort = "none"
+
+
+def test_openai_annotation_cache_avoids_second_responses_call(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """OpenAI retries reuse the same durable provider-independent cache."""
+    from pipeline.ingest.annotate import annotate_shot
+
+    _select_openai(config)
+    shot = _make_shot()
+    keyframe = _make_jpeg(tmp_path)
+    mock_client = MagicMock()
+    mock_client.responses.parse.return_value = _openai_response()
+
+    with patch(
+        "pipeline.ingest.annotate._get_openai_client",
+        return_value=mock_client,
+    ):
+        annotate_shot(
+            shot,
+            [keyframe],
+            [],
+            config,
+            cache_dir=tmp_path / "annotations",
+        )
+        annotate_shot(
+            shot,
+            [keyframe],
+            [],
+            config,
+            cache_dir=tmp_path / "annotations",
+        )
+
+    mock_client.responses.parse.assert_called_once()
+
+
+def test_openai_annotation_uses_responses_structured_output(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """OpenAI receives at most three low-detail data-URL keyframes."""
+    from pipeline.ingest.annotate import _ShotAnnotation, annotate_shot
+
+    _select_openai(config)
+    keyframes = [_make_jpeg(tmp_path, f"kf{i}.jpg") for i in range(4)]
+    mock_client = MagicMock()
+    mock_client.responses.parse.return_value = _openai_response()
+
+    with patch(
+        "pipeline.ingest.annotate._get_openai_client",
+        return_value=mock_client,
+    ):
+        result = annotate_shot(_make_shot(), keyframes, [], config)
+
+    kwargs = mock_client.responses.parse.call_args.kwargs
+    assert kwargs["model"] == "gpt-5.6-luna"
+    assert kwargs["reasoning"] == {"effort": "none"}
+    assert kwargs["store"] is False
+    assert kwargs["max_output_tokens"] == 800
+    assert kwargs["text_format"] is _ShotAnnotation
+
+    content = kwargs["input"][0]["content"]
+    images = [part for part in content if part["type"] == "input_image"]
+    assert len(images) == 3
+    assert all(part["detail"] == "low" for part in images)
+    assert all(
+        part["image_url"].startswith("data:image/jpeg;base64,")
+        for part in images
+    )
+    assert base64.b64decode(images[0]["image_url"].split(",", 1)[1])
+    assert result["caption"].startswith("Two figures")
+    assert result["mood"] == ["noir", "lonely", "rainy"]
+
+
+def test_openai_annotation_appends_overlapping_dialogue(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Provider-independent searchable text retains matching dialogue."""
+    from pipeline.ingest.annotate import annotate_shot
+
+    _select_openai(config)
+    keyframe = _make_jpeg(tmp_path)
+    dialogue = [
+        DialogueLine(start=12.0, end=13.0, text="Meet me after midnight."),
+        DialogueLine(start=30.0, end=31.0, text="Outside the shot."),
+    ]
+    mock_client = MagicMock()
+    mock_client.responses.parse.return_value = _openai_response()
+
+    with patch(
+        "pipeline.ingest.annotate._get_openai_client",
+        return_value=mock_client,
+    ):
+        result = annotate_shot(_make_shot(), [keyframe], dialogue, config)
+
+    assert "Meet me after midnight." in result["searchable_text"]
+    assert "Outside the shot." not in result["searchable_text"]
+
+
+def test_openai_unusable_output_is_retried_once_then_succeeds(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A truncated/invalid response costs one retry, not the whole film."""
+    from pipeline.ingest.annotate import annotate_shot
+
+    _select_openai(config)
+    bad = _openai_response()
+    bad.output_parsed = None
+    mock_client = MagicMock()
+    mock_client.responses.parse.side_effect = [bad, _openai_response()]
+
+    with patch(
+        "pipeline.ingest.annotate._get_openai_client",
+        return_value=mock_client,
+    ):
+        result = annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+    assert mock_client.responses.parse.call_count == 2
+    assert result["caption"].startswith("Two figures")
+    first, second = mock_client.responses.parse.call_args_list
+    assert first.kwargs["max_output_tokens"] == 800
+    # Text-dense shots (credit rolls) truncate at the normal budget; the
+    # retry must escalate or it deterministically fails the same way.
+    assert second.kwargs["max_output_tokens"] == 3000
+
+
+def test_openai_refusal_is_not_retried(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Refusals are deterministic; a retry would only double the spend."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    _select_openai(config)
+    response = _openai_response()
+    response.output = [
+        SimpleNamespace(
+            type="message",
+            content=[
+                SimpleNamespace(type="refusal", refusal="Cannot process image.")
+            ],
+        )
+    ]
+    mock_client = MagicMock()
+    mock_client.responses.parse.return_value = response
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="refused"),
+    ):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+    mock_client.responses.parse.assert_called_once()
+
+
+def test_openai_annotation_rejects_missing_parsed_output(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A malformed or incomplete response cannot become a blank DB row."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    _select_openai(config)
+    response = _openai_response()
+    response.output_parsed = None
+    mock_client = MagicMock()
+    mock_client.responses.parse.return_value = response
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="without parsed"),
+    ):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+
+def test_openai_annotation_surfaces_refusal(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A provider refusal is explicit rather than silently indexed."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    _select_openai(config)
+    response = _openai_response()
+    response.output = [
+        SimpleNamespace(
+            type="message",
+            content=[
+                SimpleNamespace(type="refusal", refusal="Cannot process image.")
+            ],
+        )
+    ]
+    mock_client = MagicMock()
+    mock_client.responses.parse.return_value = response
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="refused"),
+    ):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+
+def test_openai_annotation_surfaces_quota_error_code(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Quota failures are actionable when surfaced by the ingest command."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    _select_openai(config)
+    response = httpx.Response(
+        429,
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        headers={"x-request-id": "req_test"},
+    )
+    error = openai.RateLimitError(
+        "quota exceeded",
+        response=response,
+        body={"type": "insufficient_quota", "code": "insufficient_quota"},
+    )
+    mock_client = MagicMock()
+    mock_client.responses.parse.side_effect = error
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="insufficient_quota"),
+    ):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+
+def test_gemini_annotation_failure_is_not_silenced(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Gemini errors also abort instead of returning empty annotations."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    mock_client = _make_mock_client()
+    mock_client.models.generate_content.side_effect = RuntimeError("API down")
+
+    with (
+        patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client),
+        pytest.raises(AnnotationError, match="Gemini annotation failed"),
+    ):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+
+def test_gemini_empty_annotation_is_rejected(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """An empty provider response cannot become a blank DB row."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    mock_client = _make_mock_client(response_text="")
+
+    with (
+        patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client),
+        pytest.raises(AnnotationError, match="empty annotation response"),
+    ):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+
+def test_annotation_rejects_invalid_mood_count(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """The shared provider contract requires two to four mood keywords."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    _select_openai(config)
+    mock_client = MagicMock()
+    mock_client.responses.parse.return_value = _openai_response(mood=["lonely"])
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="expected 2-4"),
+    ):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+
+def test_unknown_annotation_provider_is_rejected(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Provider typos fail loudly before making any API call."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    config.models.annotator_provider = "other"
+
+    with pytest.raises(AnnotationError, match="Unknown annotator provider"):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+
+# ---------------------------------------------------------------------------
+# Typed facets
+# ---------------------------------------------------------------------------
+
+
+def test_facets_round_trip_from_gemini(tmp_path: Path, config: Config) -> None:
+    """The structured Gemini response's facets survive into the result."""
+    from pipeline.ingest.annotate import annotate_shot
+
+    mock_client = _make_mock_client()
+
+    with patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client):
+        result = annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+    assert result["framing"] == "wide"
+    assert result["setting"] == "exterior"
+    assert result["time_of_day"] == "night"
+    assert result["people_count"] == 2
+    assert result["energy"] == "calm"
+    assert result["camera_motion"] == "unknown"
+    assert result["palette"] == ["neon blue", "black"]
+    assert result["subjects"] == ["two silhouetted figures", "city skyline"]
+    assert result["on_screen_text"] == ""
+
+
+def test_validate_annotation_coerces_out_of_vocabulary_facets() -> None:
+    """A drifting enum degrades to unknown instead of wasting the paid call."""
+    from pipeline.ingest.annotate import _validate_annotation
+
+    raw = {
+        "caption": "A shot.",
+        "mood": ["calm", "warm"],
+        "framing": "dutch angle",
+        "setting": "EXTERIOR",
+        "time_of_day": None,
+        "people_count": "several",
+        "energy": "explosive",
+        "camera_motion": "crane",
+        "palette": ["red", "", 3, "blue", "green", "gold"],
+    }
+    result = _validate_annotation(raw, "test")
+
+    assert result["framing"] == "unknown"
+    assert result["setting"] == "exterior"  # case-normalized, in vocabulary
+    assert result["time_of_day"] == "unknown"
+    assert result["people_count"] is None
+    assert result["energy"] == "unknown"
+    assert result["camera_motion"] == "unknown"
+    assert result["palette"] == ["red", "blue", "green"]
+
+
+def test_validate_annotation_clamps_people_count() -> None:
+    from pipeline.ingest.annotate import _validate_annotation
+
+    base = {"caption": "A shot.", "mood": ["calm", "warm"]}
+    assert _validate_annotation({**base, "people_count": -3}, "t")["people_count"] == 0
+    assert _validate_annotation({**base, "people_count": 500}, "t")["people_count"] == 99
+    assert _validate_annotation({**base, "people_count": 7}, "t")["people_count"] == 7
+
+
+def test_v1_annotation_cache_is_a_clean_miss(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Pre-facet cache entries re-request instead of failing or half-loading."""
+    from pipeline.ingest.annotate import annotate_shot
+
+    shot = _make_shot()
+    cache_dir = tmp_path / "annotations"
+    cache_dir.mkdir()
+    (cache_dir / f"{shot.shot_id}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "shot_id": shot.shot_id,
+                "identity": {"provider": "gemini"},
+                "caption": "old cached caption",
+                "mood": ["old", "cached"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    mock_client = _make_mock_client()
+
+    with patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client):
+        result = annotate_shot(
+            shot,
+            [_make_jpeg(tmp_path)],
+            [],
+            config,
+            cache_dir=cache_dir,
+        )
+
+    mock_client.models.generate_content.assert_called_once()
+    assert result["caption"] != "old cached caption"
+    rewritten = json.loads(
+        (cache_dir / f"{shot.shot_id}.json").read_text(encoding="utf-8")
+    )
+    assert rewritten["schema_version"] == 2
+    assert rewritten["annotation"]["framing"] == "wide"

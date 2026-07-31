@@ -11,6 +11,7 @@ Tests:
 from __future__ import annotations
 
 import math
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -43,11 +44,8 @@ def _make_film(tmp_path: Path, *, duration: float = 30.0, fps: float = 30.0):
 
 
 def _mock_transnetv2(scenes_frames: list[tuple[int, int]], total_frames: int):
-    """Return (fake_single_pred_mock, scenes_np) for mocking TransNetV2."""
-    fake_single_pred = MagicMock()
-    fake_single_pred.cpu.return_value.detach.return_value.numpy.return_value = np.zeros(
-        total_frames
-    )
+    """Return deterministic predictions and scenes for mocking TransNetV2."""
+    fake_single_pred = np.zeros(total_frames, dtype=np.float32)
     scenes_np = np.array(scenes_frames, dtype=np.int32)
     return fake_single_pred, scenes_np
 
@@ -88,6 +86,58 @@ def test_shot_timestamps_are_floats() -> None:
     )
     assert isinstance(shot.t_start, float)
     assert isinstance(shot.t_end, float)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: bounded streaming TransNet input
+# ---------------------------------------------------------------------------
+
+
+def test_predict_video_streaming_preserves_frame_order_and_padding(
+    tmp_path: Path,
+) -> None:
+    """Streaming windows emit one prediction per frame without full buffering."""
+    from pipeline.ingest.shots import _predict_video_streaming
+
+    raw_video = b"".join(
+        np.full((27, 48, 3), index, dtype=np.uint8).tobytes()
+        for index in range(123)
+    )
+    process = MagicMock()
+    process.stdout = BytesIO(raw_video)
+    process.stderr = BytesIO()
+    process.wait.return_value = 0
+    process.poll.return_value = 0
+
+    def fake_predict(_model: object, frames: list[np.ndarray]) -> np.ndarray:
+        assert len(frames) == 100
+        return np.asarray(
+            [frame[0, 0, 0] for frame in frames[25:75]],
+            dtype=np.float32,
+        )
+
+    with (
+        patch("pipeline.ingest.shots.subprocess.Popen", return_value=process)
+        as popen,
+        patch(
+            "pipeline.ingest.shots._predict_transnet_window",
+            side_effect=fake_predict,
+        ) as predict_window,
+    ):
+        predictions = _predict_video_streaming(
+            MagicMock(),
+            tmp_path / "film.mkv",
+            expected_frames=123,
+        )
+
+    np.testing.assert_array_equal(
+        predictions,
+        np.arange(123, dtype=np.float32),
+    )
+    assert predict_window.call_count == 3
+    command = popen.call_args.args[0]
+    assert command[command.index("-threads") + 1] == "2"
+    assert command[command.index("-filter_threads") + 1] == "1"
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +287,13 @@ def test_detect_shots_returns_list_of_shot(tmp_path: Path, config: Config) -> No
     total_frames = 100  # 10s * 10fps
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 99)], total_frames)
 
-    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
-        instance = MockCls.return_value
-        instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
+    with (
+        patch("transnetv2_pytorch.TransNetV2") as MockCls,
+        patch(
+            "pipeline.ingest.shots._predict_video_streaming",
+            return_value=fake_single_pred,
+        ),
+    ):
         MockCls.predictions_to_scenes.return_value = scenes_np
 
         result = detect_shots(film, config)
@@ -256,9 +310,13 @@ def test_detect_shots_no_zero_duration_mocked(tmp_path: Path, config: Config) ->
     total_frames = 100
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 99)], total_frames)
 
-    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
-        instance = MockCls.return_value
-        instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
+    with (
+        patch("transnetv2_pytorch.TransNetV2") as MockCls,
+        patch(
+            "pipeline.ingest.shots._predict_video_streaming",
+            return_value=fake_single_pred,
+        ),
+    ):
         MockCls.predictions_to_scenes.return_value = scenes_np
 
         result = detect_shots(film, config)
@@ -281,9 +339,13 @@ def test_detect_shots_sub_segments_have_parent_shot_id(
     total_frames = 300
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 299)], total_frames)
 
-    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
-        instance = MockCls.return_value
-        instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
+    with (
+        patch("transnetv2_pytorch.TransNetV2") as MockCls,
+        patch(
+            "pipeline.ingest.shots._predict_video_streaming",
+            return_value=fake_single_pred,
+        ),
+    ):
         MockCls.predictions_to_scenes.return_value = scenes_np
 
         result = detect_shots(film, config)
@@ -304,9 +366,13 @@ def test_detect_shots_short_scene_no_parent_id(tmp_path: Path, config: Config) -
     total_frames = 50
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 49)], total_frames)
 
-    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
-        instance = MockCls.return_value
-        instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
+    with (
+        patch("transnetv2_pytorch.TransNetV2") as MockCls,
+        patch(
+            "pipeline.ingest.shots._predict_video_streaming",
+            return_value=fake_single_pred,
+        ),
+    ):
         MockCls.predictions_to_scenes.return_value = scenes_np
 
         result = detect_shots(film, config)
@@ -323,9 +389,13 @@ def test_detect_shots_shot_id_format(tmp_path: Path, config: Config) -> None:
     total_frames = 50
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 49)], total_frames)
 
-    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
-        instance = MockCls.return_value
-        instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
+    with (
+        patch("transnetv2_pytorch.TransNetV2") as MockCls,
+        patch(
+            "pipeline.ingest.shots._predict_video_streaming",
+            return_value=fake_single_pred,
+        ),
+    ):
         MockCls.predictions_to_scenes.return_value = scenes_np
 
         result = detect_shots(film, config)
@@ -349,9 +419,13 @@ def test_detect_shots_keyframe_times_populated(tmp_path: Path, config: Config) -
     total_frames = 100
     fake_single_pred, scenes_np = _mock_transnetv2([(0, 99)], total_frames)
 
-    with patch("transnetv2_pytorch.TransNetV2") as MockCls:
-        instance = MockCls.return_value
-        instance.predict_video.return_value = (MagicMock(), fake_single_pred, MagicMock())
+    with (
+        patch("transnetv2_pytorch.TransNetV2") as MockCls,
+        patch(
+            "pipeline.ingest.shots._predict_video_streaming",
+            return_value=fake_single_pred,
+        ),
+    ):
         MockCls.predictions_to_scenes.return_value = scenes_np
 
         result = detect_shots(film, config)

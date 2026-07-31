@@ -12,10 +12,13 @@ Tests:
 """
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PIL import Image
 
 from pipeline.config import Config
 
@@ -31,9 +34,11 @@ def _make_film(tmp_path: Path):
 
     asset_dir = tmp_path / "assets" / "abc123"
     asset_dir.mkdir(parents=True, exist_ok=True)
+    film_path = tmp_path / "film.mkv"
+    film_path.write_bytes(b"synthetic source film")
     return FilmRecord(
         film_id="abc123",
-        path=tmp_path / "film.mkv",
+        path=film_path,
         asset_dir=asset_dir,
         duration=30.0,
         fps=30.0,
@@ -87,6 +92,37 @@ def _capturing_ffmpeg(calls_list: list):
         return result
 
     return _run
+
+
+def _capturing_valid_ffmpeg(calls_list: list):
+    """Record calls and create reusable media at ffmpeg's temporary path."""
+
+    def _run(cmd, **kwargs):
+        calls_list.append(list(cmd))
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_path.suffix == ".webp":
+            Image.new("RGB", (16, 16), "red").save(
+                output_path,
+                format="WEBP",
+            )
+        else:
+            output_path.write_bytes(b"valid-preview-stub")
+        result = MagicMock()
+        result.returncode = 0
+        return result
+
+    return _run
+
+
+def _manifest_path(film, shot) -> Path:
+    """Return the implementation's deterministic short manifest path."""
+    from pipeline.ingest.media import _media_manifest_path
+
+    return _media_manifest_path(
+        film.asset_dir / "media-manifests",
+        shot.shot_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +234,385 @@ def test_extract_media_creates_preview_files(tmp_path: Path, config: Config) -> 
     for shot in shots:
         expected = preview_dir / f"{shot.shot_id}.webm"
         assert expected.exists(), f"Missing preview file: {expected}"
+
+
+def test_extract_media_resumes_only_missing_expected_artifacts(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A matching manifest resumes only missing or corrupt artifacts."""
+    from pipeline.ingest.media import extract_media
+
+    film = _make_film(tmp_path)
+    shot = _make_shots(film.film_id)[0]
+
+    calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(calls),
+        ),
+    ):
+        extract_media(film, [shot], config)
+        assert len(calls) == 4
+        calls.clear()
+
+        keyframe_dir = film.asset_dir / "keyframes"
+        frame_1 = keyframe_dir / f"{shot.shot_id}_1.webp"
+        frame_2 = keyframe_dir / f"{shot.shot_id}_2.webp"
+        preview = film.asset_dir / "previews" / f"{shot.shot_id}.webm"
+        frame_1.unlink()
+        frame_2.write_bytes(b"not-a-webp")
+        preview.unlink()
+
+        extract_media(film, [shot], config)
+
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webp")]) == 2
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webm")]) == 1
+    assert (keyframe_dir / f"{shot.shot_id}_0.webp").is_file()
+    with Image.open(frame_2) as image:
+        assert image.format == "WEBP"
+
+
+def test_extract_media_replaces_corrupt_expected_keyframe(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A named artifact must decode successfully before it counts as cached."""
+    from pipeline.ingest.media import extract_media
+
+    film = _make_film(tmp_path)
+    shot = _make_shots(film.film_id)[1]
+    keyframe = film.asset_dir / "keyframes" / f"{shot.shot_id}_0.webp"
+
+    calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(calls),
+        ),
+    ):
+        extract_media(film, [shot], config)
+        calls.clear()
+        keyframe.write_bytes(b"not-a-webp")
+        extract_media(film, [shot], config)
+
+    assert len(calls) == 1
+    assert calls[0][-1].endswith(".webp")
+    with Image.open(keyframe) as image:
+        assert image.format == "WEBP"
+
+
+def test_extract_media_does_not_publish_partial_ffmpeg_output(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A killed encoder leaves no artifact that a retry could accept."""
+    from pipeline.ingest.media import extract_media
+
+    film = _make_film(tmp_path)
+    shot = _make_shots(film.film_id)[1]
+
+    def interrupted(cmd, **_kwargs):
+        Path(cmd[-1]).write_bytes(b"partial")
+        raise subprocess.CalledProcessError(1, cmd)
+
+    with (
+        patch("subprocess.run", side_effect=interrupted),
+        pytest.raises(subprocess.CalledProcessError),
+    ):
+        extract_media(film, [shot], config)
+
+    destination = (
+        film.asset_dir / "keyframes" / f"{shot.shot_id}_0.webp"
+    )
+    assert not destination.exists()
+    assert list(destination.parent.glob(".*.webp")) == []
+    manifest = _manifest_path(film, shot)
+    assert not manifest.exists()
+
+
+def test_extract_media_timing_change_regenerates_entire_shot(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Exact shot timing is part of the media cache identity."""
+    from pipeline.ingest.media import extract_media
+    from pipeline.ingest.shots import Shot
+
+    film = _make_film(tmp_path)
+    original = _make_shots(film.film_id)[0]
+    changed = Shot(
+        shot_id=original.shot_id,
+        t_start=0.25,
+        t_end=9.5,
+        parent_shot_id=None,
+        keyframe_times=[2.0, 4.75, 7.0],
+    )
+    calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(calls),
+        ),
+    ):
+        extract_media(film, [original], config)
+        calls.clear()
+        extract_media(film, [changed], config)
+
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webp")]) == 3
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webm")]) == 1
+
+
+def test_extract_media_source_stat_change_regenerates_entire_shot(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Changing the source file invalidates every artifact for the shot."""
+    from pipeline.ingest.media import extract_media
+
+    film = _make_film(tmp_path)
+    shot = _make_shots(film.film_id)[1]
+    calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(calls),
+        ),
+    ):
+        extract_media(film, [shot], config)
+        calls.clear()
+        film.path.write_bytes(b"a different synthetic source film")
+        extract_media(film, [shot], config)
+
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webp")]) == 1
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webm")]) == 1
+
+
+def test_extract_media_recipe_version_change_regenerates_entire_shot(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """An extraction version change invalidates otherwise valid media."""
+    from pipeline.ingest.media import extract_media
+
+    film = _make_film(tmp_path)
+    shot = _make_shots(film.film_id)[1]
+    calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(calls),
+        ),
+    ):
+        extract_media(film, [shot], config)
+        calls.clear()
+        with patch("pipeline.ingest.media._MEDIA_EXTRACTION_VERSION", 2):
+            extract_media(film, [shot], config)
+
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webp")]) == 1
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webm")]) == 1
+
+
+def test_extract_media_recipe_setting_change_regenerates_entire_shot(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Each concrete extraction setting participates in cache identity."""
+    from pipeline.ingest.media import extract_media
+
+    film = _make_film(tmp_path)
+    shot = _make_shots(film.film_id)[1]
+    calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(calls),
+        ),
+    ):
+        extract_media(film, [shot], config)
+        calls.clear()
+        with patch("pipeline.ingest.media._PREVIEW_CRF", 31):
+            extract_media(film, [shot], config)
+
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webp")]) == 1
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webm")]) == 1
+
+
+def test_extract_media_corrupt_manifest_regenerates_entire_shot(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Media without a readable matching identity is never blindly reused."""
+    from pipeline.ingest.media import extract_media
+
+    film = _make_film(tmp_path)
+    shot = _make_shots(film.film_id)[1]
+    manifest = _manifest_path(film, shot)
+    calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(calls),
+        ),
+    ):
+        extract_media(film, [shot], config)
+        manifest.write_text("{broken", encoding="utf-8")
+        calls.clear()
+        extract_media(film, [shot], config)
+
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webp")]) == 1
+    assert len([cmd for cmd in calls if cmd[-1].endswith(".webm")]) == 1
+    assert json.loads(manifest.read_text(encoding="utf-8"))["identity"]
+
+
+def test_extract_media_interrupted_identity_change_keeps_old_manifest(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A crash cannot publish or accidentally bless partially replaced media."""
+    from pipeline.ingest.media import extract_media
+    from pipeline.ingest.shots import Shot
+
+    film = _make_film(tmp_path)
+    original = _make_shots(film.film_id)[0]
+    changed = Shot(
+        shot_id=original.shot_id,
+        t_start=0.5,
+        t_end=9.0,
+        parent_shot_id=None,
+        keyframe_times=[2.0, 4.5, 7.0],
+    )
+    manifest = _manifest_path(film, original)
+    initial_calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(initial_calls),
+        ),
+    ):
+        extract_media(film, [original], config)
+    old_manifest = manifest.read_bytes()
+
+    interrupted_calls: list[list[str]] = []
+
+    def interrupted(cmd, **_kwargs):
+        interrupted_calls.append(list(cmd))
+        output_path = Path(cmd[-1])
+        if len(interrupted_calls) == 1:
+            Image.new("RGB", (16, 16), "blue").save(
+                output_path,
+                format="WEBP",
+            )
+            return MagicMock(returncode=0)
+        output_path.write_bytes(b"partial")
+        raise subprocess.CalledProcessError(1, cmd)
+
+    with (
+        patch("subprocess.run", side_effect=interrupted),
+        pytest.raises(subprocess.CalledProcessError),
+    ):
+        extract_media(film, [changed], config)
+
+    assert manifest.read_bytes() == old_manifest
+    assert list((film.asset_dir / "keyframes").glob(".*.webp")) == []
+
+    retry_calls: list[list[str]] = []
+    with (
+        patch(
+            "pipeline.ingest.media._is_valid_preview",
+            side_effect=lambda path: path.is_file(),
+        ),
+        patch(
+            "subprocess.run",
+            side_effect=_capturing_valid_ffmpeg(retry_calls),
+        ),
+    ):
+        extract_media(film, [changed], config)
+
+    assert len(
+        [cmd for cmd in retry_calls if cmd[-1].endswith(".webp")]
+    ) == 3
+    assert len(
+        [cmd for cmd in retry_calls if cmd[-1].endswith(".webm")]
+    ) == 1
+    updated = json.loads(manifest.read_text(encoding="utf-8"))
+    assert updated["identity"]["shot"]["t_start"] == 0.5
+
+
+def test_extract_media_manifest_is_small_and_complete(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """The sidecar records all cache inputs without storing bulky media data."""
+    from pipeline.ingest.media import extract_media
+
+    film = _make_film(tmp_path)
+    shot = _make_shots(film.film_id)[0]
+    calls: list[list[str]] = []
+    with patch(
+        "subprocess.run",
+        side_effect=_capturing_valid_ffmpeg(calls),
+    ):
+        extract_media(film, [shot], config)
+
+    manifest_path = _manifest_path(film, shot)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    identity = manifest["identity"]
+    source_stat = film.path.stat()
+
+    assert manifest_path.stat().st_size < 4096
+    assert identity["source"] == {
+        "film_id": film.film_id,
+        "path": str(film.path.resolve()),
+        "size_bytes": source_stat.st_size,
+        "mtime_ns": source_stat.st_mtime_ns,
+    }
+    assert identity["shot"] == {
+        "shot_id": shot.shot_id,
+        "t_start": shot.t_start,
+        "t_end": shot.t_end,
+        "keyframe_times": shot.keyframe_times,
+    }
+    assert identity["extraction_version"] == 1
+    assert identity["keyframes"]["quality"] == 82
+    assert identity["keyframes"]["scale_width"] == 1280
+    assert identity["preview"]["video_codec"] == "libvpx-vp9"
+    assert identity["preview"]["crf"] == 35
+    assert len(manifest["artifacts"]["keyframes"]) == 3
+    assert len(manifest["artifacts"]["preview"]["sha256"]) == 64
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,141 @@
+version: 1
+film:
+  title: Fallen Angels
+  year: 1995
+  director: Wong Kar-wai
+instructions:
+  - These are search prompts, not relevance judgments.
+  - Keep queries even when the current system returns poor candidates.
+queries:
+  - id: action_01
+    category: action
+    query: woman smoking a cigarette in a moving car
+  - id: action_02
+    category: action
+    query: man eating noodles with chopsticks
+  - id: action_03
+    category: action
+    query: someone washing another person's hair at a sink
+  - id: action_04
+    category: action
+    query: handing out ice cream from a van
+  - id: action_05
+    category: action
+    query: motorcycle ride through a tunnel at night
+  - id: action_06
+    category: action
+    query: a man aiming or firing a handgun in a restaurant
+
+  - id: people_01
+    category: people
+    query: woman and reclining man sharing the back seat of a car
+  - id: people_02
+    category: people
+    query: lone woman walking through an underground station
+  - id: people_03
+    category: people
+    query: masked woman cleaning a cramped room
+  - id: people_04
+    category: people
+    query: a mute young man spending time with his father
+  - id: people_05
+    category: people
+    query: two strangers pressed close together in a narrow space
+  - id: people_06
+    category: people
+    query: jealous woman searching the city for a blonde woman
+
+  - id: shot_01
+    category: shot_type
+    query: extreme close-up of red Chinese lettering
+  - id: shot_02
+    category: shot_type
+    query: low-angle shot looking up an escalator
+  - id: shot_03
+    category: shot_type
+    query: tilted dutch-angle view down a narrow corridor
+  - id: shot_04
+    category: shot_type
+    query: wide establishing shot of an empty subway concourse
+  - id: shot_05
+    category: shot_type
+    query: face seen indirectly in a mirror or reflection
+  - id: shot_06
+    category: shot_type
+    query: distorted wide-angle close-up of a face
+
+  - id: color_01
+    category: color_light
+    query: saturated red and purple graphic frame
+  - id: color_02
+    category: color_light
+    query: sickly green fluorescent tunnel lighting
+  - id: color_03
+    category: color_light
+    query: warm amber window with a person in silhouette
+  - id: color_04
+    category: color_light
+    query: deep blue neon on a rainy night street
+  - id: color_05
+    category: color_light
+    query: yellow tiled interior under harsh fluorescent light
+  - id: color_06
+    category: color_light
+    query: grainy high-contrast black-and-white close-up
+
+  - id: setting_01
+    category: setting_object
+    query: tiled underground pedestrian tunnel
+  - id: setting_02
+    category: setting_object
+    query: cramped industrial kitchen full of metal shelves
+  - id: setting_03
+    category: setting_object
+    query: late-night noodle restaurant
+  - id: setting_04
+    category: setting_object
+    query: tiny shop being used after closing time
+  - id: setting_05
+    category: setting_object
+    query: highway and city lights seen from inside a vehicle
+  - id: setting_06
+    category: setting_object
+    query: narrow decaying apartment hallway
+
+  - id: vibe_01
+    category: vibe
+    query: lonely nocturnal urban melancholy
+  - id: vibe_02
+    category: vibe
+    query: claustrophobic restless intimacy
+  - id: vibe_03
+    category: vibe
+    query: frantic wide-angle chase energy
+  - id: vibe_04
+    category: vibe
+    query: a brief moment of tenderness and warmth
+  - id: vibe_05
+    category: vibe
+    query: absurd playful chaos in the middle of the night
+  - id: vibe_06
+    category: vibe
+    query: 1990s Hong Kong neon dream atmosphere
+
+  - id: dialogue_01
+    category: dialogue
+    query: "Are we still partners?"
+  - id: dialogue_02
+    category: dialogue
+    query: "We've been business partners for 155 weeks"
+  - id: dialogue_03
+    category: dialogue
+    query: "I'm having some ice cream"
+  - id: dialogue_04
+    category: dialogue
+    query: "I desperately want to tell her that I want to quit"
+  - id: dialogue_05
+    category: dialogue
+    query: "Everything has its expiration date"
+  - id: dialogue_06
+    category: dialogue
+    query: "I hadn't ridden on a motorcycle in a long time"

@@ -6,3 +6,5 @@ __pycache__/
 .venv/
 .env
 assets/
+.tmp/
+.claude/settings.local.json

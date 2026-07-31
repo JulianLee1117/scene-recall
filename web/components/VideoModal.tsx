@@ -13,7 +13,8 @@ export default function VideoModal({ shot, onClose }: VideoModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hasSeenCanPlay = useRef(false);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
-  const seekTarget = Math.max(0, shot.t_start - 1);
+  const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
+  const seekTarget = Math.max(0, evidenceTime - 1);
 
   // Reset the one-shot guard whenever the shot changes
   useEffect(() => {
@@ -75,7 +76,9 @@ export default function VideoModal({ shot, onClose }: VideoModalProps) {
             {filmLabel(shot.film_id)}
           </span>
           <span style={{ color: "#6b6b6b", fontSize: "0.85rem" }}>
-            {formatTime(shot.t_start)} – {formatTime(shot.t_end)}
+            {typeof shot.matched_frame_timestamp === "number"
+              ? `${formatTime(evidenceTime)} match`
+              : `${formatTime(shot.t_start)} – ${formatTime(shot.t_end)}`}
           </span>
           <button
             onClick={onClose}

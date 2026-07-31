@@ -7,7 +7,7 @@ Run with::
 Asserts:
 - CUDA is visible (torch.cuda.is_available())
 - ffmpeg is on PATH
-- GEMINI_API_KEY is set in the environment
+- The selected annotation provider's API key is set
 - assets_dir from config.yaml is writable
 
 Exits 0 on success, 1 on the first failure.
@@ -20,6 +20,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from pipeline.config import load_config
 
@@ -53,15 +55,28 @@ def check_ffmpeg() -> None:
     _ok("ffmpeg + ffprobe on PATH")
 
 
-def check_gemini_key() -> None:
-    """Assert that GEMINI_API_KEY is set."""
-    key = os.environ.get("GEMINI_API_KEY", "")
+def check_annotator_key() -> None:
+    """Assert that the configured annotation provider's API key is set."""
+    try:
+        config = load_config()
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+
+    provider = config.models.annotator_provider
+    key_name = {
+        "openai": "OPENAI_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+    }.get(provider)
+    if key_name is None:
+        _fail(f"Unknown annotator provider: {provider!r}")
+
+    key = os.environ.get(key_name, "")
     if not key:
         _fail(
-            "GEMINI_API_KEY is not set. "
+            f"{key_name} is not set. "
             "Add it to your shell profile or a .env file."
         )
-    _ok("GEMINI_API_KEY is set")
+    _ok(f"{key_name} is set for {provider}")
 
 
 def check_assets_dir() -> None:
@@ -103,11 +118,12 @@ def _fail(msg: str) -> None:
 
 
 def main() -> None:
+    load_dotenv()
     print("cinema-search environment check")
     print("=" * 40)
     check_cuda()
     check_ffmpeg()
-    check_gemini_key()
+    check_annotator_key()
     check_assets_dir()
     print("=" * 40)
     print("All checks passed.")

@@ -40,6 +40,12 @@ _TEST_CLIP = _FIXTURES_DIR / "test_clip.mkv"
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _skip_encoder_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the API's startup encoder warmup out of every test process."""
+    monkeypatch.setenv("SCENE_RECALL_SKIP_WARMUP", "1")
+
+
 @pytest.fixture()
 def config(tmp_path: Path) -> Config:
     """Minimal Config whose assets_dir is a fresh temp directory."""

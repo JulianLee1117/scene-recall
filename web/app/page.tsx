@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useId, useRef } from "react";
 import ResultGrid from "@/components/ResultGrid";
 import VideoModal from "@/components/VideoModal";
 import LibraryView from "@/components/LibraryView";
+import MovieScopeFilter from "@/components/MovieScopeFilter";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import type { SearchResult, SearchResponse } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -16,44 +18,308 @@ export default function Home() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [completedQuery, setCompletedQuery] = useState<string | null>(null);
+  const [referenceLabel, setReferenceLabel] = useState<string | null>(null);
+  const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(
+    null,
+  );
   const [activeShot, setActiveShot] = useState<SearchResult | null>(null);
+  const [debug, setDebug] = useState(false);
+  const [selectedFilmIds, setSelectedFilmIds] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const referenceBlobRef = useRef<Blob | null>(null);
+  const referenceExcludeRef = useRef<string | null>(null);
+  const referenceLabelRef = useRef<string | null>(null);
+  const referencePreviewUrlRef = useRef<string | null>(null);
+  const voiceStatusId = useId();
 
-  const runSearch = useCallback(async (q: string) => {
-    const trimmed = q.trim();
-    if (!trimmed) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const res = await fetch(
-        `${API_URL}/search?q=${encodeURIComponent(trimmed)}`
-      );
-      if (!res.ok) throw new Error(`API error ${res.status}`);
-      const data: SearchResponse = await res.json();
-      setResults(data.results);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed");
-      setResults([]);
-    } finally {
-      setLoading(false);
+  const clearReference = useCallback(() => {
+    searchAbortRef.current?.abort();
+    if (referencePreviewUrlRef.current) {
+      URL.revokeObjectURL(referencePreviewUrlRef.current);
     }
+    referenceBlobRef.current = null;
+    referenceExcludeRef.current = null;
+    referenceLabelRef.current = null;
+    referencePreviewUrlRef.current = null;
+    setReferenceLabel(null);
+    setReferencePreviewUrl(null);
   }, []);
+
+  const activateReference = useCallback(
+    (image: Blob, label: string, excludeUnitId: string | null = null) => {
+      if (referencePreviewUrlRef.current) {
+        URL.revokeObjectURL(referencePreviewUrlRef.current);
+      }
+      const previewUrl = URL.createObjectURL(image);
+      referenceBlobRef.current = image;
+      referenceExcludeRef.current = excludeUnitId;
+      referenceLabelRef.current = label;
+      referencePreviewUrlRef.current = previewUrl;
+      setReferenceLabel(label);
+      setReferencePreviewUrl(previewUrl);
+      setQuery("");
+      setCompletedQuery(null);
+      setActiveShot(null);
+    },
+    [],
+  );
+
+  const runSearch = useCallback(
+    async (q: string, scope: readonly string[] = selectedFilmIds) => {
+      const trimmed = q.trim();
+      if (!trimmed) return;
+
+      searchAbortRef.current?.abort();
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+      setLoading(true);
+      setError(null);
+      setCompletedQuery(null);
+
+      const params = new URLSearchParams({ q: trimmed });
+      scope.forEach((filmId) => params.append("film_id", filmId));
+
+      try {
+        const res = await fetch(`${API_URL}/search?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          let message = `API error ${res.status}`;
+          try {
+            const body = (await res.json()) as { detail?: string };
+            if (typeof body.detail === "string" && body.detail) {
+              message = body.detail;
+            }
+          } catch {
+            // Keep the status-based fallback for non-JSON errors.
+          }
+          throw new Error(message);
+        }
+        const data: SearchResponse = await res.json();
+        if (searchAbortRef.current !== controller) return;
+        setResults(data.results);
+        setCompletedQuery(trimmed);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Search failed");
+        setResults([]);
+      } finally {
+        if (searchAbortRef.current === controller) {
+          searchAbortRef.current = null;
+          setLoading(false);
+        }
+      }
+    },
+    [selectedFilmIds],
+  );
+
+  const runImageSearch = useCallback(
+    async (
+      image: Blob,
+      label: string,
+      excludeUnitId: string | null = null,
+      scope: readonly string[] = selectedFilmIds,
+    ) => {
+      searchAbortRef.current?.abort();
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+      setLoading(true);
+      setError(null);
+      setCompletedQuery(null);
+
+      const params = new URLSearchParams();
+      scope.forEach((filmId) => params.append("film_id", filmId));
+      if (excludeUnitId) {
+        params.set("exclude_unit_id", excludeUnitId);
+      }
+      const suffix = params.size ? `?${params.toString()}` : "";
+
+      try {
+        const res = await fetch(`${API_URL}/search/image${suffix}`, {
+          method: "POST",
+          body: image,
+          headers: {
+            "Content-Type": image.type || "application/octet-stream",
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          let message = `API error ${res.status}`;
+          try {
+            const detail = (await res.json()) as { detail?: string };
+            if (detail.detail) message = detail.detail;
+          } catch {
+            // Keep the status-based fallback for non-JSON errors.
+          }
+          throw new Error(message);
+        }
+        const data: SearchResponse = await res.json();
+        if (searchAbortRef.current !== controller) return;
+        setResults(data.results);
+        setReferenceLabel(label);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setError(
+          err instanceof Error ? err.message : "Reference search failed",
+        );
+        setResults([]);
+      } finally {
+        if (searchAbortRef.current === controller) {
+          searchAbortRef.current = null;
+          setLoading(false);
+        }
+      }
+    },
+    [selectedFilmIds],
+  );
+
+  const handleMovieScopeChange = useCallback(
+    (filmIds: string[]) => {
+      setSelectedFilmIds(filmIds);
+      setActiveShot(null);
+      if (referenceBlobRef.current && referenceLabelRef.current) {
+        void runImageSearch(
+          referenceBlobRef.current,
+          referenceLabelRef.current,
+          referenceExcludeRef.current,
+          filmIds,
+        );
+      } else if (query.trim()) {
+        void runSearch(query, filmIds);
+      }
+    },
+    [query, runImageSearch, runSearch],
+  );
+
+  const handleVoiceTranscript = useCallback(
+    (transcript: string) => {
+      clearReference();
+      setQuery(transcript);
+    },
+    [clearReference],
+  );
+
+  const handleVoiceComplete = useCallback(
+    (transcript: string) => {
+      clearReference();
+      setQuery(transcript);
+      inputRef.current?.focus();
+      void runSearch(transcript);
+    },
+    [clearReference, runSearch]
+  );
+
+  const speech = useSpeechRecognition({
+    onTranscript: handleVoiceTranscript,
+    onComplete: handleVoiceComplete,
+  });
+
+  const handleReferenceFile = useCallback(
+    (file: File) => {
+      speech.cancel();
+      activateReference(file, file.name || "Uploaded frame");
+      void runImageSearch(file, file.name || "Uploaded frame");
+    },
+    [activateReference, runImageSearch, speech],
+  );
+
+  const handleFindSimilar = useCallback(
+    async (shot: SearchResult) => {
+      if (loading) return;
+      speech.cancel();
+      searchAbortRef.current?.abort();
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+      setLoading(true);
+      setError(null);
+      setActiveShot(null);
+      const referenceUrl =
+        shot.matched_frame_url ?? shot.keyframe_url;
+      try {
+        // The same URL was already loaded by <img> in no-CORS mode. Avoid
+        // reusing that opaque browser cache entry for this CORS fetch.
+        const response = await fetch(`${API_URL}${referenceUrl}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Could not load reference frame (${response.status})`);
+        }
+        const image = await response.blob();
+        if (searchAbortRef.current !== controller) return;
+        const label = `Result ${shot.rank ?? ""} frame`.trim();
+        activateReference(image, label, shot.unit_id);
+        await runImageSearch(image, label, shot.unit_id);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setError(
+          err instanceof Error ? err.message : "Reference search failed",
+        );
+      } finally {
+        if (searchAbortRef.current === controller) {
+          searchAbortRef.current = null;
+          setLoading(false);
+        }
+      }
+    },
+    [activateReference, loading, runImageSearch, speech],
+  );
+
+  const handleClearReference = useCallback(() => {
+    searchAbortRef.current?.abort();
+    clearReference();
+    setResults([]);
+    setError(null);
+    setCompletedQuery(null);
+    setLoading(false);
+    inputRef.current?.focus();
+  }, [clearReference]);
+
+  useEffect(
+    () => () => {
+      searchAbortRef.current?.abort();
+      if (referencePreviewUrlRef.current) {
+        URL.revokeObjectURL(referencePreviewUrlRef.current);
+      }
+    },
+    []
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    speech.cancel();
+    clearReference();
     void runSearch(query);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape" && speech.status !== "idle") {
+      e.preventDefault();
+      speech.cancel();
+      inputRef.current?.focus();
+      return;
+    }
     if (e.key === "Enter") {
       e.preventDefault();
+      speech.cancel();
+      clearReference();
       void runSearch(query);
     }
   };
 
   const isEmpty = results.length === 0 && !loading && !error;
+  const voiceActive = speech.status !== "idle";
+  const voiceStatus =
+    speech.status === "requesting"
+      ? "Starting microphone…"
+      : speech.status === "listening"
+        ? "Listening… say what scene you remember"
+        : speech.status === "processing"
+          ? "Finishing transcription…"
+          : speech.error;
 
   return (
     <main
@@ -79,7 +345,10 @@ export default function Home() {
         {(["search", "library"] as const).map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => {
+              if (tab !== "search") speech.cancel();
+              setActiveTab(tab);
+            }}
             style={{
               background: "none",
               border: "none",
@@ -166,9 +435,16 @@ export default function Home() {
                   ref={inputRef}
                   type="text"
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    speech.cancel();
+                    speech.clearError();
+                    clearReference();
+                    setQuery(e.target.value);
+                  }}
                   onKeyDown={handleKeyDown}
                   placeholder="describe a scene…"
+                  aria-label="Describe a scene"
+                  aria-describedby={voiceStatus ? voiceStatusId : undefined}
                   autoFocus
                   style={{
                     width: "100%",
@@ -177,7 +453,13 @@ export default function Home() {
                     borderRadius: "6px",
                     color: "#ededed",
                     fontSize: isEmpty ? "1.25rem" : "1rem",
-                    padding: isEmpty ? "18px 52px 18px 20px" : "13px 44px 13px 16px",
+                    padding: speech.isSupported
+                      ? isEmpty
+                        ? "18px 126px 18px 20px"
+                        : "13px 116px 13px 16px"
+                      : isEmpty
+                        ? "18px 88px 18px 20px"
+                        : "13px 78px 13px 16px",
                     outline: "none",
                     transition: "font-size 0.3s ease, padding 0.3s ease, border-color 0.15s ease",
                     caretColor: "#d4a96a",
@@ -189,6 +471,102 @@ export default function Home() {
                     e.currentTarget.style.borderColor = "#2a2a2a";
                   }}
                 />
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) handleReferenceFile(file);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="image-search-button"
+                  disabled={loading}
+                  aria-label="Search by reference image"
+                  title="Search by reference frame"
+                  onClick={() => {
+                    speech.cancel();
+                    imageInputRef.current?.click();
+                  }}
+                  style={{
+                    right: speech.isSupported
+                      ? isEmpty
+                        ? "78px"
+                        : "70px"
+                      : isEmpty
+                        ? "46px"
+                        : "40px",
+                  }}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <circle cx="8.5" cy="9" r="1.5" />
+                    <path d="m4 17 4.5-4.5 3 3 2-2 6.5 6.5" />
+                  </svg>
+                </button>
+                {speech.isSupported && (
+                  <button
+                    type="button"
+                    className="voice-search-button"
+                    data-state={speech.status}
+                    disabled={speech.status === "processing"}
+                    aria-label={
+                      speech.status === "requesting"
+                        ? "Cancel voice search"
+                        : speech.status === "listening"
+                          ? "Stop listening and search"
+                          : speech.status === "processing"
+                            ? "Finishing voice search"
+                            : "Start voice search"
+                    }
+                    aria-pressed={voiceActive}
+                    title={
+                      speech.status === "requesting"
+                        ? "Cancel voice search"
+                        : speech.status === "listening"
+                          ? "Stop listening"
+                          : speech.status === "processing"
+                            ? "Finishing voice search"
+                            : "Search by voice"
+                    }
+                    onClick={() => speech.toggle(query)}
+                    style={{
+                      right: isEmpty ? "46px" : "40px",
+                    }}
+                  >
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <rect x="9" y="2" width="6" height="12" rx="3" />
+                      <path d="M5 10a7 7 0 0 0 14 0" />
+                      <path d="M12 17v4" />
+                      <path d="M8 21h8" />
+                    </svg>
+                  </button>
+                )}
                 {/* search button */}
                 <button
                   type="submit"
@@ -222,6 +600,57 @@ export default function Home() {
                   )}
                 </button>
               </div>
+
+              <div className="search-meta">
+                <span
+                  id={voiceStatusId}
+                  className={`voice-search-status${
+                    speech.error ? " voice-search-status-error" : ""
+                  }`}
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  {speech.status === "listening" && (
+                    <span className="voice-search-status-dot" aria-hidden="true" />
+                  )}
+                  {voiceStatus}
+                </span>
+                <div className="search-controls">
+                  <MovieScopeFilter
+                    selectedFilmIds={selectedFilmIds}
+                    onChange={handleMovieScopeChange}
+                  />
+                  <button
+                    type="button"
+                    className="debug-toggle"
+                    aria-pressed={debug}
+                    onClick={() => setDebug((enabled) => !enabled)}
+                  >
+                    <span className="debug-toggle-dot" aria-hidden="true" />
+                    Debug
+                  </button>
+                </div>
+              </div>
+
+              {referencePreviewUrl && referenceLabel && (
+                <div className="reference-query-chip" role="status">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={referencePreviewUrl} alt="" />
+                  <span className="reference-query-copy">
+                    <span>{referenceLabel}</span>
+                    <span>Position + composition match</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearReference}
+                    aria-label="Clear reference image"
+                    title="Clear reference"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
             </form>
 
             {/* error */}
@@ -238,21 +667,31 @@ export default function Home() {
             )}
 
             {/* no results */}
-            {!loading && !error && results.length === 0 && query && (
-              <p
-                style={{
-                  marginTop: "24px",
-                  color: "#555",
-                  fontSize: "0.9rem",
-                }}
-              >
-                No results found.
-              </p>
-            )}
+            {!loading &&
+              !error &&
+              speech.status === "idle" &&
+              results.length === 0 &&
+              (completedQuery === query.trim() || referenceLabel !== null) && (
+                <p
+                  style={{
+                    marginTop: "24px",
+                    color: "#555",
+                    fontSize: "0.9rem",
+                  }}
+                >
+                  No results found.
+                </p>
+              )}
           </div>
 
           {/* results grid */}
-          <ResultGrid results={results} onShotClick={setActiveShot} />
+          <ResultGrid
+            results={results}
+            onShotClick={setActiveShot}
+            onFindSimilar={handleFindSimilar}
+            debug={debug}
+            similarDisabled={loading}
+          />
 
           {/* video modal */}
           {activeShot && (

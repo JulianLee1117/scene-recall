@@ -228,7 +228,7 @@ export default function LibraryView() {
           const isError = job?.status === "error";
           const isIndexed =
             !isIngesting && !isError && film.status === "indexed";
-          const showIngest = !isIndexed && !isIngesting && !isError;
+          const showIngest = !isIndexed && !isIngesting;
 
           return (
             <div
@@ -272,6 +272,17 @@ export default function LibraryView() {
                   {isIngesting && job != null && (
                     <span style={{ color: "#6b5a3a", marginLeft: "8px" }}>
                       {formatElapsed(job.started_at, now)}
+                      {job.progress != null && (
+                        <span
+                          style={{
+                            color: "#8a7245",
+                            marginLeft: "8px",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {job.progress.slice(0, 60)}
+                        </span>
+                      )}
                     </span>
                   )}
                   {isError && job?.error != null && (
@@ -363,7 +374,7 @@ export default function LibraryView() {
                     e.currentTarget.style.color = "#666";
                   }}
                 >
-                  Ingest
+                  {isError ? "Retry" : "Ingest"}
                 </button>
               )}
             </div>

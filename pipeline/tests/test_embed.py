@@ -4,7 +4,7 @@ Tests:
   - embed_images: shape (N, D), float32, L2 norm ≈ 1.0 per row
   - embed_text: shape (N, D), float32, L2 norm ≈ 1.0 per row
   - shot_embedding: 1D vector of dim D, L2 norm ≈ 1.0
-  - Model cache: CLIPModel.from_pretrained called only once across two _load_model calls
+  - Model cache: OpenCLIP model creation happens once across two _load_model calls
   - Batching: multiple images/texts handled correctly
 
 All model loading is mocked so no weights are downloaded during CI.
@@ -36,39 +36,16 @@ def _make_dummy_image(parent: Path, name: str = "frame.jpg") -> Path:
     return p
 
 
-def _fake_loader(embed_dim: int = 1024):
-    """Return a fake ``(model, processor, device)`` triple matching ``_load_model`` output.
-
-    The processor returns a dict keyed by 'pixel_values' or 'input_ids'.
-    The model returns random tensors of shape ``(batch, embed_dim)``.
-    """
-    proc = MagicMock()
-
-    def proc_side_effect(*args, **kwargs):
-        images = kwargs.get("images") or []
-        texts = kwargs.get("text") or []
-        if images:
-            bs = len(images) if isinstance(images, list) else 1
-            return {"pixel_values": torch.zeros(bs, 3, 224, 224)}
-        bs = len(texts) if isinstance(texts, list) else 1
-        return {"input_ids": torch.zeros(bs, 32, dtype=torch.long)}
-
-    proc.side_effect = proc_side_effect
-
-    model = MagicMock()
-
-    def fake_image_features(**kwargs):
-        v = next(iter(kwargs.values()))
-        return torch.randn(v.shape[0], embed_dim)
-
-    def fake_text_features(**kwargs):
-        v = next(iter(kwargs.values()))
-        return torch.randn(v.shape[0], embed_dim)
-
-    model.get_image_features.side_effect = fake_image_features
-    model.get_text_features.side_effect = fake_text_features
-
-    return model, proc, torch.device("cpu")
+def _fake_loader(embed_dim: int = 1024) -> MagicMock:
+    """Return a fake encoder matching the uniform ``_load_model`` contract."""
+    encoder = MagicMock()
+    encoder.encode_images.side_effect = lambda images: torch.randn(
+        len(images), embed_dim
+    )
+    encoder.encode_texts.side_effect = lambda texts: torch.randn(
+        len(texts), embed_dim
+    )
+    return encoder
 
 
 def _make_shot(shot_id: str, n_keyframes: int) -> Shot:
@@ -141,6 +118,81 @@ def test_embed_images_dtype(tmp_path: Path, config: Config) -> None:
     assert result.dtype == np.float32
 
 
+def test_embed_pil_images_accepts_in_memory_images(config: Config) -> None:
+    """Reference-image search can embed a decoded image without a temp file."""
+    from pipeline.ingest.embed import embed_pil_images
+
+    fake = _fake_loader(embed_dim=1024)
+    images = [
+        Image.new("RGB", (32, 24), color=(20, 40, 60)),
+        Image.new("RGB", (32, 24), color=(80, 100, 120)),
+    ]
+
+    with patch("pipeline.ingest.embed._load_model", return_value=fake):
+        result = embed_pil_images(images, config)
+
+    assert result.shape == (2, 1024)
+    np.testing.assert_allclose(
+        np.linalg.norm(result, axis=1),
+        1.0,
+        atol=1e-5,
+    )
+
+
+def test_embed_spatial_images_returns_position_grid(config: Config) -> None:
+    """Compatible encoders expose normalized fixed-coordinate patch cells."""
+    from pipeline.ingest.embed import embed_spatial_images
+
+    fake = _fake_loader(embed_dim=1024)
+    fake.encode_spatial_images.return_value = (
+        torch.randn(2, 1024),
+        torch.nn.functional.normalize(
+            torch.randn(2, 1024, 6, 6),
+            p=2,
+            dim=1,
+        ),
+    )
+    images = [
+        Image.new("RGB", (32, 24), color=(20, 40, 60)),
+        Image.new("RGB", (32, 24), color=(80, 100, 120)),
+    ]
+
+    with patch("pipeline.ingest.embed._load_model", return_value=fake):
+        global_features, spatial_features = embed_spatial_images(
+            images,
+            config,
+        )
+
+    assert global_features.shape == (2, 1024)
+    assert spatial_features is not None
+    assert spatial_features.shape == (2, 6, 6, 1024)
+    np.testing.assert_allclose(
+        np.linalg.norm(spatial_features, axis=-1),
+        1.0,
+        atol=1e-5,
+    )
+
+
+def test_embed_spatial_images_falls_back_to_global_only(config: Config) -> None:
+    """An encoder without patch features remains usable for image search."""
+    from pipeline.ingest.embed import embed_spatial_images
+
+    fake = _fake_loader(embed_dim=1024)
+    fake.encode_spatial_images.return_value = (
+        torch.randn(1, 1024),
+        None,
+    )
+
+    with patch("pipeline.ingest.embed._load_model", return_value=fake):
+        global_features, spatial_features = embed_spatial_images(
+            [Image.new("RGB", (32, 24))],
+            config,
+        )
+
+    assert global_features.shape == (1, 1024)
+    assert spatial_features is None
+
+
 # ---------------------------------------------------------------------------
 # embed_text
 # ---------------------------------------------------------------------------
@@ -187,6 +239,28 @@ def test_embed_text_dtype(config: Config) -> None:
 # ---------------------------------------------------------------------------
 # shot_embedding
 # ---------------------------------------------------------------------------
+
+
+def test_pool_image_embeddings_reuses_frame_matrix_for_shot_vector() -> None:
+    """Frame vectors can feed both frame rows and the pooled shot row."""
+    from pipeline.ingest.embed import pool_image_embeddings
+
+    frames = np.zeros((2, 4), dtype=np.float32)
+    frames[0, 0] = 1.0
+    frames[1, 1] = 1.0
+
+    pooled = pool_image_embeddings(frames)
+
+    expected = np.array([2**-0.5, 2**-0.5, 0.0, 0.0], dtype=np.float32)
+    np.testing.assert_allclose(pooled, expected, atol=1e-6)
+    assert pooled.dtype == np.float32
+
+
+def test_pool_image_embeddings_rejects_empty_matrix() -> None:
+    from pipeline.ingest.embed import pool_image_embeddings
+
+    with pytest.raises(ValueError, match="nonempty 2D"):
+        pool_image_embeddings(np.empty((0, 1024), dtype=np.float32))
 
 
 def test_shot_embedding_shape(tmp_path: Path, config: Config) -> None:
@@ -242,12 +316,8 @@ def test_shot_embedding_single_keyframe_equals_frame_embedding(
     raw[0, 0] = 3.0
     raw[0, 1] = 4.0
 
-    model = MagicMock()
-    proc = MagicMock()
-    proc.side_effect = lambda *a, **k: {"pixel_values": torch.zeros(1, 3, 224, 224)}
-    model.get_image_features.return_value = torch.tensor(raw)
-
-    fake = (model, proc, torch.device("cpu"))
+    fake = MagicMock()
+    fake.encode_images.return_value = torch.tensor(raw)
 
     with patch("pipeline.ingest.embed._load_model", return_value=fake):
         result = shot_embedding(shot, tmp_path, config)
@@ -287,17 +357,21 @@ def test_load_model_cached_on_second_call(config: Config) -> None:
     fake_model = MagicMock()
     fake_model.to.return_value = fake_model
     fake_model.eval.return_value = fake_model
-    fake_proc = MagicMock()
+    fake_preprocess = MagicMock()
+    fake_tokenizer = MagicMock()
 
     with (
-        patch("transformers.CLIPModel.from_pretrained", return_value=fake_model) as mock_cls,
-        patch("transformers.CLIPProcessor.from_pretrained", return_value=fake_proc),
+        patch(
+            "open_clip.create_model_and_transforms",
+            return_value=(fake_model, MagicMock(), fake_preprocess),
+        ) as mock_create,
+        patch("open_clip.get_tokenizer", return_value=fake_tokenizer),
     ):
         r1 = embed._load_model("pe_core_l14")
         r2 = embed._load_model("pe_core_l14")
 
-    assert mock_cls.call_count == 1, "CLIPModel.from_pretrained must be called exactly once"
-    assert r1 is r2, "Second call must return the same cached tuple"
+    mock_create.assert_called_once_with("hf-hub:timm/PE-Core-L-14-336")
+    assert r1 is r2, "Second call must return the same cached encoder"
 
     embed._MODEL_CACHE.clear()
 

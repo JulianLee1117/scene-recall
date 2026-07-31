@@ -89,7 +89,57 @@ def test_load_config_models(tmp_path):
     assert cfg.models.visual_encoder == "pe_core_l14"
     assert cfg.models.text_encoder == "qwen3-embedding-0.6b"
     assert cfg.models.annotator == "gemini-3-flash"
+    assert cfg.models.annotator_provider == "gemini"
+    assert cfg.models.annotator_image_detail == "low"
+    assert cfg.models.annotator_reasoning_effort == "none"
     assert cfg.models.router == "qwen3:8b"
+
+
+def test_load_config_explicit_openai_annotator(tmp_path):
+    """OpenAI annotation settings are loaded and normalized."""
+    raw = yaml.safe_load(textwrap.dedent(MINIMAL_CONFIG))
+    raw["models"].update({
+        "annotator_provider": "OPENAI",
+        "annotator": "gpt-5.6-luna",
+        "annotator_image_detail": "HIGH",
+        "annotator_reasoning_effort": "NONE",
+    })
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    from pipeline.config import load_config
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.models.annotator_provider == "openai"
+    assert cfg.models.annotator == "gpt-5.6-luna"
+    assert cfg.models.annotator_image_detail == "high"
+    assert cfg.models.annotator_reasoning_effort == "none"
+
+
+def test_load_config_infers_openai_from_model(tmp_path):
+    """Legacy configs without a provider infer OpenAI for non-Gemini models."""
+    raw = yaml.safe_load(textwrap.dedent(MINIMAL_CONFIG))
+    raw["models"]["annotator"] = "gpt-5.6-luna"
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    from pipeline.config import load_config
+
+    assert load_config(cfg_file).models.annotator_provider == "openai"
+
+
+def test_load_config_rejects_unknown_annotator_provider(tmp_path):
+    """Provider typos fail before a long ingest can begin."""
+    raw = yaml.safe_load(textwrap.dedent(MINIMAL_CONFIG))
+    raw["models"]["annotator_provider"] = "unknown"
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    from pipeline.config import load_config
+
+    with pytest.raises(ValueError, match="annotator_provider"):
+        load_config(cfg_file)
 
 
 def test_load_config_thresholds(tmp_path):
@@ -196,3 +246,41 @@ def test_config_repr_includes_class_name(tmp_path):
     cfg = load_config(cfg_file)
 
     assert "Config" in repr(cfg)
+
+
+# ---------------------------------------------------------------------------
+# load_config — ingest section
+# ---------------------------------------------------------------------------
+
+def test_load_config_ingest_defaults(tmp_path):
+    """A config without an ingest section gets the default concurrency."""
+    from pipeline.config import load_config
+
+    cfg = load_config(_write_config(tmp_path, MINIMAL_CONFIG))
+    assert cfg.ingest.annotation_concurrency == 8
+
+
+def test_load_config_ingest_section(tmp_path):
+    """ingest.annotation_concurrency is read from the YAML when present."""
+    from pipeline.config import load_config
+
+    content = MINIMAL_CONFIG + (
+        "\n"
+        "    ingest:\n"
+        "      annotation_concurrency: 3\n"
+    )
+    cfg = load_config(_write_config(tmp_path, content))
+    assert cfg.ingest.annotation_concurrency == 3
+
+
+def test_load_config_rejects_nonpositive_annotation_concurrency(tmp_path):
+    """Zero or negative concurrency fails before an ingest can hang."""
+    from pipeline.config import load_config
+
+    content = MINIMAL_CONFIG + (
+        "\n"
+        "    ingest:\n"
+        "      annotation_concurrency: 0\n"
+    )
+    with pytest.raises(ValueError, match="annotation_concurrency"):
+        load_config(_write_config(tmp_path, content))

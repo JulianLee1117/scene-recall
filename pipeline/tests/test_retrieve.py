@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from pipeline.config import Config
 
@@ -30,6 +31,9 @@ from pipeline.config import Config
 # ---------------------------------------------------------------------------
 
 VEC_DIM = 1024
+MEDIA_FILM_ID = "a" * 64
+OTHER_FILM_ID = "b" * 64
+MEDIA_SHOT_ID = f"{MEDIA_FILM_ID}_0001"
 
 
 # ---------------------------------------------------------------------------
@@ -46,8 +50,9 @@ def _fake_vec() -> np.ndarray:
 def _make_unit_row(
     shot_id: str = "film_abc_0001",
     film_id: str = "film_abc",
+    **overrides: object,
 ) -> dict:
-    return {
+    row = {
         "unit_id": shot_id,
         "film_id": film_id,
         "shot_id": shot_id,
@@ -63,6 +68,122 @@ def _make_unit_row(
         "txt_vec": [0.0] * VEC_DIM,
         "_distance": 0.1,
     }
+    row.update(overrides)
+    return row
+
+
+def _basis_vec(index: int) -> list[float]:
+    """Return a deterministic unit vector for diversity tests."""
+    vector = [0.0] * VEC_DIM
+    vector[index] = 1.0
+    return vector
+
+
+def _cosine_vec(
+    similarity: float,
+    anchor_index: int = 0,
+    orthogonal_index: int = 1,
+) -> list[float]:
+    """Return a unit vector with the requested cosine to an anchor basis."""
+    vector = [0.0] * VEC_DIM
+    vector[anchor_index] = similarity
+    vector[orthogonal_index] = float(np.sqrt(1.0 - similarity**2))
+    return vector
+
+
+def _make_query_chain(rows: list[dict]) -> MagicMock:
+    chain = MagicMock()
+    chain.metric.return_value = chain
+    chain.select.return_value = chain
+    chain.where.return_value = chain
+    chain.limit.return_value = chain
+    chain.to_list.return_value = rows
+    return chain
+
+
+def _make_hybrid_mock_db(
+    *,
+    image_rows: list[dict],
+    text_rows: list[dict],
+    lexical_rows: list[dict],
+) -> MagicMock:
+    """Mock independent image, text, and unvectorised table searches."""
+    table = MagicMock()
+
+    def fake_search(
+        _query: object = None,
+        *,
+        vector_column_name: str | None = None,
+        **_kwargs: object,
+    ) -> MagicMock:
+        if vector_column_name == "img_vec":
+            return _make_query_chain(image_rows)
+        if vector_column_name == "txt_vec":
+            return _make_query_chain(text_rows)
+        assert vector_column_name is None
+        return _make_query_chain(lexical_rows)
+
+    table.search.side_effect = fake_search
+    db = MagicMock()
+    db.open_table.return_value = table
+    return db
+
+
+def _make_frame_hybrid_mock_db(
+    *,
+    frame_rows: list[dict],
+    fallback_image_rows: list[dict],
+    text_rows: list[dict],
+    lexical_rows: list[dict],
+    frame_unit_rows: list[dict] | None = None,
+) -> tuple[MagicMock, MagicMock, MagicMock]:
+    """Mock units plus an optional frame-level visual index."""
+    units = MagicMock()
+    scalar_query_chains: list[MagicMock] = []
+
+    def fake_unit_search(
+        _query: object = None,
+        *,
+        vector_column_name: str | None = None,
+        **_kwargs: object,
+    ) -> MagicMock:
+        if vector_column_name == "img_vec":
+            return _make_query_chain(fallback_image_rows)
+        if vector_column_name == "txt_vec":
+            return _make_query_chain(text_rows)
+        assert vector_column_name is None
+        rows = (
+            lexical_rows
+            if not scalar_query_chains or frame_unit_rows is None
+            else frame_unit_rows
+        )
+        chain = _make_query_chain(rows)
+        scalar_query_chains.append(chain)
+        return chain
+
+    units.search.side_effect = fake_unit_search
+    units._scalar_query_chains = scalar_query_chains
+    frames = MagicMock()
+    frame_query_chain = _make_query_chain(frame_rows)
+
+    def fake_frame_search(
+        _query: object = None,
+        *,
+        vector_column_name: str | None = None,
+        **_kwargs: object,
+    ) -> MagicMock:
+        assert vector_column_name == "visual_vec"
+        return frame_query_chain
+
+    frames.search.side_effect = fake_frame_search
+    frames._query_chain = frame_query_chain
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames", "units"]
+    db.open_table.side_effect = lambda name: {
+        "frames": frames,
+        "units": units,
+    }[name]
+    return db, units, frames
 
 
 def _make_search_mock_db(rows: list[dict]) -> MagicMock:
@@ -85,10 +206,11 @@ def _make_search_mock_db(rows: list[dict]) -> MagicMock:
 
 def _make_filter_mock_db(rows: list[dict]) -> MagicMock:
     """Mock DB for scalar-filter chain:
-    open_table("units").search().where("unit_id = '...'").to_list()
+    open_table("units").search().where(...).limit(...).to_list()
     """
     chain = MagicMock()
     chain.where.return_value = chain
+    chain.limit.return_value = chain
     chain.to_list.return_value = rows
 
     tbl = MagicMock()
@@ -162,6 +284,37 @@ def test_search_preview_url_format(config: Config) -> None:
     assert results[0]["preview_url"] == f"/media/preview/{shot_id}"
 
 
+def test_search_scopes_every_channel_to_selected_films(config: Config) -> None:
+    """A selected film scope excludes candidates from every other film."""
+    from pipeline.search.retrieve import search
+
+    selected = _make_unit_row(
+        shot_id="film_one_0001",
+        film_id="film_one",
+        caption="A woman walking through rain",
+    )
+    excluded = _make_unit_row(
+        shot_id="film_two_0001",
+        film_id="film_two",
+        caption="A woman walking through rain",
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[excluded, selected],
+        text_rows=[excluded, selected],
+        lexical_rows=[excluded, selected],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search(
+            "woman walking through rain",
+            db,
+            config,
+            film_ids=["film_one"],
+        )
+
+    assert [result["film_id"] for result in results] == ["film_one"]
+
+
 def test_search_calls_embed_text_with_query(config: Config) -> None:
     """search() calls embed_text([query], config) exactly once."""
     from pipeline.search.retrieve import search
@@ -187,9 +340,1010 @@ def test_search_empty_db_returns_empty_list(config: Config) -> None:
     assert results == []
 
 
+def test_search_fuses_channel_ranks_with_config_weights(config: Config) -> None:
+    """A candidate ranked in two channels beats raw-distance channel winners."""
+    from pipeline.search.retrieve import search
+
+    image_only = _make_unit_row(
+        "image_only",
+        "film_image",
+        caption="A person outdoors",
+        searchable_text="A person outdoors",
+        t_start=0.0,
+        t_end=2.0,
+        img_vec=_basis_vec(0),
+        _distance=0.01,
+    )
+    text_only = _make_unit_row(
+        "text_only",
+        "film_text",
+        caption="A person indoors",
+        searchable_text="A person indoors",
+        t_start=50.0,
+        t_end=52.0,
+        img_vec=_basis_vec(1),
+        _distance=0.02,
+    )
+    shared = _make_unit_row(
+        "shared",
+        "film_shared",
+        caption="A night portrait",
+        searchable_text="A night portrait",
+        t_start=100.0,
+        t_end=102.0,
+        img_vec=_basis_vec(2),
+        _distance=0.40,
+    )
+    lexical_only = _make_unit_row(
+        "lexical_only",
+        "film_lexical",
+        caption="A cigarette in an ashtray",
+        searchable_text="cigarette smoke ashtray",
+        t_start=150.0,
+        t_end=152.0,
+        img_vec=_basis_vec(3),
+        _distance=0.90,
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[image_only, shared],
+        text_rows=[text_only, shared],
+        lexical_rows=[image_only, text_only, shared, lexical_only],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()) as embed:
+        results = search("cigarette", db, config)
+
+    assert results[0]["unit_id"] == "shared"
+    assert results[0]["debug"]["final_score"] == pytest.approx(
+        config.retrieval.weights.img / 62
+        + config.retrieval.weights.txt / 62
+    )
+    assert results[0]["debug"]["channels"]["img"]["rank"] == 2
+    assert results[0]["debug"]["channels"]["txt"]["rank"] == 2
+    embed.assert_called_once_with(["cigarette"], config)
+
+
+def test_search_filters_junk_unless_query_explicitly_requests_it(
+    config: Config,
+) -> None:
+    """Credits are suppressed normally but available for a credits query."""
+    from pipeline.search.retrieve import search
+
+    credits = _make_unit_row(
+        "credits",
+        "film_credits",
+        caption="Rolling end credits over a black screen",
+        searchable_text="closing credits cast and crew",
+        img_vec=_basis_vec(0),
+        _distance=0.01,
+    )
+    scene = _make_unit_row(
+        "scene",
+        "film_scene",
+        caption="A woman smokes by a window",
+        searchable_text="woman smoking cigarette at night",
+        img_vec=_basis_vec(1),
+        _distance=0.10,
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[credits, scene],
+        text_rows=[credits, scene],
+        lexical_rows=[credits, scene],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        ordinary = search("woman", db, config)
+        explicit = search("end credits", db, config)
+
+    assert [result["unit_id"] for result in ordinary] == ["scene"]
+    assert "credits" in [result["unit_id"] for result in explicit]
+
+
+def test_lexical_ranking_ignores_glue_words_and_requires_compound_evidence() -> None:
+    """Incidental “up”/“in” matches cannot influence compound-query fusion."""
+    from pipeline.search.retrieve import _lexical_ranking
+
+    close_up = _make_unit_row(
+        "close_up",
+        caption="A tight close-up portrait of a woman",
+        searchable_text="tight close-up portrait woman",
+    )
+    walks_up = _make_unit_row(
+        "walks_up",
+        caption="A man walks up the stairs in a wide shot",
+        searchable_text="man walks up stairs wide shot",
+    )
+    woman_only = _make_unit_row(
+        "woman_only",
+        caption="A woman waits in a restaurant",
+        searchable_text="woman waits restaurant",
+    )
+    car_only = _make_unit_row(
+        "car_only",
+        caption="A car crosses a tunnel",
+        searchable_text="car crosses tunnel",
+    )
+    woman_in_car = _make_unit_row(
+        "woman_in_car",
+        caption="A woman drives a car at night",
+        searchable_text="woman drives car night",
+    )
+    rows = [close_up, walks_up, woman_only, car_only, woman_in_car]
+
+    close_results = _lexical_ranking("close up", rows)
+    compound_results = _lexical_ranking("woman in a car", rows)
+
+    assert [row["unit_id"] for row, _score in close_results] == ["close_up"]
+    assert [row["unit_id"] for row, _score in compound_results] == [
+        "woman_in_car"
+    ]
+
+
+def test_junk_override_rejects_incidental_and_negated_credit_queries() -> None:
+    """“Credit card” and “without credits” do not re-enable a credit roll."""
+    from pipeline.search.retrieve import _is_unrequested_junk
+
+    credits = _make_unit_row(
+        "credits",
+        caption="Rolling end credits over a black screen",
+        searchable_text="closing credits cast and crew",
+    )
+
+    assert _is_unrequested_junk(credits, "credit card")
+    assert _is_unrequested_junk(credits, "black screen without credits")
+    assert not _is_unrequested_junk(credits, "end credits")
+
+
+def test_hyphenated_end_credit_captions_are_filtered() -> None:
+    """The annotator writes "end-credit cards", which must count as credits."""
+    from pipeline.search.retrieve import _is_unrequested_junk
+
+    for caption in (
+        "Minimalist end-credit cards display centered white serif text",
+        "Static black end-credit frame with centered white acknowledgments",
+        "Black screen with white credit cards listing the production crew",
+    ):
+        row = _make_unit_row(
+            "credits_row",
+            caption=caption,
+            searchable_text=caption,
+        )
+        assert _is_unrequested_junk(row, "medium shot"), caption
+
+
+def test_search_collapses_same_subject_repeats_far_apart(
+    config: Config,
+) -> None:
+    """0.92+ visual repeats collapse at any distance; 0.91 callbacks survive."""
+    from pipeline.search.retrieve import search
+
+    hero = _make_unit_row(
+        "hero",
+        "film_one",
+        caption="Extreme close-up of a pale elf queen",
+        searchable_text="elf queen close-up",
+        t_start=10.0,
+        t_end=12.0,
+        img_vec=_basis_vec(0),
+        _distance=0.01,
+    )
+    repeat = _make_unit_row(
+        "repeat",
+        "film_one",
+        caption="Close-up of the same pale elf queen minutes later",
+        searchable_text="elf queen close-up again",
+        t_start=600.0,
+        t_end=602.0,
+        img_vec=_cosine_vec(0.93),
+        _distance=0.02,
+    )
+    callback = _make_unit_row(
+        "callback",
+        "film_one",
+        caption="The elf queen seen again in a different light",
+        searchable_text="elf queen later",
+        t_start=900.0,
+        t_end=902.0,
+        img_vec=_cosine_vec(0.91, orthogonal_index=2),
+        _distance=0.03,
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[hero, repeat, callback],
+        text_rows=[hero, repeat, callback],
+        lexical_rows=[],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("elf queen", db, config)
+
+    assert [result["unit_id"] for result in results] == ["hero", "callback"]
+
+
+def test_search_enforces_config_max_per_film(config: Config) -> None:
+    """One film cannot fill the page past retrieval.diversity.max_per_film."""
+    from pipeline.search.retrieve import search
+
+    config.retrieval.diversity.max_per_film = 2
+    same_film = [
+        _make_unit_row(
+            f"crowded_{index}",
+            "film_crowded",
+            caption=f"Distinct moment {index}",
+            searchable_text=f"moment {index}",
+            t_start=float(index * 100),
+            t_end=float(index * 100 + 2),
+            img_vec=_basis_vec(index),
+            _distance=0.01 + index * 0.01,
+        )
+        for index in range(5)
+    ]
+    other = _make_unit_row(
+        "other_film",
+        "film_other",
+        caption="A moment from another film",
+        searchable_text="another film moment",
+        t_start=50.0,
+        t_end=52.0,
+        img_vec=_basis_vec(9),
+        _distance=0.30,
+    )
+    rows = [*same_film, other]
+    db = _make_hybrid_mock_db(
+        image_rows=rows,
+        text_rows=rows,
+        lexical_rows=[],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("moment", db, config)
+
+    films = [result["film_id"] for result in results]
+    assert films.count("film_crowded") == 2
+    assert "film_other" in films
+
+
+def test_search_deduplicates_channels_and_near_identical_images(
+    config: Config,
+) -> None:
+    """One unit appears once, and a .95+ cosine visual duplicate is removed."""
+    from pipeline.search.retrieve import search
+
+    original = _make_unit_row(
+        "original",
+        "film_one",
+        caption="A red car",
+        searchable_text="red car road",
+        t_start=0.0,
+        t_end=2.0,
+        img_vec=_basis_vec(0),
+        _distance=0.01,
+    )
+    visual_duplicate = _make_unit_row(
+        "visual_duplicate",
+        "film_two",
+        caption="The same red car",
+        searchable_text="same red car road",
+        t_start=100.0,
+        t_end=102.0,
+        img_vec=_basis_vec(0),
+        _distance=0.02,
+    )
+    distinct = _make_unit_row(
+        "distinct",
+        "film_three",
+        caption="A blue truck",
+        searchable_text="blue truck road",
+        t_start=200.0,
+        t_end=202.0,
+        img_vec=_basis_vec(1),
+        _distance=0.03,
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[original, visual_duplicate, distinct],
+        text_rows=[original, visual_duplicate, distinct],
+        lexical_rows=[original, visual_duplicate, distinct],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("road", db, config)
+
+    unit_ids = [result["unit_id"] for result in results]
+    assert unit_ids.count("original") == 1
+    assert "visual_duplicate" not in unit_ids
+    assert "distinct" in unit_ids
+
+
+def test_search_keeps_temporally_adjacent_visually_distinct_results(
+    config: Config,
+) -> None:
+    """Nearby but visually different shots remain eligible in a one-film index."""
+    from pipeline.search.retrieve import search
+
+    near_a = _make_unit_row(
+        "near_a",
+        "same_film",
+        caption="A car at night",
+        searchable_text="car night",
+        t_start=10.0,
+        t_end=12.0,
+        img_vec=_basis_vec(0),
+        _distance=0.01,
+    )
+    near_b = _make_unit_row(
+        "near_b",
+        "same_film",
+        caption="A car turns",
+        searchable_text="car turn",
+        t_start=35.0,
+        t_end=37.0,
+        img_vec=_basis_vec(1),
+        _distance=0.02,
+    )
+    far = _make_unit_row(
+        "far",
+        "same_film",
+        caption="A car on a bridge",
+        searchable_text="car bridge",
+        t_start=80.0,
+        t_end=82.0,
+        img_vec=_basis_vec(2),
+        _distance=0.03,
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[near_a, near_b, far],
+        text_rows=[near_a, near_b, far],
+        lexical_rows=[near_a, near_b, far],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("car", db, config)
+
+    assert [result["unit_id"] for result in results] == ["near_a", "near_b", "far"]
+
+
+def test_search_only_temporally_suppresses_visually_similar_results(
+    config: Config,
+) -> None:
+    """A >.90-similar adjacent shot is removed, while a distant one remains."""
+    from pipeline.search.retrieve import search
+
+    original = _make_unit_row(
+        "original",
+        "same_film",
+        caption="A car enters a tunnel",
+        searchable_text="car tunnel",
+        t_start=10.0,
+        t_end=12.0,
+        img_vec=_basis_vec(0),
+        _distance=0.01,
+    )
+    adjacent_similar = _make_unit_row(
+        "adjacent_similar",
+        "same_film",
+        caption="The car continues through the tunnel",
+        searchable_text="car tunnel",
+        t_start=35.0,
+        t_end=37.0,
+        img_vec=_cosine_vec(0.91),
+        _distance=0.02,
+    )
+    distant_similar = _make_unit_row(
+        "distant_similar",
+        "same_film",
+        caption="The car returns to the tunnel later",
+        searchable_text="car tunnel",
+        t_start=80.0,
+        t_end=82.0,
+        img_vec=_cosine_vec(0.91),
+        _distance=0.03,
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[original, adjacent_similar, distant_similar],
+        text_rows=[original, adjacent_similar, distant_similar],
+        lexical_rows=[],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("car", db, config)
+
+    assert [result["unit_id"] for result in results] == [
+        "original",
+        "distant_similar",
+    ]
+
+
+def test_search_uses_middle_keyframe_and_serializable_debug(
+    config: Config,
+) -> None:
+    """Three-frame shots display frame 1 and expose rank/channel diagnostics."""
+    from pipeline.search.retrieve import search
+
+    shot_id = "film_abc_0007"
+    row = _make_unit_row(
+        shot_id,
+        keyframe_paths=json.dumps(
+            [
+                f"/assets/{shot_id}_0.webp",
+                f"/assets/{shot_id}_1.webp",
+                f"/assets/{shot_id}_2.webp",
+            ]
+        ),
+        img_vec=_basis_vec(0),
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[row],
+        text_rows=[row],
+        lexical_rows=[row],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        result = search("rainy", db, config)[0]
+
+    assert result["keyframe_url"] == f"/media/keyframe/{shot_id}/1"
+    assert result["rank"] == 1
+    assert set(result["debug"]) == {"final_score", "channels"}
+    assert set(result["debug"]["channels"]) == {"img", "txt", "lex"}
+    assert result["debug"]["channels"]["img"]["distance"] == pytest.approx(0.1)
+    assert result["debug"]["channels"]["lex"]["distance"] is None
+    json.dumps(result)
+
+
+def test_search_uses_best_frame_per_shot_and_returns_match_evidence(
+    config: Config,
+) -> None:
+    """Frame retrieval collapses to shots and displays each shot's argmax."""
+    from pipeline.search.retrieve import search
+
+    first = _make_unit_row(
+        "first",
+        "film_one",
+        caption="A person makes a subtle motion",
+        searchable_text="person subtle motion",
+        keyframe_paths=json.dumps(["a.webp", "b.webp", "c.webp"]),
+        img_vec=_basis_vec(0),
+    )
+    second = _make_unit_row(
+        "second",
+        "film_two",
+        caption="Another person moves",
+        searchable_text="another person moves",
+        keyframe_paths=json.dumps(["d.webp"]),
+        img_vec=_basis_vec(1),
+    )
+    frame_rows = [
+        {
+            "frame_id": "first_0",
+            "unit_id": "first",
+            "shot_id": "first",
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": 11.0,
+            "path": "a.webp",
+            "_distance": 0.20,
+        },
+        {
+            "frame_id": "second_0",
+            "unit_id": "second",
+            "shot_id": "second",
+            "film_id": "film_two",
+            "frame_index": 0,
+            "timestamp": 20.0,
+            "path": "d.webp",
+            "_distance": 0.02,
+        },
+        {
+            "frame_id": "first_1",
+            "unit_id": "first",
+            "shot_id": "first",
+            "film_id": "film_one",
+            "frame_index": 1,
+            "timestamp": 12.5,
+            "path": "b.webp",
+            "_distance": 0.01,
+        },
+        {
+            "frame_id": "first_2",
+            "unit_id": "first",
+            "shot_id": "first",
+            "film_id": "film_one",
+            "frame_index": 2,
+            "timestamp": 14.0,
+            "path": "c.webp",
+            "_distance": 0.30,
+        },
+    ]
+    db, units, frames = _make_frame_hybrid_mock_db(
+        frame_rows=frame_rows,
+        fallback_image_rows=[second, first],
+        text_rows=[],
+        lexical_rows=[first, second],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("distinctive gesture", db, config)
+
+    assert [result["unit_id"] for result in results] == ["first", "second"]
+    assert len(results) == 2
+    first_result = results[0]
+    assert first_result["keyframe_url"] == "/media/keyframe/first/1"
+    assert first_result["matched_frame_url"] == "/media/keyframe/first/1"
+    assert first_result["matched_frame_index"] == 1
+    assert first_result["matched_frame_timestamp"] == pytest.approx(12.5)
+    image_debug = first_result["debug"]["channels"]["img"]
+    assert image_debug["source"] == "frame"
+    assert image_debug["rank"] == 1
+    assert image_debug["matched_frame"]["frame_id"] == "first_1"
+    assert "path" not in image_debug["matched_frame"]
+    assert not any(
+        call.kwargs.get("vector_column_name") == "img_vec"
+        for call in units.search.call_args_list
+    )
+    assert frames.search.call_args.kwargs["vector_column_name"] == "visual_vec"
+    json.dumps(results)
+
+
+def test_search_fetches_frame_hit_units_outside_bounded_lexical_scan(
+    config: Config,
+) -> None:
+    """Frame hits are joined directly even when absent from the 10k scan."""
+    from pipeline.search.retrieve import search
+
+    scanned = _make_unit_row(
+        "inside_scan",
+        "selected_film",
+        caption="An unrelated quiet room",
+        searchable_text="unrelated quiet room",
+    )
+    frame_hit = _make_unit_row(
+        "outside_scan",
+        "selected_film",
+        caption="A distinctive gesture",
+        searchable_text="distinctive gesture",
+        img_vec=_basis_vec(1),
+    )
+    out_of_scope = _make_unit_row(
+        "other_film_hit",
+        "other_film",
+        caption="The same distinctive gesture",
+        searchable_text="distinctive gesture",
+        img_vec=_basis_vec(2),
+    )
+    frame_rows = [
+        {
+            "frame_id": "outside_scan_0",
+            "unit_id": "outside_scan",
+            "shot_id": "outside_scan",
+            "film_id": "selected_film",
+            "frame_index": 0,
+            "timestamp": 42.0,
+            "path": "outside.webp",
+            "_distance": 0.01,
+        },
+        {
+            "frame_id": "other_film_hit_0",
+            "unit_id": "other_film_hit",
+            "shot_id": "other_film_hit",
+            "film_id": "other_film",
+            "frame_index": 0,
+            "timestamp": 24.0,
+            "path": "other.webp",
+            "_distance": 0.001,
+        },
+    ]
+    db, units, frames = _make_frame_hybrid_mock_db(
+        frame_rows=frame_rows,
+        fallback_image_rows=[],
+        text_rows=[],
+        lexical_rows=[scanned],
+        frame_unit_rows=[frame_hit, out_of_scope],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search(
+            "distinctive gesture",
+            db,
+            config,
+            film_ids=["selected_film"],
+        )
+
+    assert [result["unit_id"] for result in results] == ["outside_scan"]
+    assert results[0]["matched_frame_url"] == "/media/keyframe/outside_scan/0"
+    assert len(units._scalar_query_chains) == 2
+    lexical_query, frame_unit_query = units._scalar_query_chains
+    lexical_query.limit.assert_called_once_with(10_000)
+    frame_unit_query.limit.assert_called_once_with(1)
+    frame_unit_query.where.assert_called_once()
+    frames._query_chain.where.assert_called_once()
+
+
+def test_search_falls_back_to_unit_image_vector_when_frames_empty(
+    config: Config,
+) -> None:
+    """An existing but empty frames table preserves the old image channel."""
+    from pipeline.search.retrieve import search
+
+    row = _make_unit_row(
+        "fallback",
+        keyframe_paths=json.dumps(["a.webp", "b.webp", "c.webp"]),
+        img_vec=_basis_vec(0),
+    )
+    db, units, frames = _make_frame_hybrid_mock_db(
+        frame_rows=[],
+        fallback_image_rows=[row],
+        text_rows=[],
+        lexical_rows=[row],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        result = search("rain", db, config)[0]
+
+    assert result["keyframe_url"] == "/media/keyframe/fallback/1"
+    assert "matched_frame_index" not in result
+    assert result["debug"]["channels"]["img"]["source"] == "unit"
+    assert frames.search.called
+    assert any(
+        call.kwargs.get("vector_column_name") == "img_vec"
+        for call in units.search.call_args_list
+    )
+
+
+def test_search_returns_at_most_twelve_results(config: Config) -> None:
+    """Large candidate pools are capped at twelve final results."""
+    from pipeline.search.retrieve import search
+
+    rows = [
+        _make_unit_row(
+            f"shot_{index}",
+            f"film_{index}",
+            caption=f"Car number {index}",
+            searchable_text=f"car number {index}",
+            t_start=float(index * 100),
+            t_end=float(index * 100 + 2),
+            img_vec=_basis_vec(index),
+            _distance=index / 100,
+        )
+        for index in range(20)
+    ]
+    db = _make_hybrid_mock_db(
+        image_rows=rows,
+        text_rows=rows,
+        lexical_rows=rows,
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("car", db, config)
+
+    assert len(results) == 12
+    assert [result["rank"] for result in results] == list(range(1, 13))
+
+
 # ---------------------------------------------------------------------------
 # FastAPI app endpoints
 # ---------------------------------------------------------------------------
+
+
+def test_spatial_grid_scores_reward_matching_screen_cells() -> None:
+    """Equal global content scores still distinguish aligned from swapped layout."""
+    from pipeline.search.retrieve import _spatial_grid_scores
+
+    query = np.zeros((2, 2, 2), dtype=np.float32)
+    query[:, 0, 0] = 1.0
+    query[:, 1, 1] = 1.0
+    aligned = query.copy()
+    horizontally_swapped = query[:, ::-1, :].copy()
+
+    scores = _spatial_grid_scores(
+        query,
+        np.stack([aligned, horizontally_swapped]),
+    )
+
+    assert scores[0] == pytest.approx(1.0)
+    assert scores[1] == pytest.approx(0.0)
+
+
+def test_search_by_image_blends_semantics_with_aligned_spatial_cells(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A strong aligned-grid match can improve a close semantic candidate."""
+    from pipeline.search.retrieve import search_by_image
+
+    first_path = tmp_path / "first.webp"
+    second_path = tmp_path / "second.webp"
+    Image.new("RGB", (64, 36), "navy").save(first_path)
+    Image.new("RGB", (64, 36), "navy").save(second_path)
+
+    first = _make_unit_row(
+        "first",
+        "film_one",
+        caption="Semantic favorite with a different layout",
+    )
+    second = _make_unit_row(
+        "second",
+        "film_one",
+        caption="Slightly weaker semantics with aligned layout",
+    )
+    frame_rows = [
+        {
+            "frame_id": "first_0",
+            "unit_id": "first",
+            "shot_id": "first",
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": 10.0,
+            "path": str(first_path),
+            "_distance": 0.10,
+        },
+        {
+            "frame_id": "second_0",
+            "unit_id": "second",
+            "shot_id": "second",
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": 130.0,
+            "path": str(second_path),
+            "_distance": 0.15,
+        },
+    ]
+
+    frames = MagicMock()
+    frames.search.return_value = _make_query_chain(frame_rows)
+    units = MagicMock()
+    units.search.return_value = _make_query_chain([first, second])
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames", "units"]
+    db.open_table.side_effect = lambda name: {
+        "frames": frames,
+        "units": units,
+    }[name]
+
+    query_grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    query_grid[..., 0] = 1.0
+    candidate_grids = np.zeros((2, 6, 6, 2), dtype=np.float32)
+    candidate_grids[0, ..., 0] = -1.0
+    candidate_grids[1, ..., 0] = 1.0
+    global_query = np.zeros((1, VEC_DIM), dtype=np.float32)
+    global_query[0, 0] = 1.0
+    global_candidates = np.repeat(global_query, 2, axis=0)
+
+    with patch(
+        "pipeline.search.retrieve.embed_spatial_images",
+        side_effect=[
+            (global_query, query_grid),
+            (global_candidates, candidate_grids),
+        ],
+    ):
+        results = search_by_image(
+            Image.new("RGB", (64, 36), "navy"),
+            db,
+            config,
+        )
+
+    assert [result["unit_id"] for result in results] == ["second", "first"]
+    assert results[0]["debug"]["mode"] == "reference_image"
+    assert results[0]["debug"]["channels"]["spatial"]["rank"] == 1
+    assert results[0]["matched_frame_url"] == "/media/keyframe/second/0"
+
+
+def test_search_by_image_reranks_unique_shots_not_duplicate_frames(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Multiple global hits from one shot consume one spatial-rerank slot."""
+    from pipeline.search.retrieve import search_by_image
+
+    paths = [
+        tmp_path / "first_0.webp",
+        tmp_path / "first_1.webp",
+        tmp_path / "second_0.webp",
+    ]
+    for path in paths:
+        Image.new("RGB", (64, 36), "navy").save(path)
+
+    first = _make_unit_row("first", "film_one")
+    second = _make_unit_row("second", "film_one")
+    frame_rows = [
+        {
+            "frame_id": frame_id,
+            "unit_id": unit_id,
+            "shot_id": unit_id,
+            "film_id": "film_one",
+            "frame_index": frame_index,
+            "timestamp": timestamp,
+            "path": str(path),
+            "_distance": distance,
+        }
+        for frame_id, unit_id, frame_index, timestamp, path, distance in (
+            ("first_0", "first", 0, 10.0, paths[0], 0.05),
+            ("first_1", "first", 1, 11.0, paths[1], 0.06),
+            ("second_0", "second", 0, 130.0, paths[2], 0.10),
+        )
+    ]
+    frame_query = _make_query_chain(frame_rows)
+    frames = MagicMock()
+    frames.search.return_value = frame_query
+    units = MagicMock()
+    units.search.return_value = _make_query_chain([first, second])
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames", "units"]
+    db.open_table.side_effect = lambda name: {
+        "frames": frames,
+        "units": units,
+    }[name]
+
+    global_query = np.zeros((1, VEC_DIM), dtype=np.float32)
+    global_query[0, 0] = 1.0
+    grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    grid[..., 0] = 1.0
+    spatial_embed = MagicMock(
+        side_effect=[
+            (global_query, grid),
+            (
+                np.repeat(global_query, 2, axis=0),
+                np.repeat(grid, 2, axis=0),
+            ),
+        ]
+    )
+
+    with patch(
+        "pipeline.search.retrieve.embed_spatial_images",
+        spatial_embed,
+    ):
+        results = search_by_image(
+            Image.new("RGB", (64, 36), "navy"),
+            db,
+            config,
+        )
+
+    assert [result["unit_id"] for result in results] == ["first", "second"]
+    assert len(spatial_embed.call_args_list[1].args[0]) == 2
+    frame_query.limit.assert_called_once_with(288)
+
+
+def test_search_by_image_excludes_source_unit(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """The in-app Similar action does not return its own source shot."""
+    from pipeline.search.retrieve import search_by_image
+
+    paths = [tmp_path / "source.webp", tmp_path / "other.webp"]
+    for path in paths:
+        Image.new("RGB", (64, 36), "black").save(path)
+    source = _make_unit_row("source", "film_one")
+    other = _make_unit_row("other", "film_one")
+    frame_rows = [
+        {
+            "frame_id": f"{unit_id}_0",
+            "unit_id": unit_id,
+            "shot_id": unit_id,
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": timestamp,
+            "path": str(path),
+            "_distance": distance,
+        }
+        for unit_id, timestamp, path, distance in (
+            ("source", 10.0, paths[0], 0.0),
+            ("other", 60.0, paths[1], 0.1),
+        )
+    ]
+    frames = MagicMock()
+    frames.search.return_value = _make_query_chain(frame_rows)
+    units = MagicMock()
+    units.search.return_value = _make_query_chain([source, other])
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames", "units"]
+    db.open_table.side_effect = lambda name: {
+        "frames": frames,
+        "units": units,
+    }[name]
+    grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    grid[..., 0] = 1.0
+    candidate_grids = np.repeat(grid, 2, axis=0)
+    global_query = np.zeros((1, VEC_DIM), dtype=np.float32)
+    global_query[0, 0] = 1.0
+
+    with patch(
+        "pipeline.search.retrieve.embed_spatial_images",
+        side_effect=[
+            (global_query, grid),
+            (np.repeat(global_query, 2, axis=0), candidate_grids),
+        ],
+    ):
+        results = search_by_image(
+            Image.new("RGB", (64, 36), "black"),
+            db,
+            config,
+            exclude_unit_id="source",
+        )
+
+    assert [result["unit_id"] for result in results] == ["other"]
+
+
+def test_reference_image_temporal_diversity_keeps_other_moments() -> None:
+    """One nearby match is allowed, but it cannot fill the result page."""
+    from pipeline.search.retrieve import _is_reference_temporal_duplicate
+
+    selected = [{"film_id": "film_one", "timestamp": 100.0}]
+
+    assert _is_reference_temporal_duplicate(
+        {"film_id": "film_one", "timestamp": 180.0},
+        selected,
+    )
+    assert not _is_reference_temporal_duplicate(
+        {"film_id": "film_one", "timestamp": 200.1},
+        selected,
+    )
+    assert not _is_reference_temporal_duplicate(
+        {"film_id": "film_two", "timestamp": 120.0},
+        selected,
+    )
+
+
+def test_reference_image_temporal_diversity_backfills_adjacent_matches(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Strong neighboring match cuts remain eligible when diversity underfills."""
+    from pipeline.search.retrieve import search_by_image
+
+    paths = [tmp_path / f"near_{index}.webp" for index in range(3)]
+    for path in paths:
+        Image.new("RGB", (64, 36), "black").save(path)
+    units_rows = [
+        _make_unit_row(f"near_{index}", "film_one")
+        for index in range(3)
+    ]
+    frame_rows = [
+        {
+            "frame_id": f"near_{index}_0",
+            "unit_id": f"near_{index}",
+            "shot_id": f"near_{index}",
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": 10.0 + index * 10.0,
+            "path": str(paths[index]),
+            "_distance": 0.05 + index * 0.01,
+        }
+        for index in range(3)
+    ]
+    frames = MagicMock()
+    frames.search.return_value = _make_query_chain(frame_rows)
+    units = MagicMock()
+    units.search.return_value = _make_query_chain(units_rows)
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames", "units"]
+    db.open_table.side_effect = lambda name: {
+        "frames": frames,
+        "units": units,
+    }[name]
+
+    global_query = np.zeros((1, VEC_DIM), dtype=np.float32)
+    global_query[0, 0] = 1.0
+    grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    grid[..., 0] = 1.0
+    with patch(
+        "pipeline.search.retrieve.embed_spatial_images",
+        side_effect=[
+            (global_query, grid),
+            (
+                np.repeat(global_query, 3, axis=0),
+                np.repeat(grid, 3, axis=0),
+            ),
+        ],
+    ):
+        results = search_by_image(
+            Image.new("RGB", (64, 36), "black"),
+            db,
+            config,
+        )
+
+    assert [result["unit_id"] for result in results] == [
+        "near_0",
+        "near_1",
+        "near_2",
+    ]
 
 
 def test_api_search_returns_results_dict(config: Config) -> None:
@@ -217,6 +1371,181 @@ def test_api_search_returns_results_dict(config: Config) -> None:
     result = data["results"][0]
     for key in ("unit_id", "film_id", "t_start", "t_end", "caption", "keyframe_url", "preview_url"):
         assert key in result, f"API result missing key: {key}"
+
+
+def test_api_image_search_accepts_raw_image_and_forwards_scope(
+    config: Config,
+) -> None:
+    """POST /search/image decodes one still and preserves repeated filters."""
+    from fastapi.testclient import TestClient
+    from io import BytesIO
+
+    buffer = BytesIO()
+    Image.new("RGB", (32, 18), "red").save(buffer, format="PNG")
+    mock_db = MagicMock()
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+        patch(
+            "pipeline.api.main._search_by_image",
+            return_value=[],
+        ) as image_search,
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.post(
+                "/search/image",
+                params=[
+                    ("film_id", "film_one"),
+                    ("film_id", "film_two"),
+                    ("exclude_unit_id", "source"),
+                ],
+                content=buffer.getvalue(),
+                headers={"Content-Type": "image/png"},
+            )
+
+    assert response.status_code == 200
+    assert response.json() == {"results": []}
+    args = image_search.call_args.args
+    assert isinstance(args[0], Image.Image)
+    assert args[0].mode == "RGB"
+    assert args[0].size == (32, 18)
+    assert args[1:] == (mock_db, config)
+    assert image_search.call_args.kwargs == {
+        "film_ids": ["film_one", "film_two"],
+        "exclude_unit_id": "source",
+    }
+
+
+@pytest.mark.parametrize(
+    ("content", "content_type", "expected_status"),
+    [
+        (b"", "image/png", 400),
+        (b"not an image", "image/png", 400),
+        (b"not an image", "text/plain", 415),
+    ],
+)
+def test_api_image_search_rejects_bad_payloads(
+    content: bytes,
+    content_type: str,
+    expected_status: int,
+    config: Config,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=MagicMock()),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.post(
+                "/search/image",
+                content=content,
+                headers={"Content-Type": content_type},
+            )
+
+    assert response.status_code == expected_status
+
+
+def test_api_image_search_rejects_oversized_payload(config: Config) -> None:
+    from fastapi.testclient import TestClient
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=MagicMock()),
+        patch("pipeline.api.main._MAX_REFERENCE_IMAGE_BYTES", 4),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.post(
+                "/search/image",
+                content=b"12345",
+                headers={"Content-Type": "image/png"},
+            )
+
+    assert response.status_code == 413
+
+
+def test_api_image_search_stream_cap_does_not_require_content_length(
+    config: Config,
+) -> None:
+    """The byte cap is enforced while consuming a chunked request body."""
+    from fastapi.testclient import TestClient
+
+    def chunks():
+        yield b"123"
+        yield b"45"
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=MagicMock()),
+        patch("pipeline.api.main._MAX_REFERENCE_IMAGE_BYTES", 4),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.post(
+                "/search/image",
+                content=chunks(),
+                headers={"Content-Type": "image/png"},
+            )
+
+    assert response.status_code == 413
+
+
+def test_api_image_search_rejects_disguised_unsupported_format(
+    config: Config,
+) -> None:
+    """Declared MIME type cannot make a GIF pass the JPEG/PNG/WebP allowlist."""
+    from fastapi.testclient import TestClient
+    from io import BytesIO
+
+    buffer = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(buffer, format="GIF")
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=MagicMock()),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.post(
+                "/search/image",
+                content=buffer.getvalue(),
+                headers={"Content-Type": "image/png"},
+            )
+
+    assert response.status_code == 415
+
+
+def test_api_search_forwards_repeated_film_scope(config: Config) -> None:
+    """Repeated film_id parameters become one explicit backend search scope."""
+    from fastapi.testclient import TestClient
+
+    mock_db = MagicMock()
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+        patch("pipeline.api.main._search", return_value=[]) as scoped_search,
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get(
+                "/search",
+                params=[
+                    ("q", "rain"),
+                    ("film_id", "film_one"),
+                    ("film_id", "film_two"),
+                ],
+            )
+
+    assert response.status_code == 200
+    scoped_search.assert_called_once_with(
+        "rain",
+        mock_db,
+        config,
+        film_ids=["film_one", "film_two"],
+    )
 
 
 def test_api_unit_endpoint_returns_row(config: Config) -> None:
@@ -261,11 +1590,15 @@ def test_api_keyframe_returns_file(tmp_path: Path, config: Config) -> None:
     """GET /media/keyframe/{shot_id}/{n} returns 200 when file exists."""
     from fastapi.testclient import TestClient
 
-    keyframe_dir = config.paths.assets_dir / "keyframes"
+    film_id = MEDIA_FILM_ID
+    shot_id = MEDIA_SHOT_ID
+    keyframe_dir = config.paths.assets_dir / film_id / "keyframes"
     keyframe_dir.mkdir(parents=True, exist_ok=True)
-    (keyframe_dir / "test_shot_0.webp").write_bytes(b"RIFF fake webp")
+    (keyframe_dir / f"{shot_id}_0.webp").write_bytes(b"RIFF fake webp")
 
-    mock_db = MagicMock()
+    mock_db = _make_filter_mock_db([
+        _make_unit_row(shot_id=shot_id, film_id=film_id)
+    ])
 
     with (
         patch("pipeline.api.main.load_config", return_value=config),
@@ -273,7 +1606,7 @@ def test_api_keyframe_returns_file(tmp_path: Path, config: Config) -> None:
     ):
         import pipeline.api.main as api_mod  # noqa: PLC0415
         with TestClient(api_mod.app) as client:
-            response = client.get("/media/keyframe/test_shot/0")
+            response = client.get(f"/media/keyframe/{shot_id}/0")
 
     assert response.status_code == 200
 
@@ -282,7 +1615,10 @@ def test_api_keyframe_404_when_missing(config: Config) -> None:
     """GET /media/keyframe/{shot_id}/{n} returns 404 when file is absent."""
     from fastapi.testclient import TestClient
 
-    mock_db = MagicMock()
+    shot_id = MEDIA_SHOT_ID
+    mock_db = _make_filter_mock_db([
+        _make_unit_row(shot_id=shot_id, film_id=MEDIA_FILM_ID)
+    ])
 
     with (
         patch("pipeline.api.main.load_config", return_value=config),
@@ -295,15 +1631,48 @@ def test_api_keyframe_404_when_missing(config: Config) -> None:
     assert response.status_code == 404
 
 
+@pytest.mark.parametrize("n", [-1, 1])
+def test_api_keyframe_404_when_index_out_of_range(
+    config: Config,
+    n: int,
+) -> None:
+    """Only keyframe indexes recorded on the unit may be served."""
+    from fastapi.testclient import TestClient
+
+    film_id = MEDIA_FILM_ID
+    shot_id = MEDIA_SHOT_ID
+    keyframe_dir = config.paths.assets_dir / film_id / "keyframes"
+    keyframe_dir.mkdir(parents=True, exist_ok=True)
+    (keyframe_dir / f"{shot_id}_{n}.webp").write_bytes(b"unindexed keyframe")
+
+    mock_db = _make_filter_mock_db([
+        _make_unit_row(shot_id=shot_id, film_id=film_id)
+    ])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app, raise_server_exceptions=False) as client:
+            response = client.get(f"/media/keyframe/{shot_id}/{n}")
+
+    assert response.status_code == 404
+
+
 def test_api_preview_returns_file(tmp_path: Path, config: Config) -> None:
     """GET /media/preview/{shot_id} returns 200 when file exists."""
     from fastapi.testclient import TestClient
 
-    preview_dir = config.paths.assets_dir / "previews"
+    film_id = MEDIA_FILM_ID
+    shot_id = MEDIA_SHOT_ID
+    preview_dir = config.paths.assets_dir / film_id / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
-    (preview_dir / "test_shot.webm").write_bytes(b"fake webm bytes")
+    (preview_dir / f"{shot_id}.webm").write_bytes(b"fake webm bytes")
 
-    mock_db = MagicMock()
+    mock_db = _make_filter_mock_db([
+        _make_unit_row(shot_id=shot_id, film_id=film_id)
+    ])
 
     with (
         patch("pipeline.api.main.load_config", return_value=config),
@@ -311,7 +1680,7 @@ def test_api_preview_returns_file(tmp_path: Path, config: Config) -> None:
     ):
         import pipeline.api.main as api_mod  # noqa: PLC0415
         with TestClient(api_mod.app) as client:
-            response = client.get("/media/preview/test_shot")
+            response = client.get(f"/media/preview/{shot_id}")
 
     assert response.status_code == 200
 
@@ -320,7 +1689,10 @@ def test_api_preview_404_when_missing(config: Config) -> None:
     """GET /media/preview/{shot_id} returns 404 when file is absent."""
     from fastapi.testclient import TestClient
 
-    mock_db = MagicMock()
+    shot_id = MEDIA_SHOT_ID
+    mock_db = _make_filter_mock_db([
+        _make_unit_row(shot_id=shot_id, film_id=MEDIA_FILM_ID)
+    ])
 
     with (
         patch("pipeline.api.main.load_config", return_value=config),
@@ -333,25 +1705,318 @@ def test_api_preview_404_when_missing(config: Config) -> None:
     assert response.status_code == 404
 
 
+def test_api_preview_rejects_path_outside_assets(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A compromised film_id cannot cross into another film's asset tree."""
+    from fastapi.testclient import TestClient
+
+    shot_id = MEDIA_SHOT_ID
+    other_film_dir = config.paths.assets_dir / OTHER_FILM_ID / "previews"
+    other_film_dir.mkdir(parents=True, exist_ok=True)
+    (other_film_dir / f"{shot_id}.webm").write_bytes(b"must not be served")
+
+    mock_db = _make_filter_mock_db([
+        _make_unit_row(
+            shot_id=shot_id,
+            film_id=f"{MEDIA_FILM_ID}\\..\\{OTHER_FILM_ID}",
+        )
+    ])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app, raise_server_exceptions=False) as client:
+            response = client.get(f"/media/preview/{shot_id}")
+
+    assert response.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # Film mock DB helper
 # ---------------------------------------------------------------------------
 
 
-def _make_film_mock_db(rows: list[dict]) -> MagicMock:
+def _make_film_mock_db(
+    rows: list[dict],
+    *,
+    ready_film_ids: set[str] | None = None,
+) -> MagicMock:
     """Mock DB for film lookup:
     open_table("films").search().where(...).to_list()
     """
-    chain = MagicMock()
-    chain.where.return_value = chain
-    chain.to_list.return_value = rows
+    film_chain = MagicMock()
+    film_chain.select.return_value = film_chain
+    film_chain.where.return_value = film_chain
+    film_chain.limit.return_value = film_chain
+    film_chain.to_list.return_value = rows
+    films_table = MagicMock()
+    films_table.search.return_value = film_chain
 
-    tbl = MagicMock()
-    tbl.search.return_value = chain
+    ready = (
+        {str(row["film_id"]) for row in rows}
+        if ready_film_ids is None
+        else ready_film_ids
+    )
+    unit_chain = MagicMock()
+    unit_chain.select.return_value = unit_chain
+    unit_chain.where.return_value = unit_chain
+    unit_chain.limit.return_value = unit_chain
+    unit_chain.to_list.return_value = [
+        {"film_id": film_id} for film_id in sorted(ready)
+    ]
+    units_table = MagicMock()
+    units_table.search.return_value = unit_chain
+    units_table.version = 1
 
     db = MagicMock()
-    db.open_table.return_value = tbl
+    db.open_table.side_effect = lambda name: (
+        films_table if name == "films" else units_table
+    )
+    db.list_tables.return_value.tables = ["films", "units"]
     return db
+
+
+def test_api_library_includes_searchable_film_metadata(
+    config: Config,
+) -> None:
+    """Indexed library rows expose the stable ID and display metadata."""
+    from fastapi.testclient import TestClient
+
+    config.paths.films_dir.mkdir(parents=True)
+    indexed_path = config.paths.films_dir / "fallen-angels.mkv"
+    indexed_path.write_bytes(b"film")
+    (config.paths.films_dir / "unindexed.mp4").write_bytes(b"new")
+    film_row = {
+        "film_id": "film_one",
+        "title": "Fallen Angels",
+        "path": str(indexed_path),
+        "duration": 5940.0,
+    }
+    mock_db = _make_film_mock_db([film_row])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get("/library")
+
+    assert response.status_code == 200
+    by_filename = {row["filename"]: row for row in response.json()}
+    indexed = by_filename[indexed_path.name]
+    assert indexed["status"] == "indexed"
+    assert indexed["film_id"] == "film_one"
+    assert indexed["title"] == "Fallen Angels"
+    assert indexed["duration"] == 5940.0
+    assert by_filename["unindexed.mp4"]["film_id"] is None
+
+
+def test_api_library_does_not_mark_metadata_only_film_indexed(
+    config: Config,
+) -> None:
+    """A crash before the final unit publication cannot fake readiness."""
+    from fastapi.testclient import TestClient
+
+    config.paths.films_dir.mkdir(parents=True)
+    source = config.paths.films_dir / "interrupted.mkv"
+    source.write_bytes(b"film")
+    mock_db = _make_film_mock_db(
+        [
+            {
+                "film_id": "interrupted",
+                "title": "Interrupted",
+                "path": str(source),
+                "duration": 100.0,
+            }
+        ],
+        ready_film_ids=set(),
+    )
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod
+
+        with TestClient(api_mod.app) as client:
+            response = client.get("/library")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "filename": "interrupted.mkv",
+            "path": str(source),
+            "size_gb": 0.0,
+            "status": "not_indexed",
+            "film_id": None,
+            "title": "interrupted",
+            "duration": None,
+        }
+    ]
+
+
+def test_api_library_caches_ready_ids_for_unchanged_units_version(
+    config: Config,
+) -> None:
+    """Frequent UI polling does not rescan every representative unit."""
+    from fastapi.testclient import TestClient
+
+    config.paths.films_dir.mkdir(parents=True)
+    source = config.paths.films_dir / "ready.mkv"
+    source.write_bytes(b"film")
+    mock_db = _make_film_mock_db(
+        [
+            {
+                "film_id": "ready",
+                "title": "Ready",
+                "path": str(source),
+                "duration": 100.0,
+            }
+        ]
+    )
+    units_table = mock_db.open_table("units")
+    ready_scan = units_table.search.return_value
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod
+
+        with TestClient(api_mod.app) as client:
+            first = client.get("/library")
+            second = client.get("/library")
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    ready_scan.to_list.assert_called_once()
+
+
+def test_api_library_refreshes_ready_ids_when_units_version_changes(
+    config: Config,
+) -> None:
+    """A completed unit publication invalidates readiness immediately."""
+    from fastapi.testclient import TestClient
+
+    config.paths.films_dir.mkdir(parents=True)
+    sources = []
+    film_rows = []
+    for film_id in ("first", "second"):
+        source = config.paths.films_dir / f"{film_id}.mkv"
+        source.write_bytes(b"film")
+        sources.append(source)
+        film_rows.append(
+            {
+                "film_id": film_id,
+                "title": film_id.title(),
+                "path": str(source),
+                "duration": 100.0,
+            }
+        )
+    mock_db = _make_film_mock_db(
+        film_rows,
+        ready_film_ids={"first"},
+    )
+    units_table = mock_db.open_table("units")
+    ready_scan = units_table.search.return_value
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod
+
+        with TestClient(api_mod.app) as client:
+            first = client.get("/library")
+            units_table.version = 2
+            ready_scan.to_list.return_value = [
+                {"film_id": "first"},
+                {"film_id": "second"},
+            ]
+            second = client.get("/library")
+
+    first_status = {row["filename"]: row["status"] for row in first.json()}
+    second_status = {row["filename"]: row["status"] for row in second.json()}
+    assert first_status == {
+        "first.mkv": "indexed",
+        "second.mkv": "not_indexed",
+    }
+    assert second_status == {
+        "first.mkv": "indexed",
+        "second.mkv": "indexed",
+    }
+    assert ready_scan.to_list.call_count == 2
+
+
+def test_api_library_unions_external_indexed_and_source_directory_films(
+    config: Config,
+) -> None:
+    """Indexed sources outside films_dir remain available to search filters."""
+    from fastapi.testclient import TestClient
+
+    config.paths.films_dir.mkdir(parents=True)
+    unindexed_path = config.paths.films_dir / "waiting-to-ingest.mp4"
+    unindexed_path.write_bytes(b"new")
+    external_path = config.paths.films_dir.parent / "archive" / "indexed.mkv"
+    external_path.parent.mkdir()
+    external_path.write_bytes(b"indexed")
+    mock_db = _make_film_mock_db([
+        {
+            "film_id": "external_film",
+            "title": "External Film",
+            "path": str(external_path),
+            "duration": 7200.0,
+        },
+    ])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get("/library")
+
+    assert response.status_code == 200
+    by_filename = {row["filename"]: row for row in response.json()}
+    assert by_filename["indexed.mkv"] == {
+        "filename": "indexed.mkv",
+        "path": str(external_path),
+        "size_gb": 0.0,
+        "status": "indexed",
+        "film_id": "external_film",
+        "title": "External Film",
+        "duration": 7200.0,
+    }
+    assert by_filename["waiting-to-ingest.mp4"]["status"] == "not_indexed"
+    assert by_filename["waiting-to-ingest.mp4"]["film_id"] is None
+
+
+def test_api_library_reports_index_metadata_failure(config: Config) -> None:
+    """A DB failure is an explicit retryable error, not a fake empty catalog."""
+    from fastapi.testclient import TestClient
+
+    config.paths.films_dir.mkdir(parents=True)
+    mock_db = MagicMock()
+    mock_db.list_tables.side_effect = RuntimeError("database offline")
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app, raise_server_exceptions=False) as client:
+            response = client.get("/library")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Indexed film metadata is temporarily unavailable",
+    }
 
 
 # ---------------------------------------------------------------------------

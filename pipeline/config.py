@@ -18,6 +18,11 @@ from typing import Optional
 
 import yaml
 
+#: Video containers the pipeline ingests; shared by the CLI and the API.
+VIDEO_EXTENSIONS: frozenset[str] = frozenset({
+    ".mkv", ".mp4", ".avi", ".mov", ".m4v", ".webm"
+})
+
 
 # ---------------------------------------------------------------------------
 # Nested config sub-sections
@@ -36,6 +41,9 @@ class ModelsConfig:
     text_encoder: str
     annotator: str
     router: str
+    annotator_provider: str = "gemini"
+    annotator_image_detail: str = "low"
+    annotator_reasoning_effort: str = "none"
     whisper: str = "large-v3"
 
 
@@ -77,6 +85,11 @@ class ScoringConfig:
     frame_worthiness_weight: float
 
 
+@dataclass
+class IngestConfig:
+    annotation_concurrency: int = 8
+
+
 # ---------------------------------------------------------------------------
 # Top-level Config
 # ---------------------------------------------------------------------------
@@ -91,6 +104,7 @@ class Config:
     thresholds: ThresholdsConfig
     retrieval: RetrievalConfig
     scoring: ScoringConfig
+    ingest: IngestConfig
 
 
 # ---------------------------------------------------------------------------
@@ -137,11 +151,46 @@ def load_config(path: Optional[Path | str] = None) -> Config:
 
     # --- models ---
     m = raw["models"]
+    annotator = str(m["annotator"])
+    annotator_provider = str(
+        m.get(
+            "annotator_provider",
+            "gemini" if annotator.startswith("gemini-") else "openai",
+        )
+    ).lower()
+    if annotator_provider not in {"openai", "gemini"}:
+        raise ValueError(
+            "models.annotator_provider must be 'openai' or 'gemini', "
+            f"got {annotator_provider!r}"
+        )
+
+    annotator_image_detail = str(
+        m.get("annotator_image_detail", "low")
+    ).lower()
+    if annotator_image_detail not in {"low", "high", "original", "auto"}:
+        raise ValueError(
+            "models.annotator_image_detail must be low, high, original, or auto"
+        )
+
+    annotator_reasoning_effort = str(
+        m.get("annotator_reasoning_effort", "none")
+    ).lower()
+    if annotator_reasoning_effort not in {
+        "none", "low", "medium", "high", "xhigh", "max"
+    }:
+        raise ValueError(
+            "models.annotator_reasoning_effort must be none, low, medium, "
+            "high, xhigh, or max"
+        )
+
     models = ModelsConfig(
         visual_encoder=m["visual_encoder"],
         text_encoder=m["text_encoder"],
-        annotator=m["annotator"],
+        annotator=annotator,
         router=m["router"],
+        annotator_provider=annotator_provider,
+        annotator_image_detail=annotator_image_detail,
+        annotator_reasoning_effort=annotator_reasoning_effort,
         whisper=m.get("whisper", "large-v3"),
     )
 
@@ -182,10 +231,18 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         frame_worthiness_weight=float(s["frame_worthiness_weight"]),
     )
 
+    # --- ingest (optional section) ---
+    ingest_raw = raw.get("ingest") or {}
+    annotation_concurrency = int(ingest_raw.get("annotation_concurrency", 8))
+    if annotation_concurrency < 1:
+        raise ValueError("ingest.annotation_concurrency must be at least 1")
+    ingest = IngestConfig(annotation_concurrency=annotation_concurrency)
+
     return Config(
         paths=paths,
         models=models,
         thresholds=thresholds,
         retrieval=retrieval,
         scoring=scoring,
+        ingest=ingest,
     )
