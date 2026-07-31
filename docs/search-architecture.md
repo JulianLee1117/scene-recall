@@ -1,7 +1,8 @@
 # Scene Recall search architecture
 
-Status: hybrid baseline, frame-level retrieval, and the first real-film review
-pool are implemented. The remaining sections describe the staged target.
+Status: hybrid/frame retrieval, native FTS, and reproducible channel-ablation
+experiments are implemented. Human relevance judgments are the next gate; the
+remaining sections describe the staged target.
 
 ## Decision
 
@@ -41,6 +42,25 @@ There is no universally optimal model blend. The architecture is designed so
 that models and weights can be selected against Scene Recall's own judged
 queries without changing the product contract.
 
+## Frame Set as a product benchmark, not a backend blueprint
+
+[Frame Set](https://site.frameset.app/) validates the product shape: a dense
+visual grid, flexible natural-language search, one-click similar-frame search,
+typed filters, motion references, credits, and lightweight collections. Its
+help center also makes two especially useful interaction patterns explicit:
+[text can be paired with similarity or filters](https://intercom.help/frame-set/en/articles/7832998-text-search),
+and filter state/navigation should remain intact while exploring
+[deep result paths](https://intercom.help/frame-set/en/articles/11734364-july-2025-faster-search-smarter-navigation).
+
+Scene Recall should adopt that composable creative flow, including Sets later,
+but not assume Frame Set's private retrieval implementation. The products have
+different data contracts: Frame Set is a curated cross-production reference
+catalog; Scene Recall is an exhaustive private library whose results must map
+back to exact source timestamps, dialogue, scenes, and editable clips. Local
+ownership, reproducible ingest lineage, complete-film coverage, and temporal
+units therefore remain architectural requirements rather than implementation
+details to trade away for a hosted frame catalog.
+
 ## What the current baseline proves
 
 The current repair is a useful Layer 1:
@@ -52,7 +72,7 @@ The current repair is a useful Layer 1:
   composition is valid program content and is not junk.
 - Near-duplicate suppression uses visual evidence; time proximity alone no
   longer removes distinct shots.
-- All 1,800 existing Fallen Angels keyframes have independent PE vectors.
+- Every extracted keyframe has an independent PE vector in the `frames` table.
   Frame candidates collapse to shots by best similarity while preserving the
   matched frame and reconstructed seek timestamp as result evidence.
 - A reference-still prototype retrieves 96 global PE frame candidates and
@@ -61,8 +81,13 @@ The current repair is a useful Layer 1:
   path without hosted API calls, schema changes, or re-ingestion.
 - The API returns rank and per-channel debug evidence.
 - Results render in row-major rank order and expose an optional debug view.
-- A 42-query, seven-category review pool freezes 504 real candidates with
-  blank human-owned grades and category-aware scoring.
+- Native LanceDB FTS replaces the capped Python corpus scan. Startup and film
+  publication enforce zero unindexed rows, including LanceDB 0.33's
+  merge-after-index edge case.
+- A reproducible 42-query, seven-category experiment runs hybrid, image-only,
+  text-only, and lexical-only retrieval, captures code/config/corpus/index
+  provenance and latency, pools candidates, and preserves only matching human
+  judgments. Zero-weight channels now do no retrieval work.
 
 It is not the final design:
 
@@ -72,11 +97,12 @@ It is not the final design:
 - Frame retrieval is limited to the one or three sparse keyframes extracted by
   the original ingest. There are no ordered clip embeddings for temporal
   actions or camera motion yet.
-- Caption, dialogue, and mood are mixed into one searchable string.
-- Shot type, palette, action, people, era, OCR, and junk status are not typed
-  evidence.
-- The current BM25-like channel scans Python rows. Native indexed FTS is the
-  scalable replacement.
+- Caption, dialogue, and mood are still mixed into one semantic text vector;
+  the native FTS field also combines caption and dialogue for this first safe
+  migration.
+- Framing, setting, time of day, people count, energy, camera motion, palette,
+  subjects, and on-screen text are stored, but not yet indexed as typed search
+  constraints. Several list-like fields are still JSON strings.
 - The new Fallen Angels candidates are deliberately ungraded. Search quality
   is observable, but relevance metrics remain unavailable until a person
   supplies judgments.
@@ -523,9 +549,11 @@ wrong-object/action/vibe/shot/frame feedback over raw clicks.
   matched rank display, and debug contract.
 - Preserve the six existing specific-search smoke cases.
 
-### Layer 1 — evaluation first (pooling complete; judgments pending)
+### Layer 1 — evaluation first (experiment harness complete; judgments pending)
 
-- Replace the placeholder-only evaluation with the graded Fallen Angels set.
+- Grade the pooled multi-variant Fallen Angels experiment; relevance metrics
+  intentionally remain unavailable until each query's candidate union is
+  complete.
 - Start with 30 to 50 queries and grow to 150 after the first local challenger.
 - Add pooled qrels, category metrics, thumbnail judgments, latency, and
   channel-ablation reporting.
@@ -538,7 +566,8 @@ wrong-object/action/vibe/shot/frame feedback over raw clicks.
   release-era filters and scene diversity have real fields before the planner
   depends on them.
 - Return the actual best frame and evidence timestamp.
-- Replace the Python lexical scan with native fielded FTS.
+- Native FTS replacement is complete for the combined searchable-text field;
+  split fielded caption/dialogue indexes follow their schema migration.
 - Split dialogue/utterances from visual captions.
 - Add Qwen3-Embedding-0.6B text vectors.
 - Compute palette, luminance, contrast, text coverage, quality, and initial

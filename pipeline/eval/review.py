@@ -40,7 +40,7 @@ DEFAULT_REVIEW = Path(__file__).parent / "fallen_angels_review.yaml"
 VALID_GRADES = frozenset({0, 1, 2, 3})
 RELEVANT_GRADE = 2
 
-SearchFunction = Callable[[str, Any, Config], list[dict[str, Any]]]
+SearchFunction = Callable[..., list[dict[str, Any]]]
 
 
 def _read_yaml(path: Path) -> Any:
@@ -130,6 +130,7 @@ def build_review_document(
     config: Config,
     *,
     source_metadata: dict[str, Any] | None = None,
+    film_ids: Sequence[str] | None = None,
     limit: int = 12,
     search_fn: SearchFunction = search,
     created_at: str | None = None,
@@ -140,7 +141,15 @@ def build_review_document(
 
     review_queries: list[dict[str, Any]] = []
     for query in queries:
-        results = search_fn(str(query["query"]), db, config)[:limit]
+        if film_ids is None:
+            results = search_fn(str(query["query"]), db, config)[:limit]
+        else:
+            results = search_fn(
+                str(query["query"]),
+                db,
+                config,
+                film_ids=film_ids,
+            )[:limit]
         review_queries.append(
             {
                 "id": str(query["id"]),
@@ -298,17 +307,20 @@ def score_review_document(
         }
         for category, rows in sorted(category_rows.items())
     }
-    overall = aggregate(query_rows) if query_rows else {name: 0.0 for name in metric_names}
+    overall = aggregate(query_rows) if query_rows else None
+    metric_note = (
+        "Top-k quality within this frozen candidate pool; corpus recall is not "
+        "measured."
+        if query_rows
+        else "Relevance unavailable: no query has a complete human judgment set."
+    )
 
     return {
         "queries_total": len(queries),
         "queries_evaluated": len(query_rows),
         "queries_incomplete": len(incomplete),
         "incomplete_ids": incomplete,
-        "metric_note": (
-            "Top-k quality within this frozen candidate pool; corpus recall is not "
-            "measured."
-        ),
+        "metric_note": metric_note,
         "overall": overall,
         "by_category": by_category,
         "queries": query_rows,
@@ -328,6 +340,18 @@ def pool_command(
             "you need to preserve"
         )
     queries, metadata = load_query_set(queries_path)
+    scope = metadata.get("scope") or {}
+    if not isinstance(scope, dict):
+        raise ValueError("query metadata scope must be a mapping")
+    raw_film_ids = scope.get("film_ids")
+    film_ids: list[str] | None = None
+    if raw_film_ids is not None:
+        if not isinstance(raw_film_ids, list) or not raw_film_ids or not all(
+            isinstance(film_id, str) and film_id.strip()
+            for film_id in raw_film_ids
+        ):
+            raise ValueError("scope.film_ids must contain non-empty film IDs")
+        film_ids = [film_id.strip() for film_id in raw_film_ids]
     config = load_config()
     db = open_db(config)
     document = build_review_document(
@@ -338,6 +362,7 @@ def pool_command(
             "queries_file": str(queries_path),
             **metadata,
         },
+        film_ids=film_ids,
         limit=limit,
     )
     _write_yaml(output_path, document)

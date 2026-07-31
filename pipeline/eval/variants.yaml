@@ -1,0 +1,14 @@
+version: 1
+variants:
+  - id: hybrid
+    description: Current production-weighted hybrid retrieval.
+    weights: {img: 0.4, txt: 0.4, lex: 0.2}
+  - id: image_only
+    description: Visual frame/shot retrieval without text or lexical rank weight.
+    weights: {img: 1.0, txt: 0.0, lex: 0.0}
+  - id: text_only
+    description: Dense text retrieval without visual or lexical rank weight.
+    weights: {img: 0.0, txt: 1.0, lex: 0.0}
+  - id: lexical_only
+    description: Exact-word retrieval without dense rank weight.
+    weights: {img: 0.0, txt: 0.0, lex: 1.0}

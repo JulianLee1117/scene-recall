@@ -328,6 +328,83 @@ def test_search_calls_embed_text_with_query(config: Config) -> None:
     mock_embed.assert_called_once_with(["rainy night alone"], config)
 
 
+@pytest.mark.parametrize(
+    ("weights", "expected_vector_column", "expects_embedding"),
+    [
+        ((1.0, 0.0, 0.0), "img_vec", True),
+        ((0.0, 1.0, 0.0), "txt_vec", True),
+        ((0.0, 0.0, 1.0), None, False),
+    ],
+    ids=("image-only", "text-only", "lexical-only"),
+)
+def test_zero_weight_channels_do_no_retrieval_work(
+    config: Config,
+    weights: tuple[float, float, float],
+    expected_vector_column: str | None,
+    expects_embedding: bool,
+) -> None:
+    """A channel ablation executes only the retrieval work it measures."""
+    from pipeline.search.retrieve import search
+
+    config.retrieval.weights.img = weights[0]
+    config.retrieval.weights.txt = weights[1]
+    config.retrieval.weights.lex = weights[2]
+    row = _make_unit_row(searchable_text="rainy night alone")
+    db = _make_hybrid_mock_db(
+        image_rows=[row],
+        text_rows=[row],
+        lexical_rows=[row],
+    )
+    table = db.open_table.return_value
+
+    with patch(
+        "pipeline.search.retrieve.embed_text",
+        return_value=_fake_vec(),
+    ) as embed:
+        results = search("rainy night", db, config)
+
+    assert [result["unit_id"] for result in results] == [row["unit_id"]]
+    if expects_embedding:
+        embed.assert_called_once_with(["rainy night"], config)
+    else:
+        embed.assert_not_called()
+
+    vector_columns = [
+        call.kwargs.get("vector_column_name")
+        for call in table.search.call_args_list
+        if call.kwargs.get("vector_column_name") is not None
+    ]
+    if expected_vector_column is None:
+        assert vector_columns == []
+    else:
+        assert vector_columns == [expected_vector_column]
+
+
+def test_search_rejects_no_enabled_channels(config: Config) -> None:
+    """An invalid all-zero experiment cannot masquerade as empty retrieval."""
+    from pipeline.search.retrieve import search
+
+    config.retrieval.weights.img = 0.0
+    config.retrieval.weights.txt = 0.0
+    config.retrieval.weights.lex = 0.0
+
+    with pytest.raises(ValueError, match="at least one retrieval channel"):
+        search("rainy night", MagicMock(), config)
+
+
+def test_lexical_query_terms_are_bounded_for_pasted_prose() -> None:
+    """Compound native FTS work cannot grow without bound with query length."""
+    from pipeline.search.retrieve import (
+        _MAX_LEXICAL_QUERY_TERMS,
+        _unique_query_terms,
+    )
+
+    terms = _unique_query_terms(" ".join(f"term{index}" for index in range(100)))
+
+    assert len(terms) == _MAX_LEXICAL_QUERY_TERMS
+    assert terms == [f"term{index}" for index in range(_MAX_LEXICAL_QUERY_TERMS)]
+
+
 def test_search_empty_db_returns_empty_list(config: Config) -> None:
     """search() returns an empty list when the DB returns no rows."""
     from pipeline.search.retrieve import search
@@ -600,6 +677,43 @@ def test_search_enforces_config_max_per_film(config: Config) -> None:
     films = [result["film_id"] for result in results]
     assert films.count("film_crowded") == 2
     assert "film_other" in films
+
+
+def test_search_disables_film_cap_for_explicit_scope(config: Config) -> None:
+    """A user-selected movie scope may fill the complete result page."""
+    from pipeline.search.retrieve import search
+
+    config.retrieval.diversity.max_per_film = 2
+    rows = [
+        _make_unit_row(
+            f"scoped_{index}",
+            "selected_film",
+            caption=f"Distinct selected-film moment {index}",
+            searchable_text=f"selected moment {index}",
+            t_start=float(index * 100),
+            t_end=float(index * 100 + 2),
+            img_vec=_basis_vec(index),
+            _distance=0.01 + index * 0.01,
+        )
+        for index in range(6)
+    ]
+    db = _make_hybrid_mock_db(
+        image_rows=rows,
+        text_rows=rows,
+        lexical_rows=[],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search(
+            "moment",
+            db,
+            config,
+            film_ids=["selected_film"],
+        )
+
+    assert [result["unit_id"] for result in results] == [
+        f"scoped_{index}" for index in range(6)
+    ]
 
 
 def test_search_deduplicates_channels_and_near_identical_images(
@@ -882,11 +996,11 @@ def test_search_uses_best_frame_per_shot_and_returns_match_evidence(
     json.dumps(results)
 
 
-def test_search_fetches_frame_hit_units_outside_bounded_lexical_scan(
+def test_search_fetches_frame_hit_units_outside_lexical_candidates(
     config: Config,
 ) -> None:
-    """Frame hits are joined directly even when absent from the 10k scan."""
-    from pipeline.search.retrieve import search
+    """Frame hits are joined directly when absent from the FTS candidate set."""
+    from pipeline.search.retrieve import _LEXICAL_CANDIDATE_LIMIT, search
 
     scanned = _make_unit_row(
         "inside_scan",
@@ -950,7 +1064,7 @@ def test_search_fetches_frame_hit_units_outside_bounded_lexical_scan(
     assert results[0]["matched_frame_url"] == "/media/keyframe/outside_scan/0"
     assert len(units._scalar_query_chains) == 2
     lexical_query, frame_unit_query = units._scalar_query_chains
-    lexical_query.limit.assert_called_once_with(10_000)
+    lexical_query.limit.assert_called_once_with(_LEXICAL_CANDIDATE_LIMIT)
     frame_unit_query.limit.assert_called_once_with(1)
     frame_unit_query.where.assert_called_once()
     frames._query_chain.where.assert_called_once()
@@ -1548,6 +1662,95 @@ def test_api_search_forwards_repeated_film_scope(config: Config) -> None:
     )
 
 
+def test_api_search_attaches_human_readable_film_title(config: Config) -> None:
+    """Search responses join display titles without changing retrieval rows."""
+    from fastapi.testclient import TestClient
+
+    result = {
+        "unit_id": "unit_one",
+        "film_id": "film_one",
+        "t_start": 10.0,
+        "t_end": 12.0,
+        "caption": "A room at night",
+        "keyframe_url": "/media/keyframe/unit_one/0",
+        "preview_url": "/media/preview/unit_one",
+    }
+    films = MagicMock()
+    films.version = 7
+    films.search.return_value = _make_query_chain(
+        [{"film_id": "film_one", "title": "Fallen Angels"}]
+    )
+    mock_db = MagicMock()
+    mock_db.list_tables.return_value.tables = ["films"]
+    mock_db.open_table.return_value = films
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+        patch("pipeline.api.main._search", return_value=[result]),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get("/search?q=night")
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["film_title"] == "Fallen Angels"
+
+
+def test_api_search_survives_optional_film_title_lookup_failure(
+    config: Config,
+) -> None:
+    """A display-metadata failure cannot discard valid retrieval results."""
+    from fastapi.testclient import TestClient
+
+    result = {
+        "unit_id": "unit_one",
+        "film_id": "film_one",
+        "t_start": 10.0,
+        "t_end": 12.0,
+        "caption": "A room at night",
+        "keyframe_url": "/media/keyframe/unit_one/0",
+        "preview_url": "/media/preview/unit_one",
+    }
+    films = MagicMock()
+    films.version = 7
+    films.search.side_effect = RuntimeError("metadata temporarily unavailable")
+    mock_db = MagicMock()
+    mock_db.list_tables.return_value.tables = ["films"]
+    mock_db.open_table.return_value = films
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+        patch("pipeline.api.main._search", return_value=[result]),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get("/search?q=night")
+
+    assert response.status_code == 200
+    assert response.json() == {"results": [result]}
+
+
+def test_api_search_rejects_unbounded_query_text(config: Config) -> None:
+    """Pasted documents are rejected before model or database search work."""
+    from fastapi.testclient import TestClient
+
+    mock_db = MagicMock()
+    mock_db.list_tables.return_value.tables = []
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+        patch("pipeline.api.main._search", return_value=[]) as search_mock,
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get("/search", params={"q": "x" * 501})
+
+    assert response.status_code == 422
+    search_mock.assert_not_called()
+
+
 def test_api_unit_endpoint_returns_row(config: Config) -> None:
     """GET /unit/{unit_id} returns the matching unit row."""
     from fastapi.testclient import TestClient
@@ -1771,6 +1974,14 @@ def _make_film_mock_db(
     units_table = MagicMock()
     units_table.search.return_value = unit_chain
     units_table.version = 1
+    fts_index = MagicMock()
+    fts_index.name = "units_searchable_text_fts_v1"
+    fts_index.index_type = "FTS"
+    fts_index.columns = ["searchable_text"]
+    units_table.list_indices.return_value = [fts_index]
+    fts_stats = MagicMock()
+    fts_stats.num_unindexed_rows = 0
+    units_table.index_stats.return_value = fts_stats
 
     db = MagicMock()
     db.open_table.side_effect = lambda name: (
@@ -2008,6 +2219,7 @@ def test_api_library_reports_index_metadata_failure(config: Config) -> None:
     with (
         patch("pipeline.api.main.load_config", return_value=config),
         patch("pipeline.api.main.open_db", return_value=mock_db),
+        patch("pipeline.api.main.ensure_search_indexes"),
     ):
         import pipeline.api.main as api_mod  # noqa: PLC0415
         with TestClient(api_mod.app, raise_server_exceptions=False) as client:

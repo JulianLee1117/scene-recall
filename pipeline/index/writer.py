@@ -4,6 +4,7 @@ Public API
 ----------
 - ``open_db(config)``          — open (or create) the LanceDB at assets_dir/db
 - ``create_tables(db)``        — idempotent table creation
+- ``ensure_search_indexes(db)`` — create/synchronize native search indexes
 - ``write_unit(...)``          — upsert one indexable shot unit
 - ``write_units(...)``         — upsert a film's buffered units in one merge
 - ``publish_film_index(...)``  — scoped replacement with units as ready marker
@@ -19,16 +20,18 @@ Vectors are fixed at **1024 dimensions** (PE core L/14) for Phase 1.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
 
-import numpy as np
-
+from filelock import FileLock
 import lancedb
+import numpy as np
 
 from pipeline.config import Config
 from pipeline.ingest.probe import FilmRecord
@@ -43,6 +46,10 @@ from pipeline.index.schema import (
 
 _INGEST_TIMESTAMP_SOURCE = "ingest_keyframe_seek_v1"
 _PUBLICATION_LOCK = Lock()
+_DATABASE_WRITE_LOCK = ".scene-recall-write.lock"
+_DATABASE_WRITE_LOCK_TIMEOUT_SECONDS = 600
+UNITS_FTS_FIELD = "searchable_text"
+UNITS_FTS_INDEX = "units_searchable_text_fts_v1"
 
 
 # ---------------------------------------------------------------------------
@@ -147,9 +154,109 @@ def create_tables(db: lancedb.DBConnection, vector_dim: int = 1024) -> None:
         Defaults to 1024 (PE core L/14).  Pass 1152 for SigLIP-2.
         Ignored when the table already exists.
     """
-    _create_or_check_table(db, "units", make_units_schema(vector_dim))
-    _create_or_check_table(db, "frames", make_frames_schema(vector_dim))
-    _create_or_check_table(db, "films", FILMS_SCHEMA)
+    # ``exist_ok`` table creation and FTS creation are separate Lance
+    # operations.  Serialize them across API-launched ingest subprocesses so
+    # two first-time ingests cannot race to create the same native index.
+    with _PUBLICATION_LOCK, _database_write_lock(db):
+        _create_or_check_table(db, "units", make_units_schema(vector_dim))
+        _create_or_check_table(db, "frames", make_frames_schema(vector_dim))
+        _create_or_check_table(db, "films", FILMS_SCHEMA)
+        _ensure_search_indexes_locked(db)
+
+
+def _database_write_lock(
+    db: lancedb.DBConnection,
+) -> AbstractContextManager[None]:
+    """Return the cross-process lock guarding local DB publication.
+
+    Unit tests use lightweight DB doubles and LanceDB also supports remote
+    connection URIs, neither of which has a meaningful local lock-file path.
+    The in-process publication lock still protects those callers.
+    """
+    uri = getattr(db, "uri", None)
+    if not isinstance(uri, (str, os.PathLike)):
+        return nullcontext()
+    uri_text = os.fspath(uri)
+    if "://" in uri_text:
+        return nullcontext()
+
+    root = Path(uri_text)
+    root.mkdir(parents=True, exist_ok=True)
+    return FileLock(
+        root / _DATABASE_WRITE_LOCK,
+        timeout=_DATABASE_WRITE_LOCK_TIMEOUT_SECONDS,
+    )
+
+
+def ensure_search_indexes(db: lancedb.DBConnection) -> None:
+    """Create and fully synchronize the versioned native FTS index.
+
+    LanceDB 0.33 can leave merge-inserted rows outside an existing FTS index.
+    A normal query is not guaranteed to merge those rows correctly for terms
+    already present in the index, so zero unindexed rows is a correctness
+    invariant rather than a performance preference.
+    """
+    with _PUBLICATION_LOCK, _database_write_lock(db):
+        _ensure_search_indexes_locked(db)
+
+
+def _ensure_search_indexes_locked(db: lancedb.DBConnection) -> None:
+    """Implement :func:`ensure_search_indexes` while the DB lock is held."""
+    if "units" not in table_names(db):
+        return
+
+    table = db.open_table("units")
+    indices = list(table.list_indices())
+    named = [index for index in indices if index.name == UNITS_FTS_INDEX]
+    same_field = [
+        index
+        for index in indices
+        if str(index.index_type).upper() == "FTS"
+        and list(index.columns) == [UNITS_FTS_FIELD]
+    ]
+
+    if named and not (
+        len(named) == 1
+        and str(named[0].index_type).upper() == "FTS"
+        and list(named[0].columns) == [UNITS_FTS_FIELD]
+    ):
+        raise RuntimeError(
+            f"search index {UNITS_FTS_INDEX!r} has an incompatible contract"
+        )
+    if len(same_field) > 1 or (same_field and not named):
+        names = ", ".join(sorted(index.name for index in same_field))
+        raise RuntimeError(
+            "units.searchable_text already has an unmanaged FTS index "
+            f"({names}); remove it before creating {UNITS_FTS_INDEX!r}"
+        )
+
+    if not named:
+        table.create_fts_index(
+            UNITS_FTS_FIELD,
+            name=UNITS_FTS_INDEX,
+            replace=False,
+            base_tokenizer="simple",
+            language="English",
+            max_token_length=40,
+            lower_case=True,
+            stem=True,
+            remove_stop_words=True,
+            ascii_folding=True,
+            with_position=True,
+        )
+
+    stats = table.index_stats(UNITS_FTS_INDEX)
+    if stats is None:
+        raise RuntimeError(f"search index {UNITS_FTS_INDEX!r} was not created")
+    if int(stats.num_unindexed_rows) > 0:
+        table.optimize()
+        stats = table.index_stats(UNITS_FTS_INDEX)
+    if stats is None or int(stats.num_unindexed_rows) > 0:
+        remaining = None if stats is None else int(stats.num_unindexed_rows)
+        raise RuntimeError(
+            f"search index {UNITS_FTS_INDEX!r} is incomplete; "
+            f"unindexed_rows={remaining}"
+        )
 
 
 def _create_or_check_table(
@@ -184,7 +291,22 @@ def upsert_frames(
     rows: Sequence[dict[str, Any]],
 ) -> None:
     """Upsert keyframe rows by stable ``frame_id``; an empty input is a no-op."""
-    _merge_rows(db, "frames", "frame_id", rows)
+    upsert_frame_batches(db, (rows,))
+
+
+def upsert_frame_batches(
+    db: lancedb.DBConnection,
+    batches: Iterable[Sequence[dict[str, Any]]],
+) -> None:
+    """Upsert frame batches under one publication lock.
+
+    A legacy backfill may need bounded batches for memory, but its complete
+    run must not interleave with a film re-publication and reintroduce stale
+    frame rows after that film's replacement boundary.
+    """
+    with _PUBLICATION_LOCK, _database_write_lock(db):
+        for rows in batches:
+            _merge_rows(db, "frames", "frame_id", rows)
 
 
 def _merge_rows(
@@ -264,13 +386,16 @@ def write_units(
 
     Lance creates a new table version for every merge. Ingest therefore
     buffers a film's units and sends them here together, keeping storage and
-    manifest growth roughly constant as the library expands.
+    manifest growth roughly constant as the library expands. Native FTS is
+    synchronized before this function returns.
     """
     if not units:
         return
 
     rows = [_make_unit_row(film, unit) for unit in units]
-    _upsert_unit_rows(db, rows)
+    with _PUBLICATION_LOCK, _database_write_lock(db):
+        _upsert_unit_rows(db, rows)
+        _ensure_search_indexes_locked(db)
 
 
 def publish_film_index(
@@ -285,14 +410,17 @@ def publish_film_index(
     one film-scoped merge, then the final film-scoped unit merge atomically
     updates/inserts the new generation and deletes its obsolete units. Existing
     complete units therefore remain searchable until that final boundary.
+    Native FTS is synchronized immediately after the unit merge and before
+    this function reports a successful publication.
     """
     unit_rows = [_make_unit_row(film, unit) for unit in units]
     frame_rows = [_make_frame_row(film.film_id, frame) for frame in frames]
     _validate_publication_rows(film.film_id, unit_rows, frame_rows)
 
-    # Lance publication spans three tables. Serialize only this short DB phase
-    # so concurrent background ingests cannot interleave table versions.
-    with _PUBLICATION_LOCK:
+    # Lance publication spans three tables and API ingest jobs run in distinct
+    # subprocesses.  The in-process lock protects threads/tests; the file lock
+    # prevents different film ingests from interleaving table/index versions.
+    with _PUBLICATION_LOCK, _database_write_lock(db):
         _replace_frame_rows(db, film.film_id, frame_rows)
 
         # Metadata may be prepared before the visibility boundary. The
@@ -300,6 +428,7 @@ def publish_film_index(
         # crash or failed final merge cannot present this row as indexed.
         write_film(db, film)
         _replace_unit_rows(db, film.film_id, unit_rows)
+        _ensure_search_indexes_locked(db)
 
 
 def _replace_frame_rows(

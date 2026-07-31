@@ -17,7 +17,7 @@ import pyarrow as pa
 
 from pipeline.config import Config
 from pipeline.index.schema import FRAMES_SCHEMA_VERSION, make_frames_schema
-from pipeline.index.writer import create_tables, open_db, upsert_frames
+from pipeline.index.writer import create_tables, open_db, upsert_frame_batches
 from pipeline.ingest.embed import embed_images, get_vector_dim
 from pipeline.ingest.media import _KEYFRAME_START_PAD
 
@@ -140,8 +140,13 @@ def backfill_frames(
         }
         for source, vector in zip(stale, vectors, strict=True)
     ]
-    for start in range(0, len(rows), batch_size):
-        upsert_frames(db, rows[start : start + batch_size])
+    upsert_frame_batches(
+        db,
+        (
+            rows[start : start + batch_size]
+            for start in range(0, len(rows), batch_size)
+        ),
+    )
 
     return FrameBackfillResult(
         discovered=len(sources),

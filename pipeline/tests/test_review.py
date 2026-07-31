@@ -90,6 +90,28 @@ def test_build_review_document_preserves_evidence_and_blank_labels() -> None:
     assert candidates[0]["note"] == ""
 
 
+def test_build_review_document_forwards_explicit_film_scope() -> None:
+    queries = [{"id": "q1", "category": "action", "query": "smoking"}]
+    search_fn = MagicMock(return_value=[])
+    db = MagicMock()
+    config = MagicMock()
+
+    build_review_document(
+        queries,
+        db,
+        config,
+        film_ids=["film-a"],
+        search_fn=search_fn,
+    )
+
+    search_fn.assert_called_once_with(
+        "smoking",
+        db,
+        config,
+        film_ids=["film-a"],
+    )
+
+
 def test_metrics_for_grades_uses_graded_ndcg_and_binary_relevance() -> None:
     metrics = metrics_for_grades([3, 0, 2, 1], k=3)
 
@@ -135,6 +157,27 @@ def test_score_skips_partial_queries_and_aggregates_categories() -> None:
     assert report["overall"]["junk@2"] == pytest.approx(0.5)
     assert report["by_category"]["action"]["evaluated"] == 1
     assert "vibe" not in report["by_category"]
+
+
+def test_score_does_not_report_synthetic_zero_quality_without_judgments() -> None:
+    document = {
+        "queries": [
+            {
+                "id": "unjudged",
+                "category": "vibe",
+                "query": "lonely at night",
+                "candidates": [
+                    {**_result("u1"), "grade": None, "flags": [], "note": ""}
+                ],
+            }
+        ]
+    }
+
+    report = score_review_document(document)
+
+    assert report["queries_evaluated"] == 0
+    assert report["overall"] is None
+    assert "unavailable" in report["metric_note"].lower()
 
 
 @pytest.mark.parametrize("grade", [-1, 4, 1.5, True])

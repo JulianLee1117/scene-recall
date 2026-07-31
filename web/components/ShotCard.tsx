@@ -122,7 +122,9 @@ export default function ShotCard({
               opacity: hovered ? 1 : 0,
             }}
           >
-            <span className="result-film">{filmLabel(shot.film_id)}</span>
+            <span className="result-film">
+              {shot.film_title ?? filmLabel(shot.film_id)}
+            </span>
             <span className="result-time">{formatTime(evidenceTime)}</span>
           </span>
         </span>

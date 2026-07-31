@@ -106,9 +106,13 @@ export function useSpeechRecognition({
 
   const cancel = useCallback(() => {
     const recognition = recognitionRef.current;
+    if (!recognition) return;
+
     recognitionRef.current = null;
-    recognition?.abort();
+    recognition.abort();
+    transcriptRef.current = "";
     setStatus("idle");
+    onTranscriptRef.current(originalValueRef.current);
   }, []);
 
   const stop = useCallback(() => {

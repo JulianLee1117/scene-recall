@@ -8,3 +8,4 @@ __pycache__/
 assets/
 .tmp/
 .claude/settings.local.json
+pipeline/eval/runs/

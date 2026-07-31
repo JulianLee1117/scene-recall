@@ -23,6 +23,8 @@ export interface SearchDebug {
 export interface SearchResult {
   unit_id: string;
   film_id: string;
+  /** Human-readable title joined from the films index by the API. */
+  film_title?: string;
   t_start: number;
   t_end: number;
   caption: string;
@@ -48,11 +50,11 @@ export interface LibraryFilm {
   size_gb: number;
   status: "indexed" | "not_indexed";
   /** Stable search identifier. Present for indexed films on newer backends. */
-  film_id?: string;
+  film_id: string | null;
   /** Human-readable title extracted during ingestion. */
-  title?: string;
+  title: string;
   /** Runtime in seconds. */
-  duration?: number;
+  duration: number | null;
 }
 
 export interface IngestJob {

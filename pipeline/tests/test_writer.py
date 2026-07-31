@@ -119,12 +119,78 @@ def test_create_tables_creates_units_and_films(config: Config) -> None:
 
 
 def test_create_tables_is_idempotent(config: Config) -> None:
-    """create_tables can be called twice without raising."""
-    from pipeline.index.writer import open_db, create_tables
+    """Table and native FTS creation can be repeated without duplication."""
+    from pipeline.index.writer import (
+        UNITS_FTS_FIELD,
+        UNITS_FTS_INDEX,
+        create_tables,
+        open_db,
+    )
 
     db = open_db(config)
     create_tables(db)
     create_tables(db)  # must not raise
+
+    units = db.open_table("units")
+    matching = [
+        index
+        for index in units.list_indices()
+        if index.name == UNITS_FTS_INDEX
+    ]
+    assert len(matching) == 1
+    assert matching[0].index_type == "FTS"
+    assert list(matching[0].columns) == [UNITS_FTS_FIELD]
+    stats = units.index_stats(UNITS_FTS_INDEX)
+    assert stats is not None
+    assert stats.num_unindexed_rows == 0
+
+
+def test_ensure_search_indexes_backfills_a_populated_legacy_table(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Startup migration creates a current FTS index over existing units."""
+    from pipeline.index.writer import (
+        UNITS_FTS_FIELD,
+        UNITS_FTS_INDEX,
+        create_tables,
+        ensure_search_indexes,
+        open_db,
+        write_unit,
+    )
+
+    db = open_db(config)
+    create_tables(db)
+    film = _make_film(tmp_path)
+    shot = _make_shot()
+    write_unit(
+        db,
+        film,
+        shot,
+        _make_annotation(),
+        _rand_vec(),
+        _rand_vec(),
+    )
+    db.open_table("units").drop_index(UNITS_FTS_INDEX)
+
+    ensure_search_indexes(db)
+
+    units = db.open_table("units")
+    stats = units.index_stats(UNITS_FTS_INDEX)
+    assert stats is not None
+    assert stats.num_indexed_rows == 1
+    assert stats.num_unindexed_rows == 0
+    matches = (
+        units.search(
+            "corridor",
+            query_type="fts",
+            fts_columns=UNITS_FTS_FIELD,
+        )
+        .select(["unit_id", "_score"])
+        .limit(10)
+        .to_list()
+    )
+    assert [row["unit_id"] for row in matches] == [shot.shot_id]
 
 
 # ---------------------------------------------------------------------------
@@ -294,8 +360,9 @@ def test_write_units_adds_one_lance_version_for_many_rows(
     tmp_path: Path,
     config: Config,
 ) -> None:
-    """The real database confirms batch size does not multiply manifests."""
+    """A batch adds one data version plus one native-index sync version."""
     from pipeline.index.writer import (
+        UNITS_FTS_INDEX,
         UnitWrite,
         create_tables,
         open_db,
@@ -326,7 +393,73 @@ def test_write_units_adds_one_lance_version_for_many_rows(
 
     table = db.open_table("units")
     assert table.count_rows() == 2
-    assert len(table.list_versions()) == versions_before + 1
+    assert len(table.list_versions()) == versions_before + 2
+    stats = table.index_stats(UNITS_FTS_INDEX)
+    assert stats is not None
+    assert stats.num_unindexed_rows == 0
+
+
+def test_write_units_indexes_fresh_rows_with_an_existing_term(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A later merge is immediately visible for a term in the older index."""
+    from pipeline.index.writer import (
+        UNITS_FTS_FIELD,
+        UNITS_FTS_INDEX,
+        UnitWrite,
+        create_tables,
+        open_db,
+        write_units,
+    )
+
+    film = _make_film(tmp_path)
+    first = _make_shot()
+    second = Shot(
+        shot_id="film_abc123_0002",
+        t_start=16.0,
+        t_end=18.0,
+        parent_shot_id=None,
+        keyframe_times=[17.0],
+    )
+    first_annotation = {
+        **_make_annotation(),
+        "caption": "An established red room.",
+        "searchable_text": "An established red room.",
+    }
+    second_annotation = {
+        **_make_annotation(),
+        "caption": "A fresh red automobile.",
+        "searchable_text": "A fresh red automobile.",
+    }
+
+    db = open_db(config)
+    create_tables(db)
+    write_units(
+        db,
+        film,
+        [UnitWrite(first, first_annotation, _rand_vec(), _rand_vec())],
+    )
+    write_units(
+        db,
+        film,
+        [UnitWrite(second, second_annotation, _rand_vec(), _rand_vec())],
+    )
+
+    table = db.open_table("units")
+    stats = table.index_stats(UNITS_FTS_INDEX)
+    assert stats is not None
+    assert stats.num_unindexed_rows == 0
+    matches = (
+        table.search("red", query_type="fts", fts_columns=UNITS_FTS_FIELD)
+        .select(["unit_id", "_score"])
+        .limit(10)
+        .to_list()
+    )
+    assert {row["unit_id"] for row in matches} == {
+        first.shot_id,
+        second.shot_id,
+    }
 
 
 def test_publish_film_replaces_only_that_films_units_and_frames(
@@ -336,6 +469,8 @@ def test_publish_film_replaces_only_that_films_units_and_frames(
     """Re-ingest removes obsolete rows without touching another film."""
     from pipeline.index.writer import (
         FrameWrite,
+        UNITS_FTS_FIELD,
+        UNITS_FTS_INDEX,
         UnitWrite,
         create_tables,
         open_db,
@@ -419,14 +554,26 @@ def test_publish_film_replaces_only_that_films_units_and_frames(
         ("film_a", "film_a_keep::frame::0"),
         ("film_b", "film_b_only::frame::0"),
     }
-    assert (
-        len(db.open_table("units").list_versions())
-        == unit_versions_before + 1
-    )
+    units_table = db.open_table("units")
+    assert len(units_table.list_versions()) == unit_versions_before + 2
     assert (
         len(db.open_table("frames").list_versions())
         == frame_versions_before + 1
     )
+    stats = units_table.index_stats(UNITS_FTS_INDEX)
+    assert stats is not None
+    assert stats.num_unindexed_rows == 0
+    caption_matches = (
+        units_table.search(
+            "caption",
+            query_type="fts",
+            fts_columns=UNITS_FTS_FIELD,
+        )
+        .select(["unit_id", "_score"])
+        .limit(10)
+        .to_list()
+    )
+    assert [row["unit_id"] for row in caption_matches] == ["film_a_keep"]
 
 
 def test_publish_film_final_unit_failure_preserves_previous_generation(

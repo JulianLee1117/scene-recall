@@ -3,6 +3,11 @@ film:
   title: Fallen Angels
   year: 1995
   director: Wong Kar-wai
+scope:
+  # Keep the first benchmark stable as more films enter the local library.
+  # Library-wide generalization needs a separately pooled and judged query set.
+  film_ids:
+    - 513831eef8eb598038f62bde3bddd7bff6b6e50d533edf5f1bc4e0f5fd4a6e03
 instructions:
   - These are search prompts, not relevance judgments.
   - Keep queries even when the current system returns poor candidates.

@@ -485,7 +485,9 @@ input {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  /* Search results are visual evidence. Never crop scope/anamorphic frames
+     into a uniform card; the existing dark background supplies letterboxing. */
+  object-fit: contain;
   transition: opacity 0.15s ease;
 }
 

@@ -1,10 +1,10 @@
-"""Hybrid retrieval over the LanceDB ``units`` table.
+"""Hybrid retrieval over the LanceDB ``units`` and ``frames`` tables.
 
-The query is embedded once and searched independently against the stored
-image and text vectors.  A small, dependency-free BM25 implementation adds
-an exact-word channel.  The three ranked lists are combined with weighted
-reciprocal-rank fusion (RRF), so incomparable cosine distances and lexical
-scores are never added together.
+Enabled channels independently retrieve visual, semantic-text, and native
+full-text candidates.  Their ranked lists are combined with weighted
+reciprocal-rank fusion (RRF), so incomparable cosine distances and BM25
+scores are never added together.  A zero channel weight is a true ablation:
+that channel performs no retrieval (and lexical-only search loads no model).
 """
 
 from __future__ import annotations
@@ -14,11 +14,13 @@ import math
 import re
 from collections import Counter
 from collections.abc import Iterable
+from itertools import combinations
 from typing import Any
 
 import lancedb
 import numpy as np
 from lancedb.expr import col, lit
+from lancedb.query import BooleanQuery, FullTextOperator, MatchQuery, Occur
 from PIL import Image
 
 from pipeline.config import Config
@@ -34,8 +36,10 @@ _REFERENCE_SPATIAL_GRID_SIZE = 6
 _REFERENCE_GLOBAL_WEIGHT = 0.65
 _REFERENCE_SPATIAL_WEIGHT = 1.0 - _REFERENCE_GLOBAL_WEIGHT
 _REFERENCE_RESULT_TEMPORAL_GAP_SECONDS = 90.0
-_LEXICAL_SCAN_LIMIT = 10_000
-_RESULT_LIMIT = 12
+_LEXICAL_CANDIDATE_LIMIT = _CANDIDATE_LIMIT * 3
+_MAX_LEXICAL_QUERY_TERMS = 12
+SEARCH_RESULT_LIMIT = 12
+_RESULT_LIMIT = SEARCH_RESULT_LIMIT
 _RRF_K = 60
 # Treat time as supporting evidence for a duplicate, never as a duplicate by
 # itself: .90 within 30 seconds, or .92 at any distance/film.  Measured on a
@@ -98,6 +102,7 @@ _LEXICAL_COLUMNS = [
 # are bounded to ~100 rows, so carrying the vector for the final diversity
 # pass is cheap there.
 _CANDIDATE_COLUMNS = [*_LEXICAL_COLUMNS, "img_vec"]
+_FTS_COLUMNS = [*_LEXICAL_COLUMNS, "_score"]
 
 # Each category has deliberately narrower document patterns than query
 # patterns.  For example, spoken dialogue containing "give me credit" should
@@ -220,6 +225,16 @@ def _query_tokens(value: Any) -> list[str]:
     return [token for token in _tokens(value) if token not in _LEXICAL_STOP_WORDS]
 
 
+def _unique_query_terms(value: Any) -> list[str]:
+    """Return a bounded, order-preserving lexical query vocabulary.
+
+    Dense retrieval still sees the complete prompt. The cap bounds native
+    pairwise compound evidence so pasted prose cannot turn one FTS request
+    into quadratic unbounded work.
+    """
+    return list(dict.fromkeys(_query_tokens(value)))[:_MAX_LEXICAL_QUERY_TERMS]
+
+
 def _row_text(row: dict[str, Any]) -> str:
     """Combine text fields for content classification."""
     return " ".join(
@@ -247,10 +262,10 @@ def _lexical_ranking(
     ``searchable_text`` naturally give descriptive concepts a modest field
     boost without introducing hand-tuned raw-score mixing.
     """
-    query_terms = list(dict.fromkeys(_query_tokens(query)))
+    query_terms = _unique_query_terms(query)
     if not query_terms:
         return []
-    minimum_term_matches = 1 if len(query_terms) == 1 else 2
+    minimum_term_matches = _minimum_term_matches(query_terms)
 
     # A scan can theoretically contain duplicate unit rows after migrations;
     # score only the first occurrence so document frequency stays meaningful.
@@ -307,6 +322,92 @@ def _lexical_ranking(
         if score > 0.0:
             ranked.append((row, score))
 
+    ranked.sort(key=lambda item: (-item[1], _row_id(item[0])))
+    return ranked[:_CANDIDATE_LIMIT]
+
+
+def _minimum_term_matches(query_terms: list[str]) -> int:
+    """Require compound lexical queries to have more than incidental evidence."""
+    return 1 if len(query_terms) == 1 else 2
+
+
+def _native_fts_query(query_terms: list[str]) -> MatchQuery | BooleanQuery:
+    """Build an index-native query requiring two terms for compound prompts.
+
+    Pairwise boolean clauses preserve the original high-precision rule (any
+    two meaningful terms) while letting Lance's tokenizer perform stemming and
+    ASCII folding. A raw Python token check would wrongly discard valid native
+    matches such as ``runs`` against ``running``.
+    """
+    term_queries = [
+        MatchQuery(
+            term,
+            "searchable_text",
+            operator=FullTextOperator.OR,
+        )
+        for term in query_terms
+    ]
+    if len(term_queries) == 1:
+        return term_queries[0]
+    pairs = [
+        BooleanQuery(
+            [
+                (Occur.MUST, term_queries[first]),
+                (Occur.MUST, term_queries[second]),
+            ]
+        )
+        for first, second in combinations(range(len(term_queries)), 2)
+    ]
+    return BooleanQuery([(Occur.SHOULD, pair) for pair in pairs])
+
+
+def _native_lexical_ranking(
+    query: str,
+    table: Any,
+    representative_filter: Any,
+    film_ids: tuple[str, ...],
+) -> list[tuple[dict[str, Any], float]]:
+    """Return bounded native-FTS candidates, with a correctness fallback.
+
+    API startup and film publication keep the versioned FTS index current.
+    The unbounded Python fallback is deliberately slow-but-correct for direct
+    library callers that bypass that lifecycle; it never silently truncates a
+    growing collection as the previous 10,000-row scan did.
+    """
+    query_terms = _unique_query_terms(query)
+    if not query_terms:
+        return []
+
+    fts_query = _native_fts_query(query_terms)
+    try:
+        rows = (
+            table.search(fts_query, query_type="fts")
+            .select(_FTS_COLUMNS)
+            .where(representative_filter)
+            .limit(_LEXICAL_CANDIDATE_LIMIT)
+            .to_list()
+        )
+    except (RuntimeError, ValueError):
+        rows = (
+            table.search()
+            .select(_LEXICAL_COLUMNS)
+            .where(representative_filter)
+            .limit(None)
+            .to_list()
+        )
+        return _lexical_ranking(
+            query,
+            _rows_in_film_scope(rows, film_ids),
+        )
+
+    rows = _rows_in_film_scope(rows, film_ids)
+    # Unit-test doubles and legacy indexless callers may not expose Lance's
+    # synthetic score column. Preserve correct behavior without weakening the
+    # production requirement that startup validates the real native index.
+    if rows and any("_score" not in row for row in rows):
+        return _lexical_ranking(query, rows)
+
+    ranked = [(row, float(row["_score"])) for row in rows]
     ranked.sort(key=lambda item: (-item[1], _row_id(item[0])))
     return ranked[:_CANDIDATE_LIMIT]
 
@@ -540,9 +641,9 @@ def _frame_search_rows(
 ) -> list[dict[str, Any]]:
     """Return shot rows ranked by their best frame, or an empty fallback cue.
 
-    Frame search is independent from the bounded lexical corpus scan.  Once
+    Frame search is independent from the bounded lexical candidate set. Once
     the nearest frames are known, fetch only their owning units so a frame hit
-    remains eligible even when its unit lies beyond ``_LEXICAL_SCAN_LIMIT``.
+    remains eligible even when lexical retrieval did not select that unit.
     """
     if "frames" not in table_names(db):
         return []
@@ -652,43 +753,32 @@ def search(
     film_ids: Iterable[str] | None = None,
 ) -> list[dict]:
     """Return up to twelve hybrid, junk-filtered, diverse search results."""
-    # PE is a joint image/text model, so this single query vector can search
-    # both stored spaces.  Do not move embedding into either channel.
-    vector: np.ndarray = embed_text([query], config)[0]
+    weights = {
+        "img": float(config.retrieval.weights.img),
+        "txt": float(config.retrieval.weights.txt),
+        "lex": float(config.retrieval.weights.lex),
+    }
+    if any(weight < 0.0 for weight in weights.values()):
+        raise ValueError("retrieval channel weights must be non-negative")
+    enabled = {channel for channel, weight in weights.items() if weight > 0.0}
+    if not enabled:
+        raise ValueError("at least one retrieval channel weight must be positive")
+
     table = db.open_table("units")
     scoped_film_ids = _normalise_film_ids(film_ids)
     representative_filter = _representative_filter(scoped_film_ids)
 
-    text_rows = _rows_in_film_scope(
-        table.search(vector, vector_column_name="txt_vec")
-        .metric("cosine")
-        .where(representative_filter)
-        .limit(_CANDIDATE_LIMIT)
-        .to_list(),
-        scoped_film_ids,
-    )
-    lexical_rows = _rows_in_film_scope(
-        table.search()
-        .select(_LEXICAL_COLUMNS)
-        .where(representative_filter)
-        .limit(_LEXICAL_SCAN_LIMIT)
-        .to_list(),
-        scoped_film_ids,
-    )
-    lexical_ranked = _attach_image_vectors(
-        _lexical_ranking(query, lexical_rows),
-        table,
-        scoped_film_ids,
-    )
-    image_rows = _frame_search_rows(
-        vector,
-        db,
-        table,
-        scoped_film_ids,
-    )
-    if not image_rows:
-        image_rows = _rows_in_film_scope(
-            table.search(vector, vector_column_name="img_vec")
+    # PE is a joint image/text model, so one query embedding can serve both
+    # vector channels.  Crucially, do not load it for lexical-only variants.
+    vector: np.ndarray | None = None
+    if enabled & {"img", "txt"}:
+        vector = embed_text([query], config)[0]
+
+    text_rows: list[dict[str, Any]] = []
+    if "txt" in enabled:
+        assert vector is not None
+        text_rows = _rows_in_film_scope(
+            table.search(vector, vector_column_name="txt_vec")
             .metric("cosine")
             .where(representative_filter)
             .limit(_CANDIDATE_LIMIT)
@@ -696,11 +786,38 @@ def search(
             scoped_film_ids,
         )
 
-    weights = {
-        "img": float(config.retrieval.weights.img),
-        "txt": float(config.retrieval.weights.txt),
-        "lex": float(config.retrieval.weights.lex),
-    }
+    lexical_ranked: list[tuple[dict[str, Any], float]] = []
+    if "lex" in enabled:
+        lexical_ranked = _attach_image_vectors(
+            _native_lexical_ranking(
+                query,
+                table,
+                representative_filter,
+                scoped_film_ids,
+            ),
+            table,
+            scoped_film_ids,
+        )
+
+    image_rows: list[dict[str, Any]] = []
+    if "img" in enabled:
+        assert vector is not None
+        image_rows = _frame_search_rows(
+            vector,
+            db,
+            table,
+            scoped_film_ids,
+        )
+        if not image_rows:
+            image_rows = _rows_in_film_scope(
+                table.search(vector, vector_column_name="img_vec")
+                .metric("cosine")
+                .where(representative_filter)
+                .limit(_CANDIDATE_LIMIT)
+                .to_list(),
+                scoped_film_ids,
+            )
+
     fused: dict[str, dict[str, Any]] = {}
 
     def add_channel(
@@ -766,7 +883,15 @@ def search(
     selected: list[dict[str, Any]] = []
     selected_candidates: list[dict[str, Any]] = []
     requested_junk = _requested_junk_categories(query)
-    max_per_film = int(config.retrieval.diversity.max_per_film)
+    # An explicit movie scope is a relevance constraint chosen by the user,
+    # not a browse request that needs library-wide balancing.  Applying the
+    # global cap to a one- or two-film scope can underfill a twelve-result page
+    # (the previous default returned only four results for one selected film).
+    max_per_film = (
+        0
+        if scoped_film_ids
+        else int(config.retrieval.diversity.max_per_film)
+    )
     film_result_counts: Counter[str] = Counter()
     for candidate in ordered:
         row = candidate["row"]

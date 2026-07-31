@@ -9,6 +9,7 @@ import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import type { SearchResult, SearchResponse } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const MOVIE_SCOPE_SEARCH_DEBOUNCE_MS = 350;
 
 type Tab = "search" | "library";
 
@@ -29,13 +30,21 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
+  const scopeSearchTimerRef = useRef<number | null>(null);
   const referenceBlobRef = useRef<Blob | null>(null);
   const referenceExcludeRef = useRef<string | null>(null);
   const referenceLabelRef = useRef<string | null>(null);
   const referencePreviewUrlRef = useRef<string | null>(null);
   const voiceStatusId = useId();
 
+  const cancelPendingScopeSearch = useCallback(() => {
+    if (scopeSearchTimerRef.current === null) return;
+    window.clearTimeout(scopeSearchTimerRef.current);
+    scopeSearchTimerRef.current = null;
+  }, []);
+
   const clearReference = useCallback(() => {
+    cancelPendingScopeSearch();
     searchAbortRef.current?.abort();
     if (referencePreviewUrlRef.current) {
       URL.revokeObjectURL(referencePreviewUrlRef.current);
@@ -46,7 +55,7 @@ export default function Home() {
     referencePreviewUrlRef.current = null;
     setReferenceLabel(null);
     setReferencePreviewUrl(null);
-  }, []);
+  }, [cancelPendingScopeSearch]);
 
   const activateReference = useCallback(
     (image: Blob, label: string, excludeUnitId: string | null = null) => {
@@ -72,6 +81,7 @@ export default function Home() {
       const trimmed = q.trim();
       if (!trimmed) return;
 
+      cancelPendingScopeSearch();
       searchAbortRef.current?.abort();
       const controller = new AbortController();
       searchAbortRef.current = controller;
@@ -113,7 +123,7 @@ export default function Home() {
         }
       }
     },
-    [selectedFilmIds],
+    [cancelPendingScopeSearch, selectedFilmIds],
   );
 
   const runImageSearch = useCallback(
@@ -123,6 +133,7 @@ export default function Home() {
       excludeUnitId: string | null = null,
       scope: readonly string[] = selectedFilmIds,
     ) => {
+      cancelPendingScopeSearch();
       searchAbortRef.current?.abort();
       const controller = new AbortController();
       searchAbortRef.current = controller;
@@ -173,25 +184,39 @@ export default function Home() {
         }
       }
     },
-    [selectedFilmIds],
+    [cancelPendingScopeSearch, selectedFilmIds],
   );
 
   const handleMovieScopeChange = useCallback(
     (filmIds: string[]) => {
+      cancelPendingScopeSearch();
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
+      setLoading(false);
       setSelectedFilmIds(filmIds);
       setActiveShot(null);
-      if (referenceBlobRef.current && referenceLabelRef.current) {
-        void runImageSearch(
-          referenceBlobRef.current,
-          referenceLabelRef.current,
-          referenceExcludeRef.current,
-          filmIds,
-        );
-      } else if (query.trim()) {
-        void runSearch(query, filmIds);
-      }
+
+      const hasReference = Boolean(
+        referenceBlobRef.current && referenceLabelRef.current,
+      );
+      const pendingQuery = query.trim();
+      if (!hasReference && !pendingQuery) return;
+
+      scopeSearchTimerRef.current = window.setTimeout(() => {
+        scopeSearchTimerRef.current = null;
+        if (referenceBlobRef.current && referenceLabelRef.current) {
+          void runImageSearch(
+            referenceBlobRef.current,
+            referenceLabelRef.current,
+            referenceExcludeRef.current,
+            filmIds,
+          );
+        } else if (pendingQuery) {
+          void runSearch(pendingQuery, filmIds);
+        }
+      }, MOVIE_SCOPE_SEARCH_DEBOUNCE_MS);
     },
-    [query, runImageSearch, runSearch],
+    [cancelPendingScopeSearch, query, runImageSearch, runSearch],
   );
 
   const handleVoiceTranscript = useCallback(
@@ -229,6 +254,7 @@ export default function Home() {
   const handleFindSimilar = useCallback(
     async (shot: SearchResult) => {
       if (loading) return;
+      cancelPendingScopeSearch();
       speech.cancel();
       searchAbortRef.current?.abort();
       const controller = new AbortController();
@@ -265,7 +291,13 @@ export default function Home() {
         }
       }
     },
-    [activateReference, loading, runImageSearch, speech],
+    [
+      activateReference,
+      cancelPendingScopeSearch,
+      loading,
+      runImageSearch,
+      speech,
+    ],
   );
 
   const handleClearReference = useCallback(() => {
@@ -280,19 +312,22 @@ export default function Home() {
 
   useEffect(
     () => () => {
+      cancelPendingScopeSearch();
       searchAbortRef.current?.abort();
       if (referencePreviewUrlRef.current) {
         URL.revokeObjectURL(referencePreviewUrlRef.current);
       }
     },
-    []
+    [cancelPendingScopeSearch],
   );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const submittedQuery = query;
     speech.cancel();
     clearReference();
-    void runSearch(query);
+    setQuery(submittedQuery);
+    void runSearch(submittedQuery);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -304,9 +339,11 @@ export default function Home() {
     }
     if (e.key === "Enter") {
       e.preventDefault();
+      const submittedQuery = query;
       speech.cancel();
       clearReference();
-      void runSearch(query);
+      setQuery(submittedQuery);
+      void runSearch(submittedQuery);
     }
   };
 

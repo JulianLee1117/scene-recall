@@ -47,7 +47,12 @@ from lancedb.expr import col, lit
 from pydantic import BaseModel
 
 from pipeline.config import VIDEO_EXTENSIONS, Config, load_config
-from pipeline.index.writer import open_db, published_film_ids, table_names
+from pipeline.index.writer import (
+    ensure_search_indexes,
+    open_db,
+    published_film_ids,
+    table_names,
+)
 from pipeline.search.retrieve import (
     search as _search,
     search_by_image as _search_by_image,
@@ -109,6 +114,10 @@ async def lifespan(app: FastAPI):
     """
     config: Config = load_config()
     db = open_db(config)
+    # One-time legacy migration plus a correctness check for rows added by a
+    # prior interrupted ingest. Search traffic is not accepted until native
+    # FTS covers the complete units table.
+    ensure_search_indexes(db)
     if os.environ.get("SCENE_RECALL_SKIP_WARMUP"):
         app.state.encoder_ready = True
     else:
@@ -123,6 +132,8 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.ready_units_version = None
     app.state.ready_film_ids = frozenset()
+    app.state.film_titles_version = None
+    app.state.film_titles = {}
     app.state.image_search_lock = asyncio.Lock()
     app.state.image_search_slots = asyncio.Queue(maxsize=2)
     app.state.image_search_slots.put_nowait(None)
@@ -186,6 +197,68 @@ def _ready_films_for_units_version(
     request.app.state.ready_units_version = version
     request.app.state.ready_film_ids = ready_film_ids
     return ready_film_ids
+
+
+def _film_titles_for_version(
+    request: Request,
+    db: Any,
+) -> dict[str, str]:
+    """Return cached human-readable film titles for the current table version."""
+    if "films" not in table_names(db):
+        request.app.state.film_titles_version = None
+        request.app.state.film_titles = {}
+        return {}
+
+    table = db.open_table("films")
+    version = table.version
+    if request.app.state.film_titles_version == version:
+        return request.app.state.film_titles
+
+    rows = (
+        table.search()
+        .select(["film_id", "title"])
+        .limit(None)
+        .to_list()
+    )
+    titles = {
+        str(row["film_id"]): str(row["title"])
+        for row in rows
+        if row.get("film_id") and row.get("title")
+    }
+    # Publish the version only after its complete title map was read.
+    request.app.state.film_titles = titles
+    request.app.state.film_titles_version = version
+    return titles
+
+
+def _with_film_titles(
+    request: Request,
+    results: list[dict],
+) -> list[dict]:
+    """Attach display metadata without coupling retrieval to the films table."""
+    if not results:
+        return results
+    try:
+        titles = _film_titles_for_version(request, request.app.state.db)
+    except Exception as exc:
+        # Titles are optional decoration and the frontend has a stable ID
+        # fallback. A transient films-table read must not discard otherwise
+        # valid retrieval results.
+        request.app.state.film_titles_version = None
+        request.app.state.film_titles = {}
+        print(f"[search] film title lookup failed: {exc}", flush=True)
+        return results
+    return [
+        {
+            **result,
+            **(
+                {"film_title": title}
+                if (title := titles.get(str(result.get("film_id") or "")))
+                else {}
+            ),
+        }
+        for result in results
+    ]
 
 
 def _parse_range(range_header: str, file_size: int) -> tuple[int, int]:
@@ -320,15 +393,18 @@ class IngestRequest(BaseModel):
 
 @app.get("/search")
 def search_endpoint(
-    q: str,
     request: Request,
+    q: str = Query(min_length=1, max_length=500),
     film_id: list[str] | None = Query(default=None),
 ) -> dict:
     """Run hybrid search in FastAPI's worker threadpool."""
     _require_search_ready(request)
     config: Config = request.app.state.config
     db = request.app.state.db
-    results = _search(q, db, config, film_ids=film_id)
+    results = _with_film_titles(
+        request,
+        _search(q, db, config, film_ids=film_id),
+    )
     return {"results": results}
 
 
@@ -412,7 +488,7 @@ async def image_search_endpoint(
                 # cancelling ``to_thread`` alone does not stop its GPU work.
                 await work
                 raise
-        return {"results": results}
+        return {"results": _with_film_titles(request, results)}
     finally:
         request.app.state.image_search_slots.put_nowait(None)
 

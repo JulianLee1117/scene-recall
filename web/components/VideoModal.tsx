@@ -73,7 +73,7 @@ export default function VideoModal({ shot, onClose }: VideoModalProps) {
           }}
         >
           <span style={{ color: "#d4a96a", fontWeight: 600, fontSize: "0.9rem" }}>
-            {filmLabel(shot.film_id)}
+            {shot.film_title ?? filmLabel(shot.film_id)}
           </span>
           <span style={{ color: "#6b6b6b", fontSize: "0.85rem" }}>
             {typeof shot.matched_frame_timestamp === "number"

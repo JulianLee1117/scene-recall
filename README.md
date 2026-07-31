@@ -105,11 +105,21 @@ or motion matching.
 ## Eval
 
 ```bash
-python -m pipeline.cli eval
-python -m pipeline.eval.review pool
-python -m pipeline.eval.review score pipeline/eval/fallen_angels_review.yaml
+python -m pipeline.eval.experiment run \
+  --queries pipeline/eval/fallen_angels_queries.yaml \
+  --variants pipeline/eval/variants.yaml \
+  --output pipeline/eval/runs/fa-001.yaml
+python -m pipeline.eval.experiment score pipeline/eval/runs/fa-001.yaml
 ```
 
-Runs the retrieval evaluation suite and prints MRR / Recall@k metrics.
-The review workflow freezes real search candidates with blank 0–3 human grades;
-it never invents relevance labels.
+The experiment runner records code/config/corpus/index provenance, separates
+warmup from measured latency, runs true hybrid/image/text/lexical ablations,
+and pools their candidates with blank 0–3 human grades. It never invents
+relevance labels: quality metrics remain unavailable until a complete pooled
+query is human-judged. Pass `--judgments-from` on later runs to preserve only
+judgments whose query, unit, film, and source timestamps still match.
+Machine-owned snapshot evidence is checksummed while grade/flags/note remain
+editable. Baseline runs require a clean Git worktree; `--allow-dirty` exists
+only for explicitly non-reproducible diagnostics. Local run snapshots live in
+the ignored `pipeline/eval/runs/` directory; later snapshots record the hash of
+their `--judgments-from` input without treating human grading as a code change.

@@ -8,8 +8,11 @@ dependencies = [
     "click>=8.4.2",
     "fastapi>=0.138.1",
     "faster-whisper>=1.2.1",
+    "filelock>=3.20,<4",
     "google-genai>=2.10.0",
-    "lancedb[embeddings]>=0.33.0",
+    # Native FTS is experimental and its 0.33 index-maintenance contract is
+    # covered by integration tests. Certify newer minor releases before use.
+    "lancedb[embeddings]>=0.33,<0.34",
     "numpy>=1.26.0",
     "openai>=2.44.0",
     "open-clip-torch>=3.3,<4",
