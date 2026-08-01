@@ -42,6 +42,8 @@ export interface SearchResult {
 
 export interface SearchResponse {
   results: SearchResult[];
+  /** Backend-defined diversity/display page size. Older APIs omit it. */
+  display_batch_size?: number;
 }
 
 export interface LibraryFilm {

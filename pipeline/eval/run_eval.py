@@ -138,7 +138,12 @@ def run_eval_queries(
             skipped += 1
             continue
 
-        results = search(query_text, db, config)
+        results = search(
+            query_text,
+            db,
+            config,
+            result_limit=max(k5, k10),
+        )
         h5 = hit_at_k(results, acceptable, k=k5)
         h10 = hit_at_k(results, acceptable, k=k10)
 

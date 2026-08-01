@@ -426,6 +426,19 @@ input {
   }
 }
 
+.search-results {
+  padding-bottom: 34px;
+}
+
+.result-count {
+  margin: 0;
+  padding: 0 14px;
+  color: #5f5f5f;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.025em;
+}
+
 .result-grid {
   display: grid;
   grid-auto-flow: row;
@@ -438,6 +451,55 @@ input {
 
 .result-grid-item {
   min-width: 0;
+}
+
+.result-more {
+  display: flex;
+  padding: 12px 14px 0;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #565656;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-more-button {
+  padding: 7px 12px;
+  border: 1px solid #303030;
+  border-radius: 999px;
+  background: #111;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 0.7rem;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.result-more-button:hover {
+  border-color: #55482f;
+  background: #17140f;
+  color: #d8bc90;
+}
+
+.result-more-button:disabled {
+  border-color: #252525;
+  background: #0e0e0e;
+  color: #4f4f4f;
+  cursor: wait;
+}
+
+.result-more-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .result-more-button {
+    transition: none;
+  }
 }
 
 .result-card {

@@ -239,7 +239,8 @@ def test_run_eval_queries_returns_aggregate_metrics() -> None:
     mock_db = MagicMock()
 
     # search returns a hit for q001 in position 1, miss for q002
-    def fake_search(query: str, db, config):
+    def fake_search(query: str, db, config, *, result_limit: int):
+        assert result_limit == 10
         if "rainy" in query:
             return [{"film_id": "film_yi_yi", "t_start": 100.0, "t_end": 120.0}]
         return []

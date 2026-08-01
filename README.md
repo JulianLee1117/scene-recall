@@ -123,3 +123,6 @@ editable. Baseline runs require a clean Git worktree; `--allow-dirty` exists
 only for explicitly non-reproducible diagnostics. Local run snapshots live in
 the ignored `pipeline/eval/runs/` directory; later snapshots record the hash of
 their `--judgments-from` input without treating human grading as a code change.
+Use `--limit 100` for candidate-recall experiments; this deeper evaluation
+window is independent from the 48-result production window and 12-result UI
+display batch.

@@ -109,6 +109,7 @@ def test_build_review_document_forwards_explicit_film_scope() -> None:
         db,
         config,
         film_ids=["film-a"],
+        result_limit=12,
     )
 
 

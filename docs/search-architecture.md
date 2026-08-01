@@ -75,10 +75,18 @@ The current repair is a useful Layer 1:
 - Every extracted keyframe has an independent PE vector in the `frames` table.
   Frame candidates collapse to shots by best similarity while preserving the
   matched frame and reconstructed seek timestamp as result evidence.
-- A reference-still prototype retrieves 96 global PE frame candidates and
-  lightly reranks them with PE's learned final-layer features pooled to a 6x6
-  fixed-position grid. Upload and in-result **Similar** inputs both use this
-  path without hosted API calls, schema changes, or re-ingestion.
+- A reference-still prototype retrieves 200 global PE frame candidates and
+  spatially reranks only the strongest 96 with PE's learned final-layer
+  features pooled to a 6x6 fixed-position grid. Semantic-only candidates can
+  still backfill the result window without doubling spatial GPU work. Upload
+  and in-result **Similar** inputs both use this path without hosted API calls,
+  schema changes, or re-ingestion.
+- Candidate generation (200 per channel), the stable production result window
+  (48), and the display batch (12) are independent. Evaluations may explicitly
+  request a bounded top 100 without changing production or UI behavior.
+- Film diversity is a deterministic per-page preference with relevance
+  backfill, not a hard cap. Explicit film scopes disable film balancing, while
+  junk and true visual duplicates remain filtered.
 - The API returns rank and per-channel debug evidence.
 - Results render in row-major rank order and expose an optional debug view.
 - Native LanceDB FTS replaces the capped Python corpus scan. Startup and film
@@ -306,7 +314,7 @@ A representative normalized plan:
     "dialogue_query": null,
     "ocr_query": null,
     "temporal_query": "women smoking while riding in a car",
-    "candidate_k_per_channel": 100
+    "candidate_k_per_channel": 200
   },
   "similar_to": {
     "unit_id": null,

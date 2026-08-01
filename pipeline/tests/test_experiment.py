@@ -188,10 +188,12 @@ def test_run_experiment_records_variants_pool_latency_and_provenance(
         variant_config: Config,
         *,
         film_ids: tuple[str, ...] | None,
+        result_limit: int,
     ) -> list[dict[str, Any]]:
         weights = variant_config.retrieval.weights
         recipe = (weights.img, weights.txt, weights.lex)
         calls.append((query, recipe, film_ids))
+        assert result_limit == 2
         prefix = query.split()[0]
         shared = _result(f"{prefix}-shared", t_start=10.0)
         shared["matched_frame_index"] = 2 if weights.img == 1.0 else 1
@@ -354,14 +356,14 @@ def test_run_experiment_rejects_ambiguous_or_missing_scope(
 def test_run_experiment_rejects_limit_above_production_contract(
     config: Config,
 ) -> None:
-    with pytest.raises(ValueError, match="production search limit"):
+    with pytest.raises(ValueError, match="max_result_limit"):
         run_experiment(
             [{"id": "q", "category": "vibe", "query": "night"}],
             {"scope": {"film_ids": [FILM_ID]}},
             _variants()[:1],
             object(),
             config,
-            limit=13,
+            limit=101,
             search_fn=lambda *_args, **_kwargs: [],
             index_state_fn=_stable_index,
             warmup=False,

@@ -10,6 +10,14 @@ import type { SearchResult, SearchResponse } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const MOVIE_SCOPE_SEARCH_DEBOUNCE_MS = 350;
+const DEFAULT_RESULT_BATCH_SIZE = 12;
+
+function displayBatchSize(response: SearchResponse): number {
+  const size = response.display_batch_size;
+  return typeof size === "number" && Number.isSafeInteger(size) && size > 0
+    ? size
+    : DEFAULT_RESULT_BATCH_SIZE;
+}
 
 type Tab = "search" | "library";
 
@@ -17,6 +25,11 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("search");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [resultBatchSize, setResultBatchSize] = useState(
+    DEFAULT_RESULT_BATCH_SIZE,
+  );
+  const [visibleResultCount, setVisibleResultCount] =
+    useState(DEFAULT_RESULT_BATCH_SIZE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [completedQuery, setCompletedQuery] = useState<string | null>(null);
@@ -88,6 +101,7 @@ export default function Home() {
       setLoading(true);
       setError(null);
       setCompletedQuery(null);
+      setVisibleResultCount(resultBatchSize);
 
       const params = new URLSearchParams({ q: trimmed });
       scope.forEach((filmId) => params.append("film_id", filmId));
@@ -110,6 +124,9 @@ export default function Home() {
         }
         const data: SearchResponse = await res.json();
         if (searchAbortRef.current !== controller) return;
+        const nextBatchSize = displayBatchSize(data);
+        setResultBatchSize(nextBatchSize);
+        setVisibleResultCount(nextBatchSize);
         setResults(data.results);
         setCompletedQuery(trimmed);
       } catch (err) {
@@ -123,7 +140,7 @@ export default function Home() {
         }
       }
     },
-    [cancelPendingScopeSearch, selectedFilmIds],
+    [cancelPendingScopeSearch, resultBatchSize, selectedFilmIds],
   );
 
   const runImageSearch = useCallback(
@@ -140,6 +157,7 @@ export default function Home() {
       setLoading(true);
       setError(null);
       setCompletedQuery(null);
+      setVisibleResultCount(resultBatchSize);
 
       const params = new URLSearchParams();
       scope.forEach((filmId) => params.append("film_id", filmId));
@@ -169,6 +187,9 @@ export default function Home() {
         }
         const data: SearchResponse = await res.json();
         if (searchAbortRef.current !== controller) return;
+        const nextBatchSize = displayBatchSize(data);
+        setResultBatchSize(nextBatchSize);
+        setVisibleResultCount(nextBatchSize);
         setResults(data.results);
         setReferenceLabel(label);
       } catch (err) {
@@ -184,7 +205,7 @@ export default function Home() {
         }
       }
     },
-    [cancelPendingScopeSearch, selectedFilmIds],
+    [cancelPendingScopeSearch, resultBatchSize, selectedFilmIds],
   );
 
   const handleMovieScopeChange = useCallback(
@@ -201,6 +222,7 @@ export default function Home() {
       );
       const pendingQuery = query.trim();
       if (!hasReference && !pendingQuery) return;
+      setVisibleResultCount(resultBatchSize);
 
       scopeSearchTimerRef.current = window.setTimeout(() => {
         scopeSearchTimerRef.current = null;
@@ -216,7 +238,13 @@ export default function Home() {
         }
       }, MOVIE_SCOPE_SEARCH_DEBOUNCE_MS);
     },
-    [cancelPendingScopeSearch, query, runImageSearch, runSearch],
+    [
+      cancelPendingScopeSearch,
+      query,
+      resultBatchSize,
+      runImageSearch,
+      runSearch,
+    ],
   );
 
   const handleVoiceTranscript = useCallback(
@@ -262,6 +290,7 @@ export default function Home() {
       setLoading(true);
       setError(null);
       setActiveShot(null);
+      setVisibleResultCount(resultBatchSize);
       const referenceUrl =
         shot.matched_frame_url ?? shot.keyframe_url;
       try {
@@ -295,6 +324,7 @@ export default function Home() {
       activateReference,
       cancelPendingScopeSearch,
       loading,
+      resultBatchSize,
       runImageSearch,
       speech,
     ],
@@ -304,6 +334,8 @@ export default function Home() {
     searchAbortRef.current?.abort();
     clearReference();
     setResults([]);
+    setResultBatchSize(DEFAULT_RESULT_BATCH_SIZE);
+    setVisibleResultCount(DEFAULT_RESULT_BATCH_SIZE);
     setError(null);
     setCompletedQuery(null);
     setLoading(false);
@@ -724,6 +756,12 @@ export default function Home() {
           {/* results grid */}
           <ResultGrid
             results={results}
+            visibleCount={visibleResultCount}
+            batchSize={resultBatchSize}
+            revealDisabled={loading}
+            onShowMore={() =>
+              setVisibleResultCount((count) => count + resultBatchSize)
+            }
             onShotClick={setActiveShot}
             onFindSimilar={handleFindSimilar}
             debug={debug}

@@ -57,7 +57,7 @@ from pipeline.index.writer import (
     published_film_ids,
     table_names,
 )
-from pipeline.search.retrieve import SEARCH_RESULT_LIMIT, search
+from pipeline.search.retrieve import search
 
 
 SCHEMA_VERSION = 1
@@ -657,9 +657,10 @@ def run_experiment(
     """Run every query/variant and return one pooled, unlabelled snapshot."""
     if limit <= 0:
         raise ValueError("limit must be positive")
-    if limit > SEARCH_RESULT_LIMIT:
+    if limit > config.retrieval.max_result_limit:
         raise ValueError(
-            f"limit cannot exceed production search limit {SEARCH_RESULT_LIMIT}"
+            "limit cannot exceed configured retrieval.max_result_limit "
+            f"{config.retrieval.max_result_limit}"
         )
     if not variants:
         raise ValueError("at least one variant is required")
@@ -692,6 +693,7 @@ def run_experiment(
                 db,
                 variant_configs[variant.id],
                 film_ids=scope,
+                result_limit=limit,
             )
             warmup_ms[variant.id] = max(
                 0.0,
@@ -719,7 +721,8 @@ def run_experiment(
                 db,
                 variant_configs[variant.id],
                 film_ids=scope,
-            )[:limit]
+                result_limit=limit,
+            )
             latency_ms = max(0.0, (clock() - started) * 1000.0)
             ranking: list[dict[str, Any]] = []
             seen_units: set[str] = set()

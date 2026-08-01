@@ -403,9 +403,18 @@ def search_endpoint(
     db = request.app.state.db
     results = _with_film_titles(
         request,
-        _search(q, db, config, film_ids=film_id),
+        _search(
+            q,
+            db,
+            config,
+            film_ids=film_id,
+            result_limit=config.retrieval.result_window,
+        ),
     )
-    return {"results": results}
+    return {
+        "results": results,
+        "display_batch_size": config.retrieval.diversity.page_size,
+    }
 
 
 @app.post("/search/image")
@@ -479,6 +488,7 @@ async def image_search_endpoint(
                     config,
                     film_ids=film_id,
                     exclude_unit_id=exclude_unit_id,
+                    result_limit=config.retrieval.result_window,
                 )
             )
             try:
@@ -488,7 +498,10 @@ async def image_search_endpoint(
                 # cancelling ``to_thread`` alone does not stop its GPU work.
                 await work
                 raise
-        return {"results": _with_film_titles(request, results)}
+        return {
+            "results": _with_film_titles(request, results),
+            "display_batch_size": config.retrieval.diversity.page_size,
+        }
     finally:
         request.app.state.image_search_slots.put_nowait(None)
 

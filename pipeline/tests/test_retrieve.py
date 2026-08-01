@@ -636,11 +636,12 @@ def test_search_collapses_same_subject_repeats_far_apart(
     assert [result["unit_id"] for result in results] == ["hero", "callback"]
 
 
-def test_search_enforces_config_max_per_film(config: Config) -> None:
-    """One film cannot fill the page past retrieval.diversity.max_per_film."""
+def test_search_soft_film_diversity_backfills_by_relevance(config: Config) -> None:
+    """Film variety reorders a page but never suppresses available results."""
     from pipeline.search.retrieve import search
 
-    config.retrieval.diversity.max_per_film = 2
+    config.retrieval.diversity.page_size = 4
+    config.retrieval.diversity.film_results_per_page_target = 2
     same_film = [
         _make_unit_row(
             f"crowded_{index}",
@@ -672,18 +673,25 @@ def test_search_enforces_config_max_per_film(config: Config) -> None:
     )
 
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
-        results = search("moment", db, config)
+        results = search("moment", db, config, result_limit=6)
 
-    films = [result["film_id"] for result in results]
-    assert films.count("film_crowded") == 2
-    assert "film_other" in films
+    assert [result["unit_id"] for result in results] == [
+        "crowded_0",
+        "crowded_1",
+        "other_film",
+        "crowded_2",
+        "crowded_3",
+        "crowded_4",
+    ]
+    assert len(results) == 6
 
 
 def test_search_disables_film_cap_for_explicit_scope(config: Config) -> None:
-    """A user-selected movie scope may fill the complete result page."""
+    """An explicit movie scope preserves relevance order without balancing."""
     from pipeline.search.retrieve import search
 
-    config.retrieval.diversity.max_per_film = 2
+    config.retrieval.diversity.page_size = 4
+    config.retrieval.diversity.film_results_per_page_target = 2
     rows = [
         _make_unit_row(
             f"scoped_{index}",
@@ -709,6 +717,7 @@ def test_search_disables_film_cap_for_explicit_scope(config: Config) -> None:
             db,
             config,
             film_ids=["selected_film"],
+            result_limit=6,
         )
 
     assert [result["unit_id"] for result in results] == [
@@ -1000,7 +1009,7 @@ def test_search_fetches_frame_hit_units_outside_lexical_candidates(
     config: Config,
 ) -> None:
     """Frame hits are joined directly when absent from the FTS candidate set."""
-    from pipeline.search.retrieve import _LEXICAL_CANDIDATE_LIMIT, search
+    from pipeline.search.retrieve import search
 
     scanned = _make_unit_row(
         "inside_scan",
@@ -1064,7 +1073,9 @@ def test_search_fetches_frame_hit_units_outside_lexical_candidates(
     assert results[0]["matched_frame_url"] == "/media/keyframe/outside_scan/0"
     assert len(units._scalar_query_chains) == 2
     lexical_query, frame_unit_query = units._scalar_query_chains
-    lexical_query.limit.assert_called_once_with(_LEXICAL_CANDIDATE_LIMIT)
+    lexical_query.limit.assert_called_once_with(
+        config.retrieval.candidate_limit * 3
+    )
     frame_unit_query.limit.assert_called_once_with(1)
     frame_unit_query.where.assert_called_once()
     frames._query_chain.where.assert_called_once()
@@ -1101,8 +1112,8 @@ def test_search_falls_back_to_unit_image_vector_when_frames_empty(
     )
 
 
-def test_search_returns_at_most_twelve_results(config: Config) -> None:
-    """Large candidate pools are capped at twelve final results."""
+def test_search_honors_an_explicit_smaller_result_limit(config: Config) -> None:
+    """A caller can request the legacy twelve-result presentation prefix."""
     from pipeline.search.retrieve import search
 
     rows = [
@@ -1125,10 +1136,83 @@ def test_search_returns_at_most_twelve_results(config: Config) -> None:
     )
 
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
-        results = search("car", db, config)
+        results = search("car", db, config, result_limit=12)
 
     assert len(results) == 12
     assert [result["rank"] for result in results] == list(range(1, 13))
+
+
+def test_search_result_window_has_stable_smaller_prefix(config: Config) -> None:
+    """Expanding the window cannot reshuffle results already shown."""
+    from pipeline.search.retrieve import search
+
+    rows = [
+        _make_unit_row(
+            f"stable_{index}",
+            f"film_{index}",
+            caption=f"Stable moment {index}",
+            searchable_text=f"stable moment {index}",
+            t_start=float(index * 100),
+            t_end=float(index * 100 + 2),
+            img_vec=_basis_vec(index),
+            _distance=index / 1000,
+        )
+        for index in range(60)
+    ]
+    db = _make_hybrid_mock_db(
+        image_rows=rows,
+        text_rows=rows,
+        lexical_rows=rows,
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        first_page = search("stable", db, config, result_limit=12)
+        full_window = search("stable", db, config)
+        evaluation_window = search("stable", db, config, result_limit=100)
+
+    assert len(full_window) == 48
+    assert [row["unit_id"] for row in first_page] == [
+        row["unit_id"] for row in full_window[:12]
+    ]
+    assert [row["unit_id"] for row in full_window] == [
+        row["unit_id"] for row in evaluation_window[:48]
+    ]
+
+
+def test_search_supports_bounded_top_100_for_evaluation(config: Config) -> None:
+    from pipeline.search.retrieve import search
+
+    rows = [
+        _make_unit_row(
+            f"eval_{index}",
+            f"film_{index}",
+            img_vec=_basis_vec(index),
+            _distance=index / 1000,
+        )
+        for index in range(110)
+    ]
+    db = _make_hybrid_mock_db(
+        image_rows=rows,
+        text_rows=rows,
+        lexical_rows=[],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        assert len(search("moment", db, config, result_limit=100)) == 100
+
+
+def test_search_rejects_invalid_result_limit_before_work(config: Config) -> None:
+    from pipeline.search.retrieve import search
+
+    db = MagicMock()
+    with (
+        patch("pipeline.search.retrieve.embed_text") as embed,
+        pytest.raises(ValueError, match="between 1 and 100"),
+    ):
+        search("moment", db, config, result_limit=101)
+
+    db.open_table.assert_not_called()
+    embed.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1239,6 +1323,79 @@ def test_search_by_image_blends_semantics_with_aligned_spatial_cells(
     assert results[0]["matched_frame_url"] == "/media/keyframe/second/0"
 
 
+def test_reference_image_semantic_backfill_follows_spatial_shortlist(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A missing spatial score is never an accidental ranking advantage."""
+    from pipeline.search.retrieve import _reference_frame_candidates
+
+    shortlist_path = tmp_path / "shortlist.webp"
+    Image.new("RGB", (64, 36), "navy").save(shortlist_path)
+    frame_rows = [
+        {
+            "frame_id": "shortlist_0",
+            "unit_id": "shortlist",
+            "shot_id": "shortlist",
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": 10.0,
+            "path": str(shortlist_path),
+            "_distance": 0.05,
+        },
+        {
+            "frame_id": "backfill_0",
+            "unit_id": "backfill",
+            "shot_id": "backfill",
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": 130.0,
+            "path": str(tmp_path / "unused.webp"),
+            "_distance": 0.15,
+        },
+    ]
+    frames = MagicMock()
+    frames.search.return_value = _make_query_chain(frame_rows)
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames"]
+    db.open_table.return_value = frames
+
+    global_query = np.zeros((1, VEC_DIM), dtype=np.float32)
+    global_query[0, 0] = 1.0
+    query_grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    query_grid[..., 0] = 1.0
+    opposite_grid = -query_grid.copy()
+
+    with (
+        patch(
+            "pipeline.search.retrieve._REFERENCE_SPATIAL_CANDIDATE_LIMIT",
+            1,
+        ),
+        patch(
+            "pipeline.search.retrieve.embed_spatial_images",
+            side_effect=[
+                (global_query, query_grid),
+                (global_query, opposite_grid),
+            ],
+        ),
+    ):
+        candidates = _reference_frame_candidates(
+            Image.new("RGB", (64, 36), "navy"),
+            db,
+            config,
+            (),
+            candidate_limit=2,
+        )
+
+    assert [row["unit_id"] for row in candidates] == [
+        "shortlist",
+        "backfill",
+    ]
+    assert candidates[0]["_reference_score"] < candidates[1]["_reference_score"]
+    assert candidates[0]["_spatial_score"] is not None
+    assert candidates[1]["_spatial_score"] is None
+
+
 def test_search_by_image_reranks_unique_shots_not_duplicate_frames(
     tmp_path: Path,
     config: Config,
@@ -1311,7 +1468,9 @@ def test_search_by_image_reranks_unique_shots_not_duplicate_frames(
 
     assert [result["unit_id"] for result in results] == ["first", "second"]
     assert len(spatial_embed.call_args_list[1].args[0]) == 2
-    frame_query.limit.assert_called_once_with(288)
+    frame_query.limit.assert_called_once_with(
+        config.retrieval.candidate_limit * 3
+    )
 
 
 def test_search_by_image_excludes_source_unit(
@@ -1480,6 +1639,7 @@ def test_api_search_returns_results_dict(config: Config) -> None:
     assert response.status_code == 200
     data = response.json()
     assert "results" in data
+    assert data["display_batch_size"] == 12
     assert isinstance(data["results"], list)
     assert len(data["results"]) > 0
     result = data["results"][0]
@@ -1520,7 +1680,7 @@ def test_api_image_search_accepts_raw_image_and_forwards_scope(
             )
 
     assert response.status_code == 200
-    assert response.json() == {"results": []}
+    assert response.json() == {"results": [], "display_batch_size": 12}
     args = image_search.call_args.args
     assert isinstance(args[0], Image.Image)
     assert args[0].mode == "RGB"
@@ -1529,6 +1689,7 @@ def test_api_image_search_accepts_raw_image_and_forwards_scope(
     assert image_search.call_args.kwargs == {
         "film_ids": ["film_one", "film_two"],
         "exclude_unit_id": "source",
+        "result_limit": 48,
     }
 
 
@@ -1659,6 +1820,7 @@ def test_api_search_forwards_repeated_film_scope(config: Config) -> None:
         mock_db,
         config,
         film_ids=["film_one", "film_two"],
+        result_limit=48,
     )
 
 
@@ -1729,7 +1891,10 @@ def test_api_search_survives_optional_film_title_lookup_failure(
             response = client.get("/search?q=night")
 
     assert response.status_code == 200
-    assert response.json() == {"results": [result]}
+    assert response.json() == {
+        "results": [result],
+        "display_batch_size": 12,
+    }
 
 
 def test_api_search_rejects_unbounded_query_text(config: Config) -> None:

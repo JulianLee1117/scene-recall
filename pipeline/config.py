@@ -23,6 +23,17 @@ VIDEO_EXTENSIONS: frozenset[str] = frozenset({
     ".mkv", ".mp4", ".avi", ".mov", ".m4v", ".webm"
 })
 
+# Retrieval has three deliberately separate depths.  Candidate generation is
+# broad enough to survive fusion/filtering, the production window is what an
+# interactive search returns, and the hard ceiling bounds explicit evaluation
+# requests.  Keeping these defaults here also lets older config files upgrade
+# without silently retaining the former twelve-result retrieval ceiling.
+DEFAULT_SEARCH_CANDIDATE_LIMIT = 200
+DEFAULT_SEARCH_RESULT_WINDOW = 48
+DEFAULT_SEARCH_MAX_RESULT_LIMIT = 100
+DEFAULT_SEARCH_PAGE_SIZE = 12
+DEFAULT_FILM_RESULTS_PER_PAGE_TARGET = 4
+
 
 # ---------------------------------------------------------------------------
 # Nested config sub-sections
@@ -67,8 +78,8 @@ class RetrievalWeights:
 
 @dataclass
 class DiversityConfig:
-    max_per_scene: int
-    max_per_film: int
+    page_size: int
+    film_results_per_page_target: int
 
 
 @dataclass
@@ -76,6 +87,9 @@ class RetrievalConfig:
     weights: RetrievalWeights
     diversity: DiversityConfig
     rerank_enabled: bool
+    candidate_limit: int
+    result_window: int
+    max_result_limit: int
 
 
 @dataclass
@@ -213,14 +227,61 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         txt=float(r["weights"]["txt"]),
         lex=float(r["weights"]["lex"]),
     )
-    diversity = DiversityConfig(
-        max_per_scene=int(r["diversity"]["max_per_scene"]),
-        max_per_film=int(r["diversity"]["max_per_film"]),
+    diversity_raw = r["diversity"]
+    # ``max_per_film`` was a hard global cap.  Accept it only as a legacy
+    # spelling for the new per-page preference so existing personal configs
+    # migrate to non-destructive, relevance-backfilled diversity.
+    film_results_per_page_target = int(
+        diversity_raw.get(
+            "film_results_per_page_target",
+            diversity_raw.get(
+                "max_per_film",
+                DEFAULT_FILM_RESULTS_PER_PAGE_TARGET,
+            ),
+        )
     )
+    page_size = int(
+        diversity_raw.get("page_size", DEFAULT_SEARCH_PAGE_SIZE)
+    )
+    if page_size < 1:
+        raise ValueError("retrieval.diversity.page_size must be at least 1")
+    if film_results_per_page_target < 0:
+        raise ValueError(
+            "retrieval.diversity.film_results_per_page_target cannot be negative"
+        )
+    diversity = DiversityConfig(
+        page_size=page_size,
+        film_results_per_page_target=film_results_per_page_target,
+    )
+
+    candidate_limit = int(
+        r.get("candidate_limit", DEFAULT_SEARCH_CANDIDATE_LIMIT)
+    )
+    result_window = int(
+        r.get("result_window", DEFAULT_SEARCH_RESULT_WINDOW)
+    )
+    max_result_limit = int(
+        r.get("max_result_limit", DEFAULT_SEARCH_MAX_RESULT_LIMIT)
+    )
+    if max_result_limit < 1 or max_result_limit > 1000:
+        raise ValueError(
+            "retrieval.max_result_limit must be between 1 and 1000"
+        )
+    if result_window < 1 or result_window > max_result_limit:
+        raise ValueError(
+            "retrieval.result_window must be between 1 and max_result_limit"
+        )
+    if candidate_limit < max_result_limit:
+        raise ValueError(
+            "retrieval.candidate_limit must be at least max_result_limit"
+        )
     retrieval = RetrievalConfig(
         weights=weights,
         diversity=diversity,
         rerank_enabled=bool(r["rerank_enabled"]),
+        candidate_limit=candidate_limit,
+        result_window=result_window,
+        max_result_limit=max_result_limit,
     )
 
     # --- scoring ---

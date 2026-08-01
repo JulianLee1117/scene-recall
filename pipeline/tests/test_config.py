@@ -41,8 +41,8 @@ MINIMAL_CONFIG = """
         txt: 0.4
         lex: 0.2
       diversity:
-        max_per_scene: 2
-        max_per_film: 4
+        page_size: 12
+        film_results_per_page_target: 4
       rerank_enabled: false
 
     scoring:
@@ -166,9 +166,30 @@ def test_load_config_retrieval(tmp_path):
     assert cfg.retrieval.weights.img == pytest.approx(0.4)
     assert cfg.retrieval.weights.txt == pytest.approx(0.4)
     assert cfg.retrieval.weights.lex == pytest.approx(0.2)
-    assert cfg.retrieval.diversity.max_per_scene == 2
-    assert cfg.retrieval.diversity.max_per_film == 4
+    assert cfg.retrieval.candidate_limit == 200
+    assert cfg.retrieval.result_window == 48
+    assert cfg.retrieval.max_result_limit == 100
+    assert cfg.retrieval.diversity.page_size == 12
+    assert cfg.retrieval.diversity.film_results_per_page_target == 4
     assert cfg.retrieval.rerank_enabled is False
+
+
+def test_load_config_migrates_legacy_hard_film_cap(tmp_path):
+    """Older personal configs become a soft page target, not a hard cap."""
+    raw = yaml.safe_load(textwrap.dedent(MINIMAL_CONFIG))
+    raw["retrieval"]["diversity"] = {
+        "max_per_scene": 2,
+        "max_per_film": 3,
+    }
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    from pipeline.config import load_config
+
+    cfg = load_config(cfg_file)
+
+    assert cfg.retrieval.diversity.page_size == 12
+    assert cfg.retrieval.diversity.film_results_per_page_target == 3
 
 
 def test_load_config_scoring(tmp_path):

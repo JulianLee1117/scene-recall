@@ -142,13 +142,19 @@ def build_review_document(
     review_queries: list[dict[str, Any]] = []
     for query in queries:
         if film_ids is None:
-            results = search_fn(str(query["query"]), db, config)[:limit]
+            results = search_fn(
+                str(query["query"]),
+                db,
+                config,
+                result_limit=limit,
+            )[:limit]
         else:
             results = search_fn(
                 str(query["query"]),
                 db,
                 config,
                 film_ids=film_ids,
+                result_limit=limit,
             )[:limit]
         review_queries.append(
             {

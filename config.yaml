@@ -26,7 +26,12 @@ ingest:
 
 retrieval:
   weights: {img: 0.4, txt: 0.4, lex: 0.2}
-  diversity: {max_per_scene: 2, max_per_film: 4}
+  candidate_limit: 200       # candidates retained per enabled retrieval channel
+  result_window: 48          # stable ranked window returned by production search
+  max_result_limit: 100      # bounded deeper window available to evaluations
+  diversity:
+    page_size: 12
+    film_results_per_page_target: 4  # soft preference; every page relevance-backfills
   rerank_enabled: false
 
 scoring:

@@ -76,8 +76,8 @@ def config(tmp_path: Path) -> Config:
             txt: 0.4
             lex: 0.2
           diversity:
-            max_per_scene: 2
-            max_per_film: 4
+            page_size: 12
+            film_results_per_page_target: 4
           rerank_enabled: false
 
         scoring:
