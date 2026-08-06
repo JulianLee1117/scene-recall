@@ -1,5 +1,5 @@
 paths:
-  films_dir: C:/Users/julia/Videos/films          # source files (immutable)
+  films_dir: V:/scene-recall/films                # source files (immutable)
   assets_dir: C:/Users/julia/Videos/cinema-assets # derived: keyframes/, previews/, proxies/, db/
 
 models:

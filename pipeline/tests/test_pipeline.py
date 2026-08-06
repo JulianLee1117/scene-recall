@@ -128,7 +128,39 @@ def test_run_pipeline_calls_stages_in_order_and_returns_film(
         result = run_pipeline(film_path, config)
 
     assert result is film
-    assert call_order[:4] == ["probe", "dialogue", "shots", "media"]
+    assert call_order[:5] == ["probe", "probe", "dialogue", "shots", "media"]
+
+
+def test_run_pipeline_rejects_source_identity_change_while_waiting(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    film = _make_film(tmp_path)
+    changed = FilmRecord(
+        film_id="different-film-id",
+        path=film.path,
+        asset_dir=tmp_path / "assets" / "different-film-id",
+        duration=film.duration,
+        fps=film.fps,
+        has_embedded_subs=film.has_embedded_subs,
+        title=film.title,
+    )
+    film_path = tmp_path / "film.mkv"
+    film_path.touch()
+
+    with (
+        patch(
+            "pipeline.ingest.pipeline.probe_film",
+            side_effect=[film, changed],
+        ),
+        patch("pipeline.ingest.pipeline._run_pipeline_locked") as run_locked,
+        pytest.raises(RuntimeError, match="identity changed"),
+    ):
+        from pipeline.ingest.pipeline import run_pipeline
+
+        run_pipeline(film_path, config)
+
+    run_locked.assert_not_called()
 
 
 def test_run_pipeline_reuses_cached_dialogue(
@@ -287,6 +319,58 @@ def test_cli_ingest_exits_zero_and_calls_pipeline(
 
     assert result.exit_code == 0, result.output
     run.assert_called_once_with(film_path, config)
+
+
+def test_indexed_film_ids_repairs_search_index_before_batch_skip(
+    config: Config,
+) -> None:
+    """A post-publication FTS failure resumes without re-ingesting media."""
+    from pipeline.cli import _indexed_film_ids
+
+    db = MagicMock()
+    expected = frozenset({"film_complete"})
+    with (
+        patch("pipeline.cli.open_db", return_value=db),
+        patch("pipeline.cli.ensure_search_indexes") as ensure,
+        patch("pipeline.cli.published_film_ids", return_value=expected) as published,
+    ):
+        result = _indexed_film_ids(config)
+
+    assert result == expected
+    ensure.assert_called_once_with(db)
+    published.assert_called_once_with(db)
+
+
+def test_cli_repair_search_index_reports_coverage_without_ingest(
+    config: Config,
+) -> None:
+    """FTS recovery is narrow, visible, and never invokes film processing."""
+    from click.testing import CliRunner
+    from pipeline.cli import cli
+
+    index = MagicMock()
+    index.name = "units_searchable_text_fts_v1"
+    after = MagicMock(num_indexed_rows=10_271, num_unindexed_rows=0)
+    table = MagicMock()
+    table.list_indices.return_value = [index]
+    table.index_stats.return_value = after
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["units"]
+    db.open_table.return_value = table
+
+    runner = CliRunner()
+    with (
+        patch("pipeline.cli.load_config", return_value=config),
+        patch("pipeline.cli.open_db", return_value=db),
+        patch("pipeline.cli.ensure_search_indexes") as ensure,
+        patch("pipeline.cli.run_pipeline") as run,
+    ):
+        result = runner.invoke(cli, ["repair-search-index"])
+
+    assert result.exit_code == 0, result.output
+    assert "10271 indexed, 0 pending" in result.output
+    ensure.assert_called_once_with(db)
+    run.assert_not_called()
 
 
 def test_cli_ingest_batch_skips_indexed_and_survives_one_failure(

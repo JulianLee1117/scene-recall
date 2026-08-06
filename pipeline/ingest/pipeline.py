@@ -15,7 +15,7 @@ Idempotency rules
 -----------------
 - ``probe``    — always runs (needed to obtain the FilmRecord and film_id)
 - ``dialogue`` — skipped when ``<asset_dir>/dialogue.json`` exists (loaded from cache)
-- ``shots``    — always runs (no reliable on-disk artefact to check)
+- ``shots``    — reuses a compatible ``<asset_dir>/shots.json`` cache
 - ``media``    — validates and resumes every expected keyframe and preview
 - ``annotate`` — reuses matching ``<asset_dir>/annotations/<shot_id>.json``
 - ``embed`` / ``write`` — always run; unit and frame writes are batched
@@ -37,6 +37,7 @@ from pipeline.index.writer import (
     create_tables,
     open_db,
     publish_film_index,
+    require_current_film_source,
 )
 from pipeline.ingest.annotate import annotate_shot
 from pipeline.ingest.dialogue import DialogueLine, extract_dialogue
@@ -45,6 +46,10 @@ from pipeline.ingest.embed import (
     embed_text,
     get_vector_dim,
     pool_image_embeddings,
+)
+from pipeline.ingest.locks import (
+    film_operation_lock,
+    require_no_pending_film_relink,
 )
 from pipeline.ingest.media import extract_media, keyframe_seek_time
 from pipeline.ingest.probe import FilmRecord, probe_film
@@ -77,8 +82,29 @@ def run_pipeline(film_path: Path, config: Config) -> FilmRecord:
     # Stage 1: Probe — always run (provides film_id + FilmRecord)
     # ------------------------------------------------------------------
     t = time.perf_counter()
-    film = probe_film(film_path, config)
-    print(f"[probe] {time.perf_counter() - t:.2f}s")
+    candidate = probe_film(film_path, config)
+    with film_operation_lock(candidate.asset_dir):
+        # The source can change while this process waits behind another ingest
+        # or relink. Re-probe under the lock and never mutate the candidate
+        # film's cache if its content-addressed identity changed.
+        film = probe_film(film_path, config)
+        if film.film_id != candidate.film_id:
+            raise RuntimeError(
+                "source film identity changed while waiting for its ingest lock"
+            )
+        print(f"[probe] {time.perf_counter() - t:.2f}s")
+        return _run_pipeline_locked(film, config, total_start)
+
+
+def _run_pipeline_locked(
+    film: FilmRecord,
+    config: Config,
+    total_start: float,
+) -> FilmRecord:
+    """Run cache and index mutations while holding this film's lock."""
+    require_no_pending_film_relink(film.asset_dir)
+    db = open_db(config)
+    require_current_film_source(db, film)
 
     # ------------------------------------------------------------------
     # Stage 2: Dialogue — skip if cached
@@ -93,7 +119,7 @@ def run_pipeline(film_path: Path, config: Config) -> FilmRecord:
         print(f"[dialogue] {time.perf_counter() - t:.2f}s")
 
     # ------------------------------------------------------------------
-    # Stage 3: Shots — always run
+    # Stage 3: Shots — reuse the recipe-validated cache when available
     # ------------------------------------------------------------------
     t = time.perf_counter()
     shots = detect_shots(film, config)
@@ -109,7 +135,6 @@ def run_pipeline(film_path: Path, config: Config) -> FilmRecord:
     # ------------------------------------------------------------------
     # Stages 5-7: Embed + Annotate + Write — always run (per shot)
     # ------------------------------------------------------------------
-    db = open_db(config)
     create_tables(db, vector_dim=get_vector_dim(config))
 
     t = time.perf_counter()

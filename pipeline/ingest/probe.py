@@ -22,6 +22,28 @@ from pipeline.config import Config
 # How many bytes to read from each end of the file for the content hash.
 _CONTENT_HASH_CHUNK_BYTES = 4 * 1024 * 1024  # 4 MB
 
+# Subtitle codecs FFmpeg can convert directly into the SRT text consumed by
+# the dialogue parser. Bitmap codecs such as PGS require OCR and therefore use
+# the Whisper audio fallback instead.
+_TEXT_SUBTITLE_CODECS = frozenset({
+    "ass",
+    "jacosub",
+    "microdvd",
+    "mov_text",
+    "mpl2",
+    "pjs",
+    "realtext",
+    "sami",
+    "ssa",
+    "stl",
+    "subrip",
+    "subviewer",
+    "subviewer1",
+    "text",
+    "vplayer",
+    "webvtt",
+})
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -38,7 +60,8 @@ class FilmRecord:
     duration: float     # Total duration in seconds (float64)
     fps: float          # Frames per second of the primary video stream
     has_embedded_subs: bool  # True if at least one subtitle stream exists
-    title: str          # From container metadata, or the stem of the filename
+    title: str          # From the authoritative filename stem
+    text_subtitle_stream_index: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +92,7 @@ def probe_film(path: Path, config: Config) -> FilmRecord:
     duration = _parse_duration(meta)
     fps = _parse_fps(meta)
     has_subs = _has_subtitle_streams(meta)
+    text_subtitle_stream_index = _text_subtitle_stream_index(meta)
     title = _parse_title(meta, path)
 
     asset_dir = config.paths.assets_dir / film_id
@@ -82,6 +106,7 @@ def probe_film(path: Path, config: Config) -> FilmRecord:
         fps=fps,
         has_embedded_subs=has_subs,
         title=title,
+        text_subtitle_stream_index=text_subtitle_stream_index,
     )
 
 
@@ -177,17 +202,25 @@ def _has_subtitle_streams(meta: dict) -> bool:
     )
 
 
+def _text_subtitle_stream_index(meta: dict) -> int | None:
+    """Return the first FFmpeg-convertible text subtitle stream index."""
+    for stream in meta.get("streams", []):
+        if (
+            stream.get("codec_type") == "subtitle"
+            and stream.get("codec_name") in _TEXT_SUBTITLE_CODECS
+        ):
+            index = stream.get("index")
+            if isinstance(index, int) and not isinstance(index, bool) and index >= 0:
+                return index
+    return None
+
+
 def _parse_title(meta: dict, path: Path) -> str:
     """Return the film title.
 
-    Uses the ``title`` tag from the container format metadata when present;
-    falls back to the file stem (filename without extension).
+    The canonical library filename is authoritative. Downloaded containers
+    frequently carry release-group or encoder text in their ``title`` tag,
+    while the ingest workflow normalizes the filename before publication.
     """
-    tags = meta.get("format", {}).get("tags", {})
-    # Tags can appear with different capitalisation depending on the muxer.
-    for key in ("title", "TITLE", "Title"):
-        value = tags.get(key, "").strip()
-        if value:
-            return value
-
+    del meta  # Container metadata is intentionally not a display-title source.
     return path.stem

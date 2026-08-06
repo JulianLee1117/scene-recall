@@ -66,7 +66,12 @@ def _seconds_to_srt(s: float) -> str:
     return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
 
 
-def _make_film(tmp_path: Path, *, has_embedded_subs: bool = True):
+def _make_film(
+    tmp_path: Path,
+    *,
+    has_embedded_subs: bool = True,
+    text_subtitle_stream_index: int | None = 0,
+):
     """Return a minimal FilmRecord pointing into tmp_path."""
     from pipeline.ingest.probe import FilmRecord
 
@@ -80,6 +85,9 @@ def _make_film(tmp_path: Path, *, has_embedded_subs: bool = True):
         fps=24.0,
         has_embedded_subs=has_embedded_subs,
         title="Test Film",
+        text_subtitle_stream_index=(
+            text_subtitle_stream_index if has_embedded_subs else None
+        ),
     )
 
 
@@ -389,3 +397,45 @@ def test_extract_dialogue_fallback_saves_dialogue_json(config: Config, tmp_path:
         extract_dialogue(film, config)
 
     assert (film.asset_dir / "dialogue.json").exists()
+
+
+def test_extract_dialogue_maps_selected_text_subtitle_stream(
+    config: Config,
+    tmp_path: Path,
+) -> None:
+    """Extraction maps the probed text stream, not the first subtitle stream."""
+    from pipeline.ingest.dialogue import extract_dialogue
+
+    film = _make_film(tmp_path, text_subtitle_stream_index=3)
+    with patch(
+        "subprocess.run",
+        side_effect=_fake_ffmpeg_writer(SRT_TWO_LINES, film.asset_dir),
+    ) as run:
+        extract_dialogue(film, config)
+
+    command = run.call_args.args[0]
+    assert command[command.index("-map") + 1] == "0:3"
+
+
+def test_extract_dialogue_uses_whisper_for_bitmap_only_subtitles(
+    config: Config,
+    tmp_path: Path,
+) -> None:
+    """PGS-only films use audio transcription rather than invalid SRT conversion."""
+    from pipeline.ingest.dialogue import extract_dialogue
+
+    film = _make_film(tmp_path, text_subtitle_stream_index=None)
+    fake_model = MagicMock()
+    fake_model.transcribe.return_value = ([], MagicMock())
+
+    with (
+        patch("pipeline.ingest.dialogue.WhisperModel", return_value=fake_model),
+        patch("subprocess.run") as run,
+    ):
+        extract_dialogue(film, config)
+
+    run.assert_not_called()
+    fake_model.transcribe.assert_called_once_with(
+        str(film.path),
+        word_timestamps=False,
+    )

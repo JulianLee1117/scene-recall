@@ -9,6 +9,8 @@ Public API
 - ``write_units(...)``         — upsert a film's buffered units in one merge
 - ``publish_film_index(...)``  — scoped replacement with units as ready marker
 - ``write_film(db, film)``     — upsert one film record
+- ``require_current_film_source(...)`` — reject stale duplicate-path ingest
+- ``update_film_source(...)``  — compare-and-set a relocated raw source path
 
 All write operations are idempotent: calling them a second time with the same
 primary key (``unit_id`` / ``film_id``) silently updates the existing row.
@@ -120,6 +122,132 @@ def published_film_ids(db: lancedb.DBConnection) -> frozenset[str]:
     return frozenset(film_ids & ready_ids)
 
 
+def require_current_film_source(
+    db: lancedb.DBConnection,
+    film: FilmRecord,
+) -> None:
+    """Reject ingest from a published path superseded by source relink."""
+    from lancedb.expr import col, lit
+
+    if film.film_id not in published_film_ids(db):
+        return
+    rows = (
+        db.open_table("films")
+        .search()
+        .where(col("film_id") == lit(film.film_id))
+        .limit(2)
+        .to_list()
+    )
+    if not rows:
+        return
+    if len(rows) != 1:
+        raise RuntimeError(
+            f"expected one films row for {film.film_id!r}, found {len(rows)}"
+        )
+    indexed_path = str(rows[0].get("path") or "")
+    requested_path = str(film.path)
+    if (
+        not indexed_path
+        or os.path.normcase(os.path.abspath(indexed_path))
+        != os.path.normcase(os.path.abspath(requested_path))
+    ):
+        raise RuntimeError(
+            f"film {film.film_id} is indexed from {indexed_path!r}; refusing "
+            f"ingest from {requested_path!r}; use relink-film to change an "
+            "indexed source path"
+        )
+
+
+def update_film_source(
+    db: lancedb.DBConnection,
+    film_id: str,
+    *,
+    expected_old_path: str,
+    new_path: str,
+    title: str,
+) -> dict[str, Any]:
+    """Relink one film row without touching its indexed units or frames.
+
+    The old path is a compare-and-set precondition. This prevents a stale
+    relocation plan from overwriting a concurrent metadata change. The
+    existing row supplies duration and FPS unchanged, while the shared
+    cross-process publication lock serializes this update with ingest. Callers
+    must also hold the film-operation lock so cache identities and this row
+    remain one recoverable transaction.
+    """
+    from lancedb.expr import col, lit
+
+    if not title.strip():
+        raise ValueError("film title cannot be empty")
+
+    with _PUBLICATION_LOCK, _database_write_lock(db):
+        table = db.open_table("films")
+        rows = (
+            table.search()
+            .where(col("film_id") == lit(film_id))
+            .limit(2)
+            .to_list()
+        )
+        if len(rows) != 1:
+            raise RuntimeError(
+                f"expected exactly one films row for {film_id!r}, found {len(rows)}"
+            )
+
+        current = dict(rows[0])
+        current_path = str(current.get("path") or "")
+        current_title = str(current.get("title") or "")
+        if current_path == new_path and current_title == title:
+            return current
+        if current_path != expected_old_path:
+            raise RuntimeError(
+                "film source changed after relocation was planned: "
+                f"expected {expected_old_path!r}, found {current_path!r}"
+            )
+
+        # Do not let two film IDs claim the same absolute source path.
+        all_rows = table.search().select(["film_id", "path"]).limit(None).to_list()
+        new_path_key = os.path.normcase(os.path.abspath(new_path))
+        conflicts = [
+            row
+            for row in all_rows
+            if str(row.get("film_id") or "") != film_id
+            and os.path.normcase(os.path.abspath(str(row.get("path") or "")))
+            == new_path_key
+        ]
+        if conflicts:
+            raise RuntimeError(
+                "another indexed film already uses the destination path: "
+                f"{new_path}"
+            )
+
+        replacement = {
+            **current,
+            "path": new_path,
+            "title": title,
+        }
+        (
+            table.merge_insert("film_id")
+            .when_matched_update_all()
+            .execute([replacement])
+        )
+
+        updated_rows = (
+            table.search()
+            .where(col("film_id") == lit(film_id))
+            .limit(2)
+            .to_list()
+        )
+        if len(updated_rows) != 1:
+            raise RuntimeError("film source update did not publish exactly one row")
+        updated = dict(updated_rows[0])
+        if (
+            str(updated.get("path") or "") != new_path
+            or str(updated.get("title") or "") != title
+        ):
+            raise RuntimeError("film source update failed read-back verification")
+        return updated
+
+
 def open_db(config: Config) -> lancedb.DBConnection:
     """Open (or create) the LanceDB at ``config.paths.assets_dir / "db"``.
 
@@ -194,7 +322,10 @@ def ensure_search_indexes(db: lancedb.DBConnection) -> None:
     LanceDB 0.33 can leave merge-inserted rows outside an existing FTS index.
     A normal query is not guaranteed to merge those rows correctly for terms
     already present in the index, so zero unindexed rows is a correctness
-    invariant rather than a performance preference.
+    invariant rather than a performance preference.  Synchronization rebuilds
+    only the FTS index; calling ``Table.optimize()`` here would also compact
+    unrelated table data and can fail in LanceDB 0.33's list decoder on a
+    perfectly readable multi-fragment table.
     """
     with _PUBLICATION_LOCK, _database_write_lock(db):
         _ensure_search_indexes_locked(db)
@@ -231,32 +362,49 @@ def _ensure_search_indexes_locked(db: lancedb.DBConnection) -> None:
         )
 
     if not named:
-        table.create_fts_index(
-            UNITS_FTS_FIELD,
-            name=UNITS_FTS_INDEX,
-            replace=False,
-            base_tokenizer="simple",
-            language="English",
-            max_token_length=40,
-            lower_case=True,
-            stem=True,
-            remove_stop_words=True,
-            ascii_folding=True,
-            with_position=True,
-        )
+        _create_units_fts_index(table, replace=False)
 
     stats = table.index_stats(UNITS_FTS_INDEX)
     if stats is None:
         raise RuntimeError(f"search index {UNITS_FTS_INDEX!r} was not created")
     if int(stats.num_unindexed_rows) > 0:
-        table.optimize()
+        # Rebuild the targeted index instead of calling table.optimize().
+        # Besides compacting data unnecessarily, LanceDB 0.33.0 can raise an
+        # internal Arrow offset-decoding error while optimizing a valid table
+        # after a large film merge.  Replacing this derived index is fast,
+        # transactional, and leaves the source rows untouched.
+        _create_units_fts_index(table, replace=True)
         stats = table.index_stats(UNITS_FTS_INDEX)
-    if stats is None or int(stats.num_unindexed_rows) > 0:
-        remaining = None if stats is None else int(stats.num_unindexed_rows)
+    table_rows = int(table.count_rows())
+    if stats is None:
+        raise RuntimeError(
+            f"search index {UNITS_FTS_INDEX!r} disappeared during refresh"
+        )
+    indexed = int(stats.num_indexed_rows)
+    remaining = int(stats.num_unindexed_rows)
+    if remaining > 0 or indexed != table_rows:
         raise RuntimeError(
             f"search index {UNITS_FTS_INDEX!r} is incomplete; "
-            f"unindexed_rows={remaining}"
+            f"indexed_rows={indexed}, unindexed_rows={remaining}, "
+            f"table_rows={table_rows}"
         )
+
+
+def _create_units_fts_index(table: Any, *, replace: bool) -> None:
+    """Create the managed units FTS index with its complete stable contract."""
+    table.create_fts_index(
+        UNITS_FTS_FIELD,
+        name=UNITS_FTS_INDEX,
+        replace=replace,
+        base_tokenizer="simple",
+        language="English",
+        max_token_length=40,
+        lower_case=True,
+        stem=True,
+        remove_stop_words=True,
+        ascii_folding=True,
+        with_position=True,
+    )
 
 
 def _create_or_check_table(
@@ -421,14 +569,23 @@ def publish_film_index(
     # subprocesses.  The in-process lock protects threads/tests; the file lock
     # prevents different film ingests from interleaving table/index versions.
     with _PUBLICATION_LOCK, _database_write_lock(db):
+        require_current_film_source(db, film)
         _replace_frame_rows(db, film.film_id, frame_rows)
 
         # Metadata may be prepared before the visibility boundary. The
         # /library endpoint gates film rows on a representative unit, so a
         # crash or failed final merge cannot present this row as indexed.
-        write_film(db, film)
+        _write_film_locked(db, film)
         _replace_unit_rows(db, film.film_id, unit_rows)
-        _ensure_search_indexes_locked(db)
+        try:
+            _ensure_search_indexes_locked(db)
+        except Exception as exc:
+            raise RuntimeError(
+                "Film data and caches were saved successfully; only "
+                "search-index finalization failed. Run `uv run python -m "
+                "pipeline.cli repair-search-index`; do not re-ingest. "
+                f"Search-index error: {exc}"
+            ) from exc
 
 
 def _replace_frame_rows(
@@ -606,6 +763,13 @@ def write_film(db: lancedb.DBConnection, film: FilmRecord) -> None:
     film:
         Film record to persist.
     """
+    with _PUBLICATION_LOCK, _database_write_lock(db):
+        require_current_film_source(db, film)
+        _write_film_locked(db, film)
+
+
+def _write_film_locked(db: lancedb.DBConnection, film: FilmRecord) -> None:
+    """Upsert one film row while the shared DB publication lock is held."""
     row = [
         {
             "film_id": film.film_id,

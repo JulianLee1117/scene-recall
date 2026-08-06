@@ -1,12 +1,12 @@
 """dialogue.py — extract dialogue lines from a film as a list of DialogueLine.
 
-Primary path (has_embedded_subs=True):
-    Use ffmpeg to extract the first subtitle stream to an SRT file, then parse
-    that SRT into a list of :class:`DialogueLine` objects.
+Primary path (text subtitle available):
+    Use ffmpeg to extract the first convertible text subtitle stream to an SRT
+    file, then parse that SRT into a list of :class:`DialogueLine` objects.
 
-Fallback path (has_embedded_subs=False):
-    Use faster-whisper with word timestamps to transcribe audio and produce
-    :class:`DialogueLine` objects from the returned segments.
+Fallback path (no subtitles or bitmap-only subtitles):
+    Use faster-whisper to transcribe audio and produce :class:`DialogueLine`
+    objects from the returned segments.
 
 Output is always saved as ``film.asset_dir / "dialogue.json"``.
 
@@ -55,9 +55,10 @@ class DialogueLine:
 def extract_dialogue(film: FilmRecord, config: Config) -> list[DialogueLine]:
     """Extract all dialogue from *film* and return as a :class:`DialogueLine` list.
 
-    If *film* has an embedded subtitle stream, ffmpeg extracts it to
-    ``film.asset_dir/subs.srt`` which is then parsed.  Otherwise, faster-whisper
-    transcribes the audio track.
+    If *film* has an FFmpeg-convertible text subtitle stream, ffmpeg extracts
+    it to ``film.asset_dir/subs.srt`` which is then parsed. Otherwise,
+    faster-whisper transcribes the audio track. Bitmap subtitles such as PGS
+    require OCR, so they intentionally take the audio fallback.
 
     The result is also serialised to ``film.asset_dir/dialogue.json`` as a list
     of ``{"start": float, "end": float, "text": str}`` dicts.
@@ -75,8 +76,8 @@ def extract_dialogue(film: FilmRecord, config: Config) -> list[DialogueLine]:
     list[DialogueLine]
         Dialogue lines in chronological order.
     """
-    if film.has_embedded_subs:
-        lines = _extract_via_ffmpeg(film)
+    if film.text_subtitle_stream_index is not None:
+        lines = _extract_via_ffmpeg(film, film.text_subtitle_stream_index)
     else:
         lines = _extract_via_whisper(film, config)
 
@@ -89,14 +90,17 @@ def extract_dialogue(film: FilmRecord, config: Config) -> list[DialogueLine]:
 # ---------------------------------------------------------------------------
 
 
-def _extract_via_ffmpeg(film: FilmRecord) -> list[DialogueLine]:
-    """Extract the first subtitle stream with ffmpeg and parse the resulting SRT."""
+def _extract_via_ffmpeg(
+    film: FilmRecord,
+    stream_index: int,
+) -> list[DialogueLine]:
+    """Extract one text subtitle stream and parse the resulting SRT."""
     srt_path = film.asset_dir / "subs.srt"
     cmd = [
         "ffmpeg",
         "-y",
         "-i", str(film.path),
-        "-map", "0:s:0",
+        "-map", f"0:{stream_index}",
         "-f", "srt",
         str(srt_path),
     ]

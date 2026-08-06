@@ -193,6 +193,47 @@ def test_ensure_search_indexes_backfills_a_populated_legacy_table(
     assert [row["unit_id"] for row in matches] == [shot.shot_id]
 
 
+def test_ensure_search_indexes_rebuilds_only_fts_when_rows_are_unindexed() -> None:
+    """A large merge must not route FTS sync through table compaction."""
+    from pipeline.index.writer import (
+        UNITS_FTS_FIELD,
+        UNITS_FTS_INDEX,
+        _ensure_search_indexes_locked,
+    )
+
+    index = MagicMock()
+    index.name = UNITS_FTS_INDEX
+    index.index_type = "FTS"
+    index.columns = [UNITS_FTS_FIELD]
+    stale_stats = MagicMock(num_indexed_rows=8_774, num_unindexed_rows=1_497)
+    current_stats = MagicMock(num_indexed_rows=10_271, num_unindexed_rows=0)
+
+    table = MagicMock()
+    table.list_indices.return_value = [index]
+    table.index_stats.side_effect = [stale_stats, current_stats]
+    table.count_rows.return_value = 10_271
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["units"]
+    db.open_table.return_value = table
+
+    _ensure_search_indexes_locked(db)
+
+    table.optimize.assert_not_called()
+    table.create_fts_index.assert_called_once_with(
+        UNITS_FTS_FIELD,
+        name=UNITS_FTS_INDEX,
+        replace=True,
+        base_tokenizer="simple",
+        language="English",
+        max_token_length=40,
+        lower_case=True,
+        stem=True,
+        remove_stop_words=True,
+        ascii_folding=True,
+        with_position=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # write_unit / read back
 # ---------------------------------------------------------------------------
@@ -740,6 +781,59 @@ def test_new_film_unit_failure_has_metadata_but_no_ready_units(
         row["film_id"]
         for row in db.open_table("films").search().to_list()
     } == {"film_new"}
+
+
+def test_post_publication_fts_failure_preserves_rows_and_explains_repair(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A final derived-index failure must not suggest redoing expensive work."""
+    from pipeline.index.writer import (
+        FrameWrite,
+        UnitWrite,
+        create_tables,
+        open_db,
+        publish_film_index,
+    )
+
+    db = open_db(config)
+    create_tables(db)
+    film = _make_named_film(tmp_path, "film_fts_pending")
+    shot = Shot(
+        shot_id="film_fts_pending_0001",
+        t_start=0.0,
+        t_end=2.0,
+        parent_shot_id=None,
+        keyframe_times=[1.0],
+    )
+    path = film.asset_dir / "keyframes" / f"{shot.shot_id}_0.webp"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"frame")
+    unit = UnitWrite(shot, _make_annotation(), _rand_vec(), _rand_vec())
+    frame = FrameWrite(
+        unit_id=shot.shot_id,
+        shot_id=shot.shot_id,
+        frame_index=0,
+        timestamp=1.0,
+        path=path,
+        visual_encoder="pe_core_l14",
+        visual_vec=_rand_vec(),
+        is_representative=True,
+    )
+
+    with (
+        patch(
+            "pipeline.index.writer._ensure_search_indexes_locked",
+            side_effect=RuntimeError("offset decoder failed"),
+        ),
+        pytest.raises(RuntimeError, match="repair-search-index") as caught,
+    ):
+        publish_film_index(db, film, [unit], [frame])
+
+    assert "do not re-ingest" in str(caught.value)
+    assert db.open_table("films").count_rows() == 1
+    assert db.open_table("units").count_rows() == 1
+    assert db.open_table("frames").count_rows() == 1
 
 
 def test_publish_validation_fails_before_unpublishing_current_generation(

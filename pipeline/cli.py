@@ -4,6 +4,9 @@ Usage::
 
     python -m pipeline.cli ingest <film_path>
     python -m pipeline.cli ingest-batch <directory> [--force]
+    python -m pipeline.cli repair-search-index
+    python -m pipeline.cli relink-film <new_path> [--apply]
+    python -m pipeline.cli recover-relink <film_id>
     python -m pipeline.cli index-frames [--film-id FILM_ID]
     python -m pipeline.cli eval [--queries pipeline/eval/gold_queries.yaml]
 
@@ -18,6 +21,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 from dotenv import load_dotenv
@@ -25,11 +29,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from pipeline.config import VIDEO_EXTENSIONS, Config, load_config
-from pipeline.ingest.pipeline import run_pipeline
 from pipeline.ingest.probe import _content_hash
-from pipeline.index.writer import open_db, published_film_ids
+from pipeline.index.writer import (
+    UNITS_FTS_INDEX,
+    ensure_search_indexes,
+    open_db,
+    published_film_ids,
+    table_names,
+)
 
 _DEFAULT_QUERIES = Path(__file__).parent / "eval" / "gold_queries.yaml"
+
+
+def run_pipeline(film_path: Path, config: Config) -> Any:
+    """Load the heavyweight ingest stack only when a film actually runs."""
+    from pipeline.ingest.pipeline import run_pipeline as execute_pipeline
+
+    return execute_pipeline(film_path, config)
 
 
 def _lower_own_priority() -> None:
@@ -121,8 +137,142 @@ def ingest_batch(directory: Path, force: bool) -> None:
 
 
 def _indexed_film_ids(config: Config) -> frozenset[str]:
-    """Return film IDs that are fully published (film row plus ready units)."""
-    return published_film_ids(open_db(config))
+    """Repair derived search state, then return fully published film IDs."""
+    db = open_db(config)
+    # A prior ingest can commit all film rows and then fail while refreshing
+    # the derived FTS index.  Repair that cheap final stage before the batch
+    # decides the film is complete and skips its expensive cached pipeline.
+    ensure_search_indexes(db)
+    return published_film_ids(db)
+
+
+def _fts_index_coverage(db: Any) -> tuple[int, int] | None:
+    """Return managed FTS indexed/pending counts, or ``None`` if absent."""
+    if "units" not in table_names(db):
+        return None
+    table = db.open_table("units")
+    if not any(index.name == UNITS_FTS_INDEX for index in table.list_indices()):
+        return None
+    stats = table.index_stats(UNITS_FTS_INDEX)
+    if stats is None:
+        return None
+    return int(stats.num_indexed_rows), int(stats.num_unindexed_rows)
+
+
+@cli.command("repair-search-index")
+def repair_search_index_cmd() -> None:
+    """Repair the derived full-text index without re-ingesting any film."""
+    db = open_db(load_config())
+    try:
+        ensure_search_indexes(db)
+    except Exception as exc:
+        raise click.ClickException(f"search-index repair failed: {exc}") from exc
+
+    after = _fts_index_coverage(db)
+    if after is None:
+        click.echo("No units table exists yet; nothing to repair.")
+        return
+    click.echo(
+        f"Search index ready: {after[0]} indexed, {after[1]} pending."
+    )
+
+
+@cli.command("relink-film")
+@click.argument(
+    "new_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--film-id",
+    "expected_film_id",
+    default=None,
+    help="Assert the expected existing film ID before relinking.",
+)
+@click.option(
+    "--title",
+    default=None,
+    help="Set an explicit display title while relinking.",
+)
+@click.option(
+    "--title-from-filename",
+    is_flag=True,
+    help="Use the destination filename stem as the display title.",
+)
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    help="Commit the validated cache and database changes.",
+)
+def relink_film_cmd(
+    new_path: Path,
+    expected_film_id: str | None,
+    title: str | None,
+    title_from_filename: bool,
+    apply_changes: bool,
+) -> None:
+    """Safely relink an indexed film to an exact copied source at NEW_PATH.
+
+    Without ``--apply`` this performs a full-hash dry run and changes no
+    project data. The old source must still exist; this command never moves or
+    deletes either movie file.
+    """
+    from pipeline.index.relink import relink_film
+
+    if title is not None and title_from_filename:
+        raise click.UsageError(
+            "--title and --title-from-filename are mutually exclusive"
+        )
+
+    config = load_config()
+    db = open_db(config)
+    try:
+        plan = relink_film(
+            db,
+            config,
+            new_path,
+            expected_film_id=expected_film_id,
+            title=title,
+            title_from_filename=title_from_filename,
+            apply=apply_changes,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Film ID: {plan.film_id}")
+    click.echo(f"Old source: {plan.old_path}")
+    click.echo(f"New source: {plan.new_path}")
+    click.echo(f"Full SHA-256: {plan.sha256}")
+    click.echo(f"Title: {plan.old_title!r} -> {plan.new_title!r}")
+    click.echo(
+        "Cache identities: "
+        f"{plan.shot_cache_changes} shot cache, "
+        f"{plan.media_manifest_changes} media manifests"
+    )
+    if plan.is_noop:
+        click.echo("Already current; no changes needed.")
+    elif apply_changes:
+        click.echo("Relink committed. The original source was retained.")
+    else:
+        click.echo("Dry run passed. Re-run with --apply to commit.")
+
+
+@cli.command("recover-relink")
+@click.argument("film_id")
+def recover_relink_cmd(film_id: str) -> None:
+    """Recover an interrupted source relink for FILM_ID."""
+    from pipeline.index.relink import recover_film_relink
+
+    config = load_config()
+    db = open_db(config)
+    try:
+        outcome = recover_film_relink(db, config, film_id)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if outcome is None:
+        click.echo(f"No pending relink for {film_id}.")
+    else:
+        click.echo(f"Recovered {film_id} to the journal's {outcome} state.")
 
 
 @cli.command("index-frames")

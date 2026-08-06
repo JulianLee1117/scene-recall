@@ -100,6 +100,18 @@ def test_probe_film_title(test_clip: Path, config: Config) -> None:
     assert record.title  # not empty
 
 
+def test_parse_title_uses_canonical_filename_over_container_tag() -> None:
+    """Release-group container tags cannot override the normalized filename."""
+    from pipeline.ingest.probe import _parse_title
+
+    title = _parse_title(
+        {"format": {"tags": {"title": "Release.Group.Encoder.Text"}}},
+        Path("Canonical Film (2001).mkv"),
+    )
+
+    assert title == "Canonical Film (2001)"
+
+
 def test_probe_film_duration_is_float(test_clip: Path, config: Config) -> None:
     """duration is stored as a float (not int or str)."""
     from pipeline.ingest.probe import probe_film
@@ -124,3 +136,38 @@ def test_probe_film_has_embedded_subs_true(test_clip: Path, config: Config) -> N
         record = probe_film(test_clip, config)
 
     assert record.has_embedded_subs is True
+
+
+def test_text_subtitle_stream_skips_pgs_and_selects_subrip() -> None:
+    """Bitmap subtitles do not hide a later convertible text stream."""
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    meta = {
+        "streams": [
+            {
+                "index": 2,
+                "codec_type": "subtitle",
+                "codec_name": "hdmv_pgs_subtitle",
+            },
+            {"index": 3, "codec_type": "subtitle", "codec_name": "subrip"},
+        ]
+    }
+
+    assert _text_subtitle_stream_index(meta) == 3
+
+
+def test_text_subtitle_stream_is_none_for_pgs_only() -> None:
+    """A bitmap-only file must use audio transcription instead of SRT output."""
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    meta = {
+        "streams": [
+            {
+                "index": 2,
+                "codec_type": "subtitle",
+                "codec_name": "hdmv_pgs_subtitle",
+            }
+        ]
+    }
+
+    assert _text_subtitle_stream_index(meta) is None
