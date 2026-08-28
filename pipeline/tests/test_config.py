@@ -56,7 +56,7 @@ def test_load_config_returns_config_object(tmp_path):
 
 
 def test_load_config_paths(tmp_path):
-    """Legacy configs derive incoming_dir beside films_dir."""
+    """Legacy configs derive incoming and durable-state paths beside films."""
     from pipeline.config import load_config
 
     cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
@@ -65,9 +65,11 @@ def test_load_config_paths(tmp_path):
     assert isinstance(cfg.paths.films_dir, Path)
     assert isinstance(cfg.paths.incoming_dir, Path)
     assert isinstance(cfg.paths.assets_dir, Path)
+    assert isinstance(cfg.paths.state_dir, Path)
     assert cfg.paths.films_dir == Path("/tmp/films")
     assert cfg.paths.incoming_dir == Path("/tmp/incoming")
     assert cfg.paths.assets_dir == Path("/tmp/assets")
+    assert cfg.paths.state_dir == Path("/tmp/state")
 
 
 def test_load_config_explicit_incoming_dir(tmp_path):
@@ -81,6 +83,20 @@ def test_load_config_explicit_incoming_dir(tmp_path):
 
     assert load_config(cfg_file).paths.incoming_dir == Path(
         "/mnt/seagate/downloads"
+    )
+
+
+def test_load_config_explicit_state_dir(tmp_path):
+    """Durable user state can live outside the default library drive path."""
+    raw = yaml.safe_load(textwrap.dedent(MINIMAL_CONFIG))
+    raw["paths"]["state_dir"] = "/mnt/local/scene-recall-state"
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    from pipeline.config import load_config
+
+    assert load_config(cfg_file).paths.state_dir == Path(
+        "/mnt/local/scene-recall-state"
     )
 
 

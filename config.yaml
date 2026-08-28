@@ -1,6 +1,7 @@
 paths:
   films_dir: V:/scene-recall/films                # source files (immutable)
   incoming_dir: V:/scene-recall/incoming          # completed downloads awaiting review
+  state_dir: V:/scene-recall/state                # durable bookmarks and future user state
   assets_dir: C:/Users/julia/Videos/cinema-assets # derived: keyframes/, previews/, proxies/, db/
 
 models:

@@ -64,3 +64,4 @@ The accepted boundary or behavior.
 | [0003](0003-composable-composition-and-text-search.md) | Accepted | Rerank a mandatory composition shortlist with text |
 | [0004](0004-local-first-and-conditional-advanced-retrieval.md) | Accepted | Stay local-first and require demonstrated need for advanced retrieval |
 | [0005](0005-cross-film-composition-candidates.md) | Accepted | Exclude the source film before composition candidate generation |
+| [0006](0006-separate-durable-user-state.md) | Accepted | Keep bookmarks outside replaceable search indexes |

@@ -36,6 +36,10 @@ cp web/.env.local.example web/.env.local
 # Edit config.yaml with your paths and model preferences
 ```
 
+`paths.state_dir` stores durable user-authored state such as saved scenes. Keep
+it outside the replaceable `assets_dir` and include it in normal backups. Older
+configs default it to a `state` directory beside `films`.
+
 The default annotator uses OpenAI `gpt-5.6-luna`. Annotation sends up to three
 derived keyframes per shot with response storage disabled. Set
 `models.annotator_provider: gemini` and a Gemini model name in `config.yaml`
@@ -208,6 +212,11 @@ the existing local frame index and a learned 6x6 spatial feature grid, so it
 does not call OpenAI or Gemini or require re-ingestion. Treat it as
 framing/position similarity, not exact subject-relation, skeletal-pose, or
 motion matching.
+
+Hover a result and use its bookmark action to save that source moment. Saved
+scenes persist in `paths.state_dir` independently of search-index repair or a
+compatible reingest; unavailable sources remain listed until explicitly
+removed.
 
 ## Optional retrieval comparison
 

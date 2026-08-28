@@ -46,6 +46,7 @@ class PathsConfig:
     films_dir: Path
     assets_dir: Path
     incoming_dir: Path
+    state_dir: Path
 
 
 @dataclass
@@ -153,6 +154,10 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         # Existing configs continue to work: by convention incoming sits next
         # to the immutable film library on the same volume.
         incoming_dir=Path(p.get("incoming_dir", films_dir.parent / "incoming")),
+        # User-authored state must not live in the replaceable asset/index
+        # directory.  Keep older configs working by placing it beside the
+        # source library unless an explicit location is configured.
+        state_dir=Path(p.get("state_dir", films_dir.parent / "state")),
     )
 
     # --- models ---

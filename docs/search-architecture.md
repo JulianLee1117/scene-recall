@@ -8,10 +8,11 @@ choices were made but do not override this document.
 
 ## Product contract
 
-Scene Recall supports two related jobs:
+Scene Recall supports three related jobs:
 
 1. Find a film moment someone remembers.
 2. Discover visually related references and playable source moments.
+3. Save source moments for later retrieval.
 
 Retrieval returns source-backed evidence: film identity, time range, and the
 matched frame or text. Generation may later explain or organize retrieved
@@ -59,6 +60,21 @@ revision, dimensions, contract, inputs, and relevant schema or prompt. Never
 mix incompatible vector spaces. Preserve old profiles until a replacement is
 complete and deliberately activated; missing optional derivations must degrade
 to a known-safe baseline.
+
+## Durable user state
+
+Bookmarks are user-authored state, not an index derivation. They live in a
+schema-versioned SQLite database under the configured `state_dir`, outside the
+replaceable `assets_dir`. Index repair, backfill, and film reingestion must not
+delete them.
+
+Each bookmark preserves the source `film_id` and evidence timestamp as its
+durable anchor. The unit ID and frame index recorded when it was saved are
+derived lookup hints. If a later compatible reingest changes shot boundaries,
+the API may resolve the bookmark to the current unit containing that timestamp,
+but only within the same film identity. Missing or temporarily unavailable
+source/index data leaves an explicit unavailable bookmark rather than silently
+rebinding or deleting user state.
 
 ## Implemented dataflow
 
@@ -160,6 +176,8 @@ with exact revision lineage and its own activation manifest.
 - OCR comes from the general annotator rather than a dedicated OCR pass.
 - Typed facets are not first-class query filters.
 - There are no clip, audio, scene-summary, reranker, router, or RAG indexes.
+- Saved scenes are local to one configured state database; named collections
+  and account synchronization are not implemented.
 
 These are boundaries, not an automatic backlog. Retained source evidence makes
 targeted future derivations possible without predicting every metadata field.
