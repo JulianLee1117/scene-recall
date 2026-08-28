@@ -165,6 +165,7 @@ def _make_frame_hybrid_mock_db(
     units._scalar_query_chains = scalar_query_chains
     frames = MagicMock()
     frame_query_chain = _make_query_chain(frame_rows)
+    _mark_frames_as_current_profile(frames, len(frame_rows))
 
     def fake_frame_search(
         _query: object = None,
@@ -184,6 +185,12 @@ def _make_frame_hybrid_mock_db(
         "units": units,
     }[name]
     return db, units, frames
+
+
+def _mark_frames_as_current_profile(frames: MagicMock, row_count: int) -> None:
+    """Give a frame-table mock the lineage facts checked at query time."""
+    frames.schema.names = ["visual_encoder"]
+    frames.count_rows.side_effect = lambda _filter=None: row_count
 
 
 def _make_search_mock_db(rows: list[dict]) -> MagicMock:
@@ -378,6 +385,147 @@ def test_zero_weight_channels_do_no_retrieval_work(
         assert vector_columns == []
     else:
         assert vector_columns == [expected_vector_column]
+
+
+def test_ready_semantic_profile_uses_qwen_and_collapses_views_per_unit(
+    config: Config,
+) -> None:
+    """Independent text views produce one RRF vote and expose match evidence."""
+    from pipeline.index.text_features import TextIndexProfile
+    from pipeline.search.retrieve import search
+
+    config.retrieval.weights.img = 0.0
+    config.retrieval.weights.txt = 1.0
+    config.retrieval.weights.lex = 0.0
+    profile = TextIndexProfile(
+        profile_id="qwen-v1",
+        table_name="unit_text_qwen_v1",
+        model_id="Qwen/test",
+        model_revision="abc123",
+        dimension=VEC_DIM,
+    )
+    first = _make_unit_row(shot_id="film_abc_0001")
+    second = _make_unit_row(shot_id="film_abc_0002")
+    feature_rows = [
+        {
+            "feature_id": "film_abc_0001::text::dialogue",
+            "profile_id": profile.profile_id,
+            "film_id": "film_abc",
+            "unit_id": "film_abc_0001",
+            "view": "dialogue",
+            "text": "Meet me after midnight.",
+            "_distance": 0.05,
+        },
+        {
+            "feature_id": "film_abc_0001::text::caption",
+            "profile_id": profile.profile_id,
+            "film_id": "film_abc",
+            "unit_id": "film_abc_0001",
+            "view": "caption",
+            "text": "A woman waits outside.",
+            "_distance": 0.08,
+        },
+        {
+            "feature_id": "film_abc_0002::text::caption",
+            "profile_id": profile.profile_id,
+            "film_id": "film_abc",
+            "unit_id": "film_abc_0002",
+            "view": "caption",
+            "text": "A clock reads midnight.",
+            "_distance": 0.10,
+        },
+    ]
+
+    features = MagicMock()
+    features.search.return_value = _make_query_chain(feature_rows)
+    units = MagicMock()
+    units.search.return_value = _make_query_chain([first, second])
+    db = MagicMock()
+    db.open_table.side_effect = lambda name: {
+        "units": units,
+        profile.table_name: features,
+    }[name]
+
+    with (
+        patch(
+            "pipeline.search.retrieve._ready_text_profile",
+            return_value=profile,
+        ),
+        patch(
+            "pipeline.search.retrieve.embed_semantic_query",
+            return_value=_fake_vec()[0],
+        ) as semantic_embed,
+        patch("pipeline.search.retrieve.embed_text") as pe_embed,
+    ):
+        results = search("meet me after midnight", db, config)
+
+    semantic_embed.assert_called_once_with("meet me after midnight", config)
+    pe_embed.assert_not_called()
+    assert [result["unit_id"] for result in results] == [
+        "film_abc_0001",
+        "film_abc_0002",
+    ]
+    assert results[0]["matched_text_view"] == "dialogue"
+    assert results[0]["matched_text"] == "Meet me after midnight."
+    assert results[0]["debug"]["channels"]["txt"]["source"] == "dialogue"
+    assert features.search.call_count == 1
+    features.search.return_value.select.assert_called_once_with(
+        [
+            "feature_id",
+            "profile_id",
+            "film_id",
+            "unit_id",
+            "view",
+            "text",
+            "_distance",
+        ]
+    )
+
+
+def test_ready_semantic_profile_failure_falls_back_as_one_legacy_channel(
+    config: Config,
+) -> None:
+    from pipeline.index.text_features import TextIndexProfile
+    from pipeline.search.retrieve import search
+
+    config.retrieval.weights.img = 0.0
+    config.retrieval.weights.txt = 1.0
+    config.retrieval.weights.lex = 0.0
+    profile = TextIndexProfile(
+        profile_id="qwen-v1",
+        table_name="unit_text_qwen_v1",
+        model_id="Qwen/test",
+        model_revision="abc123",
+        dimension=VEC_DIM,
+    )
+    row = _make_unit_row()
+    db = _make_hybrid_mock_db(
+        image_rows=[],
+        text_rows=[row],
+        lexical_rows=[],
+    )
+
+    with (
+        patch(
+            "pipeline.search.retrieve._ready_text_profile",
+            return_value=profile,
+        ),
+        patch(
+            "pipeline.search.retrieve.embed_semantic_query",
+            side_effect=RuntimeError("weights unavailable"),
+        ),
+        patch(
+            "pipeline.search.retrieve.embed_text",
+            return_value=_fake_vec(),
+        ) as legacy_embed,
+    ):
+        results = search("rainy night", db, config)
+
+    legacy_embed.assert_called_once_with(["rainy night"], config)
+    assert [result["unit_id"] for result in results] == [row["unit_id"]]
+    assert results[0]["debug"]["channels"]["txt"]["source"] == (
+        "legacy_combined_text"
+    )
 
 
 def test_search_rejects_no_enabled_channels(config: Config) -> None:
@@ -1220,6 +1368,200 @@ def test_search_rejects_invalid_result_limit_before_work(config: Config) -> None
 # ---------------------------------------------------------------------------
 
 
+def test_reference_and_text_fusion_rewards_agreement_and_preserves_evidence() -> None:
+    from pipeline.search.retrieve import _fuse_reference_and_text_results
+
+    reference_results = [
+        {
+            "unit_id": "reference_only",
+            "matched_frame_url": "/media/keyframe/reference_only/0",
+            "debug": {"channels": {"spatial": {"rank": 1}}},
+        },
+        {
+            "unit_id": "both",
+            "matched_frame_url": "/media/keyframe/both/2",
+            "debug": {"channels": {"spatial": {"rank": 2}}},
+        },
+    ]
+    text_results = [
+        {
+            "unit_id": "both",
+            "matched_text_view": "dialogue",
+            "matched_text": "Come out into the rain.",
+            "debug": {"channels": {"txt": {"rank": 1}}},
+        },
+        {
+            "unit_id": "text_only",
+            "debug": {"channels": {"lex": {"rank": 2}}},
+        },
+    ]
+
+    results = _fuse_reference_and_text_results(
+        reference_results,
+        text_results,
+        result_limit=3,
+    )
+
+    assert [result["unit_id"] for result in results] == [
+        "both",
+        "reference_only",
+    ]
+    assert results[0]["matched_frame_url"] == "/media/keyframe/both/2"
+    assert results[0]["matched_text_view"] == "dialogue"
+    assert results[0]["matched_text"] == "Come out into the rain."
+    assert set(results[0]["debug"]["channels"]) == {"spatial"}
+    assert set(results[0]["debug"]["clauses"]) == {"reference", "text"}
+    assert set(
+        results[0]["debug"]["clauses"]["text"]["channels"]
+    ) == {"txt"}
+    assert results[0]["debug"]["query_ranks"] == {
+        "reference": 2,
+        "text": 1,
+    }
+    assert results[0]["debug"]["mode"] == "reference_image_text"
+
+
+def test_search_by_image_with_text_runs_both_replaceable_retrievers(
+    config: Config,
+) -> None:
+    from pipeline.search.retrieve import search_by_image
+
+    reference_results = [{"unit_id": "both", "debug": {"channels": {}}}]
+    text_results = [{"unit_id": "both", "debug": {"channels": {}}}]
+    image = Image.new("RGB", (32, 18), "black")
+    db = MagicMock()
+
+    with (
+        patch(
+            "pipeline.search.retrieve._search_by_image_only",
+            return_value=reference_results,
+        ) as image_search,
+        patch(
+            "pipeline.search.retrieve.search",
+            return_value=text_results,
+        ) as text_search,
+    ):
+        results = search_by_image(
+            image,
+            db,
+            config,
+            film_ids=["film_one"],
+            exclude_unit_id="source",
+            result_limit=7,
+            text_query="  neon rain  ",
+        )
+
+    assert [result["unit_id"] for result in results] == ["both"]
+    image_search.assert_called_once_with(
+        image,
+        db,
+        config,
+        film_ids=("film_one",),
+        exclude_unit_id="source",
+        result_limit=100,
+        requested_text="neon rain",
+        deduplicate_visual=False,
+    )
+    text_search.assert_called_once_with(
+        "neon rain",
+        db,
+        config,
+        film_ids=("film_one",),
+        result_limit=100,
+    )
+
+
+def test_blank_text_preserves_reference_search_exactly(config: Config) -> None:
+    from pipeline.search.retrieve import search_by_image
+
+    reference_results = [
+        {
+            "unit_id": "first",
+            "rank": 1,
+            "debug": {"mode": "reference_image", "channels": {}},
+        }
+    ]
+    image = Image.new("RGB", (32, 18), "black")
+
+    with (
+        patch(
+            "pipeline.search.retrieve._search_by_image_only",
+            return_value=reference_results,
+        ) as image_search,
+        patch("pipeline.search.retrieve.search") as text_search,
+    ):
+        results = search_by_image(
+            image,
+            MagicMock(),
+            config,
+            text_query="   ",
+        )
+
+    assert results is reference_results
+    assert image_search.call_args.kwargs["requested_text"] == ""
+    assert image_search.call_args.kwargs["deduplicate_visual"] is True
+    text_search.assert_not_called()
+
+
+def test_text_constraint_can_retain_visually_similar_repeated_shots(
+    config: Config,
+) -> None:
+    from pipeline.search.retrieve import _search_by_image_only
+
+    first = _make_unit_row("first", "film_one", img_vec=_basis_vec(0))
+    second = _make_unit_row("second", "film_one", img_vec=_basis_vec(0))
+    frame_rows = [
+        {
+            "frame_id": f"{unit_id}_0",
+            "unit_id": unit_id,
+            "shot_id": unit_id,
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": timestamp,
+            "path": f"{unit_id}.webp",
+            "_distance": distance,
+            "_semantic_rank": rank,
+            "_semantic_score": 1.0 - distance,
+            "_spatial_rank": rank,
+            "_spatial_score": 1.0 - distance,
+            "_reference_score": 1.0 - distance,
+        }
+        for unit_id, timestamp, distance, rank in (
+            ("first", 10.0, 0.01, 1),
+            ("second", 200.0, 0.02, 2),
+        )
+    ]
+    units = MagicMock()
+    units.search.return_value = _make_query_chain([first, second])
+    db = MagicMock()
+    db.open_table.return_value = units
+
+    with patch(
+        "pipeline.search.retrieve._reference_frame_candidates",
+        return_value=frame_rows,
+    ):
+        image_only = _search_by_image_only(
+            Image.new("RGB", (32, 18), "black"),
+            db,
+            config,
+            result_limit=2,
+        )
+        combined_candidates = _search_by_image_only(
+            Image.new("RGB", (32, 18), "black"),
+            db,
+            config,
+            result_limit=2,
+            requested_text="the second conversation",
+            deduplicate_visual=False,
+        )
+
+    assert [result["unit_id"] for result in image_only] == ["first"]
+    assert [result["unit_id"] for result in combined_candidates] == [
+        "first",
+        "second",
+    ]
+
+
 def test_spatial_grid_scores_reward_matching_screen_cells() -> None:
     """Equal global content scores still distinguish aligned from swapped layout."""
     from pipeline.search.retrieve import _spatial_grid_scores
@@ -1286,6 +1628,7 @@ def test_search_by_image_blends_semantics_with_aligned_spatial_cells(
 
     frames = MagicMock()
     frames.search.return_value = _make_query_chain(frame_rows)
+    _mark_frames_as_current_profile(frames, len(frame_rows))
     units = MagicMock()
     units.search.return_value = _make_query_chain([first, second])
     db = MagicMock()
@@ -1433,6 +1776,7 @@ def test_search_by_image_reranks_unique_shots_not_duplicate_frames(
     frame_query = _make_query_chain(frame_rows)
     frames = MagicMock()
     frames.search.return_value = frame_query
+    _mark_frames_as_current_profile(frames, len(frame_rows))
     units = MagicMock()
     units.search.return_value = _make_query_chain([first, second])
     db = MagicMock()
@@ -1477,7 +1821,7 @@ def test_search_by_image_excludes_source_unit(
     tmp_path: Path,
     config: Config,
 ) -> None:
-    """The in-app Similar action does not return its own source shot."""
+    """The in-app Composition action does not return its source shot."""
     from pipeline.search.retrieve import search_by_image
 
     paths = [tmp_path / "source.webp", tmp_path / "other.webp"]
@@ -1503,6 +1847,7 @@ def test_search_by_image_excludes_source_unit(
     ]
     frames = MagicMock()
     frames.search.return_value = _make_query_chain(frame_rows)
+    _mark_frames_as_current_profile(frames, len(frame_rows))
     units = MagicMock()
     units.search.return_value = _make_query_chain([source, other])
     db = MagicMock()
@@ -1583,6 +1928,7 @@ def test_reference_image_temporal_diversity_backfills_adjacent_matches(
     ]
     frames = MagicMock()
     frames.search.return_value = _make_query_chain(frame_rows)
+    _mark_frames_as_current_profile(frames, len(frame_rows))
     units = MagicMock()
     units.search.return_value = _make_query_chain(units_rows)
     db = MagicMock()
@@ -1674,6 +2020,7 @@ def test_api_image_search_accepts_raw_image_and_forwards_scope(
                     ("film_id", "film_one"),
                     ("film_id", "film_two"),
                     ("exclude_unit_id", "source"),
+                    ("q", "neon rain"),
                 ],
                 content=buffer.getvalue(),
                 headers={"Content-Type": "image/png"},
@@ -1690,6 +2037,7 @@ def test_api_image_search_accepts_raw_image_and_forwards_scope(
         "film_ids": ["film_one", "film_two"],
         "exclude_unit_id": "source",
         "result_limit": 48,
+        "text_query": "neon rain",
     }
 
 
@@ -1741,6 +2089,33 @@ def test_api_image_search_rejects_oversized_payload(config: Config) -> None:
             )
 
     assert response.status_code == 413
+
+
+def test_api_image_search_rejects_text_constraint_over_500_chars(
+    config: Config,
+) -> None:
+    from fastapi.testclient import TestClient
+    from io import BytesIO
+
+    buffer = BytesIO()
+    Image.new("RGB", (32, 18), "red").save(buffer, format="PNG")
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=MagicMock()),
+        patch("pipeline.api.main._search_by_image") as image_search,
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.post(
+                "/search/image",
+                params={"q": "x" * 501},
+                content=buffer.getvalue(),
+                headers={"Content-Type": "image/png"},
+            )
+
+    assert response.status_code == 422
+    image_search.assert_not_called()
 
 
 def test_api_image_search_stream_cap_does_not_require_content_length(

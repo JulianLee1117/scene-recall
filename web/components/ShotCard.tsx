@@ -20,6 +20,12 @@ const CHANNEL_LABELS = {
   lex: "lex",
   spatial: "pos",
 } as const;
+const TEXT_VIEW_LABELS: Record<string, string> = {
+  caption: "Visual description",
+  dialogue: "Dialogue",
+  ocr: "On-screen text",
+  facets: "Scene detail",
+};
 
 function unitSuffix(unitId: string): string {
   const separator = unitId.lastIndexOf("_");
@@ -48,6 +54,9 @@ export default function ShotCard({
   const debugDescriptionId = useId();
   const displayedRank = shot.rank ?? position;
   const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
+  const matchedTextLabel = shot.matched_text_view
+    ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
+    : null;
 
   const handleMouseEnter = useCallback(() => {
     setHovered(true);
@@ -122,6 +131,12 @@ export default function ShotCard({
               opacity: hovered ? 1 : 0,
             }}
           >
+            {matchedTextLabel && shot.matched_text && (
+              <span className="result-match-evidence">
+                <span>{matchedTextLabel} match</span>
+                <span>{shot.matched_text}</span>
+              </span>
+            )}
             <span className="result-film">
               {shot.film_title ?? filmLabel(shot.film_id)}
             </span>
@@ -150,6 +165,14 @@ export default function ShotCard({
                 </span>
               </span>
             )}
+            {shot.debug?.query_ranks && (
+              <span className="result-debug-line">
+                <span>
+                  composition #{shot.debug.query_ranks.reference ?? "—"}
+                </span>
+                <span>text #{shot.debug.query_ranks.text ?? "—"}</span>
+              </span>
+            )}
             <span className="result-debug-channels">
               {(Object.keys(CHANNEL_LABELS) as Array<
                 keyof typeof CHANNEL_LABELS
@@ -173,8 +196,8 @@ export default function ShotCard({
         onClick={handleFindSimilar}
         onFocus={handleMouseEnter}
         onBlur={handleMouseLeave}
-        aria-label={`Find shots with framing similar to result ${displayedRank}`}
-        title="Find similar framing"
+        aria-label={`Match the composition of result ${displayedRank}`}
+        title="Match composition"
       >
         <svg
           width="17"
@@ -193,7 +216,7 @@ export default function ShotCard({
           <path d="M8 21H3v-5" />
           <circle cx="12" cy="12" r="3" />
         </svg>
-        <span>Similar</span>
+        <span>Composition</span>
       </button>
     </article>
   );

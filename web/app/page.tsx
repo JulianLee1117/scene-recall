@@ -82,7 +82,6 @@ export default function Home() {
       referencePreviewUrlRef.current = previewUrl;
       setReferenceLabel(label);
       setReferencePreviewUrl(previewUrl);
-      setQuery("");
       setCompletedQuery(null);
       setActiveShot(null);
     },
@@ -149,6 +148,7 @@ export default function Home() {
       label: string,
       excludeUnitId: string | null = null,
       scope: readonly string[] = selectedFilmIds,
+      textQuery: string = "",
     ) => {
       cancelPendingScopeSearch();
       searchAbortRef.current?.abort();
@@ -163,6 +163,10 @@ export default function Home() {
       scope.forEach((filmId) => params.append("film_id", filmId));
       if (excludeUnitId) {
         params.set("exclude_unit_id", excludeUnitId);
+      }
+      const trimmedTextQuery = textQuery.trim();
+      if (trimmedTextQuery) {
+        params.set("q", trimmedTextQuery);
       }
       const suffix = params.size ? `?${params.toString()}` : "";
 
@@ -192,6 +196,7 @@ export default function Home() {
         setVisibleResultCount(nextBatchSize);
         setResults(data.results);
         setReferenceLabel(label);
+        setCompletedQuery(trimmedTextQuery || null);
       } catch (err) {
         if (controller.signal.aborted) return;
         setError(
@@ -232,6 +237,7 @@ export default function Home() {
             referenceLabelRef.current,
             referenceExcludeRef.current,
             filmIds,
+            pendingQuery,
           );
         } else if (pendingQuery) {
           void runSearch(pendingQuery, filmIds);
@@ -249,20 +255,32 @@ export default function Home() {
 
   const handleVoiceTranscript = useCallback(
     (transcript: string) => {
-      clearReference();
+      cancelPendingScopeSearch();
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
+      setLoading(false);
       setQuery(transcript);
     },
-    [clearReference],
+    [cancelPendingScopeSearch],
   );
 
   const handleVoiceComplete = useCallback(
     (transcript: string) => {
-      clearReference();
       setQuery(transcript);
       inputRef.current?.focus();
-      void runSearch(transcript);
+      if (referenceBlobRef.current && referenceLabelRef.current) {
+        void runImageSearch(
+          referenceBlobRef.current,
+          referenceLabelRef.current,
+          referenceExcludeRef.current,
+          selectedFilmIds,
+          transcript,
+        );
+      } else {
+        void runSearch(transcript);
+      }
     },
-    [clearReference, runSearch]
+    [runImageSearch, runSearch, selectedFilmIds],
   );
 
   const speech = useSpeechRecognition({
@@ -274,9 +292,15 @@ export default function Home() {
     (file: File) => {
       speech.cancel();
       activateReference(file, file.name || "Uploaded frame");
-      void runImageSearch(file, file.name || "Uploaded frame");
+      void runImageSearch(
+        file,
+        file.name || "Uploaded frame",
+        null,
+        selectedFilmIds,
+        query,
+      );
     },
-    [activateReference, runImageSearch, speech],
+    [activateReference, query, runImageSearch, selectedFilmIds, speech],
   );
 
   const handleFindSimilar = useCallback(
@@ -307,7 +331,13 @@ export default function Home() {
         if (searchAbortRef.current !== controller) return;
         const label = `Result ${shot.rank ?? ""} frame`.trim();
         activateReference(image, label, shot.unit_id);
-        await runImageSearch(image, label, shot.unit_id);
+        await runImageSearch(
+          image,
+          label,
+          shot.unit_id,
+          selectedFilmIds,
+          query,
+        );
       } catch (err) {
         if (controller.signal.aborted) return;
         setError(
@@ -324,8 +354,10 @@ export default function Home() {
       activateReference,
       cancelPendingScopeSearch,
       loading,
+      query,
       resultBatchSize,
       runImageSearch,
+      selectedFilmIds,
       speech,
     ],
   );
@@ -333,14 +365,20 @@ export default function Home() {
   const handleClearReference = useCallback(() => {
     searchAbortRef.current?.abort();
     clearReference();
-    setResults([]);
-    setResultBatchSize(DEFAULT_RESULT_BATCH_SIZE);
-    setVisibleResultCount(DEFAULT_RESULT_BATCH_SIZE);
-    setError(null);
-    setCompletedQuery(null);
-    setLoading(false);
+    setActiveShot(null);
+    const remainingQuery = query.trim();
+    if (remainingQuery) {
+      void runSearch(remainingQuery);
+    } else {
+      setResults([]);
+      setResultBatchSize(DEFAULT_RESULT_BATCH_SIZE);
+      setVisibleResultCount(DEFAULT_RESULT_BATCH_SIZE);
+      setError(null);
+      setCompletedQuery(null);
+      setLoading(false);
+    }
     inputRef.current?.focus();
-  }, [clearReference]);
+  }, [clearReference, query, runSearch]);
 
   useEffect(
     () => () => {
@@ -355,11 +393,19 @@ export default function Home() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const submittedQuery = query;
+    const submittedQuery = query.trim();
     speech.cancel();
-    clearReference();
-    setQuery(submittedQuery);
-    void runSearch(submittedQuery);
+    if (referenceBlobRef.current && referenceLabelRef.current) {
+      void runImageSearch(
+        referenceBlobRef.current,
+        referenceLabelRef.current,
+        referenceExcludeRef.current,
+        selectedFilmIds,
+        submittedQuery,
+      );
+    } else if (submittedQuery) {
+      void runSearch(submittedQuery);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -371,11 +417,19 @@ export default function Home() {
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      const submittedQuery = query;
+      const submittedQuery = query.trim();
       speech.cancel();
-      clearReference();
-      setQuery(submittedQuery);
-      void runSearch(submittedQuery);
+      if (referenceBlobRef.current && referenceLabelRef.current) {
+        void runImageSearch(
+          referenceBlobRef.current,
+          referenceLabelRef.current,
+          referenceExcludeRef.current,
+          selectedFilmIds,
+          submittedQuery,
+        );
+      } else if (submittedQuery) {
+        void runSearch(submittedQuery);
+      }
     }
   };
 
@@ -444,7 +498,7 @@ export default function Home() {
                 e.currentTarget.style.color = "#555";
             }}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === "library" ? "Films" : "Search"}
           </button>
         ))}
       </div>
@@ -507,11 +561,18 @@ export default function Home() {
                   onChange={(e) => {
                     speech.cancel();
                     speech.clearError();
-                    clearReference();
+                    cancelPendingScopeSearch();
+                    searchAbortRef.current?.abort();
+                    searchAbortRef.current = null;
+                    setLoading(false);
                     setQuery(e.target.value);
                   }}
                   onKeyDown={handleKeyDown}
-                  placeholder="describe a scene…"
+                  placeholder={
+                    referenceLabel
+                      ? "add a text constraint…"
+                      : "describe a scene…"
+                  }
                   aria-label="Describe a scene"
                   aria-describedby={voiceStatus ? voiceStatusId : undefined}
                   autoFocus
@@ -555,8 +616,8 @@ export default function Home() {
                   type="button"
                   className="image-search-button"
                   disabled={loading}
-                  aria-label="Search by reference image"
-                  title="Search by reference frame"
+                  aria-label="Choose a composition reference"
+                  title="Choose a composition reference"
                   onClick={() => {
                     speech.cancel();
                     imageInputRef.current?.click();
@@ -708,7 +769,11 @@ export default function Home() {
                   <img src={referencePreviewUrl} alt="" />
                   <span className="reference-query-copy">
                     <span>{referenceLabel}</span>
-                    <span>Position + composition match</span>
+                    <span>
+                      {query.trim()
+                        ? "Composition reference + text constraint"
+                        : "Composition reference"}
+                    </span>
                   </span>
                   <button
                     type="button"
@@ -717,6 +782,32 @@ export default function Home() {
                     title="Clear reference"
                   >
                     ×
+                  </button>
+                </div>
+              )}
+
+              {isEmpty && !query.trim() && !referenceLabel && (
+                <div className="search-examples" aria-label="Example searches">
+                  <span>Try</span>
+                  {["a lonely figure under red neon", '"I remember everything"'].map(
+                    (example) => (
+                      <button
+                        key={example}
+                        type="button"
+                        onClick={() => {
+                          setQuery(example);
+                          void runSearch(example);
+                        }}
+                      >
+                        {example}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    upload a frame for composition
                   </button>
                 </div>
               )}
@@ -773,6 +864,8 @@ export default function Home() {
             <VideoModal
               shot={activeShot}
               onClose={() => setActiveShot(null)}
+              onMatchComposition={handleFindSimilar}
+              matchCompositionDisabled={loading}
             />
           )}
         </>

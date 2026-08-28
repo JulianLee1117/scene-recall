@@ -1,20 +1,38 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import type { SearchResult } from "@/types/api";
 import { formatTime, filmLabel } from "@/lib/format";
 
 interface VideoModalProps {
   shot: SearchResult;
   onClose: () => void;
+  onMatchComposition?: (shot: SearchResult) => void;
+  matchCompositionDisabled?: boolean;
 }
 
-export default function VideoModal({ shot, onClose }: VideoModalProps) {
+const TEXT_VIEW_LABELS: Record<string, string> = {
+  caption: "Visual description",
+  dialogue: "Dialogue",
+  ocr: "On-screen text",
+  facets: "Scene detail",
+};
+
+export default function VideoModal({
+  shot,
+  onClose,
+  onMatchComposition,
+  matchCompositionDisabled = false,
+}: VideoModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hasSeenCanPlay = useRef(false);
+  const [timestampCopied, setTimestampCopied] = useState(false);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
   const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
   const seekTarget = Math.max(0, evidenceTime - 1);
+  const matchedTextLabel = shot.matched_text_view
+    ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
+    : null;
 
   // Reset the one-shot guard whenever the shot changes
   useEffect(() => {
@@ -47,6 +65,16 @@ export default function VideoModal({ shot, onClose }: VideoModalProps) {
       document.body.style.overflow = "";
     };
   }, []);
+
+  const copyTimestamp = useCallback(() => {
+    void navigator.clipboard
+      .writeText(formatTime(evidenceTime))
+      .then(() => {
+        setTimestampCopied(true);
+        window.setTimeout(() => setTimestampCopied(false), 1600);
+      })
+      .catch(() => setTimestampCopied(false));
+  }, [evidenceTime]);
 
   return (
     <div
@@ -106,21 +134,33 @@ export default function VideoModal({ shot, onClose }: VideoModalProps) {
           style={{ width: "100%", display: "block", background: "#000" }}
         />
 
-        {/* caption */}
-        {shot.caption && (
-          <p
-            style={{
-              margin: 0,
-              padding: "8px 14px 12px",
-              color: "#8a8a8a",
-              fontSize: "0.8rem",
-              fontStyle: "italic",
-              lineHeight: 1.5,
-            }}
-          >
-            {shot.caption}
-          </p>
-        )}
+        <div className="modal-evidence">
+          {matchedTextLabel && shot.matched_text && (
+            <div className="modal-match-evidence">
+              <span>{matchedTextLabel} match</span>
+              <span>{shot.matched_text}</span>
+            </div>
+          )}
+          {shot.caption &&
+            !(
+              shot.matched_text_view === "caption" &&
+              shot.matched_text === shot.caption
+            ) && <p>{shot.caption}</p>}
+          <div className="modal-actions">
+            <button type="button" onClick={copyTimestamp}>
+              {timestampCopied ? "Timestamp copied" : "Copy timestamp"}
+            </button>
+            {onMatchComposition && (
+              <button
+                type="button"
+                disabled={matchCompositionDisabled}
+                onClick={() => onMatchComposition(shot)}
+              >
+                Match composition
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

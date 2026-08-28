@@ -10,14 +10,31 @@ export interface SearchChannelDebug {
   rank: number;
   score: number;
   distance: number | null;
-  source?: "frame" | "unit";
+  source?: string;
   matched_frame?: MatchedFrameDebug;
+  matched_text?: {
+    feature_id?: string;
+    view?: string;
+    text?: string;
+    profile_id?: string;
+  };
 }
 
 export interface SearchDebug {
-  mode?: "reference_image";
+  mode?: "reference_image" | "reference_image_text";
   final_score: number;
   channels?: Partial<Record<SearchChannel, SearchChannelDebug>>;
+  query_ranks?: Partial<Record<"reference" | "text", number>>;
+  clauses?: Partial<
+    Record<
+      "reference" | "text",
+      {
+        mode?: string;
+        final_score?: number;
+        channels?: Partial<Record<SearchChannel, SearchChannelDebug>>;
+      }
+    >
+  >;
 }
 
 export interface SearchResult {
@@ -38,6 +55,9 @@ export interface SearchResult {
   matched_frame_url?: string;
   matched_frame_index?: number;
   matched_frame_timestamp?: number;
+  /** Best independent text view supporting this result. */
+  matched_text_view?: string;
+  matched_text?: string;
 }
 
 export interface SearchResponse {
@@ -59,13 +79,29 @@ export interface LibraryFilm {
   duration: number | null;
 }
 
+export interface IncomingFilm {
+  /** Path relative to the configured incoming directory. */
+  relative_path: string;
+  /** Filename of the main movie selected from this incoming item. */
+  filename: string;
+  size_gb: number;
+  suggested_title: string;
+  suggested_year: number | null;
+  suggested_edition: string | null;
+  suggested_filename: string;
+  /** Other video files in the torrent folder that will not be imported. */
+  extra_video_count: number;
+}
+
 export interface IngestJob {
   job_id: string;
   path: string;
   filename: string;
-  status: "running" | "done" | "error";
-  started_at: number;
+  status: "queued" | "running" | "done" | "error";
+  queued_at: number;
+  started_at: number | null;
   finished_at: number | null;
+  queue_position: number | null;
   error: string | null;
   /** Latest pipeline output line, e.g. "[annotate] 150/612". */
   progress?: string | null;
@@ -73,7 +109,19 @@ export interface IngestJob {
   log?: string[];
 }
 
-export interface IngestResponse {
-  job_id: string;
-  status: string;
+export type IngestResponse = IngestJob;
+
+export interface ImportFilmRequest {
+  relative_path: string;
+  title: string;
+  year: number;
+  edition: string | null;
+  ingest: boolean;
+  confirm_finished: true;
+}
+
+export interface ImportFilmResponse {
+  path: string;
+  filename: string;
+  job: IngestJob | null;
 }
