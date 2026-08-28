@@ -1,4 +1,4 @@
-"""cli.py — Click-based CLI entry point for the cinema-search pipeline.
+"""Click-based CLI entry point for Scene Recall.
 
 Usage::
 
@@ -8,12 +8,11 @@ Usage::
     python -m pipeline.cli relink-film <new_path> [--apply]
     python -m pipeline.cli recover-relink <film_id>
     python -m pipeline.cli index-frames [--film-id FILM_ID]
-    python -m pipeline.cli eval [--queries pipeline/eval/gold_queries.yaml]
+    python -m pipeline.cli index-text [--film-id FILM_ID]
 
 The ``ingest`` command runs the full ingest pipeline and prints a summary.
 The ``ingest-batch`` command ingests every video in a directory, skipping
 films whose content hash is already fully indexed.
-The ``eval`` command runs the evaluation harness against indexed films.
 """
 
 from __future__ import annotations
@@ -37,9 +36,6 @@ from pipeline.index.writer import (
     published_film_ids,
     table_names,
 )
-
-_DEFAULT_QUERIES = Path(__file__).parent / "eval" / "gold_queries.yaml"
-
 
 def run_pipeline(film_path: Path, config: Config) -> Any:
     """Load the heavyweight ingest stack only when a film actually runs."""
@@ -71,7 +67,7 @@ def _lower_own_priority() -> None:
 
 @click.group()
 def cli() -> None:
-    """Cinema search pipeline."""
+    """Scene Recall ingestion and index maintenance."""
 
 
 @cli.command()
@@ -292,11 +288,14 @@ def index_frames_cmd(film_id: str | None, batch_size: int) -> None:
     """Build the local frame index from already-extracted keyframes."""
     from pipeline.index.backfill_frames import backfill_frames
 
-    result = backfill_frames(
-        load_config(),
-        film_id=film_id,
-        batch_size=batch_size,
-    )
+    try:
+        result = backfill_frames(
+            load_config(),
+            film_id=film_id,
+            batch_size=batch_size,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(
         "Frames: "
         f"{result.discovered} found, "
@@ -306,25 +305,35 @@ def index_frames_cmd(film_id: str | None, batch_size: int) -> None:
     )
 
 
-@cli.command("eval")
+@cli.command("index-text")
 @click.option(
-    "--queries",
-    "queries_path",
-    type=click.Path(path_type=Path),
+    "--film-id",
     default=None,
-    show_default=True,
-    help="Path to gold_queries.yaml (default: pipeline/eval/gold_queries.yaml).",
+    help="Only rebuild text features belonging to this film ID.",
 )
-def eval_cmd(queries_path: Path | None) -> None:
-    """Run the evaluation harness against indexed films.
+def index_text_cmd(film_id: str | None) -> None:
+    """Build independent local caption/dialogue/OCR/facet embeddings.
 
-    Reads QUERIES_PATH (a YAML file of gold queries), calls search() for each
-    non-placeholder query, and prints per-query hit@5 / hit@10 results plus
-    aggregate metrics at the end.
+    A scoped run is safe but activates the new search profile only when every
+    current unit in the library has matching feature rows.
     """
-    from pipeline.eval.run_eval import main as run_eval_main
+    from pipeline.index.backfill_text import backfill_text_features
 
-    run_eval_main(queries_path or _DEFAULT_QUERIES)
+    try:
+        result = backfill_text_features(load_config(), film_id=film_id)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        "Text features: "
+        f"{result.units_discovered} units, "
+        f"{result.features_discovered} views, "
+        f"{result.embedded} embedded, "
+        f"{result.skipped_current} current."
+    )
+    click.echo(
+        f"Profile {result.profile_id}: "
+        + ("active" if result.activated else "not active (coverage incomplete)")
+    )
 
 
 if __name__ == "__main__":

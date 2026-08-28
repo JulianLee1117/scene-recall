@@ -18,8 +18,9 @@ Facet values outside their vocabulary are coerced to ``"unknown"`` rather
 than failing the (paid) call; only an unusable caption or mood list aborts.
 
 The function filters the supplied dialogue list to lines that overlap the
-shot's time range and appends their text to the caption to form
-``searchable_text`` (used later for text embedding).
+shot's time range and appends their text to the caption to form the legacy
+``searchable_text`` lexical projection. Dedicated semantic indexes embed the
+caption, dialogue, OCR, and facets as independent views.
 
 Usage::
 
@@ -38,6 +39,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, get_args
@@ -229,9 +231,26 @@ def annotate_shot(
 
     annotation: dict | None = None
     if cache_dir is not None:
-        cache_path = _annotation_cache_path(cache_dir, shot.shot_id)
         cache_identity = _annotation_cache_identity(keyframes, config, provider)
+        profile_id = _annotation_profile_id(cache_identity)
+        cache_path = _annotation_cache_path(
+            cache_dir,
+            shot.shot_id,
+            profile_id=profile_id,
+        )
         annotation = _read_annotation_cache(cache_path, cache_identity)
+        if annotation is None:
+            # Migrate a matching pre-profile cache without deleting it.  This
+            # preserves paid work while future model/prompt profiles coexist.
+            legacy_path = _annotation_cache_path(cache_dir, shot.shot_id)
+            annotation = _read_annotation_cache(legacy_path, cache_identity)
+            if annotation is not None:
+                _write_annotation_cache(
+                    cache_path,
+                    shot_id=shot.shot_id,
+                    identity=cache_identity,
+                    annotation=annotation,
+                )
 
     if annotation is None:
         if provider == "openai":
@@ -306,8 +325,13 @@ def _validate_annotation(raw: dict, provider: str) -> dict:
     return annotation
 
 
-def _annotation_cache_path(cache_dir: Path, shot_id: str) -> Path:
-    """Return a human-readable cache path while rejecting unsafe shot IDs."""
+def _annotation_cache_path(
+    cache_dir: Path,
+    shot_id: str,
+    *,
+    profile_id: str | None = None,
+) -> Path:
+    """Return a cache path while rejecting unsafe shot/profile identifiers."""
     if (
         not shot_id
         or Path(shot_id).name != shot_id
@@ -315,7 +339,29 @@ def _annotation_cache_path(cache_dir: Path, shot_id: str) -> Path:
         or "\\" in shot_id
     ):
         raise AnnotationError(f"Unsafe shot ID for annotation cache: {shot_id!r}")
-    return cache_dir / f"{shot_id}.json"
+    if profile_id is None:
+        return cache_dir / f"{shot_id}.json"
+    if not re.fullmatch(r"[a-f0-9]{20}", profile_id):
+        raise AnnotationError(
+            f"Unsafe annotation profile ID for cache: {profile_id!r}"
+        )
+    return cache_dir / profile_id / f"{shot_id}.json"
+
+
+def _annotation_profile_id(identity: dict) -> str:
+    """Hash producer/prompt/schema settings, excluding shot-specific frames."""
+    profile = {
+        key: value
+        for key, value in identity.items()
+        if key != "keyframes"
+    }
+    payload = json.dumps(
+        profile,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
 
 
 def _annotation_cache_identity(

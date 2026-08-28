@@ -1,7 +1,8 @@
 """pipeline.py — full ingest orchestrator.
 
 Wires all pipeline stages together in order:
-  probe → dialogue → shots → media → embed → annotate → write
+  probe → dialogue → shots → media → visual embed → annotate → publish
+  → optional semantic-text derivation
 
 Usage::
 
@@ -17,7 +18,7 @@ Idempotency rules
 - ``dialogue`` — skipped when ``<asset_dir>/dialogue.json`` exists (loaded from cache)
 - ``shots``    — reuses a compatible ``<asset_dir>/shots.json`` cache
 - ``media``    — validates and resumes every expected keyframe and preview
-- ``annotate`` — reuses matching ``<asset_dir>/annotations/<shot_id>.json``
+- ``annotate`` — reuses a matching profile-versioned per-shot cache
 - ``embed`` / ``write`` — always run; unit and frame writes are batched
 """
 
@@ -29,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
+from filelock import Timeout as FileLockTimeout
 
 from pipeline.config import Config
 from pipeline.index.writer import (
@@ -37,6 +39,7 @@ from pipeline.index.writer import (
     create_tables,
     open_db,
     publish_film_index,
+    require_visual_encoder_profile,
     require_current_film_source,
 )
 from pipeline.ingest.annotate import annotate_shot
@@ -49,6 +52,7 @@ from pipeline.ingest.embed import (
 )
 from pipeline.ingest.locks import (
     film_operation_lock,
+    global_ingest_lock,
     require_no_pending_film_relink,
 )
 from pipeline.ingest.media import extract_media, keyframe_seek_time
@@ -62,6 +66,21 @@ from pipeline.ingest.shots import Shot, detect_shots
 
 
 def run_pipeline(film_path: Path, config: Config) -> FilmRecord:
+    """Run one ingest while holding the machine-wide ingest lock."""
+    ingest_lock = global_ingest_lock(config.paths.assets_dir)
+    try:
+        ingest_lock.acquire()
+    except FileLockTimeout as exc:
+        raise RuntimeError(
+            "another film ingest is already running; wait for it to finish"
+        ) from exc
+    try:
+        return _run_pipeline_with_film_lock(film_path, config)
+    finally:
+        ingest_lock.release()
+
+
+def _run_pipeline_with_film_lock(film_path: Path, config: Config) -> FilmRecord:
     """Run the full ingest pipeline for *film_path* and return its :class:`FilmRecord`.
 
     Parameters
@@ -136,6 +155,7 @@ def _run_pipeline_locked(
     # Stages 5-7: Embed + Annotate + Write — always run (per shot)
     # ------------------------------------------------------------------
     create_tables(db, vector_dim=get_vector_dim(config))
+    require_visual_encoder_profile(db, config)
 
     t = time.perf_counter()
     pending_frames: list[FrameWrite] = []
@@ -227,6 +247,33 @@ def _run_pipeline_locked(
     # searchable generation. The final unit merge is the publication boundary.
     publish_film_index(db, film, pending_units, pending_frames)
     print(f"[frames] {len(pending_frames)} indexed")
+
+    # Semantic text features are a replaceable local derivation, not part of
+    # the film publication transaction.  Build this film's independent
+    # caption/dialogue/OCR/facet views after publication. If the configured
+    # weights are unavailable, the completeness manifest stays stale and
+    # search safely continues through the legacy PE text vector.
+    try:
+        from pipeline.index.backfill_text import (
+            backfill_text_features_during_ingest,
+        )
+
+        text_result = backfill_text_features_during_ingest(
+            config,
+            film_id=film.film_id,
+        )
+        state = "active" if text_result.activated else "shadow"
+        print(
+            f"[text-features] {text_result.embedded} embedded "
+            f"({state})",
+            flush=True,
+        )
+    except Exception as exc:
+        print(
+            "[text-features] deferred; legacy text search remains active: "
+            f"{exc}",
+            flush=True,
+        )
     print(f"[embed+annotate+write] {time.perf_counter() - t:.2f}s")
 
     # ------------------------------------------------------------------

@@ -1,5 +1,6 @@
 paths:
   films_dir: V:/scene-recall/films                # source files (immutable)
+  incoming_dir: V:/scene-recall/incoming          # completed downloads awaiting review
   assets_dir: C:/Users/julia/Videos/cinema-assets # derived: keyframes/, previews/, proxies/, db/
 
 models:
@@ -9,14 +10,9 @@ models:
   annotator: gpt-5.6-luna         # high-volume vision annotation
   annotator_image_detail: low     # lower cost; test high if fine detail matters
   annotator_reasoning_effort: none
-  router: qwen3:8b                # ollama model tag; qwen3:4b if VRAM is tight
   whisper: large-v3               # faster-whisper model for subtitle fallback
 
 thresholds:
-  shot_dedup_cosine: 0.12         # within-scene cluster merge distance
-  scene_visual_sim: 0.75          # adjacent-shot embedding similarity for merge
-  scene_dialogue_gap: 2.5         # seconds; subtitle continuity merge
-  scene_max_duration: 300         # seconds; force scene break
   subsegment_min_duration: 20     # seconds; shots longer than this get sub-segmented
   flash_min_duration: 0.5         # seconds; shots shorter than this are flash/strobe artifacts
   keyframe_short_shot_s: 2.0      # seconds; shots shorter than this get 1 keyframe (midpoint)
@@ -32,9 +28,3 @@ retrieval:
   diversity:
     page_size: 12
     film_results_per_page_target: 4  # soft preference; every page relevance-backfills
-  rerank_enabled: false
-
-scoring:
-  duration_weight: 0.05
-  motion_weight: 0.05
-  frame_worthiness_weight: 0.10

@@ -1,8 +1,9 @@
-"""Config dataclass and loader for the cinema-search pipeline.
+"""Config dataclass and loader for Scene Recall.
 
 All pipeline stages call ``load_config()`` once at startup and receive a
-``Config`` object.  No model names, paths, or thresholds are hardcoded
-anywhere else in the pipeline — they all live in ``config.yaml``.
+``Config`` object. User-selectable paths, models, thresholds, and retrieval
+weights live in ``config.yaml``; exact supported model revisions and embedding
+contracts are intentionally code-owned registries.
 
 Resolution order (no explicit path given):
 1. ``CINEMA_CONFIG`` environment variable
@@ -44,6 +45,7 @@ DEFAULT_FILM_RESULTS_PER_PAGE_TARGET = 4
 class PathsConfig:
     films_dir: Path
     assets_dir: Path
+    incoming_dir: Path
 
 
 @dataclass
@@ -51,7 +53,6 @@ class ModelsConfig:
     visual_encoder: str
     text_encoder: str
     annotator: str
-    router: str
     annotator_provider: str = "gemini"
     annotator_image_detail: str = "low"
     annotator_reasoning_effort: str = "none"
@@ -60,10 +61,6 @@ class ModelsConfig:
 
 @dataclass
 class ThresholdsConfig:
-    shot_dedup_cosine: float
-    scene_visual_sim: float
-    scene_dialogue_gap: float
-    scene_max_duration: int
     subsegment_min_duration: int
     flash_min_duration: float = 0.5
     keyframe_short_shot_s: float = 2.0
@@ -86,17 +83,9 @@ class DiversityConfig:
 class RetrievalConfig:
     weights: RetrievalWeights
     diversity: DiversityConfig
-    rerank_enabled: bool
     candidate_limit: int
     result_window: int
     max_result_limit: int
-
-
-@dataclass
-class ScoringConfig:
-    duration_weight: float
-    motion_weight: float
-    frame_worthiness_weight: float
 
 
 @dataclass
@@ -117,7 +106,6 @@ class Config:
     models: ModelsConfig
     thresholds: ThresholdsConfig
     retrieval: RetrievalConfig
-    scoring: ScoringConfig
     ingest: IngestConfig
 
 
@@ -158,9 +146,13 @@ def load_config(path: Optional[Path | str] = None) -> Config:
 
     # --- paths ---
     p = raw["paths"]
+    films_dir = Path(p["films_dir"])
     paths = PathsConfig(
-        films_dir=Path(p["films_dir"]),
+        films_dir=films_dir,
         assets_dir=Path(p["assets_dir"]),
+        # Existing configs continue to work: by convention incoming sits next
+        # to the immutable film library on the same volume.
+        incoming_dir=Path(p.get("incoming_dir", films_dir.parent / "incoming")),
     )
 
     # --- models ---
@@ -201,7 +193,6 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         visual_encoder=m["visual_encoder"],
         text_encoder=m["text_encoder"],
         annotator=annotator,
-        router=m["router"],
         annotator_provider=annotator_provider,
         annotator_image_detail=annotator_image_detail,
         annotator_reasoning_effort=annotator_reasoning_effort,
@@ -211,10 +202,6 @@ def load_config(path: Optional[Path | str] = None) -> Config:
     # --- thresholds ---
     t = raw["thresholds"]
     thresholds = ThresholdsConfig(
-        shot_dedup_cosine=float(t["shot_dedup_cosine"]),
-        scene_visual_sim=float(t["scene_visual_sim"]),
-        scene_dialogue_gap=float(t["scene_dialogue_gap"]),
-        scene_max_duration=int(t["scene_max_duration"]),
         subsegment_min_duration=int(t["subsegment_min_duration"]),
         flash_min_duration=float(t.get("flash_min_duration", 0.5)),
         keyframe_short_shot_s=float(t.get("keyframe_short_shot_s", 2.0)),
@@ -278,18 +265,9 @@ def load_config(path: Optional[Path | str] = None) -> Config:
     retrieval = RetrievalConfig(
         weights=weights,
         diversity=diversity,
-        rerank_enabled=bool(r["rerank_enabled"]),
         candidate_limit=candidate_limit,
         result_window=result_window,
         max_result_limit=max_result_limit,
-    )
-
-    # --- scoring ---
-    s = raw["scoring"]
-    scoring = ScoringConfig(
-        duration_weight=float(s["duration_weight"]),
-        motion_weight=float(s["motion_weight"]),
-        frame_worthiness_weight=float(s["frame_worthiness_weight"]),
     )
 
     # --- ingest (optional section) ---
@@ -304,6 +282,5 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         models=models,
         thresholds=thresholds,
         retrieval=retrieval,
-        scoring=scoring,
         ingest=ingest,
     )

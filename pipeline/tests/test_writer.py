@@ -29,7 +29,7 @@ from pipeline.ingest.shots import Shot
 # Helpers
 # ---------------------------------------------------------------------------
 
-VEC_DIM = 1024  # PE core L/14 — fixed for Phase 1
+VEC_DIM = 1024  # PE core L/14 legacy baseline
 
 
 def _make_film(tmp_path: Path) -> FilmRecord:
@@ -143,6 +143,35 @@ def test_create_tables_is_idempotent(config: Config) -> None:
     stats = units.index_stats(UNITS_FTS_INDEX)
     assert stats is not None
     assert stats.num_unindexed_rows == 0
+
+
+def test_visual_profile_guard_rejects_mixed_encoder(config: Config) -> None:
+    """A one-film encoder switch cannot contaminate the legacy frame table."""
+    from pipeline.index.writer import require_visual_encoder_profile
+
+    frames = MagicMock()
+    frames.schema.names = ["visual_encoder"]
+    frames.count_rows.side_effect = [1, 0]
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames"]
+    db.open_table.return_value = frames
+    config.models.visual_encoder = "siglip2_so400m"
+
+    with pytest.raises(RuntimeError, match="Do not mix encoders"):
+        require_visual_encoder_profile(db, config)
+
+
+def test_visual_profile_guard_accepts_current_encoder(config: Config) -> None:
+    from pipeline.index.writer import require_visual_encoder_profile
+
+    frames = MagicMock()
+    frames.schema.names = ["visual_encoder"]
+    frames.count_rows.side_effect = [1, 1]
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames"]
+    db.open_table.return_value = frames
+
+    require_visual_encoder_profile(db, config)
 
 
 def test_ensure_search_indexes_backfills_a_populated_legacy_table(

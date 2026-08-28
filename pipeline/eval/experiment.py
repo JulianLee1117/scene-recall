@@ -249,6 +249,38 @@ def _display_path(path: Path, repo_root: Path) -> str:
         return str(path.resolve())
 
 
+def _text_retrieval_provenance(
+    config: Config,
+    db: Any | None = None,
+) -> dict[str, Any]:
+    """Describe both configured and actually eligible semantic text paths."""
+    from pipeline.index.text_features import (
+        configured_text_profile,
+        resolve_ready_text_profile,
+    )
+
+    configured = configured_text_profile(config)
+    active = None
+    if db is not None:
+        try:
+            active = resolve_ready_text_profile(config, db)
+        except (OSError, RuntimeError, ValueError):
+            active = None
+    return {
+        "configured_semantic_text_profile": asdict(configured),
+        "active_semantic_text_profile": (
+            asdict(active) if active is not None else None
+        ),
+        "legacy_text_fallback_encoder": config.models.visual_encoder,
+        "text_profile_checked": db is not None,
+        "lineage_note": (
+            "A complete active profile uses its dedicated model-versioned "
+            "table. Otherwise txt retrieval falls back as a whole to the "
+            "legacy units.txt_vec produced by the visual encoder's text tower."
+        ),
+    }
+
+
 def build_provenance(
     queries_path: Path,
     variants_path: Path,
@@ -294,17 +326,8 @@ def build_provenance(
         },
         "models": {
             "visual_encoder": config.models.visual_encoder,
-            # Current dense text retrieval shares PE's aligned text tower.
-            # Keep the configured future encoder visible without implying it
-            # produced the vectors measured by this snapshot.
-            "semantic_text_encoder": config.models.visual_encoder,
-            "configured_text_encoder": config.models.text_encoder,
-            "stored_unit_vector_manifest": None,
-            "lineage_note": (
-                "Legacy units do not yet persist encoder revision/preprocessing "
-                "metadata; the corpus is assumed to match visual_encoder. Add an "
-                "embedding manifest before comparing encoder migrations."
-            ),
+            "legacy_unit_vector_manifest": None,
+            **_text_retrieval_provenance(config),
         },
         "retrieval_config": asdict(config.retrieval),
         "environment": {
@@ -1074,6 +1097,7 @@ def _run_command(args: argparse.Namespace) -> None:
         )
     db = open_db(config)
     ensure_search_indexes(db)
+    provenance["models"].update(_text_retrieval_provenance(config, db))
     document = run_experiment(
         queries,
         metadata,

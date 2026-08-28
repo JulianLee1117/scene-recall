@@ -26,13 +26,8 @@ MINIMAL_CONFIG = """
       visual_encoder: pe_core_l14
       text_encoder: qwen3-embedding-0.6b
       annotator: gemini-3-flash
-      router: qwen3:8b
 
     thresholds:
-      shot_dedup_cosine: 0.12
-      scene_visual_sim: 0.75
-      scene_dialogue_gap: 2.5
-      scene_max_duration: 300
       subsegment_min_duration: 20
 
     retrieval:
@@ -43,12 +38,6 @@ MINIMAL_CONFIG = """
       diversity:
         page_size: 12
         film_results_per_page_target: 4
-      rerank_enabled: false
-
-    scoring:
-      duration_weight: 0.05
-      motion_weight: 0.05
-      frame_worthiness_weight: 0.10
 """
 
 
@@ -67,20 +56,36 @@ def test_load_config_returns_config_object(tmp_path):
 
 
 def test_load_config_paths(tmp_path):
-    """Config.paths has films_dir and assets_dir as Path objects."""
+    """Legacy configs derive incoming_dir beside films_dir."""
     from pipeline.config import load_config
 
     cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
     cfg = load_config(cfg_file)
 
     assert isinstance(cfg.paths.films_dir, Path)
+    assert isinstance(cfg.paths.incoming_dir, Path)
     assert isinstance(cfg.paths.assets_dir, Path)
     assert cfg.paths.films_dir == Path("/tmp/films")
+    assert cfg.paths.incoming_dir == Path("/tmp/incoming")
     assert cfg.paths.assets_dir == Path("/tmp/assets")
 
 
+def test_load_config_explicit_incoming_dir(tmp_path):
+    """An explicit incoming directory overrides the backwards-compatible default."""
+    raw = yaml.safe_load(textwrap.dedent(MINIMAL_CONFIG))
+    raw["paths"]["incoming_dir"] = "/mnt/seagate/downloads"
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    from pipeline.config import load_config
+
+    assert load_config(cfg_file).paths.incoming_dir == Path(
+        "/mnt/seagate/downloads"
+    )
+
+
 def test_load_config_models(tmp_path):
-    """Config.models carries all four model config strings."""
+    """Config.models carries the active model choices."""
     from pipeline.config import load_config
 
     cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
@@ -92,7 +97,6 @@ def test_load_config_models(tmp_path):
     assert cfg.models.annotator_provider == "gemini"
     assert cfg.models.annotator_image_detail == "low"
     assert cfg.models.annotator_reasoning_effort == "none"
-    assert cfg.models.router == "qwen3:8b"
 
 
 def test_load_config_explicit_openai_annotator(tmp_path):
@@ -143,21 +147,17 @@ def test_load_config_rejects_unknown_annotator_provider(tmp_path):
 
 
 def test_load_config_thresholds(tmp_path):
-    """Config.thresholds carries all five threshold values."""
+    """Config.thresholds carries active segmentation thresholds."""
     from pipeline.config import load_config
 
     cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
     cfg = load_config(cfg_file)
 
-    assert cfg.thresholds.shot_dedup_cosine == pytest.approx(0.12)
-    assert cfg.thresholds.scene_visual_sim == pytest.approx(0.75)
-    assert cfg.thresholds.scene_dialogue_gap == pytest.approx(2.5)
-    assert cfg.thresholds.scene_max_duration == 300
     assert cfg.thresholds.subsegment_min_duration == 20
 
 
 def test_load_config_retrieval(tmp_path):
-    """Config.retrieval has weights, diversity, and rerank_enabled."""
+    """Config.retrieval has only implemented search controls."""
     from pipeline.config import load_config
 
     cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
@@ -171,7 +171,6 @@ def test_load_config_retrieval(tmp_path):
     assert cfg.retrieval.max_result_limit == 100
     assert cfg.retrieval.diversity.page_size == 12
     assert cfg.retrieval.diversity.film_results_per_page_target == 4
-    assert cfg.retrieval.rerank_enabled is False
 
 
 def test_load_config_migrates_legacy_hard_film_cap(tmp_path):
@@ -190,18 +189,6 @@ def test_load_config_migrates_legacy_hard_film_cap(tmp_path):
 
     assert cfg.retrieval.diversity.page_size == 12
     assert cfg.retrieval.diversity.film_results_per_page_target == 3
-
-
-def test_load_config_scoring(tmp_path):
-    """Config.scoring carries all three scoring weights."""
-    from pipeline.config import load_config
-
-    cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
-    cfg = load_config(cfg_file)
-
-    assert cfg.scoring.duration_weight == pytest.approx(0.05)
-    assert cfg.scoring.motion_weight == pytest.approx(0.05)
-    assert cfg.scoring.frame_worthiness_weight == pytest.approx(0.10)
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +243,7 @@ def test_config_not_a_dict(tmp_path):
     assert not isinstance(cfg, dict)
     # Attribute access works
     _ = cfg.paths.films_dir
-    _ = cfg.thresholds.shot_dedup_cosine
+    _ = cfg.thresholds.subsegment_min_duration
 
 
 def test_config_repr_includes_class_name(tmp_path):

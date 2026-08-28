@@ -353,7 +353,9 @@ def test_annotation_cache_reuses_hosted_response_and_rebuilds_dialogue(
     assert "Corrected transcript." in retry["searchable_text"]
     assert "First transcript." not in retry["searchable_text"]
 
-    cache_path = cache_dir / f"{shot.shot_id}.json"
+    cache_paths = list(cache_dir.glob(f"*/{shot.shot_id}.json"))
+    assert len(cache_paths) == 1
+    cache_path = cache_paths[0]
     cache_text = cache_path.read_text(encoding="utf-8")
     assert "Corrected transcript." not in cache_text
     assert "First transcript." not in cache_text
@@ -377,6 +379,9 @@ def test_annotation_cache_invalidates_when_model_changes(
         annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
 
     assert mock_client.models.generate_content.call_count == 2
+    cache_paths = list(cache_dir.glob(f"*/{shot.shot_id}.json"))
+    assert len(cache_paths) == 2
+    assert len({path.parent.name for path in cache_paths}) == 2
 
 
 def test_failed_annotation_does_not_create_resume_cache(
@@ -870,8 +875,14 @@ def test_v1_annotation_cache_is_a_clean_miss(
 
     mock_client.models.generate_content.assert_called_once()
     assert result["caption"] != "old cached caption"
-    rewritten = json.loads(
-        (cache_dir / f"{shot.shot_id}.json").read_text(encoding="utf-8")
-    )
+    # The incompatible legacy payload is retained; the current response is
+    # written into its immutable model/prompt profile directory.
+    rewritten_paths = list(cache_dir.glob(f"*/{shot.shot_id}.json"))
+    assert len(rewritten_paths) == 1
+    rewritten = json.loads(rewritten_paths[0].read_text(encoding="utf-8"))
     assert rewritten["schema_version"] == 2
     assert rewritten["annotation"]["framing"] == "wide"
+    legacy = json.loads(
+        (cache_dir / f"{shot.shot_id}.json").read_text(encoding="utf-8")
+    )
+    assert legacy["schema_version"] == 1

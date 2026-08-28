@@ -163,6 +163,21 @@ def test_run_pipeline_rejects_source_identity_change_while_waiting(
     run_locked.assert_not_called()
 
 
+def test_run_pipeline_reports_another_global_ingest_without_waiting(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A separate CLI/API process fails clearly instead of waiting for hours."""
+    from pipeline.ingest.locks import global_ingest_lock
+    from pipeline.ingest.pipeline import run_pipeline
+
+    film_path = tmp_path / "film.mkv"
+    film_path.touch()
+    with global_ingest_lock(config.paths.assets_dir):
+        with pytest.raises(RuntimeError, match="another film ingest"):
+            run_pipeline(film_path, config)
+
+
 def test_run_pipeline_reuses_cached_dialogue(
     tmp_path: Path,
     config: Config,

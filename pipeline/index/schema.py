@@ -13,6 +13,11 @@ Three tables are defined:
     One row per extracted keyframe with a versioned row contract and its
     independent visual embedding.
 
+Model-specific text feature tables are created separately with
+:func:`make_text_features_schema`.  They intentionally do not share the
+legacy ``units.txt_vec`` column, allowing a new text model to be built,
+validated, activated, and removed without migrating the durable shot rows.
+
 Vector dimension
 ----------------
 Use :func:`make_units_schema` to build the ``units`` schema for a specific
@@ -35,6 +40,9 @@ VECTOR_DIM: int = 1024
 #: Current row/schema contract for the ``frames`` table.
 FRAMES_SCHEMA_VERSION: int = 1
 
+#: Current row contract for model-specific text feature tables.
+TEXT_FEATURES_SCHEMA_VERSION: int = 1
+
 # ---------------------------------------------------------------------------
 # Schema factories
 # ---------------------------------------------------------------------------
@@ -52,7 +60,7 @@ def make_units_schema(vector_dim: int = VECTOR_DIM) -> pa.Schema:
     return pa.schema(
         [
             # --- identity ---
-            pa.field("unit_id", pa.string()),           # primary key (== shot_id in Phase 1)
+            pa.field("unit_id", pa.string()),           # primary key (currently == shot_id)
             pa.field("film_id", pa.string()),
             pa.field("shot_id", pa.string()),
             # Null for base shots; the unsplit shot's ID for sub-segments, so
@@ -61,7 +69,7 @@ def make_units_schema(vector_dim: int = VECTOR_DIM) -> pa.Schema:
             # --- timing ---
             pa.field("t_start", pa.float64()),
             pa.field("t_end", pa.float64()),
-            # --- dedup flag (Phase 2 will set this to False for duplicates) ---
+            # --- representative/search-visibility flag ---
             pa.field("is_representative", pa.bool_()),
             # --- vectors (L2-normalised float32) ---
             pa.field("img_vec", pa.list_(pa.float32(), vector_dim)),
@@ -111,6 +119,33 @@ def make_frames_schema(vector_dim: int = VECTOR_DIM) -> pa.Schema:
             pa.field("source_mtime_ns", pa.int64()),
             pa.field("visual_encoder", pa.string()),
             pa.field("visual_vec", pa.list_(pa.float32(), vector_dim)),
+        ]
+    )
+
+
+def make_text_features_schema(vector_dim: int) -> pa.Schema:
+    """Return the schema for one compatible semantic-text vector profile.
+
+    A table contains several independent textual views of each shot, but only
+    one model revision and vector dimension.  A future incompatible model gets
+    a new table rather than mutating or mixing this vector space.
+    """
+    if vector_dim < 1:
+        raise ValueError("vector_dim must be positive")
+    return pa.schema(
+        [
+            pa.field("schema_version", pa.int16()),
+            pa.field("feature_id", pa.string()),
+            pa.field("profile_id", pa.string()),
+            pa.field("model_id", pa.string()),
+            pa.field("model_revision", pa.string()),
+            pa.field("film_id", pa.string()),
+            pa.field("unit_id", pa.string()),
+            pa.field("view", pa.string()),
+            pa.field("text", pa.string()),
+            pa.field("source_sha256", pa.string()),
+            pa.field("is_representative", pa.bool_()),
+            pa.field("vector", pa.list_(pa.float32(), vector_dim)),
         ]
     )
 

@@ -78,6 +78,14 @@ def test_create_tables_adds_versioned_frames_schema(config: Config) -> None:
     assert schema.field("frame_id").type == schema.field("path").type
 
 
+def test_frame_backfill_refuses_to_race_an_ingest(config: Config) -> None:
+    from pipeline.ingest.locks import global_ingest_lock
+
+    with global_ingest_lock(config.paths.assets_dir):
+        with pytest.raises(RuntimeError, match="already running"):
+            backfill_frames(config)
+
+
 def test_backfill_writes_one_independent_row_per_keyframe(
     config: Config,
     tmp_path: Path,

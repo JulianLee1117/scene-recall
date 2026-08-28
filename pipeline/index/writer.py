@@ -1,4 +1,4 @@
-"""writer.py — LanceDB persistence layer for the cinema-search pipeline.
+"""LanceDB persistence layer for Scene Recall.
 
 Public API
 ----------
@@ -17,7 +17,7 @@ primary key (``unit_id`` / ``film_id``) silently updates the existing row.
 
 Vector dimension
 ----------------
-Vectors are fixed at **1024 dimensions** (PE core L/14) for Phase 1.
+Legacy unit/frame vectors use the configured visual encoder's fixed dimension.
 """
 
 from __future__ import annotations
@@ -90,6 +90,49 @@ def table_names(db: lancedb.DBConnection) -> set[str]:
         return set(db.list_tables().tables)
     except (AttributeError, TypeError):
         return set(db.table_names(limit=1_000))
+
+
+def require_visual_encoder_profile(
+    db: lancedb.DBConnection,
+    config: Config,
+) -> None:
+    """Reject a visual encoder switch that would mix one legacy vector table.
+
+    The current ``units``/``frames`` tables are the frozen visual baseline.
+    A future PE or video-model challenger must use a separate versioned table,
+    just like semantic text features, rather than overwriting one film at a
+    time and making cosine distances incomparable.
+    """
+    _require_visual_encoder_name(db, config.models.visual_encoder)
+
+
+def _require_visual_encoder_name(
+    db: lancedb.DBConnection,
+    visual_encoder: str,
+) -> None:
+    """Require every stored frame to use one explicit encoder profile."""
+    if "frames" not in table_names(db):
+        return
+    frames = db.open_table("frames")
+    if "visual_encoder" not in set(frames.schema.names):
+        raise RuntimeError(
+            "the legacy frames table does not record its visual encoder; "
+            "run the supported frame-index migration before searching"
+        )
+    total = int(frames.count_rows())
+    if total == 0:
+        return
+    configured = visual_encoder.replace("'", "''")
+    matching = int(
+        frames.count_rows(f"visual_encoder = '{configured}'")
+    )
+    if matching != total:
+        raise RuntimeError(
+            f"the legacy visual index has {total - matching} row(s) that do "
+            f"not use configured encoder {visual_encoder!r}. "
+            "Do not mix encoders in "
+            "units/frames; build the challenger in a separate versioned table."
+        )
 
 
 def published_film_ids(db: lancedb.DBConnection) -> frozenset[str]:
@@ -422,15 +465,34 @@ def _create_or_check_table(
     missing = [field for field in schema.names if field not in existing]
     if missing:
         raise RuntimeError(_stale_table_message(name, missing))
+    actual_schema = db.open_table(name).schema
+    incompatible = [
+        field.name
+        for field in schema
+        if actual_schema.field(field.name).type != field.type
+    ]
+    if incompatible:
+        raise RuntimeError(_incompatible_table_message(name, incompatible))
 
 
 def _stale_table_message(name: str, missing: Sequence[str] = ()) -> str:
     details = f" (missing columns: {', '.join(missing)})" if missing else ""
     return (
         f"LanceDB table {name!r} predates the current index schema{details}. "
-        "Delete the database directory (<assets_dir>/db) and re-ingest your "
-        "films; dialogue, media, and matching annotations are reused from "
-        "each film's asset cache, so only stale annotations are re-requested."
+        "Preserve the database and source films; use a supported additive "
+        "migration or build the derivation as a new versioned table. This "
+        "process will not mutate an unknown schema automatically."
+    )
+
+
+def _incompatible_table_message(
+    name: str,
+    fields: Sequence[str],
+) -> str:
+    return (
+        f"LanceDB table {name!r} has incompatible field types or vector "
+        f"dimensions ({', '.join(fields)}). Do not mix model profiles in one "
+        "table; preserve it and build the new representation separately."
     )
 
 
@@ -453,7 +515,24 @@ def upsert_frame_batches(
     frame rows after that film's replacement boundary.
     """
     with _PUBLICATION_LOCK, _database_write_lock(db):
+        expected_encoder: str | None = None
         for rows in batches:
+            if not rows:
+                continue
+            encoders = {
+                str(row.get("visual_encoder") or "").strip()
+                for row in rows
+            }
+            if not encoders or "" in encoders or len(encoders) != 1:
+                raise ValueError(
+                    "each frame publication must declare one visual encoder"
+                )
+            batch_encoder = next(iter(encoders))
+            if expected_encoder is None:
+                expected_encoder = batch_encoder
+                _require_visual_encoder_name(db, expected_encoder)
+            elif batch_encoder != expected_encoder:
+                raise ValueError("frame batches crossed visual encoder profiles")
             _merge_rows(db, "frames", "frame_id", rows)
 
 
@@ -552,12 +631,18 @@ def publish_film_index(
     units: Sequence[UnitWrite],
     frames: Sequence[FrameWrite],
 ) -> None:
-    """Replace and publish one complete film without exposing partial search.
+    """Replace one complete film with units as the final ready boundary.
 
     All rows are materialized and validated first. Frames are replaced with
     one film-scoped merge, then the final film-scoped unit merge atomically
     updates/inserts the new generation and deletes its obsolete units. Existing
-    complete units therefore remain searchable until that final boundary.
+    complete units therefore remain searchable until that final boundary. The
+    three Lance tables do not share a transaction: during replacement of an
+    existing film, a concurrent reader can briefly see new frames joined to old
+    unit metadata. The shared locks serialize writers, not readers; eliminating
+    that legacy window requires generation-tagged tables rather than rollback
+    logic that still cannot make a process crash atomic.
+
     Native FTS is synchronized immediately after the unit merge and before
     this function reports a successful publication.
     """
@@ -569,6 +654,13 @@ def publish_film_index(
     # subprocesses.  The in-process lock protects threads/tests; the file lock
     # prevents different film ingests from interleaving table/index versions.
     with _PUBLICATION_LOCK, _database_write_lock(db):
+        frame_encoders = {
+            str(row.get("visual_encoder") or "").strip()
+            for row in frame_rows
+        }
+        if not frame_encoders or "" in frame_encoders or len(frame_encoders) != 1:
+            raise ValueError("film frames must declare one visual encoder")
+        _require_visual_encoder_name(db, next(iter(frame_encoders)))
         require_current_film_source(db, film)
         _replace_frame_rows(db, film.film_id, frame_rows)
 

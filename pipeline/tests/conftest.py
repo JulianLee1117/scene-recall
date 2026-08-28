@@ -58,14 +58,9 @@ def config(tmp_path: Path) -> Config:
           visual_encoder: pe_core_l14
           text_encoder: qwen3-embedding-0.6b
           annotator: gemini-3-flash
-          router: qwen3:8b
           whisper: large-v3
 
         thresholds:
-          shot_dedup_cosine: 0.12
-          scene_visual_sim: 0.75
-          scene_dialogue_gap: 2.5
-          scene_max_duration: 300
           subsegment_min_duration: 20
           flash_min_duration: 0.5
           keyframe_short_shot_s: 2.0
@@ -78,12 +73,6 @@ def config(tmp_path: Path) -> Config:
           diversity:
             page_size: 12
             film_results_per_page_target: 4
-          rerank_enabled: false
-
-        scoring:
-          duration_weight: 0.05
-          motion_weight: 0.05
-          frame_worthiness_weight: 0.10
     """)
 
     cfg_file = tmp_path / "config.yaml"

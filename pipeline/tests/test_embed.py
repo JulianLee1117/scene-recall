@@ -237,6 +237,125 @@ def test_embed_text_dtype(config: Config) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Dedicated semantic-text embeddings
+# ---------------------------------------------------------------------------
+
+
+def _fake_semantic_encoder(embed_dim: int = 1024) -> MagicMock:
+    encoder = MagicMock()
+    encoder.encode.side_effect = lambda texts: torch.arange(
+        1,
+        len(texts) * embed_dim + 1,
+        dtype=torch.float32,
+    ).reshape(len(texts), embed_dim)
+    return encoder
+
+
+def test_semantic_documents_use_configured_text_model_without_instruction(
+    config: Config,
+) -> None:
+    from pipeline.ingest.text_embed import embed_semantic_documents
+
+    fake = _fake_semantic_encoder()
+    with patch(
+        "pipeline.ingest.text_embed._load_text_model",
+        return_value=fake,
+    ):
+        result = embed_semantic_documents(["A red hallway", "Stay here."], config)
+
+    fake.encode.assert_called_once_with(["A red hallway", "Stay here."])
+    assert result.shape == (2, 1024)
+    assert result.dtype == np.float32
+    np.testing.assert_allclose(np.linalg.norm(result, axis=1), 1.0, atol=1e-6)
+
+
+def test_semantic_queries_apply_versioned_retrieval_instruction(
+    config: Config,
+) -> None:
+    from pipeline.ingest.text_embed import (
+        SEMANTIC_QUERY_INSTRUCTION,
+        embed_semantic_query,
+    )
+
+    fake = _fake_semantic_encoder()
+    with patch(
+        "pipeline.ingest.text_embed._load_text_model",
+        return_value=fake,
+    ):
+        result = embed_semantic_query("lonely figure under red neon", config)
+
+    encoded = fake.encode.call_args.args[0]
+    assert encoded == [
+        "Instruct: "
+        f"{SEMANTIC_QUERY_INSTRUCTION}\n"
+        "Query:lonely figure under red neon"
+    ]
+    assert result.shape == (1024,)
+    assert result.dtype == np.float32
+    assert np.linalg.norm(result) == pytest.approx(1.0)
+
+
+def test_semantic_text_model_is_selected_independently_of_visual_model(
+    config: Config,
+) -> None:
+    from pipeline.ingest.text_embed import get_text_model_spec
+
+    config.models.visual_encoder = "siglip2_so400m"
+    spec = get_text_model_spec(config)
+
+    assert spec.config_name == config.models.text_encoder
+    assert spec.model_id == "Qwen/Qwen3-Embedding-0.6B"
+    assert spec.dimension == 1024
+
+
+def test_unknown_semantic_text_model_fails_before_loading(config: Config) -> None:
+    from pipeline.ingest.text_embed import get_text_model_spec
+
+    config.models.text_encoder = "not-a-model"
+    with pytest.raises(ValueError, match="Unknown text_encoder"):
+        get_text_model_spec(config)
+
+
+def test_semantic_model_load_failure_is_cached_for_process(
+    config: Config,
+) -> None:
+    from pipeline.ingest import text_embed
+
+    text_embed._TEXT_MODEL_CACHE.clear()
+    text_embed._TEXT_MODEL_FAILURES.clear()
+    try:
+        with patch(
+            "transformers.AutoTokenizer.from_pretrained",
+            side_effect=OSError("offline"),
+        ) as load:
+            with pytest.raises(RuntimeError, match="Qwen"):
+                text_embed._load_text_model(config)
+            with pytest.raises(RuntimeError, match="Qwen"):
+                text_embed._load_text_model(config)
+
+        assert load.call_count == 1
+    finally:
+        text_embed._TEXT_MODEL_CACHE.clear()
+        text_embed._TEXT_MODEL_FAILURES.clear()
+
+
+def test_qwen_last_token_pool_handles_right_padding() -> None:
+    from pipeline.ingest.text_embed import _QwenTextEncoder
+
+    hidden = torch.tensor(
+        [
+            [[1.0], [2.0], [99.0]],
+            [[3.0], [4.0], [5.0]],
+        ]
+    )
+    attention = torch.tensor([[1, 1, 0], [1, 1, 1]])
+
+    pooled = _QwenTextEncoder._last_token_pool(hidden, attention)
+
+    torch.testing.assert_close(pooled, torch.tensor([[2.0], [5.0]]))
+
+
+# ---------------------------------------------------------------------------
 # shot_embedding
 # ---------------------------------------------------------------------------
 

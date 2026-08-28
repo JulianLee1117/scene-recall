@@ -10,6 +10,7 @@ that channel performs no retrieval (and lexical-only search loads no model).
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from collections import Counter
@@ -28,9 +29,17 @@ from pipeline.config import (
     DEFAULT_SEARCH_RESULT_WINDOW,
     Config,
 )
-from pipeline.index.writer import table_names
+from pipeline.index.text_features import (
+    TEXT_VIEWS,
+    TextIndexProfile,
+    resolve_ready_text_profile,
+)
+from pipeline.index.writer import require_visual_encoder_profile, table_names
 from pipeline.ingest.embed import embed_spatial_images, embed_text
+from pipeline.ingest.text_embed import embed_semantic_query
 
+
+_LOGGER = logging.getLogger(__name__)
 
 _CANDIDATE_LIMIT = DEFAULT_SEARCH_CANDIDATE_LIMIT
 _REFERENCE_SPATIAL_CANDIDATE_LIMIT = 96
@@ -38,6 +47,8 @@ _REFERENCE_SPATIAL_GRID_SIZE = 6
 _REFERENCE_GLOBAL_WEIGHT = 0.65
 _REFERENCE_SPATIAL_WEIGHT = 1.0 - _REFERENCE_GLOBAL_WEIGHT
 _REFERENCE_RESULT_TEMPORAL_GAP_SECONDS = 90.0
+_REFERENCE_QUERY_WEIGHT = 0.5
+_TEXT_CONSTRAINT_WEIGHT = 0.5
 _MAX_LEXICAL_QUERY_TERMS = 12
 # The default is a ranked search window, not a frontend page size. Callers may
 # request a smaller stable prefix or a deeper evaluation window explicitly.
@@ -103,6 +114,15 @@ _LEXICAL_COLUMNS = [
 # pass is cheap there.
 _CANDIDATE_COLUMNS = [*_LEXICAL_COLUMNS, "img_vec"]
 _FTS_COLUMNS = [*_LEXICAL_COLUMNS, "_score"]
+_TEXT_FEATURE_COLUMNS = [
+    "feature_id",
+    "profile_id",
+    "film_id",
+    "unit_id",
+    "view",
+    "text",
+    "_distance",
+]
 
 # Each category has deliberately narrower document patterns than query
 # patterns.  For example, spoken dialogue containing "give me credit" should
@@ -704,6 +724,92 @@ def _frame_search_rows(
     )
 
 
+def _semantic_text_search_rows(
+    vector: np.ndarray,
+    db: lancedb.DBConnection,
+    unit_table: Any,
+    profile: TextIndexProfile,
+    film_ids: tuple[str, ...],
+    *,
+    candidate_limit: int = _CANDIDATE_LIMIT,
+) -> list[dict[str, Any]]:
+    """Rank independent text views, then collapse them to one vote per unit."""
+    feature_filter = col("is_representative") == lit(True)
+    film_filter = _film_filter(film_ids)
+    if film_filter is not None:
+        feature_filter = feature_filter & film_filter
+    feature_rows = (
+        db.open_table(profile.table_name)
+        .search(vector, vector_column_name="vector")
+        .metric("cosine")
+        # Ask for scoring evidence explicitly without materializing hundreds
+        # of unused 1024-float document vectors into Python for every query.
+        .select(_TEXT_FEATURE_COLUMNS)
+        .where(feature_filter)
+        .limit(candidate_limit * len(TEXT_VIEWS))
+        .to_list()
+    )
+    feature_rows = _rows_in_film_scope(feature_rows, film_ids)
+    feature_rows.sort(
+        key=lambda row: (
+            float(row.get("_distance", 1.0)),
+            str(row.get("feature_id") or ""),
+        )
+    )
+
+    best_by_unit: dict[str, dict[str, Any]] = {}
+    for feature in feature_rows:
+        unit_id = str(feature.get("unit_id") or "")
+        if unit_id and unit_id not in best_by_unit:
+            best_by_unit[unit_id] = feature
+        if len(best_by_unit) >= candidate_limit:
+            break
+    unit_ids = tuple(best_by_unit)
+    unit_filter = _unit_filter(unit_ids)
+    if unit_filter is None:
+        return []
+
+    unit_rows = (
+        unit_table.search()
+        .select(_CANDIDATE_COLUMNS)
+        .where(_representative_filter(film_ids) & unit_filter)
+        .limit(len(unit_ids))
+        .to_list()
+    )
+    units_by_id = {
+        _row_id(row): row
+        for row in _rows_in_film_scope(unit_rows, film_ids)
+        if _row_id(row)
+    }
+    ranked: list[dict[str, Any]] = []
+    for unit_id, feature in best_by_unit.items():
+        unit = units_by_id.get(unit_id)
+        if unit is None:
+            continue
+        row = dict(unit)
+        row["_distance"] = float(feature.get("_distance", 1.0))
+        row["_matched_text"] = {
+            "feature_id": feature.get("feature_id"),
+            "view": feature.get("view"),
+            "text": feature.get("text"),
+            "profile_id": feature.get("profile_id"),
+        }
+        ranked.append(row)
+    ranked.sort(key=lambda row: (float(row["_distance"]), _row_id(row)))
+    return ranked[:candidate_limit]
+
+
+def _ready_text_profile(
+    config: Config,
+    db: lancedb.DBConnection,
+) -> TextIndexProfile | None:
+    """Treat optional derived-profile failures as a legacy fallback cue."""
+    try:
+        return resolve_ready_text_profile(config, db)
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        return None
+
+
 def _channel_debug(rank: int, score: float, distance: float | None) -> dict:
     return {
         "rank": int(rank),
@@ -908,26 +1014,54 @@ def search(
     scoped_film_ids = _normalise_film_ids(film_ids)
     representative_filter = _representative_filter(scoped_film_ids)
 
-    # PE is a joint image/text model, so one query embedding can serve both
-    # vector channels.  Crucially, do not load it for lexical-only variants.
-    vector: np.ndarray | None = None
-    if enabled & {"img", "txt"}:
-        vector = embed_text([query], config)[0]
-
     text_rows: list[dict[str, Any]] = []
+    text_profile = _ready_text_profile(config, db) if "txt" in enabled else None
+    pe_vector: np.ndarray | None = None
+    if "img" in enabled or ("txt" in enabled and text_profile is None):
+        # PE's text tower remains the correct query encoder for image-space
+        # retrieval and the complete rollback path for the legacy txt_vec.
+        require_visual_encoder_profile(db, config)
+        pe_vector = embed_text([query], config)[0]
+
     if "txt" in enabled:
-        assert vector is not None
-        text_rows = _stable_vector_ranking(
-            _rows_in_film_scope(
-                table.search(vector, vector_column_name="txt_vec")
-                .metric("cosine")
-                .where(representative_filter)
-                .limit(candidate_limit)
-                .to_list(),
-                scoped_film_ids,
-            ),
-            candidate_limit=candidate_limit,
-        )
+        if text_profile is not None:
+            try:
+                text_rows = _semantic_text_search_rows(
+                    embed_semantic_query(query, config),
+                    db,
+                    table,
+                    text_profile,
+                    scoped_film_ids,
+                    candidate_limit=candidate_limit,
+                )
+            except Exception as exc:
+                # The manifest proves stored coverage, not that local weights
+                # can always load (cache eviction, OOM, device failure) or the
+                # optional derived table can always be read. Fall back as one
+                # complete channel rather than returning a 500 or mixing rows.
+                _LOGGER.warning(
+                    "Semantic text profile %s failed; using the legacy text "
+                    "channel for this query: %s",
+                    text_profile.profile_id,
+                    exc,
+                )
+                text_profile = None
+        if text_profile is None:
+            if pe_vector is None:
+                require_visual_encoder_profile(db, config)
+                pe_vector = embed_text([query], config)[0]
+            assert pe_vector is not None
+            text_rows = _stable_vector_ranking(
+                _rows_in_film_scope(
+                    table.search(pe_vector, vector_column_name="txt_vec")
+                    .metric("cosine")
+                    .where(representative_filter)
+                    .limit(candidate_limit)
+                    .to_list(),
+                    scoped_film_ids,
+                ),
+                candidate_limit=candidate_limit,
+            )
 
     lexical_ranked: list[tuple[dict[str, Any], float]] = []
     if "lex" in enabled:
@@ -945,9 +1079,9 @@ def search(
 
     image_rows: list[dict[str, Any]] = []
     if "img" in enabled:
-        assert vector is not None
+        assert pe_vector is not None
         image_rows = _frame_search_rows(
-            vector,
+            pe_vector,
             db,
             table,
             scoped_film_ids,
@@ -956,7 +1090,7 @@ def search(
         if not image_rows:
             image_rows = _stable_vector_ranking(
                 _rows_in_film_scope(
-                    table.search(vector, vector_column_name="img_vec")
+                    table.search(pe_vector, vector_column_name="img_vec")
                     .metric("cosine")
                     .where(representative_filter)
                     .limit(candidate_limit)
@@ -1003,6 +1137,15 @@ def search(
                 )
                 if isinstance(matched_frame, dict):
                     channel_evidence["matched_frame"] = matched_frame
+            elif channel == "txt":
+                matched_text = row.get("_matched_text")
+                if isinstance(matched_text, dict):
+                    channel_evidence["source"] = str(
+                        matched_text.get("view") or "semantic_text"
+                    )
+                    channel_evidence["matched_text"] = matched_text
+                else:
+                    channel_evidence["source"] = "legacy_combined_text"
             candidate["channels"][channel] = channel_evidence
             candidate["final_score"] += weights[channel] / (_RRF_K + rank)
 
@@ -1090,6 +1233,10 @@ def search(
             result["matched_frame_url"] = keyframe_url
             result["matched_frame_index"] = keyframe_index
             result["matched_frame_timestamp"] = matched_frame.get("timestamp")
+        matched_text = row.get("_matched_text")
+        if isinstance(matched_text, dict):
+            result["matched_text_view"] = matched_text.get("view")
+            result["matched_text"] = matched_text.get("text")
         selected.append(result)
 
     return selected
@@ -1288,7 +1435,7 @@ def _is_reference_temporal_duplicate(
     return False
 
 
-def search_by_image(
+def _search_by_image_only(
     image: Image.Image,
     db: lancedb.DBConnection,
     config: Config,
@@ -1296,6 +1443,8 @@ def search_by_image(
     film_ids: Iterable[str] | None = None,
     exclude_unit_id: str | None = None,
     result_limit: int | None = None,
+    requested_text: str = "",
+    deduplicate_visual: bool = True,
 ) -> list[dict]:
     """Find shots with similar content in similar normalized screen positions.
 
@@ -1356,6 +1505,7 @@ def search_by_image(
     seen_units: set[str] = set()
     dedup_candidates: list[dict[str, Any]] = []
     eligible_candidates: list[dict[str, Any]] = []
+    requested_junk = _requested_junk_categories(requested_text)
     for frame in eligible_frame_rows:
         unit_id = str(frame.get("unit_id") or frame.get("shot_id") or "")
         if (
@@ -1365,9 +1515,9 @@ def search_by_image(
         ):
             continue
         row = units_by_id[unit_id]
-        if _is_unrequested_junk(row, "", _NO_REQUESTED_JUNK):
+        if _is_unrequested_junk(row, requested_text, requested_junk):
             continue
-        if _is_duplicate(row, dedup_candidates):
+        if deduplicate_visual and _is_duplicate(row, dedup_candidates):
             continue
         seen_units.add(unit_id)
         dedup_candidates.append(row)
@@ -1456,3 +1606,210 @@ def search_by_image(
         )
 
     return results
+
+
+def _fuse_reference_and_text_results(
+    reference_results: Iterable[dict[str, Any]],
+    text_results: Iterable[dict[str, Any]],
+    *,
+    result_limit: int,
+    exclude_unit_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Rerank reference candidates with independent text evidence.
+
+    The reference shortlist is mandatory: text-only candidates cannot enter a
+    composition-constrained query.  Equal-weight RRF promotes agreement while
+    preserving reference order when no candidates have text support.  The
+    reference result remains the display source, including its exact frame.
+    """
+    normalized_exclusion = str(exclude_unit_id or "").strip()
+    text_by_unit: dict[str, tuple[int, dict[str, Any]]] = {}
+    for rank, result in enumerate(text_results, start=1):
+        unit_id = str(result.get("unit_id") or "")
+        if unit_id and unit_id not in text_by_unit:
+            text_by_unit[unit_id] = (rank, result)
+
+    candidates: list[dict[str, Any]] = []
+    seen_reference: set[str] = set()
+    for reference_rank, reference_result in enumerate(
+        reference_results,
+        start=1,
+    ):
+        unit_id = str(reference_result.get("unit_id") or "")
+        if (
+            not unit_id
+            or unit_id == normalized_exclusion
+            or unit_id in seen_reference
+        ):
+            continue
+        seen_reference.add(unit_id)
+        score = _REFERENCE_QUERY_WEIGHT / (_RRF_K + reference_rank)
+        query_ranks = {"reference": reference_rank}
+        text_result: dict[str, Any] | None = None
+        text_match = text_by_unit.get(unit_id)
+        if text_match is not None:
+            text_rank, text_result = text_match
+            score += _TEXT_CONSTRAINT_WEIGHT / (_RRF_K + text_rank)
+            query_ranks["text"] = text_rank
+        candidates.append(
+            {
+                "reference": reference_result,
+                "text": text_result,
+                "score": score,
+                "query_ranks": query_ranks,
+            }
+        )
+
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            -float(candidate["score"]),
+            int(candidate["query_ranks"]["reference"]),
+        ),
+    )
+
+    fused_results: list[dict[str, Any]] = []
+    for candidate in ordered[:result_limit]:
+        reference_result = candidate["reference"]
+        text_result = candidate["text"]
+        base = dict(reference_result)
+        reference_debug = reference_result.get("debug", {})
+        text_debug = (
+            text_result.get("debug", {})
+            if isinstance(text_result, dict)
+            else {}
+        )
+        base["debug"] = {
+            "mode": "reference_image_text",
+            "final_score": float(candidate["score"]),
+            # Keep the old top-level channel contract image-specific.  The
+            # clause records below preserve identically named channels from
+            # both searches without silently overwriting either one.
+            "channels": dict(reference_debug.get("channels") or {}),
+            "clauses": {
+                "reference": reference_debug,
+                **({"text": text_debug} if text_result is not None else {}),
+            },
+            "query_ranks": dict(candidate["query_ranks"]),
+        }
+        if isinstance(text_result, dict):
+            for key in ("matched_text_view", "matched_text"):
+                if key in text_result:
+                    base[key] = text_result[key]
+        base["rank"] = len(fused_results) + 1
+        fused_results.append(base)
+    return fused_results
+
+
+def _reapply_reference_result_preferences(
+    results: list[dict[str, Any]],
+    config: Config,
+    *,
+    scoped_film_ids: tuple[str, ...],
+    result_limit: int,
+) -> list[dict[str, Any]]:
+    """Restore temporal spread and unscoped film variety after text reranking."""
+    temporally_preferred: list[dict[str, Any]] = []
+    temporally_deferred: list[dict[str, Any]] = []
+    selected_frames: list[dict[str, Any]] = []
+    for result in results:
+        frame = {
+            "film_id": result.get("film_id"),
+            "timestamp": result.get(
+                "matched_frame_timestamp",
+                result.get("t_start"),
+            ),
+        }
+        if _is_reference_temporal_duplicate(frame, selected_frames):
+            temporally_deferred.append(result)
+            continue
+        temporally_preferred.append(result)
+        selected_frames.append(frame)
+    temporal_order = [*temporally_preferred, *temporally_deferred]
+
+    if scoped_film_ids:
+        selected = temporal_order[:result_limit]
+    else:
+        wrapped = [{"row": result} for result in temporal_order]
+        selected = [
+            candidate["row"]
+            for candidate in _progressive_film_diversity(
+                wrapped,
+                result_limit=result_limit,
+                page_size=int(config.retrieval.diversity.page_size),
+                per_film_target=int(
+                    config.retrieval.diversity.film_results_per_page_target
+                ),
+            )
+        ]
+    for rank, result in enumerate(selected, start=1):
+        result["rank"] = rank
+    return selected
+
+
+def search_by_image(
+    image: Image.Image,
+    db: lancedb.DBConnection,
+    config: Config,
+    *,
+    film_ids: Iterable[str] | None = None,
+    exclude_unit_id: str | None = None,
+    result_limit: int | None = None,
+    text_query: str | None = None,
+) -> list[dict]:
+    """Search by composition, optionally constrained by a text clause.
+
+    Image-only behavior remains the established PE spatial search.  When text
+    is present, the normal hybrid text pipeline runs independently and the two
+    ranked lists are fused.  This keeps both retrieval contracts replaceable
+    and avoids inventing a prematurely unified multimodal vector.
+    """
+    candidate_limit, resolved_result_limit = _validated_search_limits(
+        config,
+        result_limit,
+    )
+    require_visual_encoder_profile(db, config)
+    scoped_film_ids = _normalise_film_ids(film_ids)
+    normalized_text = str(text_query or "").strip()
+    candidate_window = (
+        resolved_result_limit
+        if not normalized_text
+        else max(
+            resolved_result_limit,
+            min(candidate_limit, int(config.retrieval.max_result_limit)),
+        )
+    )
+    reference_results = _search_by_image_only(
+        image,
+        db,
+        config,
+        film_ids=scoped_film_ids,
+        exclude_unit_id=exclude_unit_id,
+        result_limit=candidate_window,
+        requested_text=normalized_text,
+        # Preserve visually repeated moments until independent text evidence
+        # has had a chance to distinguish or promote one of them.
+        deduplicate_visual=not bool(normalized_text),
+    )
+    if not normalized_text:
+        return reference_results
+
+    text_results = search(
+        normalized_text,
+        db,
+        config,
+        film_ids=scoped_film_ids,
+        result_limit=candidate_window,
+    )
+    fused_results = _fuse_reference_and_text_results(
+        reference_results,
+        text_results,
+        result_limit=candidate_window,
+        exclude_unit_id=exclude_unit_id,
+    )
+    return _reapply_reference_result_preferences(
+        fused_results,
+        config,
+        scoped_film_ids=scoped_film_ids,
+        result_limit=resolved_result_limit,
+    )

@@ -13,12 +13,19 @@ import math
 from pathlib import Path
 from typing import Any
 
+from filelock import Timeout as FileLockTimeout
 import pyarrow as pa
 
 from pipeline.config import Config
 from pipeline.index.schema import FRAMES_SCHEMA_VERSION, make_frames_schema
-from pipeline.index.writer import create_tables, open_db, upsert_frame_batches
+from pipeline.index.writer import (
+    create_tables,
+    open_db,
+    require_visual_encoder_profile,
+    upsert_frame_batches,
+)
 from pipeline.ingest.embed import embed_images, get_vector_dim
+from pipeline.ingest.locks import global_ingest_lock
 from pipeline.ingest.media import _KEYFRAME_START_PAD
 
 
@@ -55,6 +62,30 @@ def backfill_frames(
     film_id: str | None = None,
     batch_size: int = 128,
 ) -> FrameBackfillResult:
+    """Run the frame backfill without racing a film publication."""
+    lock = global_ingest_lock(config.paths.assets_dir)
+    try:
+        lock.acquire()
+    except FileLockTimeout as exc:
+        raise RuntimeError(
+            "another film ingest or derived-index backfill is already running"
+        ) from exc
+    try:
+        return _backfill_frames_locked(
+            config,
+            film_id=film_id,
+            batch_size=batch_size,
+        )
+    finally:
+        lock.release()
+
+
+def _backfill_frames_locked(
+    config: Config,
+    *,
+    film_id: str | None = None,
+    batch_size: int = 128,
+) -> FrameBackfillResult:
     """Create/update frame rows from existing unit keyframe paths.
 
     Existing rows are skipped when their schema version, encoder, source path,
@@ -66,6 +97,7 @@ def backfill_frames(
     vector_dim = get_vector_dim(config)
     db = open_db(config)
     create_tables(db, vector_dim=vector_dim)
+    require_visual_encoder_profile(db, config)
     _validate_frames_table(db.open_table("frames").schema, vector_dim)
 
     units = _read_film_rows(

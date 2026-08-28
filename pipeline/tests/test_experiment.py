@@ -577,9 +577,14 @@ def test_provenance_marks_git_failure_unknown(
     assert provenance["git"]["available"] is False
     assert provenance["git"]["dirty"] is None
     assert provenance["git"]["reproducible"] is False
-    assert provenance["models"]["semantic_text_encoder"] == (
+    assert provenance["models"]["configured_semantic_text_profile"][
+        "model_id"
+    ] == "Qwen/Qwen3-Embedding-0.6B"
+    assert provenance["models"]["active_semantic_text_profile"] is None
+    assert provenance["models"]["legacy_text_fallback_encoder"] == (
         config.models.visual_encoder
     )
+    assert provenance["models"]["text_profile_checked"] is False
 
 
 def test_run_cli_refuses_existing_output_before_database_work(

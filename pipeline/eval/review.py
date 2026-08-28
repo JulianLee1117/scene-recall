@@ -12,7 +12,7 @@ captions or timestamps.
 Examples::
 
     python -m pipeline.eval.review pool
-    python -m pipeline.eval.review score pipeline/eval/fallen_angels_review.yaml
+    python -m pipeline.eval.review score pipeline/eval/runs/fallen-angels-review.yaml
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from pipeline.search.retrieve import search
 
 
 DEFAULT_QUERIES = Path(__file__).parent / "fallen_angels_queries.yaml"
-DEFAULT_REVIEW = Path(__file__).parent / "fallen_angels_review.yaml"
+DEFAULT_REVIEW = Path(__file__).parent / "runs" / "fallen-angels-review.yaml"
 VALID_GRADES = frozenset({0, 1, 2, 3})
 RELEVANT_GRADE = 2
 
