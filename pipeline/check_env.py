@@ -1,4 +1,4 @@
-"""Environment pre-flight checks for the cinema-search pipeline.
+"""Environment pre-flight checks for Scene Recall.
 
 Run with::
 
@@ -119,7 +119,7 @@ def _fail(msg: str) -> None:
 
 def main() -> None:
     load_dotenv()
-    print("cinema-search environment check")
+    print("Scene Recall environment check")
     print("=" * 40)
     check_cuda()
     check_ffmpeg()

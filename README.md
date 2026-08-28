@@ -2,8 +2,11 @@
 
 Semantic search over your film library: describe a scene in plain English and get the matching shots back.
 
-The measured search baseline and staged multimodal target architecture are
-documented in [docs/search-architecture.md](docs/search-architecture.md).
+The implemented system, architectural boundaries, and deliberately deferred
+directions are documented in
+[docs/search-architecture.md](docs/search-architecture.md). Historical reasons
+for material choices are indexed in
+[docs/decisions/](docs/decisions/README.md).
 
 ## Prerequisites
 
@@ -11,8 +14,7 @@ documented in [docs/search-architecture.md](docs/search-architecture.md).
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - CUDA 12.8 (GPU recommended; CPU falls back automatically)
 - [ffmpeg](https://ffmpeg.org/) on your `PATH`
-- [Ollama](https://ollama.com/) running locally
-- Node.js 20+
+- Node.js 20.9+
 
 ## Setup
 
@@ -25,6 +27,9 @@ cp .env.example .env
 # Add OPENAI_API_KEY to .env (or GEMINI_API_KEY if using Gemini)
 
 # Configure the web frontend
+cd web
+npm install
+cd ..
 cp web/.env.local.example web/.env.local
 # Edit web/.env.local if your API runs on a non-default port
 
@@ -54,6 +59,10 @@ On Windows PowerShell, use `npm.cmd run dev` if the execution policy blocks
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+The API accepts browser requests from `http://localhost:3000` and
+`http://127.0.0.1:3000` by default. If the frontend runs elsewhere, set the
+comma-separated `SCENE_RECALL_ALLOWED_ORIGINS` value in `.env`.
+
 ## Ingest a film
 
 ### Raw source workflow
@@ -69,10 +78,17 @@ as the torrent client's download directory. Keep each finalized movie file
 directly inside `films` because source discovery is not recursive.
 
 Download and seed in `incoming`. After seeding is finished and the torrent is
-removed, rename the file as `Title (Year) [Edition].ext`, move it into `films`
-(an instant same-drive move), and ingest that final path. Omit `[Edition]` when
-there is no confirmed cut or release variant. Use ` - ` in place of a colon,
-which Windows filenames do not allow.
+removed, open **Films** in the frontend. **Review & add** suggests the main
+video in each release (the largest supported file), a title, year, and final
+`Title (Year) [Edition].ext` filename. Confirm that downloading/seeding has
+finished, then add it to the library and optionally queue ingestion. The move
+is instant because `incoming` and `films` are on the same drive. Other videos
+inside that release folder are left in place and are not offered as films.
+
+Ingestion is FIFO and runs one film at a time in an isolated, low-priority
+child process. The Films screen polls only while work is active; completed
+jobs remain visible until the API restarts. A separate CLI ingest fails with a
+clear message while another ingest owns the shared resource lock.
 
 Do not rename or move a source after ingestion. If relocation is necessary,
 use `relink-film` below. `films` is scanned for unindexed source discovery;
@@ -84,12 +100,19 @@ interactive search.
 uv run python -m pipeline.cli ingest "V:/scene-recall/films/Film (2001).mkv"
 ```
 
-The pipeline runs: probe → dialogue → shots → keyframes → embed → annotate →
-shot index → frame index. Completed hosted annotations are cached per shot under
-that film's asset directory. If an ingest is interrupted, re-running the same
-file reuses matching dialogue, media, and annotation artifacts instead of
-paying for those annotation calls again. Changing the annotation model, prompt,
-settings, or keyframe content intentionally invalidates the relevant cache.
+The CLI remains available as a fallback for an already finalized file placed
+directly inside `films`. Omit `[Edition]` when there is no confirmed cut or
+release variant, and use ` - ` in place of a colon.
+
+The pipeline runs: probe → dialogue → shots → keyframes → visual embed →
+annotate → publish shot/frame indexes → semantic-text derivation. Completed
+hosted annotations are cached by annotation profile under that film's asset
+directory. If an ingest is interrupted, re-running the same file reuses
+matching dialogue, media, and annotation artifacts instead of paying for those
+annotation calls again. Changing the annotation model, prompt, settings, or
+keyframe content selects a new cache profile without overwriting the old one.
+The final text derivation is local and non-blocking; a safely published film
+remains searchable through the legacy baseline if that optional step fails.
 
 Hosted annotation requests run concurrently within a film; tune
 `ingest.annotation_concurrency` in `config.yaml` (default 8).
@@ -153,26 +176,38 @@ uv run python -m pipeline.cli index-frames
 This step is local, idempotent, and does not call OpenAI or Gemini. New ingests
 build the frame index automatically.
 
+Build or repair the independent Qwen semantic-text profile from already
+published captions, dialogue, OCR, and facets with:
+
+```bash
+uv run python -m pipeline.cli index-text
+```
+
+This command is also local and idempotent. Its model-versioned profile becomes
+active only when its manifest exactly covers the current units generation;
+partial or stale data falls back as a whole to the compatible legacy index.
+
 Once more than one film is indexed, use the compact **All movies** control next
 to **Debug** to search one movie, several movies, or the whole library. The
 picker gains title search automatically as the library grows.
 
-For a small composition-matching experiment, click the image icon in the
-search field and choose a JPEG, PNG, or WebP still. You can also hover any
-result and click **Similar** to use that exact keyframe. This searches the
-existing local frame index, then compares a learned 6x6 spatial feature grid;
-it does not call OpenAI or Gemini and does not require re-ingestion. Treat the
-current result as framing/position similarity, not yet as exact skeletal pose
-or motion matching.
+For composition matching, click the image icon and choose a JPEG, PNG, or WebP
+still, or hover a result and click **Composition** to use its matched keyframe.
+You may keep typing to add a text constraint such as “at night with two
+people.” The reference shortlist remains mandatory and matching text evidence
+reranks it; unrelated text-only shots do not enter. Reference retrieval uses
+the existing local frame index and a learned 6x6 spatial feature grid, so it
+does not call OpenAI or Gemini or require re-ingestion. Treat it as
+framing/position similarity, not exact skeletal pose or motion matching.
 
-## Eval
+## Optional retrieval comparison
 
 ```bash
-python -m pipeline.eval.experiment run \
+uv run python -m pipeline.eval.experiment run \
   --queries pipeline/eval/fallen_angels_queries.yaml \
   --variants pipeline/eval/variants.yaml \
   --output pipeline/eval/runs/fa-001.yaml
-python -m pipeline.eval.experiment score pipeline/eval/runs/fa-001.yaml
+uv run python -m pipeline.eval.experiment score pipeline/eval/runs/fa-001.yaml
 ```
 
 The experiment runner records code/config/corpus/index provenance, separates

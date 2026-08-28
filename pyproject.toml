@@ -1,7 +1,7 @@
 [project]
-name = "cinema-search"
+name = "scene-recall"
 version = "0.1.0"
-description = "Add your description here"
+description = "Source-backed semantic search over film libraries"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -2,10 +2,13 @@ docs/superpowers/
 .superpowers/
 pipeline/tests/fixtures/
 __pycache__/
+.pytest_cache/
 *.py[cod]
 .venv/
 .env
 assets/
 .tmp/
+.test-runs/
+temp-md/
 .claude/settings.local.json
 pipeline/eval/runs/
