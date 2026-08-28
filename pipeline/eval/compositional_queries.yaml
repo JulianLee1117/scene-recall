@@ -1,0 +1,56 @@
+version: 1
+scope:
+  all_films: true
+instructions:
+  - These paired prompts test whether subject, position, and relation bindings affect ranking.
+  - Grade the requested relationship, not merely the presence of the same objects or people.
+  - A result matching the counterfactual arrangement is not relevant to its paired query.
+queries:
+  - id: car_sides_woman_left
+    category: position_binding
+    query: inside a car at night, a woman sits on the left side of the frame and a man sits on the right
+  - id: car_sides_man_left
+    category: position_binding
+    query: inside a car at night, a man sits on the left side of the frame and a woman sits on the right
+
+  - id: depth_person_foreground
+    category: depth_binding
+    query: a person in the foreground with a car blurred in the background
+  - id: depth_car_foreground
+    category: depth_binding
+    query: a car in the foreground with a person blurred in the background
+
+  - id: table_side_by_side
+    category: relation_binding
+    query: two people sitting side by side at a table in a restaurant
+  - id: table_facing_across
+    category: relation_binding
+    query: two people sitting across from each other at a table in a restaurant
+
+  - id: three_people_red_middle
+    category: attribute_binding
+    query: three seated people with the middle person wearing red
+  - id: three_people_red_right
+    category: attribute_binding
+    query: three seated people with the person on the right wearing red
+
+  - id: face_right_space_left
+    category: negative_space
+    query: a face on the right side of the frame with empty space on the left
+  - id: face_left_space_right
+    category: negative_space
+    query: a face on the left side of the frame with empty space on the right
+
+  - id: hallway_person_far_left
+    category: position_binding
+    query: a person far left in a long hallway
+  - id: hallway_person_centered
+    category: position_binding
+    query: a person centered in a long hallway
+
+  - id: desert_figure_lower_right
+    category: position_binding
+    query: a tiny figure in the lower right of a wide desert frame
+  - id: desert_figure_center_horizon
+    category: position_binding
+    query: a tiny centered figure near the horizon in a wide desert frame

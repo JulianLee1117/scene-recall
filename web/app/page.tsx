@@ -1,11 +1,20 @@
 "use client";
 
-import { useState, useCallback, useEffect, useId, useRef } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+} from "react";
 import ResultGrid from "@/components/ResultGrid";
 import VideoModal from "@/components/VideoModal";
 import LibraryView from "@/components/LibraryView";
 import MovieScopeFilter from "@/components/MovieScopeFilter";
+import SearchOptions, { type ResultGrouping } from "@/components/SearchOptions";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { bestResultPerFilm } from "@/lib/searchResults";
 import type { SearchResult, SearchResponse } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -39,6 +48,10 @@ export default function Home() {
   );
   const [activeShot, setActiveShot] = useState<SearchResult | null>(null);
   const [debug, setDebug] = useState(false);
+  const [resultGrouping, setResultGrouping] = useState<ResultGrouping>("all");
+  const [compositionOtherMovies, setCompositionOtherMovies] = useState(true);
+  const [compositionUseCurrentText, setCompositionUseCurrentText] =
+    useState(false);
   const [selectedFilmIds, setSelectedFilmIds] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -46,6 +59,7 @@ export default function Home() {
   const scopeSearchTimerRef = useRef<number | null>(null);
   const referenceBlobRef = useRef<Blob | null>(null);
   const referenceExcludeRef = useRef<string | null>(null);
+  const referenceExcludeFilmRef = useRef<string | null>(null);
   const referenceLabelRef = useRef<string | null>(null);
   const referencePreviewUrlRef = useRef<string | null>(null);
   const voiceStatusId = useId();
@@ -64,6 +78,7 @@ export default function Home() {
     }
     referenceBlobRef.current = null;
     referenceExcludeRef.current = null;
+    referenceExcludeFilmRef.current = null;
     referenceLabelRef.current = null;
     referencePreviewUrlRef.current = null;
     setReferenceLabel(null);
@@ -71,13 +86,19 @@ export default function Home() {
   }, [cancelPendingScopeSearch]);
 
   const activateReference = useCallback(
-    (image: Blob, label: string, excludeUnitId: string | null = null) => {
+    (
+      image: Blob,
+      label: string,
+      excludeUnitId: string | null = null,
+      excludeFilmId: string | null = null,
+    ) => {
       if (referencePreviewUrlRef.current) {
         URL.revokeObjectURL(referencePreviewUrlRef.current);
       }
       const previewUrl = URL.createObjectURL(image);
       referenceBlobRef.current = image;
       referenceExcludeRef.current = excludeUnitId;
+      referenceExcludeFilmRef.current = excludeFilmId;
       referenceLabelRef.current = label;
       referencePreviewUrlRef.current = previewUrl;
       setReferenceLabel(label);
@@ -147,6 +168,7 @@ export default function Home() {
       image: Blob,
       label: string,
       excludeUnitId: string | null = null,
+      excludeFilmId: string | null = null,
       scope: readonly string[] = selectedFilmIds,
       textQuery: string = "",
     ) => {
@@ -163,6 +185,14 @@ export default function Home() {
       scope.forEach((filmId) => params.append("film_id", filmId));
       if (excludeUnitId) {
         params.set("exclude_unit_id", excludeUnitId);
+      }
+      const effectiveFilmExclusion =
+        excludeFilmId &&
+        !(scope.length === 1 && scope[0] === excludeFilmId)
+          ? excludeFilmId
+          : null;
+      if (effectiveFilmExclusion) {
+        params.set("exclude_film_id", effectiveFilmExclusion);
       }
       const trimmedTextQuery = textQuery.trim();
       if (trimmedTextQuery) {
@@ -236,6 +266,7 @@ export default function Home() {
             referenceBlobRef.current,
             referenceLabelRef.current,
             referenceExcludeRef.current,
+            referenceExcludeFilmRef.current,
             filmIds,
             pendingQuery,
           );
@@ -273,6 +304,7 @@ export default function Home() {
           referenceBlobRef.current,
           referenceLabelRef.current,
           referenceExcludeRef.current,
+          referenceExcludeFilmRef.current,
           selectedFilmIds,
           transcript,
         );
@@ -295,6 +327,7 @@ export default function Home() {
       void runImageSearch(
         file,
         file.name || "Uploaded frame",
+        null,
         null,
         selectedFilmIds,
         query,
@@ -330,13 +363,17 @@ export default function Home() {
         const image = await response.blob();
         if (searchAbortRef.current !== controller) return;
         const label = `Result ${shot.rank ?? ""} frame`.trim();
-        activateReference(image, label, shot.unit_id);
+        const excludeFilmId = compositionOtherMovies ? shot.film_id : null;
+        const textConstraint = compositionUseCurrentText ? query : "";
+        if (!compositionUseCurrentText) setQuery("");
+        activateReference(image, label, shot.unit_id, excludeFilmId);
         await runImageSearch(
           image,
           label,
           shot.unit_id,
+          excludeFilmId,
           selectedFilmIds,
-          query,
+          textConstraint,
         );
       } catch (err) {
         if (controller.signal.aborted) return;
@@ -353,6 +390,8 @@ export default function Home() {
     [
       activateReference,
       cancelPendingScopeSearch,
+      compositionOtherMovies,
+      compositionUseCurrentText,
       loading,
       query,
       resultBatchSize,
@@ -400,6 +439,7 @@ export default function Home() {
         referenceBlobRef.current,
         referenceLabelRef.current,
         referenceExcludeRef.current,
+        referenceExcludeFilmRef.current,
         selectedFilmIds,
         submittedQuery,
       );
@@ -424,6 +464,7 @@ export default function Home() {
           referenceBlobRef.current,
           referenceLabelRef.current,
           referenceExcludeRef.current,
+          referenceExcludeFilmRef.current,
           selectedFilmIds,
           submittedQuery,
         );
@@ -434,6 +475,14 @@ export default function Home() {
   };
 
   const isEmpty = results.length === 0 && !loading && !error;
+  const displayedResults = useMemo(
+    () =>
+      resultGrouping === "best-per-movie"
+        ? bestResultPerFilm(results)
+        : results,
+    [resultGrouping, results],
+  );
+  const hiddenSameMovieCount = results.length - displayedResults.length;
   const voiceActive = speech.status !== "idle";
   const voiceStatus =
     speech.status === "requesting"
@@ -751,15 +800,20 @@ export default function Home() {
                     selectedFilmIds={selectedFilmIds}
                     onChange={handleMovieScopeChange}
                   />
-                  <button
-                    type="button"
-                    className="debug-toggle"
-                    aria-pressed={debug}
-                    onClick={() => setDebug((enabled) => !enabled)}
-                  >
-                    <span className="debug-toggle-dot" aria-hidden="true" />
-                    Debug
-                  </button>
+                  <SearchOptions
+                    resultGrouping={resultGrouping}
+                    onResultGroupingChange={(grouping) => {
+                      setResultGrouping(grouping);
+                      setVisibleResultCount(resultBatchSize);
+                    }}
+                    showRankingDetails={debug}
+                    onShowRankingDetailsChange={setDebug}
+                    compositionOtherMovies={compositionOtherMovies}
+                    onCompositionOtherMoviesChange={setCompositionOtherMovies}
+                    compositionScopeLocked={selectedFilmIds.length === 1}
+                    compositionUseCurrentText={compositionUseCurrentText}
+                    onCompositionUseCurrentTextChange={setCompositionUseCurrentText}
+                  />
                 </div>
               </div>
 
@@ -846,9 +900,11 @@ export default function Home() {
 
           {/* results grid */}
           <ResultGrid
-            results={results}
+            results={displayedResults}
             visibleCount={visibleResultCount}
             batchSize={resultBatchSize}
+            groupedByFilm={resultGrouping === "best-per-movie"}
+            hiddenSameMovieCount={hiddenSameMovieCount}
             revealDisabled={loading}
             onShowMore={() =>
               setVisibleResultCount((count) => count + resultBatchSize)

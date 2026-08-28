@@ -442,6 +442,7 @@ async def image_search_endpoint(
     request: Request,
     film_id: list[str] | None = Query(default=None),
     exclude_unit_id: str | None = Query(default=None),
+    exclude_film_id: str | None = Query(default=None),
     q: str | None = Query(default=None, max_length=500),
 ) -> dict:
     """Find similar framing, optionally constrained by a text query."""
@@ -509,6 +510,7 @@ async def image_search_endpoint(
                     config,
                     film_ids=film_id,
                     exclude_unit_id=exclude_unit_id,
+                    exclude_film_id=exclude_film_id,
                     result_limit=config.retrieval.result_window,
                     text_query=q,
                 )

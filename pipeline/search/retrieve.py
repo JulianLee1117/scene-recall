@@ -831,6 +831,52 @@ def _normalise_film_ids(film_ids: Iterable[str] | None) -> tuple[str, ...]:
     )
 
 
+def _reference_film_scope(
+    db: lancedb.DBConnection,
+    film_ids: Iterable[str] | None,
+    exclude_film_id: str | None,
+) -> tuple[tuple[str, ...], bool]:
+    """Return the effective reference scope and whether to prefer diversity.
+
+    An empty film scope means "all films" throughout normal retrieval, so an
+    unscoped cross-film request must be expanded before removing its source
+    film.  Reading the small films table keeps that exclusion ahead of ANN
+    candidate generation instead of filtering an already source-heavy window.
+    """
+    requested = _normalise_film_ids(film_ids)
+    excluded = str(exclude_film_id or "").strip()
+    if not excluded:
+        return requested, not bool(requested)
+    if requested:
+        remaining = tuple(
+            film_id for film_id in requested if film_id != excluded
+        )
+        # An explicit one-film scope is a stronger instruction than the
+        # cross-film convenience default.  Keep that scope usable instead of
+        # turning the request into an ambiguous empty tuple ("all films").
+        return (remaining or requested), False
+    if "films" not in table_names(db):
+        return (), True
+    rows = (
+        db.open_table("films")
+        .search()
+        .select(["film_id"])
+        .limit(None)
+        .to_list()
+    )
+    available = tuple(
+        sorted(
+            {
+                str(row.get("film_id") or "").strip()
+                for row in rows
+                if str(row.get("film_id") or "").strip()
+                and str(row.get("film_id") or "").strip() != excluded
+            }
+        )
+    )
+    return available, True
+
+
 def _any_of(column: str, values: tuple[str, ...]) -> Any | None:
     """Build a safe Lance expression matching any of *values* in *column*."""
     if not values:
@@ -1445,6 +1491,7 @@ def _search_by_image_only(
     result_limit: int | None = None,
     requested_text: str = "",
     deduplicate_visual: bool = True,
+    apply_film_diversity: bool | None = None,
 ) -> list[dict]:
     """Find shots with similar content in similar normalized screen positions.
 
@@ -1458,6 +1505,8 @@ def _search_by_image_only(
         result_limit,
     )
     scoped_film_ids = _normalise_film_ids(film_ids)
+    if apply_film_diversity is None:
+        apply_film_diversity = not bool(scoped_film_ids)
     frame_rows = _reference_frame_candidates(
         image.convert("RGB"),
         db,
@@ -1538,9 +1587,7 @@ def _search_by_image_only(
         selected_frames.append(frame)
     temporal_order = [*temporally_preferred, *temporally_deferred]
     ranked_candidates = (
-        temporal_order[:result_limit]
-        if scoped_film_ids
-        else _progressive_film_diversity(
+        _progressive_film_diversity(
             temporal_order,
             result_limit=result_limit,
             page_size=int(config.retrieval.diversity.page_size),
@@ -1548,6 +1595,8 @@ def _search_by_image_only(
                 config.retrieval.diversity.film_results_per_page_target
             ),
         )
+        if apply_film_diversity
+        else temporal_order[:result_limit]
     )
 
     results: list[dict] = []
@@ -1707,6 +1756,7 @@ def _reapply_reference_result_preferences(
     *,
     scoped_film_ids: tuple[str, ...],
     result_limit: int,
+    apply_film_diversity: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Restore temporal spread and unscoped film variety after text reranking."""
     temporally_preferred: list[dict[str, Any]] = []
@@ -1727,9 +1777,9 @@ def _reapply_reference_result_preferences(
         selected_frames.append(frame)
     temporal_order = [*temporally_preferred, *temporally_deferred]
 
-    if scoped_film_ids:
-        selected = temporal_order[:result_limit]
-    else:
+    if apply_film_diversity is None:
+        apply_film_diversity = not bool(scoped_film_ids)
+    if apply_film_diversity:
         wrapped = [{"row": result} for result in temporal_order]
         selected = [
             candidate["row"]
@@ -1742,6 +1792,8 @@ def _reapply_reference_result_preferences(
                 ),
             )
         ]
+    else:
+        selected = temporal_order[:result_limit]
     for rank, result in enumerate(selected, start=1):
         result["rank"] = rank
     return selected
@@ -1754,6 +1806,7 @@ def search_by_image(
     *,
     film_ids: Iterable[str] | None = None,
     exclude_unit_id: str | None = None,
+    exclude_film_id: str | None = None,
     result_limit: int | None = None,
     text_query: str | None = None,
 ) -> list[dict]:
@@ -1769,7 +1822,17 @@ def search_by_image(
         result_limit,
     )
     require_visual_encoder_profile(db, config)
-    scoped_film_ids = _normalise_film_ids(film_ids)
+    requested_film_ids = _normalise_film_ids(film_ids)
+    normalized_film_exclusion = str(exclude_film_id or "").strip()
+    scoped_film_ids, apply_film_diversity = _reference_film_scope(
+        db,
+        requested_film_ids,
+        normalized_film_exclusion,
+    )
+    # With no explicit scope, an empty result means no other published films
+    # exist.  It must not fall through to the empty-tuple spelling for "all".
+    if normalized_film_exclusion and not scoped_film_ids:
+        return []
     normalized_text = str(text_query or "").strip()
     candidate_window = (
         resolved_result_limit
@@ -1790,6 +1853,7 @@ def search_by_image(
         # Preserve visually repeated moments until independent text evidence
         # has had a chance to distinguish or promote one of them.
         deduplicate_visual=not bool(normalized_text),
+        apply_film_diversity=apply_film_diversity,
     )
     if not normalized_text:
         return reference_results
@@ -1812,4 +1876,5 @@ def search_by_image(
         config,
         scoped_film_ids=scoped_film_ids,
         result_limit=resolved_result_limit,
+        apply_film_diversity=apply_film_diversity,
     )

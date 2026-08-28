@@ -7,6 +7,8 @@ interface ResultGridProps {
   results: SearchResult[];
   visibleCount: number;
   batchSize: number;
+  groupedByFilm?: boolean;
+  hiddenSameMovieCount?: number;
   revealDisabled?: boolean;
   onShowMore: () => void;
   onShotClick: (shot: SearchResult) => void;
@@ -19,6 +21,8 @@ export default function ResultGrid({
   results,
   visibleCount,
   batchSize,
+  groupedByFilm = false,
+  hiddenSameMovieCount = 0,
   revealDisabled = false,
   onShowMore,
   onShotClick,
@@ -35,7 +39,19 @@ export default function ResultGrid({
   return (
     <section className="search-results" aria-label="Ranked search results">
       <p className="result-count" role="status" aria-live="polite">
-        {visibleResults.length} of {results.length} ranked results
+        {groupedByFilm ? (
+          <>
+            {visibleResults.length} of {results.length} best-per-movie results
+            {hiddenSameMovieCount > 0 && (
+              <>{" \u00b7 "}{hiddenSameMovieCount} lower-ranked scenes hidden</>
+            )}
+          </>
+        ) : (
+          <>
+            {visibleResults.length} of {results.length} ranked scenes{" \u00b7 "}
+            {new Set(results.map((result) => result.film_id)).size} movies represented
+          </>
+        )}
       </p>
       <ol
         className="result-grid"

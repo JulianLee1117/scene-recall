@@ -108,10 +108,22 @@ Reference-image search retrieves PE frame candidates and spatially reranks a
 bounded shortlist using an on-demand learned 6x6 feature grid. This represents
 composition and subject position, not pose or motion.
 
+The result-card composition workflow defaults to a composition-only search of
+other films. Its source-film exclusion is applied before candidate generation,
+so source style cannot consume the bounded reference shortlist. Explicit film
+scope still controls the allowed library; a scope containing only the source
+film takes precedence rather than becoming an empty cross-film search. Users
+may deliberately include the source film or retain their current text clause.
+
 Text and reference clauses can be combined. The reference result set remains
 mandatory; text reranks only those candidates and cannot introduce a visually
 unrelated result. The exact matched reference frame is preserved, and matched
 text evidence is attached when available.
+
+Frontend best-per-movie grouping retains the highest-ranked item for each film
+already present in the returned window. It is presentation, not guaranteed
+per-film retrieval, and does not imply that every indexed film is relevant or
+present in the global candidate pool.
 
 ## Activation and fallback
 
@@ -182,8 +194,14 @@ preservation, and safe backfills do not require a permanent golden corpus.
 
 ## Current next action
 
-Use the active semantic-text profile and record concrete regressions or missing
-evidence rather than expanding the schema speculatively.
+Grade the paired position/relation prompts in
+`pipeline/eval/compositional_queries.yaml` before changing retrieval. If useful
+shots are absent from the pooled candidate window, test a separate versioned
+grounded layout representation on a representative subset. If those shots are
+present but ordered poorly, shadow-test a shortlist reranker instead. A query
+router or LLM decomposition layer is not a substitute for evidence the index
+does not contain and must not become an always-on dependency without the same
+paired comparison.
 
 If action or camera-motion failures recur, the next experiment is one separate
 temporal profile over a small action-heavy subset, not a full-library migration.

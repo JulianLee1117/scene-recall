@@ -187,18 +187,27 @@ This command is also local and idempotent. Its model-versioned profile becomes
 active only when its manifest exactly covers the current units generation;
 partial or stale data falls back as a whole to the compatible legacy index.
 
-Once more than one film is indexed, use the compact **All movies** control next
-to **Debug** to search one movie, several movies, or the whole library. The
-picker gains title search automatically as the library grows.
+Once more than one film is indexed, use the compact **All movies** control to
+search one movie, several movies, or the whole library. The picker gains title
+search automatically as the library grows. Open **Options** to show the best
+scene per movie represented in the returned search window or to reveal ranking
+details. This display grouping does not force an irrelevant result from every
+indexed movie. Search uses bounded ranked candidate and result windows, not a
+minimum-similarity cutoff, so a globally uncompetitive movie may be absent;
+select that movie in **All movies** when complete movie-specific recall matters.
 
 For composition matching, click the image icon and choose a JPEG, PNG, or WebP
 still, or hover a result and click **Composition** to use its matched keyframe.
-You may keep typing to add a text constraint such as “at night with two
+The result action starts a composition-only search across other movies by
+default, preventing source-film style matches from consuming its candidate
+window. **Options** can include the source movie or keep the current text as a
+constraint. You may also type a new constraint such as “at night with two
 people.” The reference shortlist remains mandatory and matching text evidence
 reranks it; unrelated text-only shots do not enter. Reference retrieval uses
 the existing local frame index and a learned 6x6 spatial feature grid, so it
 does not call OpenAI or Gemini or require re-ingestion. Treat it as
-framing/position similarity, not exact skeletal pose or motion matching.
+framing/position similarity, not exact subject-relation, skeletal-pose, or
+motion matching.
 
 ## Optional retrieval comparison
 
@@ -209,6 +218,10 @@ uv run python -m pipeline.eval.experiment run \
   --output pipeline/eval/runs/fa-001.yaml
 uv run python -m pipeline.eval.experiment score pipeline/eval/runs/fa-001.yaml
 ```
+
+Use `pipeline/eval/compositional_queries.yaml` with the same command to compare
+paired left/right, foreground/background, subject-relation, and negative-space
+prompts across the whole indexed library.
 
 The experiment runner records code/config/corpus/index provenance, separates
 warmup from measured latency, runs true hybrid/image/text/lexical ablations,

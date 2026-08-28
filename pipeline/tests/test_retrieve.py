@@ -1445,8 +1445,9 @@ def test_search_by_image_with_text_runs_both_replaceable_retrievers(
             image,
             db,
             config,
-            film_ids=["film_one"],
+            film_ids=["film_one", "film_two"],
             exclude_unit_id="source",
+            exclude_film_id="film_one",
             result_limit=7,
             text_query="  neon rain  ",
         )
@@ -1456,18 +1457,130 @@ def test_search_by_image_with_text_runs_both_replaceable_retrievers(
         image,
         db,
         config,
-        film_ids=("film_one",),
+        film_ids=("film_two",),
         exclude_unit_id="source",
         result_limit=100,
         requested_text="neon rain",
         deduplicate_visual=False,
+        apply_film_diversity=False,
     )
     text_search.assert_called_once_with(
         "neon rain",
         db,
         config,
-        film_ids=("film_one",),
+        film_ids=("film_two",),
         result_limit=100,
+    )
+
+
+def test_search_by_image_excludes_source_film_before_unscoped_candidates(
+    config: Config,
+) -> None:
+    """Cross-film matching frees ANN slots before either retriever runs."""
+    from pipeline.search.retrieve import search_by_image
+
+    films = MagicMock()
+    films.search.return_value = _make_query_chain(
+        [
+            {"film_id": "source_film"},
+            {"film_id": "other_b"},
+            {"film_id": "other_a"},
+        ]
+    )
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["films"]
+    db.open_table.return_value = films
+    image = Image.new("RGB", (32, 18), "black")
+
+    with (
+        patch("pipeline.search.retrieve.require_visual_encoder_profile"),
+        patch(
+            "pipeline.search.retrieve._search_by_image_only",
+            return_value=[],
+        ) as image_search,
+    ):
+        results = search_by_image(
+            image,
+            db,
+            config,
+            exclude_film_id="source_film",
+        )
+
+    assert results == []
+    image_search.assert_called_once_with(
+        image,
+        db,
+        config,
+        film_ids=("other_a", "other_b"),
+        exclude_unit_id=None,
+        result_limit=48,
+        requested_text="",
+        deduplicate_visual=True,
+        apply_film_diversity=True,
+    )
+
+
+def test_search_by_image_returns_empty_when_source_is_only_published_film(
+    config: Config,
+) -> None:
+    """Cross-film matching never lets the empty-scope sentinel include source."""
+    from pipeline.search.retrieve import search_by_image
+
+    films = MagicMock()
+    films.search.return_value = _make_query_chain([{"film_id": "source_film"}])
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["films"]
+    db.open_table.return_value = films
+
+    with (
+        patch("pipeline.search.retrieve.require_visual_encoder_profile"),
+        patch("pipeline.search.retrieve._search_by_image_only") as image_search,
+    ):
+        results = search_by_image(
+            Image.new("RGB", (32, 18), "black"),
+            db,
+            config,
+            exclude_film_id="source_film",
+        )
+
+    assert results == []
+    image_search.assert_not_called()
+
+
+def test_search_by_image_explicit_source_only_scope_takes_precedence(
+    config: Config,
+) -> None:
+    """A deliberate one-film scope remains usable with cross-film defaults."""
+    from pipeline.search.retrieve import search_by_image
+
+    image = Image.new("RGB", (32, 18), "black")
+    db = MagicMock()
+    with (
+        patch("pipeline.search.retrieve.require_visual_encoder_profile"),
+        patch(
+            "pipeline.search.retrieve._search_by_image_only",
+            return_value=[],
+        ) as image_search,
+    ):
+        results = search_by_image(
+            image,
+            db,
+            config,
+            film_ids=["source_film"],
+            exclude_film_id="source_film",
+        )
+
+    assert results == []
+    image_search.assert_called_once_with(
+        image,
+        db,
+        config,
+        film_ids=("source_film",),
+        exclude_unit_id=None,
+        result_limit=48,
+        requested_text="",
+        deduplicate_visual=True,
+        apply_film_diversity=False,
     )
 
 
@@ -2020,6 +2133,7 @@ def test_api_image_search_accepts_raw_image_and_forwards_scope(
                     ("film_id", "film_one"),
                     ("film_id", "film_two"),
                     ("exclude_unit_id", "source"),
+                    ("exclude_film_id", "source_film"),
                     ("q", "neon rain"),
                 ],
                 content=buffer.getvalue(),
@@ -2036,6 +2150,7 @@ def test_api_image_search_accepts_raw_image_and_forwards_scope(
     assert image_search.call_args.kwargs == {
         "film_ids": ["film_one", "film_two"],
         "exclude_unit_id": "source",
+        "exclude_film_id": "source_film",
         "result_limit": 48,
         "text_query": "neon rain",
     }
