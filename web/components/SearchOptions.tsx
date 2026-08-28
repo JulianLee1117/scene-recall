@@ -2,11 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
-export type ResultGrouping = "all" | "best-per-movie";
-
 interface SearchOptionsProps {
-  resultGrouping: ResultGrouping;
-  onResultGroupingChange: (grouping: ResultGrouping) => void;
   showRankingDetails: boolean;
   onShowRankingDetailsChange: (enabled: boolean) => void;
   compositionOtherMovies: boolean;
@@ -17,8 +13,6 @@ interface SearchOptionsProps {
 }
 
 export default function SearchOptions({
-  resultGrouping,
-  onResultGroupingChange,
   showRankingDetails,
   onShowRankingDetailsChange,
   compositionOtherMovies,
@@ -33,9 +27,7 @@ export default function SearchOptions({
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const headingId = useId();
-  const groupingName = useId();
   const changedOptionCount = [
-    resultGrouping !== "all",
     showRankingDetails,
     !compositionOtherMovies,
     compositionUseCurrentText,
@@ -65,7 +57,6 @@ export default function SearchOptions({
   }, [isOpen]);
 
   const reset = () => {
-    onResultGroupingChange("all");
     onShowRankingDetailsChange(false);
     onCompositionOtherMoviesChange(true);
     onCompositionUseCurrentTextChange(false);
@@ -157,36 +148,6 @@ export default function SearchOptions({
               </button>
             </div>
           </div>
-
-          <fieldset className="search-options-section">
-            <legend>Results</legend>
-            <label className="search-option-row">
-              <input
-                type="radio"
-                name={groupingName}
-                checked={resultGrouping === "all"}
-                onChange={() => onResultGroupingChange("all")}
-              />
-              <span className="search-option-indicator" aria-hidden="true" />
-              <span className="search-option-copy">
-                <span>All ranked scenes</span>
-                <span>Keep every returned scene in relevance order.</span>
-              </span>
-            </label>
-            <label className="search-option-row">
-              <input
-                type="radio"
-                name={groupingName}
-                checked={resultGrouping === "best-per-movie"}
-                onChange={() => onResultGroupingChange("best-per-movie")}
-              />
-              <span className="search-option-indicator" aria-hidden="true" />
-              <span className="search-option-copy">
-                <span>Best scene per represented movie</span>
-                <span>Keeps the highest-ranked scene from each movie already returned.</span>
-              </span>
-            </label>
-          </fieldset>
 
           <fieldset className="search-options-section">
             <legend>When matching a result</legend>

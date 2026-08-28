@@ -1,59 +1,109 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
 import ShotCard from "./ShotCard";
 import type { SearchResult } from "@/types/api";
 
+const INITIAL_VISIBLE_ROWS = 3;
+const ROWS_PER_REVEAL = 2;
+
+export type ResultGrouping = "all" | "best-per-movie";
+
 interface ResultGridProps {
   results: SearchResult[];
-  visibleCount: number;
-  batchSize: number;
-  groupedByFilm?: boolean;
-  hiddenSameMovieCount?: number;
+  grouping: ResultGrouping;
+  onGroupingChange: (grouping: ResultGrouping) => void;
   revealDisabled?: boolean;
-  onShowMore: () => void;
   onShotClick: (shot: SearchResult) => void;
   onFindSimilar: (shot: SearchResult) => void;
   debug: boolean;
   similarDisabled?: boolean;
 }
 
+function resolvedColumnCount(grid: HTMLOListElement): number {
+  const template = window.getComputedStyle(grid).gridTemplateColumns.trim();
+  if (!template || template === "none") return 1;
+  return Math.max(1, template.split(/\s+/).length);
+}
+
 export default function ResultGrid({
   results,
-  visibleCount,
-  batchSize,
-  groupedByFilm = false,
-  hiddenSameMovieCount = 0,
+  grouping,
+  onGroupingChange,
   revealDisabled = false,
-  onShowMore,
   onShotClick,
   onFindSimilar,
   debug,
   similarDisabled = false,
 }: ResultGridProps) {
-  if (results.length === 0) return null;
+  const gridRef = useRef<HTMLOListElement>(null);
+  const [columnCount, setColumnCount] = useState(1);
+  const [visibleRows, setVisibleRows] = useState(INITIAL_VISIBLE_ROWS);
+  const hasResults = results.length > 0;
 
+  useLayoutEffect(() => {
+    setVisibleRows(INITIAL_VISIBLE_ROWS);
+  }, [results]);
+
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid || !hasResults) return;
+
+    const updateColumnCount = () => {
+      const nextCount = resolvedColumnCount(grid);
+      setColumnCount((currentCount) =>
+        currentCount === nextCount ? currentCount : nextCount,
+      );
+    };
+
+    updateColumnCount();
+    const observer = new ResizeObserver(updateColumnCount);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [hasResults]);
+
+  if (!hasResults) return null;
+
+  const visibleCount = visibleRows * columnCount;
   const visibleResults = results.slice(0, visibleCount);
   const remainingCount = results.length - visibleResults.length;
-  const nextBatchCount = Math.min(batchSize, remainingCount);
+  const nextVisibleCount = Math.min(
+    results.length,
+    (visibleRows + ROWS_PER_REVEAL) * columnCount,
+  );
+  const nextBatchCount = nextVisibleCount - visibleResults.length;
+  const movieCount = new Set(results.map((result) => result.film_id)).size;
+  const sceneLabel = results.length === 1 ? "scene" : "scenes";
+  const movieLabel = movieCount === 1 ? "movie" : "movies";
 
   return (
     <section className="search-results" aria-label="Ranked search results">
-      <p className="result-count" role="status" aria-live="polite">
-        {groupedByFilm ? (
-          <>
-            {visibleResults.length} of {results.length} best-per-movie results
-            {hiddenSameMovieCount > 0 && (
-              <>{" \u00b7 "}{hiddenSameMovieCount} lower-ranked scenes hidden</>
-            )}
-          </>
-        ) : (
-          <>
-            {visibleResults.length} of {results.length} ranked scenes{" \u00b7 "}
-            {new Set(results.map((result) => result.film_id)).size} movies represented
-          </>
-        )}
-      </p>
+      <header className="result-toolbar">
+        <p className="result-count" role="status" aria-live="polite">
+          {results.length} {sceneLabel} <span aria-hidden="true">&middot;</span>{" "}
+          {movieCount} {movieLabel}
+        </p>
+        <div className="result-view-toggle" role="group" aria-label="Result view">
+          <button
+            type="button"
+            aria-pressed={grouping === "all"}
+            onClick={() => onGroupingChange("all")}
+          >
+            All scenes
+          </button>
+          <button
+            type="button"
+            aria-pressed={grouping === "best-per-movie"}
+            aria-label="Show one scene per represented movie"
+            title="Show the highest-ranked returned scene from each movie"
+            onClick={() => onGroupingChange("best-per-movie")}
+          >
+            One per movie
+          </button>
+        </div>
+      </header>
       <ol
+        ref={gridRef}
         className="result-grid"
         aria-label={`${visibleResults.length} of ${results.length} ranked search results shown`}
       >
@@ -76,10 +126,10 @@ export default function ResultGrid({
             type="button"
             className="result-more-button"
             disabled={revealDisabled}
-            onClick={onShowMore}
-            aria-label={`Show ${nextBatchCount} more ranked results`}
+            onClick={() => setVisibleRows((rows) => rows + ROWS_PER_REVEAL)}
+            aria-label={`Show ${nextBatchCount} more ranked ${nextBatchCount === 1 ? "result" : "results"}`}
           >
-            Show {nextBatchCount} more
+            Show more
           </button>
           <span>{remainingCount} remaining</span>
         </div>
