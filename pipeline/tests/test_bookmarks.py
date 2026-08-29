@@ -72,6 +72,29 @@ def _unit_row(unit_id: str, *, start: float, end: float) -> dict:
     }
 
 
+def _frame_row(unit_id: str, *, timestamp: float) -> dict:
+    vector = np.zeros(1024, dtype=np.float32).tolist()
+    return {
+        "schema_version": 1,
+        "frame_id": f"{unit_id}::frame::0",
+        "film_id": "film-a",
+        "unit_id": unit_id,
+        "shot_id": unit_id,
+        "frame_index": 0,
+        "timestamp": timestamp,
+        "timestamp_source": "keyframe_recipe",
+        "path": f"{unit_id}_0.webp",
+        # Any indexed keyframe may support a search hit and bookmark.  This
+        # flag marks the shot's display representative, not frame validity.
+        "is_representative": False,
+        "quality_score": None,
+        "source_size": 1,
+        "source_mtime_ns": 1,
+        "visual_encoder": "pe_core_l14",
+        "visual_vec": vector,
+    }
+
+
 def test_bookmark_api_remaps_timestamp_and_preserves_unavailable_anchor(
     config,
 ) -> None:
@@ -91,6 +114,9 @@ def test_bookmark_api_remaps_timestamp_and_preserves_unavailable_anchor(
         ]
     )
     db.open_table("units").add([_unit_row("film-a_0001", start=10, end=20)])
+    db.open_table("frames").add(
+        [_frame_row("film-a_0001", timestamp=15.25)]
+    )
 
     with (
         patch("pipeline.api.main.load_config", return_value=config),
@@ -102,11 +128,11 @@ def test_bookmark_api_remaps_timestamp_and_preserves_unavailable_anchor(
         with TestClient(api_mod.app) as client:
             first = client.put(
                 "/bookmarks/film-a_0001",
-                json={"evidence_timestamp": 15.25},
+                json={"evidence_timestamp": 15.25, "frame_index": 0},
             )
             repeated = client.put(
                 "/bookmarks/film-a_0001",
-                json={"evidence_timestamp": 15.25},
+                json={"evidence_timestamp": 15.25, "frame_index": 0},
             )
 
             assert first.status_code == 200
@@ -116,6 +142,7 @@ def test_bookmark_api_remaps_timestamp_and_preserves_unavailable_anchor(
             assert first.json()["film_title"] == "Film A"
             assert first.json()["availability"] == "indexed"
             assert first.json()["scene"]["unit_id"] == "film-a_0001"
+            assert first.json()["scene"]["matched_frame_index"] == 0
             assert first.json()["created_at"].endswith("+00:00")
 
             db.open_table("units").delete("film_id = 'film-a'")

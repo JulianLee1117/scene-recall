@@ -375,15 +375,14 @@ def _bookmark_frame_index(
             db.open_table("frames")
             .search()
             .where(col("unit_id") == lit(unit_id))
-            .select(["frame_index", "timestamp", "is_representative"])
+            .select(["frame_index", "timestamp"])
             .limit(None)
             .to_list()
         )
         frames = [
             row
             for row in rows
-            if row.get("is_representative") is not False
-            and row.get("frame_index") is not None
+            if row.get("frame_index") is not None
         ]
         if unit_id == bookmark.source_unit_id and frames:
             if bookmark.frame_index is not None:
@@ -432,18 +431,13 @@ def _bookmark_frame_timestamp(
                 (col("unit_id") == lit(unit_id))
                 & (col("frame_index") == lit(frame_index))
             )
-            .select(["timestamp", "is_representative"])
+            .select(["timestamp"])
             .limit(2)
             .to_list()
         )
-        valid = [
-            row
-            for row in rows
-            if row.get("is_representative") is not False
-        ]
-        if len(valid) != 1:
+        if len(rows) != 1:
             raise HTTPException(status_code=422, detail="Frame is not indexed")
-        timestamp = valid[0].get("timestamp")
+        timestamp = rows[0].get("timestamp")
         return float(timestamp) if timestamp is not None else None
 
     try:
