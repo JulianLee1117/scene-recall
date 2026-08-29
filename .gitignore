@@ -10,5 +10,4 @@ assets/
 .tmp/
 .test-runs/
 temp-md/
-.claude/settings.local.json
 pipeline/eval/runs/
