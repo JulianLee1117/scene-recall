@@ -3,6 +3,7 @@
 Endpoints
 ---------
 GET /search?q=...                   Dense semantic search; {"results": [...]}
+POST /search/recipe                 Typed modular scene-search clauses
 POST /search/image?q=...            Reference composition + optional text
 GET /bookmarks                      List durable saved scenes
 PUT /bookmarks/{unit_id}            Save one indexed scene
@@ -39,7 +40,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Annotated, Any, Callable, Iterator, Literal
 
 from dotenv import load_dotenv
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -50,7 +51,7 @@ from fastapi import FastAPI, HTTPException, Path as ApiPath, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from lancedb.expr import col, lit
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from pipeline.bookmarks import Bookmark, BookmarkStore
 from pipeline.config import VIDEO_EXTENSIONS, Config, load_config
@@ -63,6 +64,14 @@ from pipeline.index.writer import (
 from pipeline.search.retrieve import (
     search as _search,
     search_by_image as _search_by_image,
+)
+from pipeline.search.recipe import (
+    RecipeSourceNotFound,
+    RecipeSourceUnavailable,
+    SearchClause as InternalSearchClause,
+    SemanticTextProfileUnavailable,
+    SourceReference as InternalSourceReference,
+    search_recipe as _search_recipe,
 )
 
 
@@ -314,7 +323,7 @@ def _unit_contains_timestamp(unit: dict[str, Any], timestamp: float) -> bool:
         end = float(unit["t_end"])
     except (KeyError, TypeError, ValueError):
         return False
-    return start - 0.001 <= timestamp <= end + 0.001
+    return start <= timestamp < end
 
 
 def _resolve_bookmark_unit(db: Any, bookmark: Bookmark) -> dict[str, Any] | None:
@@ -348,9 +357,6 @@ def _resolve_bookmark_unit(db: Any, bookmark: Bookmark) -> dict[str, Any] | None
         if row.get("is_representative") is not False
         and _unit_contains_timestamp(row, bookmark.evidence_timestamp)
     ]
-    if not containing:
-        return None
-
     def preference(unit: dict[str, Any]) -> tuple[float, float, str]:
         start = float(unit["t_start"])
         end = float(unit["t_end"])
@@ -360,7 +366,28 @@ def _resolve_bookmark_unit(db: Any, bookmark: Bookmark) -> dict[str, Any] | None
             str(unit.get("unit_id") or ""),
         )
 
-    return min(containing, key=preference)
+    if containing:
+        return min(containing, key=preference)
+
+    # Half-open ranges make a shared boundary belong only to the following
+    # unit.  A film's absolute final boundary has no following unit, so retain
+    # that one exact terminal anchor as a deterministic fallback.
+    representative = [
+        dict(row)
+        for row in rows
+        if row.get("is_representative") is not False
+    ]
+    if not representative:
+        return None
+    final_end = max(float(row["t_end"]) for row in representative)
+    if abs(bookmark.evidence_timestamp - final_end) > 1e-6:
+        return None
+    ending = [
+        row
+        for row in representative
+        if abs(float(row["t_end"]) - final_end) <= 1e-6
+    ]
+    return min(ending, key=preference) if ending else None
 
 
 def _bookmark_frame_index(
@@ -495,6 +522,7 @@ def _bookmark_response(request: Request, bookmark: Bookmark) -> dict[str, Any]:
             "t_end": float(unit["t_end"]),
             "caption": str(unit.get("caption") or ""),
             "keyframe_url": keyframe_url,
+            "keyframe_index": frame_index,
             "preview_url": f"/media/preview/{shot_id}",
             "evidence_timestamp": bookmark.evidence_timestamp,
             "matched_frame_url": keyframe_url,
@@ -620,6 +648,32 @@ def _decode_reference_image(payload: bytes) -> Image.Image:
         ) from None
 
 
+async def _run_serialized_image_work(
+    request: Request,
+    function: Callable[..., Any],
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Serialize GPU-heavy reference work and outlive caller cancellation."""
+    async with request.app.state.image_search_lock:
+        if await request.is_disconnected():
+            raise HTTPException(
+                status_code=499,
+                detail="Client disconnected before image search",
+            )
+        work = asyncio.create_task(
+            asyncio.to_thread(function, *args, **kwargs)
+        )
+        try:
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            # Cancelling ``to_thread`` does not stop GPU work.  Keep both the
+            # serialized lock and bounded slot occupied until it really ends.
+            await work
+            raise
+
+
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
@@ -645,6 +699,98 @@ class BookmarkRequest(BaseModel):
         allow_inf_nan=False,
     )
     frame_index: int | None = Field(default=None, ge=0)
+
+
+_RECIPE_CLAUSE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+
+
+class SearchSourceReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str = Field(min_length=1, max_length=256)
+    frame_index: int | None = Field(default=None, ge=0, le=32_767)
+
+    @field_validator("unit_id")
+    @classmethod
+    def normalize_unit_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("unit_id cannot be blank")
+        return normalized
+
+
+class SearchTextClause(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=_RECIPE_CLAUSE_ID_PATTERN,
+    )
+    kind: Literal["text"]
+    facet: Literal["all", "scene", "words", "look", "mood"]
+    text: str = Field(min_length=1, max_length=500)
+
+    @field_validator("text")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("text cannot be blank")
+        return normalized
+
+
+class SearchSourceClause(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=_RECIPE_CLAUSE_ID_PATTERN,
+    )
+    kind: Literal["source"]
+    facet: Literal["scene", "words", "look", "composition", "mood"]
+    source: SearchSourceReference
+
+    @model_validator(mode="after")
+    def require_visual_frame(self) -> "SearchSourceClause":
+        if self.facet in {"look", "composition"} and self.source.frame_index is None:
+            raise ValueError(f"{self.facet} source requires frame_index")
+        return self
+
+
+SearchRecipeClause = Annotated[
+    SearchTextClause | SearchSourceClause,
+    Field(discriminator="kind"),
+]
+
+
+class SearchRecipeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clauses: list[SearchRecipeClause] = Field(min_length=1, max_length=3)
+    film_ids: list[str] = Field(default_factory=list, max_length=1_000)
+
+    @field_validator("film_ids")
+    @classmethod
+    def normalize_film_ids(cls, values: list[str]) -> list[str]:
+        return list(
+            dict.fromkeys(
+                normalized
+                for value in values
+                if (normalized := value.strip())
+            )
+        )
+
+    @model_validator(mode="after")
+    def require_unique_clauses(self) -> "SearchRecipeRequest":
+        clause_ids = [clause.id for clause in self.clauses]
+        if len(clause_ids) != len(set(clause_ids)):
+            raise ValueError("search recipe clause IDs must be unique")
+        facets = [clause.facet for clause in self.clauses]
+        if len(facets) != len(set(facets)):
+            raise ValueError("search recipe facets must be unique")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -674,6 +820,81 @@ def search_endpoint(
     )
     return {
         "results": results,
+        "display_batch_size": config.retrieval.diversity.page_size,
+    }
+
+
+@app.post("/search/recipe")
+async def search_recipe_endpoint(
+    payload: SearchRecipeRequest,
+    request: Request,
+) -> dict:
+    """Search one to three explicit, independently evidenced clauses."""
+    _require_search_ready(request)
+    config: Config = request.app.state.config
+    db = request.app.state.db
+    clauses = [
+        InternalSearchClause(
+            clause_id=clause.id,
+            kind=clause.kind,
+            facet=clause.facet,
+            text=clause.text if isinstance(clause, SearchTextClause) else None,
+            source=(
+                InternalSourceReference(
+                    unit_id=clause.source.unit_id,
+                    frame_index=clause.source.frame_index,
+                )
+                if isinstance(clause, SearchSourceClause)
+                else None
+            ),
+        )
+        for clause in payload.clauses
+    ]
+    uses_composition = any(
+        clause.facet == "composition" for clause in clauses
+    )
+    acquired_slot = False
+    if uses_composition:
+        try:
+            request.app.state.image_search_slots.get_nowait()
+            acquired_slot = True
+        except asyncio.QueueEmpty:
+            raise HTTPException(
+                status_code=429,
+                detail="Reference search is busy; try again in a moment",
+            ) from None
+
+    try:
+        results = await (
+            _run_serialized_image_work(
+                request,
+                _search_recipe,
+                clauses,
+                db,
+                config,
+                film_ids=payload.film_ids,
+            )
+            if uses_composition
+            else asyncio.to_thread(
+                _search_recipe,
+                clauses,
+                db,
+                config,
+                film_ids=payload.film_ids,
+            )
+        )
+    except RecipeSourceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    except RecipeSourceUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except SemanticTextProfileUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    finally:
+        if acquired_slot:
+            request.app.state.image_search_slots.put_nowait(None)
+
+    return {
+        "results": _with_film_titles(request, results),
         "display_batch_size": config.retrieval.diversity.page_size,
     }
 
@@ -737,32 +958,18 @@ async def image_search_endpoint(
         image = _decode_reference_image(payload)
         config: Config = request.app.state.config
         db = request.app.state.db
-        async with request.app.state.image_search_lock:
-            if await request.is_disconnected():
-                raise HTTPException(
-                    status_code=499,
-                    detail="Client disconnected before image search",
-                )
-            work = asyncio.create_task(
-                asyncio.to_thread(
-                    _search_by_image,
-                    image,
-                    db,
-                    config,
-                    film_ids=film_id,
-                    exclude_unit_id=exclude_unit_id,
-                    exclude_film_id=exclude_film_id,
-                    result_limit=config.retrieval.result_window,
-                    text_query=q,
-                )
-            )
-            try:
-                results = await asyncio.shield(work)
-            except asyncio.CancelledError:
-                # Keep the gate occupied until the worker really finishes;
-                # cancelling ``to_thread`` alone does not stop its GPU work.
-                await work
-                raise
+        results = await _run_serialized_image_work(
+            request,
+            _search_by_image,
+            image,
+            db,
+            config,
+            film_ids=film_id,
+            exclude_unit_id=exclude_unit_id,
+            exclude_film_id=exclude_film_id,
+            result_limit=config.retrieval.result_window,
+            text_query=q,
+        )
         return {
             "results": _with_film_titles(request, results),
             "display_batch_size": config.retrieval.diversity.page_size,
@@ -808,7 +1015,9 @@ def save_bookmark_endpoint(
         else frame_timestamp
     )
     if evidence_timestamp is None:
-        evidence_timestamp = float(unit["t_start"])
+        evidence_timestamp = (
+            float(unit["t_start"]) + float(unit["t_end"])
+        ) / 2.0
     if not _unit_contains_timestamp(unit, evidence_timestamp):
         raise HTTPException(
             status_code=422,

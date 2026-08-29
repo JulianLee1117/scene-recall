@@ -33,6 +33,12 @@ reference image + text
   -> mandatory reference shortlist
   -> text reranks only that shortlist
 
+typed recipe (one to three clauses)
+  -> explicit evidence adapters
+  -> equal reciprocal-rank fusion
+  -> mandatory composition gate when present
+  -> final filtering and diversity
+
 result
   -> film + timestamp + matched frame/text + playable media
 ```
@@ -72,9 +78,11 @@ Each bookmark preserves the source `film_id` and evidence timestamp as its
 durable anchor. The unit ID and frame index recorded when it was saved are
 derived lookup hints. If a later compatible reingest changes shot boundaries,
 the API may resolve the bookmark to the current unit containing that timestamp,
-but only within the same film identity. Missing or temporarily unavailable
-source/index data leaves an explicit unavailable bookmark rather than silently
-rebinding or deleting user state.
+but only within the same film identity. Unit intervals are resolved as
+half-open ranges, so an exact shared boundary belongs to the following unit;
+the absolute final boundary of a film deterministically falls back to its last
+unit. Missing or temporarily unavailable source/index data leaves an explicit
+unavailable bookmark rather than silently rebinding or deleting user state.
 
 ## Implemented dataflow
 
@@ -141,6 +149,52 @@ already present in the returned window. It is presentation, not guaranteed
 per-film retrieval, and does not imply that every indexed film is relevant or
 present in the global candidate pool.
 
+### Modular recipe retrieval
+
+`POST /search/recipe` composes one to three explicit clauses without adding a
+router, query LLM, model, index, or ingestion dependency. Clause IDs and facets
+must be unique. Text clauses support broad `all` search plus `scene`, `words`,
+`look`, and `mood`; indexed-scene sources support those same focused facets
+except `all`, and also support `composition`.
+
+The adapters deliberately expose evidence already present in the current
+system:
+
+- `all` uses normal hybrid text retrieval;
+- `scene` searches caption semantic views;
+- `words` searches dialogue and OCR semantic views;
+- `look` uses the paired PE text/frame space without spatial reranking;
+- `composition` uses the indexed source frame and existing spatial reranker;
+- `mood` searches the existing structured-facet semantic view.
+
+Source clauses address an indexed unit and, for `look` or `composition`, an
+exact frame index. The server resolves the corresponding unit, film, vector,
+and file path from the active index; browser-supplied paths or vectors are
+never trusted. Every source and its facet-required evidence is validated before
+an empty composition target scope can return no results. Every referenced
+source unit is removed from the result set.
+Composition retains the ADR-0005 cross-film default and is a mandatory
+candidate gate. Its effective result-film scope is resolved before any bounded
+clause retrieval and shared by every clause, so source-film hits cannot consume
+an auxiliary clause's candidate window. Other clauses may rerank composition
+candidates but cannot introduce composition-unrelated results.
+
+A recipe containing only one broad `all` text clause delegates to normal text
+search, preserving its complete bounded candidate union and diversity behavior,
+then adds the recipe match evidence. All other facet adapters return bounded
+raw rankings; recipes with multiple clauses combine them using equal
+reciprocal-rank fusion. Existing junk suppression, visual deduplication,
+reference temporal spread when applicable, and final film diversity are then
+applied once to the resulting ordering. Each returned product result includes
+stable `keyframe_index` evidence and a `matches` entry for every clause that
+retrieved it, including the contributing rank and matched text or frame when
+available.
+
+Focused `scene`, `words`, and `mood` clauses require a complete active
+semantic-text profile. They fail explicitly when it is unavailable instead of
+silently using the inseparable legacy combined text vector. Broad `all` search
+retains the established safe fallback.
+
 ## Activation and fallback
 
 The semantic-text table identity includes its model revision, dimensions, and
@@ -174,7 +228,8 @@ with exact revision lineage and its own activation manifest.
   camera movement.
 - Dialogue is embedded at shot level rather than as utterance rows.
 - OCR comes from the general annotator rather than a dedicated OCR pass.
-- Typed facets are not first-class query filters.
+- `scene` and `mood` reuse current annotation views rather than independently
+  learned representations; there is no dedicated plot representation.
 - There are no clip, audio, scene-summary, reranker, router, or RAG indexes.
 - Saved scenes are local to one configured state database; named collections
   and account synchronization are not implemented.

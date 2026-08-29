@@ -834,6 +834,72 @@ def test_search_soft_film_diversity_backfills_by_relevance(config: Config) -> No
     assert len(results) == 6
 
 
+def test_single_all_recipe_preserves_deep_normal_search_diversity(
+    config: Config,
+) -> None:
+    """A lone broad clause cannot truncate a film hit below raw rank 100."""
+    from pipeline.search.recipe import SearchClause, search_recipe
+    from pipeline.search.retrieve import search
+
+    config.retrieval.diversity.page_size = 12
+    config.retrieval.diversity.film_results_per_page_target = 2
+    crowded = [
+        _make_unit_row(
+            f"crowded_{index:03d}",
+            "film_crowded",
+            caption=f"Distinct moment {index}",
+            searchable_text=f"moment {index}",
+            t_start=float(index * 100),
+            t_end=float(index * 100 + 2),
+            img_vec=_basis_vec(index),
+            _distance=0.001 + index * 0.001,
+        )
+        for index in range(102)
+    ]
+    deep_other_film = _make_unit_row(
+        "deep_other_film",
+        "film_other",
+        caption="A lower-ranked moment from another film",
+        searchable_text="another film moment",
+        t_start=20_000.0,
+        t_end=20_002.0,
+        img_vec=_basis_vec(200),
+        _distance=0.9,
+    )
+    rows = [*crowded, deep_other_film]
+    db = _make_hybrid_mock_db(
+        image_rows=rows,
+        text_rows=rows,
+        lexical_rows=[],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        normal_results = search("moment", db, config)
+        recipe_results = search_recipe(
+            [SearchClause("main", "text", "all", text="moment")],
+            db,
+            config,
+        )
+
+    assert "deep_other_film" in [
+        result["unit_id"] for result in normal_results[:12]
+    ]
+    assert [result["unit_id"] for result in recipe_results] == [
+        result["unit_id"] for result in normal_results
+    ]
+    for recipe_result, normal_result in zip(
+        recipe_results,
+        normal_results,
+        strict=True,
+    ):
+        assert {
+            key: value
+            for key, value in recipe_result.items()
+            if key != "matches"
+        } == normal_result
+        assert recipe_result["matches"][0]["rank"] == normal_result["rank"]
+
+
 def test_search_disables_film_cap_for_explicit_scope(config: Config) -> None:
     """An explicit movie scope preserves relevance order without balancing."""
     from pipeline.search.retrieve import search
@@ -917,11 +983,22 @@ def test_search_deduplicates_channels_and_near_identical_images(
 
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
         results = search("road", db, config)
+        raw_results = search(
+            "road",
+            db,
+            config,
+            _defer_result_preferences=True,
+        )
 
     unit_ids = [result["unit_id"] for result in results]
     assert unit_ids.count("original") == 1
     assert "visual_duplicate" not in unit_ids
     assert "distinct" in unit_ids
+    assert [result["unit_id"] for result in raw_results] == [
+        "original",
+        "visual_duplicate",
+        "distinct",
+    ]
 
 
 def test_search_keeps_temporally_adjacent_visually_distinct_results(
@@ -1667,9 +1744,20 @@ def test_text_constraint_can_retain_visually_similar_repeated_shots(
             requested_text="the second conversation",
             deduplicate_visual=False,
         )
+        recipe_candidates = _search_by_image_only(
+            Image.new("RGB", (32, 18), "black"),
+            db,
+            config,
+            result_limit=2,
+            _defer_result_preferences=True,
+        )
 
     assert [result["unit_id"] for result in image_only] == ["first"]
     assert [result["unit_id"] for result in combined_candidates] == [
+        "first",
+        "second",
+    ]
+    assert [result["unit_id"] for result in recipe_candidates] == [
         "first",
         "second",
     ]
@@ -2102,7 +2190,16 @@ def test_api_search_returns_results_dict(config: Config) -> None:
     assert isinstance(data["results"], list)
     assert len(data["results"]) > 0
     result = data["results"][0]
-    for key in ("unit_id", "film_id", "t_start", "t_end", "caption", "keyframe_url", "preview_url"):
+    for key in (
+        "unit_id",
+        "film_id",
+        "t_start",
+        "t_end",
+        "caption",
+        "keyframe_url",
+        "keyframe_index",
+        "preview_url",
+    ):
         assert key in result, f"API result missing key: {key}"
 
 
