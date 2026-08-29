@@ -16,8 +16,9 @@ interface ResultGridProps {
   onGroupingChange: (grouping: ResultGrouping) => void;
   revealDisabled?: boolean;
   onShotClick: (shot: SearchResult) => void;
-  onFindSimilar: (shot: SearchResult) => void;
-  onUseInSearch: (shot: SearchResult, facet: RecipeMatchFacet) => void;
+  onFindSimilar?: (shot: SearchResult) => void;
+  onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
+  sourcePickerFacet?: RecipeMatchFacet;
   onToggleBookmark?: (shot: SearchResult) => void;
   bookmarkedUnitIds?: ReadonlySet<string>;
   pendingBookmarkUnitIds?: ReadonlySet<string>;
@@ -40,6 +41,7 @@ export default function ResultGrid({
   onShotClick,
   onFindSimilar,
   onUseInSearch,
+  sourcePickerFacet,
   onToggleBookmark,
   bookmarkedUnitIds = EMPTY_UNIT_IDS,
   pendingBookmarkUnitIds = EMPTY_UNIT_IDS,
@@ -127,6 +129,7 @@ export default function ResultGrid({
               onClick={onShotClick}
               onFindSimilar={onFindSimilar}
               onUseInSearch={onUseInSearch}
+              sourcePickerFacet={sourcePickerFacet}
               onToggleBookmark={onToggleBookmark}
               bookmarked={bookmarkedUnitIds.has(shot.unit_id)}
               bookmarkDisabled={

@@ -13,6 +13,7 @@ import VideoModal from "@/components/VideoModal";
 import LibraryView from "@/components/LibraryView";
 import SavedView from "@/components/SavedView";
 import MatchByRail from "@/components/MatchByRail";
+import SourcePicker from "@/components/SourcePicker";
 import MovieScopeFilter from "@/components/MovieScopeFilter";
 import SearchOptions from "@/components/SearchOptions";
 import { useBookmarks } from "@/hooks/useBookmarks";
@@ -63,6 +64,14 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "library", label: "Films" },
 ];
 
+function focusFacetBrowse(facet: RecipeMatchFacet) {
+  window.requestAnimationFrame(() => {
+    document
+      .querySelector<HTMLButtonElement>(`[data-browse-facet="${facet}"]`)
+      ?.focus();
+  });
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("search");
   const [query, setQuery] = useState("");
@@ -73,6 +82,8 @@ export default function Home() {
   const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
   const [searchWorkspaceActive, setSearchWorkspaceActive] = useState(false);
   const [matchDrafts, setMatchDrafts] = useState<MatchDrafts>({});
+  const [sourcePickerFacet, setSourcePickerFacet] =
+    useState<RecipeMatchFacet | null>(null);
   const [referenceLabel, setReferenceLabel] = useState<string | null>(null);
   const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(
     null,
@@ -256,6 +267,7 @@ export default function Home() {
   const leaveUploadedReference = useCallback(() => {
     if (!referenceBlobRef.current) return;
     clearReference();
+    setSourcePickerFacet(null);
     searchAbortRef.current = null;
     setLoading(false);
   }, [clearReference]);
@@ -314,6 +326,19 @@ export default function Home() {
       query,
       runRecipe,
     ],
+  );
+
+  const handleFacetTextSubmit = useCallback(
+    (facet: TextMatchFacet, text: string) => {
+      const nextDrafts: MatchDrafts = {
+        ...matchDrafts,
+        [facet]: { kind: "text", facet, text },
+      };
+      setMatchDrafts(nextDrafts);
+      setRecipeNotice(null);
+      void runRecipe(query, nextDrafts);
+    },
+    [matchDrafts, query, runRecipe],
   );
 
   const handleRemoveFacet = useCallback(
@@ -390,6 +415,31 @@ export default function Home() {
     [applySourceFacet],
   );
 
+  const handleSourcePickerChoose = useCallback(
+    (shot: SearchResult) => {
+      if (!sourcePickerFacet) return;
+      const targetFacet = sourcePickerFacet;
+      const draft = sourceDraftFromShot(sourcePickerFacet, shot);
+      if (!draft) {
+        setSourcePickerFacet(null);
+        setError("This scene does not have an exact searchable frame.");
+        focusFacetBrowse(targetFacet);
+        return;
+      }
+      setSourcePickerFacet(null);
+      applySourceFacet(targetFacet, draft);
+      focusFacetBrowse(targetFacet);
+    },
+    [applySourceFacet, sourcePickerFacet],
+  );
+
+  const handleSourcePickerCancel = useCallback(() => {
+    const targetFacet = sourcePickerFacet;
+    setActiveShot(null);
+    setSourcePickerFacet(null);
+    if (targetFacet) focusFacetBrowse(targetFacet);
+  }, [sourcePickerFacet]);
+
   const handleMovieScopeChange = useCallback(
     (filmIds: string[]) => {
       cancelPendingScopeSearch();
@@ -464,12 +514,22 @@ export default function Home() {
     onComplete: handleVoiceComplete,
   });
 
+  const handleBrowseFacet = useCallback(
+    (facet: RecipeMatchFacet) => {
+      speech.cancel();
+      setActiveShot(null);
+      setSourcePickerFacet(facet);
+    },
+    [speech],
+  );
+
   const resetSearchHome = useCallback(() => {
     speech.cancel();
     cancelPendingScopeSearch();
     searchAbortRef.current?.abort();
     searchAbortRef.current = null;
     clearReference();
+    setSourcePickerFacet(null);
     setActiveTab("search");
     setQuery("");
     setMatchDrafts({});
@@ -580,7 +640,7 @@ export default function Home() {
     }
   };
 
-  const isHome = !searchWorkspaceActive;
+  const isHome = !searchWorkspaceActive && !sourcePickerFacet;
   const clauseCount = recipeClauseCount(query, matchDrafts);
   const recipeOverLimit = clauseCount > MAX_RECIPE_CLAUSES;
   const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
@@ -642,6 +702,7 @@ export default function Home() {
                 return;
               }
               speech.cancel();
+              setSourcePickerFacet(null);
               setActiveTab(tab.id);
             }}
             style={{
@@ -729,17 +790,30 @@ export default function Home() {
               scene-recall
             </button>
 
-            {/* search bar */}
+            {/* Search recipe or independent scene-source picker. */}
+            {sourcePickerFacet ? (
+              <SourcePicker
+                targetFacet={sourcePickerFacet}
+                mainText={query}
+                drafts={matchDrafts}
+                selectedFilmIds={selectedFilmIds}
+                onCancel={handleSourcePickerCancel}
+                onChoose={handleSourcePickerChoose}
+                onPreview={setActiveShot}
+              />
+            ) : (
             <form
+              className="search-workspace-form"
               onSubmit={handleSubmit}
               style={{
                 width: "100%",
-                maxWidth: isHome ? "760px" : "720px",
+                maxWidth: isHome ? "980px" : "960px",
                 padding: "0 16px",
                 transition: "max-width 0.3s ease",
               }}
             >
               <div
+                className="search-bar-shell"
                 style={{
                   position: "relative",
                   display: "flex",
@@ -922,7 +996,9 @@ export default function Home() {
                   drafts={matchDrafts}
                   onActivateText={handleActivateTextFacet}
                   onTextChange={handleFacetTextChange}
+                  onSubmitText={handleFacetTextSubmit}
                   onRemove={handleRemoveFacet}
+                  onBrowse={handleBrowseFacet}
                   onSource={applySourceFacet}
                   onLimit={handleRecipeLimit}
                 />
@@ -1018,9 +1094,10 @@ export default function Home() {
                 </div>
               )}
             </form>
+            )}
 
             {/* error */}
-            {error && (
+            {!sourcePickerFacet && error && (
               <p
                 style={{
                   marginTop: "16px",
@@ -1034,6 +1111,7 @@ export default function Home() {
 
             {/* no results */}
             {!loading &&
+              !sourcePickerFacet &&
               !error &&
               speech.status === "idle" &&
               results.length === 0 &&
@@ -1050,22 +1128,24 @@ export default function Home() {
               )}
           </div>
 
-          {/* results grid */}
-          <ResultGrid
-            results={displayedResults}
-            grouping={resultGrouping}
-            onGroupingChange={setResultGrouping}
-            revealDisabled={loading}
-            onShotClick={setActiveShot}
-            onFindSimilar={handleFindSimilar}
-            onUseInSearch={handleUseInSearch}
-            onToggleBookmark={(shot) => void toggleBookmark(shot)}
-            bookmarkedUnitIds={bookmarkedUnitIds}
-            pendingBookmarkUnitIds={pendingBookmarkUnitIds}
-            bookmarkDisabled={bookmarksLoading}
-            debug={debug}
-            similarDisabled={loading}
-          />
+          {/* Keep the recipe grid mounted so Cancel restores its reveal state. */}
+          <div hidden={Boolean(sourcePickerFacet)}>
+            <ResultGrid
+              results={displayedResults}
+              grouping={resultGrouping}
+              onGroupingChange={setResultGrouping}
+              revealDisabled={loading}
+              onShotClick={setActiveShot}
+              onFindSimilar={handleFindSimilar}
+              onUseInSearch={handleUseInSearch}
+              onToggleBookmark={(shot) => void toggleBookmark(shot)}
+              bookmarkedUnitIds={bookmarkedUnitIds}
+              pendingBookmarkUnitIds={pendingBookmarkUnitIds}
+              bookmarkDisabled={bookmarksLoading}
+              debug={debug}
+              similarDisabled={loading}
+            />
+          </div>
         </>
       )}
 
@@ -1080,8 +1160,13 @@ export default function Home() {
         <VideoModal
           shot={activeShot}
           onClose={() => setActiveShot(null)}
-          onMatchComposition={handleFindSimilar}
-          onUseInSearch={handleUseInSearch}
+          onMatchComposition={
+            sourcePickerFacet ? undefined : handleFindSimilar
+          }
+          onUseInSearch={
+            sourcePickerFacet ? handleSourcePickerChoose : handleUseInSearch
+          }
+          sourcePickerFacet={sourcePickerFacet ?? undefined}
           matchCompositionDisabled={loading}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
           bookmarked={Boolean(activeShotBookmark)}

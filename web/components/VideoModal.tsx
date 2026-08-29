@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import UseInSearchMenu from "./UseInSearchMenu";
+import FacetIcon from "./FacetIcon";
 import { filmLabel, formatTime } from "@/lib/format";
 import { FACET_LABELS } from "@/lib/searchRecipe";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
@@ -11,6 +12,7 @@ interface VideoModalProps {
   onClose: () => void;
   onMatchComposition?: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
+  sourcePickerFacet?: RecipeMatchFacet;
   matchCompositionDisabled?: boolean;
   bookmarked?: boolean;
   bookmarkDisabled?: boolean;
@@ -29,6 +31,7 @@ export default function VideoModal({
   onClose,
   onMatchComposition,
   onUseInSearch,
+  sourcePickerFacet,
   matchCompositionDisabled = false,
   bookmarked = false,
   bookmarkDisabled = false,
@@ -228,15 +231,25 @@ export default function VideoModal({
             <button type="button" onClick={copyTimestamp}>
               {timestampCopied ? "Timestamp copied" : "Copy timestamp"}
             </button>
-            {onUseInSearch && (
+            {onUseInSearch && sourcePickerFacet ? (
+              <button
+                type="button"
+                className="modal-source-picker-use"
+                disabled={!Number.isInteger(shot.keyframe_index)}
+                onClick={() => onUseInSearch(shot, sourcePickerFacet)}
+              >
+                <FacetIcon facet={sourcePickerFacet} size={15} />
+                Use for {FACET_LABELS[sourcePickerFacet]}
+              </button>
+            ) : onUseInSearch ? (
               <UseInSearchMenu
                 shot={shot}
                 onUse={onUseInSearch}
                 variant="modal"
                 disabled={!Number.isInteger(shot.keyframe_index)}
               />
-            )}
-            {onMatchComposition && (
+            ) : null}
+            {onMatchComposition && !sourcePickerFacet && (
               <button
                 type="button"
                 disabled={matchCompositionDisabled}

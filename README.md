@@ -210,6 +210,10 @@ remains a one-click shortcut. Composition supplies the mandatory candidate
 set; other active parts can rerank it but cannot introduce visually unrelated
 shots. Result-source composition search keeps the cross-film discovery default
 to prevent the source movie's style from consuming the bounded shortlist.
+Each facet's **Find scene** action temporarily opens an independent broad search
+without changing the current recipe; cancel returns to it unchanged, while
+choosing a scene adds that source and reruns the combined recipe. Press Enter in
+a facet's text editor to run the current recipe with that explicit constraint.
 
 The image icon remains a separate uploaded-reference workflow for JPEG, PNG,
 or WebP stills and can take the main bar as a text constraint. Its active chip

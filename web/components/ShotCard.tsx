@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useId } from "react";
 import UseInSearchMenu from "./UseInSearchMenu";
+import FacetIcon from "./FacetIcon";
 import { FACET_LABELS, writeSceneSourceDrag } from "@/lib/searchRecipe";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { formatTime, filmLabel } from "@/lib/format";
@@ -14,6 +15,7 @@ interface ShotCardProps {
   onClick: (shot: SearchResult) => void;
   onFindSimilar?: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
+  sourcePickerFacet?: RecipeMatchFacet;
   similarDisabled?: boolean;
   bookmarked?: boolean;
   bookmarkDisabled?: boolean;
@@ -56,6 +58,7 @@ export default function ShotCard({
   onClick,
   onFindSimilar,
   onUseInSearch,
+  sourcePickerFacet,
   similarDisabled = false,
   bookmarked = false,
   bookmarkDisabled = false,
@@ -103,9 +106,15 @@ export default function ShotCard({
 
   return (
     <article
-      className={`result-card${debug ? " result-card-debug" : ""}`}
-      draggable={Boolean(onUseInSearch && sourceAvailable)}
+      className={`result-card${debug ? " result-card-debug" : ""}${sourcePickerFacet ? " is-source-picker-result" : ""}`}
+      draggable={Boolean(
+        !sourcePickerFacet && onUseInSearch && sourceAvailable,
+      )}
       onDragStart={(event) => {
+        if (sourcePickerFacet) {
+          event.preventDefault();
+          return;
+        }
         if (!writeSceneSourceDrag(event.dataTransfer, shot)) {
           event.preventDefault();
         }
@@ -260,14 +269,28 @@ export default function ShotCard({
               </svg>
             </button>
           )}
-          {onUseInSearch && (
+          {onUseInSearch && sourcePickerFacet ? (
+            <button
+              type="button"
+              className="result-card-action source-picker-use-action"
+              disabled={!sourceAvailable}
+              onClick={() => onUseInSearch(shot, sourcePickerFacet)}
+              onFocus={handleMouseEnter}
+              onBlur={handleMouseLeave}
+              onDragStart={(event) => event.preventDefault()}
+              aria-label={`Use result ${displayedRank} for ${FACET_LABELS[sourcePickerFacet]}`}
+            >
+              <FacetIcon facet={sourcePickerFacet} size={14} />
+              <span>Use for {FACET_LABELS[sourcePickerFacet]}</span>
+            </button>
+          ) : onUseInSearch ? (
             <UseInSearchMenu
               shot={shot}
               onUse={onUseInSearch}
               disabled={!sourceAvailable}
             />
-          )}
-          {onFindSimilar && (
+          ) : null}
+          {onFindSimilar && !sourcePickerFacet && (
             <button
               type="button"
               className="result-card-action composition-button"
