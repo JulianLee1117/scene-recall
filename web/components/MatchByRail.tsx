@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type DragEvent } from "react";
-import FacetIcon from "./FacetIcon";
 import { formatTime } from "@/lib/format";
 import {
   FACET_LABELS,
@@ -21,29 +20,11 @@ import type { RecipeMatchFacet } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-const FACET_HELP: Record<
-  RecipeMatchFacet,
-  { description: string; placeholder?: string }
-> = {
-  scene: {
-    description: "What is happening",
-    placeholder: "Describe what happens…",
-  },
-  words: {
-    description: "Dialogue or on-screen words",
-    placeholder: "Enter words you remember…",
-  },
-  look: {
-    description: "Objects, color, and light",
-    placeholder: "Describe the visual details…",
-  },
-  composition: {
-    description: "Framing and arrangement",
-  },
-  mood: {
-    description: "Feeling and atmosphere",
-    placeholder: "Describe the feeling…",
-  },
+const FACET_PLACEHOLDERS: Record<TextMatchFacet, string> = {
+  scene: "Describe what happens…",
+  words: "Type dialogue or visible text…",
+  look: "Describe objects, color, or light…",
+  mood: "Describe the feeling…",
 };
 
 interface MatchByRailProps {
@@ -60,9 +41,27 @@ interface MatchByRailProps {
     originFacet?: RecipeMatchFacet,
   ) => void;
   onLimit?: () => void;
-  frozen?: boolean;
-  label?: string;
   targetFacet?: RecipeMatchFacet;
+}
+
+function SourceReferenceIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.5" />
+      <path d="m4 17 4.5-4 3.5 3 2.5-2 5.5 4.5" />
+    </svg>
+  );
 }
 
 function sourceLabel(draft: MatchDraft): string {
@@ -102,8 +101,6 @@ export default function MatchByRail({
   onBrowse,
   onSource,
   onLimit,
-  frozen = false,
-  label = "Match by",
   targetFacet,
 }: MatchByRailProps) {
   const [editingFacet, setEditingFacet] =
@@ -116,21 +113,16 @@ export default function MatchByRail({
   const overLimit = clauseCount > MAX_RECIPE_CLAUSES;
 
   useEffect(() => {
-    if (frozen && editingFacet) {
-      setEditingFacet(null);
-      return;
-    }
     if (!editingFacet || drafts[editingFacet]?.kind === "text") return;
     setEditingFacet(null);
-  }, [drafts, editingFacet, frozen]);
+  }, [drafts, editingFacet]);
 
   const canUseFacet = (facet: RecipeMatchFacet) =>
-    !frozen &&
-    (matchDraftHasClause(drafts[facet]) ||
-      (!overLimit && clauseCount < MAX_RECIPE_CLAUSES));
+    matchDraftHasClause(drafts[facet]) ||
+    (!overLimit && clauseCount < MAX_RECIPE_CLAUSES);
 
   const canAcceptDrop = (facet: RecipeMatchFacet) => {
-    if (frozen || dragSourceFacet === facet) return false;
+    if (dragSourceFacet === facet) return false;
     if (dragSourceFacet) return true;
     return canUseFacet(facet);
   };
@@ -155,17 +147,18 @@ export default function MatchByRail({
       return;
     }
     setEditingFacet(null);
+    const draft = drafts[facet];
+    if (draft?.kind === "text" && !draft.text.trim()) onRemove?.(facet);
     onBrowse?.(facet);
   };
 
   return (
     <section
-      className={`match-rail${dragSourceFacet ? " is-moving-source" : ""}${frozen ? " is-frozen" : ""}`}
+      className={`match-rail${dragSourceFacet ? " is-moving-source" : ""}`}
       aria-labelledby="match-rail-label"
-      aria-disabled={frozen || undefined}
     >
       <div className="match-rail-heading">
-        <span id="match-rail-label">{label}</span>
+        <span id="match-rail-label">Match by</span>
         {clauseCount > 0 && (
           <span
             className={overLimit ? "is-over-limit" : undefined}
@@ -184,7 +177,14 @@ export default function MatchByRail({
           const canDrop = canAcceptDrop(facet);
           const isDragOver = dragOverFacet === facet;
           const isEditing =
-            !frozen && draft?.kind === "text" && editingFacet === facet;
+            draft?.kind === "text" && editingFacet === facet;
+          const dropCopy = isDragOver
+            ? draft && hasClause
+              ? `Replace ${FACET_LABELS[facet]}`
+              : dragSourceFacet
+                ? `Move to ${FACET_LABELS[facet]}`
+                : `Use for ${FACET_LABELS[facet]}`
+            : null;
           const tileClass = [
             "match-tile",
             isEditing ? "is-editing" : "",
@@ -193,7 +193,7 @@ export default function MatchByRail({
             dragSourceFacet && canDrop ? "is-drop-ready" : "",
             isDragOver && canDrop ? "is-drag-over" : "",
             dragSourceFacet === facet ? "is-dragging-source" : "",
-            targetFacet === facet ? "is-picker-target" : "",
+            targetFacet === facet ? "is-reference-target" : "",
             !canUse && !hasClause && !(dragSourceFacet && canDrop)
               ? "is-disabled"
               : "",
@@ -207,11 +207,11 @@ export default function MatchByRail({
               className={tileClass}
               data-facet={facet}
               onDragEnter={(event) => {
-                if (frozen || !containsSceneSource(event.dataTransfer)) return;
+                if (!containsSceneSource(event.dataTransfer)) return;
                 event.preventDefault();
               }}
               onDragOver={(event) => {
-                if (frozen || !containsSceneSource(event.dataTransfer)) return;
+                if (!containsSceneSource(event.dataTransfer)) return;
                 event.preventDefault();
                 const allowed = canAcceptDrop(facet);
                 event.dataTransfer.dropEffect = allowed
@@ -231,7 +231,6 @@ export default function MatchByRail({
                 }
               }}
               onDrop={(event) => {
-                if (frozen) return;
                 event.preventDefault();
                 const originFacet =
                   readFacetSourceDragOrigin(event.dataTransfer) ??
@@ -255,124 +254,98 @@ export default function MatchByRail({
               }}
             >
               <div className="match-tile-header">
-                <span>
-                  <FacetIcon facet={facet} />
-                  {FACET_LABELS[facet]}
-                </span>
-                {draft && !frozen && (
+                <span>{FACET_LABELS[facet]}</span>
+                <span className="match-tile-actions">
                   <button
                     type="button"
-                    className="match-inline-remove"
-                    onClick={() => onRemove?.(facet)}
-                    aria-label={`Remove ${FACET_LABELS[facet]} match`}
-                    title="Remove"
+                    className="match-reference-button"
+                    disabled={!canUse}
+                    data-browse-facet={facet}
+                    onClick={() => browse(facet)}
+                    aria-label={`Use a scene for ${FACET_LABELS[facet]}`}
+                    title={`Use a scene for ${FACET_LABELS[facet]}`}
                   >
-                    {"\u00d7"}
+                    <SourceReferenceIcon />
                   </button>
-                )}
-              </div>
-
-              {draft?.kind === "text" ? (
-                isEditing ? (
-                  <div
-                    className="match-text-editor"
-                    onBlur={(event) => {
-                      if (
-                        event.currentTarget.contains(
-                          event.relatedTarget as Node | null,
-                        )
-                      ) {
-                        return;
-                      }
-                      setEditingFacet(null);
-                      if (!draft.text.trim()) onRemove?.(facet);
-                    }}
-                  >
-                    <input
-                      type="text"
-                      value={draft.text}
-                      maxLength={500}
-                      autoFocus
-                      placeholder={FACET_HELP[facet].placeholder}
-                      aria-label={`${FACET_LABELS[facet]} match`}
-                      onChange={(event) =>
-                        onTextChange?.(draft.facet, event.target.value)
-                      }
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") {
-                          event.preventDefault();
-                          setEditingFacet(null);
-                          if (!draft.text.trim()) onRemove?.(facet);
-                        } else if (event.key === "Enter") {
-                          event.preventDefault();
-                          setEditingFacet(null);
-                          if (draft.text.trim()) {
-                            onSubmitText?.(draft.facet, draft.text);
-                          } else {
-                            onRemove?.(facet);
-                          }
-                        }
-                      }}
-                    />
-                    <div className="match-tile-footer">
-                      <span>Enter to search</span>
-                      <button
-                        type="button"
-                        data-browse-facet={facet}
-                        aria-label={`Find a scene for ${FACET_LABELS[facet]}`}
-                        onClick={() => {
-                          if (!draft.text.trim()) onRemove?.(facet);
-                          browse(facet);
-                        }}
-                      >
-                        Find scene
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
+                  {hasClause && (
                     <button
                       type="button"
-                      className="match-text-edit"
-                      disabled={frozen}
+                      className="match-inline-remove"
+                      onClick={() => onRemove?.(facet)}
+                      aria-label={`Remove ${FACET_LABELS[facet]} match`}
+                      title="Remove"
+                    >
+                      {"\u00d7"}
+                    </button>
+                  )}
+                </span>
+              </div>
+
+              <div className="match-tile-body">
+                {dropCopy ? (
+                  <span className="match-drop-copy">{dropCopy}</span>
+                ) : draft?.kind === "text" ? (
+                  isEditing ? (
+                    <div
+                      className="match-text-editor"
+                      onBlur={(event) => {
+                        if (
+                          event.currentTarget.contains(
+                            event.relatedTarget as Node | null,
+                          )
+                        ) {
+                          return;
+                        }
+                        setEditingFacet(null);
+                        if (!draft.text.trim()) onRemove?.(facet);
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={draft.text}
+                        maxLength={500}
+                        autoFocus
+                        placeholder={FACET_PLACEHOLDERS[draft.facet]}
+                        aria-label={`${FACET_LABELS[facet]} match`}
+                        onChange={(event) =>
+                          onTextChange?.(draft.facet, event.target.value)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            setEditingFacet(null);
+                            if (!draft.text.trim()) onRemove?.(facet);
+                          } else if (event.key === "Enter") {
+                            event.preventDefault();
+                            setEditingFacet(null);
+                            if (draft.text.trim()) {
+                              onSubmitText?.(draft.facet, draft.text);
+                            } else {
+                              onRemove?.(facet);
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="match-text-affordance has-value"
                       onClick={() => activateText(draft.facet)}
                       aria-label={`Edit ${FACET_LABELS[facet]} match: ${draft.text}`}
-                      title={`Edit ${FACET_LABELS[facet]} match`}
                     >
-                      <strong>{draft.text || FACET_HELP[facet].description}</strong>
+                      {draft.text}
                     </button>
-                    <div className="match-tile-footer">
-                      <button
-                        type="button"
-                        disabled={frozen}
-                        aria-label={`Edit ${FACET_LABELS[facet]} text`}
-                        onClick={() => activateText(draft.facet)}
-                      >
-                        Edit text
-                      </button>
-                      <button
-                        type="button"
-                        disabled={frozen}
-                        data-browse-facet={facet}
-                        aria-label={`Find a scene for ${FACET_LABELS[facet]}`}
-                        onClick={() => browse(facet)}
-                      >
-                        Find scene
-                      </button>
-                    </div>
-                  </>
-                )
-              ) : draft?.kind === "source" ? (
-                <>
+                  )
+                ) : draft?.kind === "source" ? (
                   <div
                     className={`match-source-drag${draft.display?.keyframeUrl ? " has-thumbnail" : ""}`}
-                    draggable={!frozen}
+                    draggable
                     role="group"
-                    aria-label={`${FACET_LABELS[facet]} scene source: ${sourceLabel(draft)}${frozen ? "" : ". Drag to move it to another category."}`}
-                    title={frozen ? undefined : "Drag to move this scene"}
+                    aria-label={`${FACET_LABELS[facet]} scene source: ${sourceLabel(draft)}. Drag to move it to another category.`}
+                    title="Drag to move this scene"
                     onDragStart={(event) => {
                       if (
-                        frozen ||
                         !writeFacetSourceDrag(event.dataTransfer, draft, facet)
                       ) {
                         event.preventDefault();
@@ -396,66 +369,28 @@ export default function MatchByRail({
                       <small>{sourceDetail(draft)}</small>
                     </span>
                   </div>
-                  <div className="match-tile-footer">
-                    <span>{frozen ? "Scene reference" : "Drag to move"}</span>
-                    <button
-                      type="button"
-                      disabled={frozen}
-                      data-browse-facet={facet}
-                      aria-label={`Find another scene for ${FACET_LABELS[facet]}`}
-                      onClick={() => browse(facet)}
-                    >
-                      Replace
-                    </button>
-                  </div>
-                </>
-              ) : facet === "composition" ? (
-                <button
-                  type="button"
-                  className="match-empty-primary"
-                  disabled={!canUse}
-                  data-browse-facet={facet}
-                  aria-label={`Find a scene for ${FACET_LABELS[facet]}`}
-                  title="Find a scene or drop one here"
-                  onClick={() => browse(facet)}
-                >
-                  <strong>Choose a scene</strong>
-                  <small>or drop one here</small>
-                </button>
-              ) : (
-                <>
+                ) : facet === "composition" ? (
                   <button
                     type="button"
-                    className="match-empty-primary"
+                    className="match-source-affordance"
                     disabled={!canUse}
-                    aria-label={`Add ${FACET_LABELS[facet]} text`}
-                    title={FACET_HELP[facet].description}
-                    onClick={() => activateText(facet as TextMatchFacet)}
+                    onClick={() => browse(facet)}
+                    aria-label="Choose or drop a scene for Framing"
                   >
-                    <strong>{FACET_HELP[facet].description}</strong>
-                    <small>Describe it or use a scene</small>
+                    Drop a scene here
                   </button>
-                  <div className="match-tile-footer">
-                    <button
-                      type="button"
-                      disabled={!canUse}
-                      aria-label={`Add ${FACET_LABELS[facet]} text`}
-                      onClick={() => activateText(facet as TextMatchFacet)}
-                    >
-                      Add text
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canUse}
-                      data-browse-facet={facet}
-                      aria-label={`Find a scene for ${FACET_LABELS[facet]}`}
-                      onClick={() => browse(facet)}
-                    >
-                      Find scene
-                    </button>
-                  </div>
-                </>
-              )}
+                ) : (
+                  <button
+                    type="button"
+                    className="match-text-affordance"
+                    disabled={!canUse}
+                    onClick={() => activateText(facet as TextMatchFacet)}
+                    aria-label={`Describe ${FACET_LABELS[facet]}`}
+                  >
+                    {FACET_PLACEHOLDERS[facet as TextMatchFacet]}
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

@@ -24,10 +24,10 @@ export type TextMatchFacet = (typeof TEXT_MATCH_FACETS)[number];
 
 export const FACET_LABELS: Record<SearchFacet, string> = {
   all: "Search",
-  scene: "Scene",
+  scene: "Action",
   words: "Words",
   look: "Look",
-  composition: "Composition",
+  composition: "Framing",
   mood: "Mood",
 };
 

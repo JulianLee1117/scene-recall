@@ -1,0 +1,155 @@
+schema_version: 1
+kind: scene_recall_match_cut_cases
+
+# Human-owned reference-frame judgments. A null criterion was not inspected;
+# it is never scored as a mismatch. Grades: 0 = mismatch, 1 = weak/partial,
+# 2 = usable match, 3 = strong match.
+criteria:
+  subject_object: Same principal subject or object types and counts.
+  normalized_position: Principal subjects occupy corresponding frame positions.
+  scale: Principal subjects have corresponding apparent size in the frame.
+  viewpoint_orientation: Camera viewpoint and subject screen orientation correspond.
+  pose: Articulated subject pose corresponds.
+  relations_negative_space: Subject relations and surrounding negative space correspond.
+
+instructions:
+  - Judge match-cut geometry, not shared film style, color, setting, or identity alone.
+  - Keep positives that would be useful with a small edit adjustment.
+  - Use hard negatives for plausible retrieval confounders that should not survive final ranking.
+  - Leave a criterion null until someone has inspected it; do not infer missing grades.
+
+cases:
+  - id: dune_tight_right_profile
+    description: Tight right-facing silhouette profile used to test position, scale, and screen-direction retention.
+    reference:
+      unit_id: 2b84b021be500d45c870cf03199a8f126c9be60e45eed497103c17267ac8eaf8_1041
+      frame_index: 0
+    judgments:
+      - unit_id: 739a8b0ba480ad9dc245038e64b19f1d73c7b7e31e657949c7867328b7b69471_0112
+        frame_index: 1
+        label: positive
+        criteria:
+          subject_object: null
+          normalized_position: 3
+          scale: 3
+          viewpoint_orientation: 3
+          pose: null
+          relations_negative_space: null
+        note: Close right profile with similar scale and position.
+      - unit_id: a68ab0f0320801198c864bf407cea7c2be02f844fd67d559b8d9eec13442eb0d_0751
+        frame_index: 0
+        label: positive
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: 3
+          viewpoint_orientation: 3
+          pose: null
+          relations_negative_space: null
+        note: Tight right profile with similar scale.
+      - unit_id: 4da6a157664a87be80fac6d2e129ad6fc901265e7d43364387bcfa21fd18418d_1573
+        frame_index: 1
+        label: positive
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: 3
+          viewpoint_orientation: 3
+          pose: null
+          relations_negative_space: null
+        note: Tight right profile with similar scale.
+      - unit_id: 45c1b6fd8a5942f1ef0534ad15287403acdcea3ef60553bac1085843177c9c78_0181
+        frame_index: 1
+        label: hard_negative
+        criteria:
+          subject_object: null
+          normalized_position: 1
+          scale: 0
+          viewpoint_orientation: 1
+          pose: null
+          relations_negative_space: null
+        note: Right-facing seated figure, but the visible subject is far smaller and lower than the reference close-up.
+      - unit_id: a3d9ad6ab55df9c16551f09df2acb2bf14e3cdb51086c2543fb326fbb7058bbe_0313
+        frame_index: 1
+        label: hard_negative
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: null
+          viewpoint_orientation: null
+          pose: null
+          relations_negative_space: null
+        note: Production rank 1, inspected as unrelated to the reference.
+      - unit_id: d27dbc7256d4f11d32923513c1224a498379dea78627ba83579a3e5fff13ed82_0873
+        frame_index: 0
+        label: hard_negative
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: null
+          viewpoint_orientation: null
+          pose: 0
+          relations_negative_space: null
+        note: Spatial rank 1 was a blurry tumbling figure rather than a tight profile.
+
+  - id: dune_tight_profile
+    description: Tight side profile used to separate subject scale from screen direction and frontal confounders.
+    reference:
+      unit_id: 2b84b021be500d45c870cf03199a8f126c9be60e45eed497103c17267ac8eaf8_0295
+      frame_index: 2
+    judgments:
+      - unit_id: a68ab0f0320801198c864bf407cea7c2be02f844fd67d559b8d9eec13442eb0d_0972
+        frame_index: 1
+        label: positive
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: 3
+          viewpoint_orientation: 3
+          pose: null
+          relations_negative_space: null
+        note: Tight left profile with similar scale and orientation.
+      - unit_id: d27dbc7256d4f11d32923513c1224a498379dea78627ba83579a3e5fff13ed82_2775
+        frame_index: 2
+        label: positive
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: 3
+          viewpoint_orientation: 1
+          pose: null
+          relations_negative_space: null
+        note: Close side profile with similar scale but opposite screen direction.
+      - unit_id: d27dbc7256d4f11d32923513c1224a498379dea78627ba83579a3e5fff13ed82_0613
+        frame_index: 0
+        label: hard_negative
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: null
+          viewpoint_orientation: 0
+          pose: null
+          relations_negative_space: null
+        note: Frontal view rather than a side profile.
+      - unit_id: d27dbc7256d4f11d32923513c1224a498379dea78627ba83579a3e5fff13ed82_2893
+        frame_index: 0
+        label: hard_negative
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: null
+          viewpoint_orientation: 0
+          pose: null
+          relations_negative_space: null
+        note: Frontal view rather than a side profile.
+      - unit_id: d27dbc7256d4f11d32923513c1224a498379dea78627ba83579a3e5fff13ed82_1287
+        frame_index: 1
+        label: hard_negative
+        criteria:
+          subject_object: null
+          normalized_position: null
+          scale: null
+          viewpoint_orientation: 1
+          pose: null
+          relations_negative_space: null
+        note: Crouched frontal or oblique view rather than the reference profile.

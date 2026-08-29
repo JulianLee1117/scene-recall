@@ -10,10 +10,10 @@ import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 interface VideoModalProps {
   shot: SearchResult;
   onClose: () => void;
-  onMatchComposition?: (shot: SearchResult) => void;
+  onMatchFraming?: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
-  sourcePickerFacet?: RecipeMatchFacet;
-  matchCompositionDisabled?: boolean;
+  sourceReferenceFacet?: RecipeMatchFacet;
+  matchFramingDisabled?: boolean;
   bookmarked?: boolean;
   bookmarkDisabled?: boolean;
   onToggleBookmark?: (shot: SearchResult) => void;
@@ -29,10 +29,10 @@ const TEXT_VIEW_LABELS: Record<string, string> = {
 export default function VideoModal({
   shot,
   onClose,
-  onMatchComposition,
+  onMatchFraming,
   onUseInSearch,
-  sourcePickerFacet,
-  matchCompositionDisabled = false,
+  sourceReferenceFacet,
+  matchFramingDisabled = false,
   bookmarked = false,
   bookmarkDisabled = false,
   onToggleBookmark,
@@ -231,15 +231,15 @@ export default function VideoModal({
             <button type="button" onClick={copyTimestamp}>
               {timestampCopied ? "Timestamp copied" : "Copy timestamp"}
             </button>
-            {onUseInSearch && sourcePickerFacet ? (
+            {onUseInSearch && sourceReferenceFacet ? (
               <button
                 type="button"
                 className="modal-source-picker-use"
                 disabled={!Number.isInteger(shot.keyframe_index)}
-                onClick={() => onUseInSearch(shot, sourcePickerFacet)}
+                onClick={() => onUseInSearch(shot, sourceReferenceFacet)}
               >
-                <FacetIcon facet={sourcePickerFacet} size={15} />
-                Use for {FACET_LABELS[sourcePickerFacet]}
+                <FacetIcon facet={sourceReferenceFacet} size={15} />
+                Use for {FACET_LABELS[sourceReferenceFacet]}
               </button>
             ) : onUseInSearch ? (
               <UseInSearchMenu
@@ -249,13 +249,13 @@ export default function VideoModal({
                 disabled={!Number.isInteger(shot.keyframe_index)}
               />
             ) : null}
-            {onMatchComposition && !sourcePickerFacet && (
+            {onMatchFraming && !sourceReferenceFacet && (
               <button
                 type="button"
-                disabled={matchCompositionDisabled}
-                onClick={() => onMatchComposition(shot)}
+                disabled={matchFramingDisabled}
+                onClick={() => onMatchFraming(shot)}
               >
-                Match composition
+                Match framing
               </button>
             )}
           </div>

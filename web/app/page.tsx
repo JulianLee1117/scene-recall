@@ -13,12 +13,13 @@ import VideoModal from "@/components/VideoModal";
 import LibraryView from "@/components/LibraryView";
 import SavedView from "@/components/SavedView";
 import MatchByRail from "@/components/MatchByRail";
-import SourcePicker from "@/components/SourcePicker";
 import MovieScopeFilter from "@/components/MovieScopeFilter";
 import SearchOptions from "@/components/SearchOptions";
 import { useBookmarks } from "@/hooks/useBookmarks";
+import { useFacetSourceSearch } from "@/hooks/useFacetSourceSearch";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import {
+  FACET_LABELS,
   MAX_RECIPE_CLAUSES,
   buildRecipeClauses,
   matchDraftHasClause,
@@ -82,8 +83,6 @@ export default function Home() {
   const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
   const [searchWorkspaceActive, setSearchWorkspaceActive] = useState(false);
   const [matchDrafts, setMatchDrafts] = useState<MatchDrafts>({});
-  const [sourcePickerFacet, setSourcePickerFacet] =
-    useState<RecipeMatchFacet | null>(null);
   const [referenceLabel, setReferenceLabel] = useState<string | null>(null);
   const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(
     null,
@@ -92,6 +91,8 @@ export default function Home() {
   const [debug, setDebug] = useState(false);
   const [resultGrouping, setResultGrouping] = useState<ResultGrouping>("all");
   const [selectedFilmIds, setSelectedFilmIds] = useState<string[]>([]);
+  const facetSourceSearch = useFacetSourceSearch(selectedFilmIds);
+  const sourceReferenceFacet = facetSourceSearch.facet;
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
@@ -99,6 +100,7 @@ export default function Home() {
   const referenceBlobRef = useRef<Blob | null>(null);
   const referenceLabelRef = useRef<string | null>(null);
   const referencePreviewUrlRef = useRef<string | null>(null);
+  const sourceModeWorkspaceRef = useRef(false);
   const voiceStatusId = useId();
   const {
     bookmarks,
@@ -267,7 +269,6 @@ export default function Home() {
   const leaveUploadedReference = useCallback(() => {
     if (!referenceBlobRef.current) return;
     clearReference();
-    setSourcePickerFacet(null);
     searchAbortRef.current = null;
     setLoading(false);
   }, [clearReference]);
@@ -278,6 +279,10 @@ export default function Home() {
 
   const handleActivateTextFacet = useCallback(
     (facet: TextMatchFacet) => {
+      if (sourceReferenceFacet) {
+        facetSourceSearch.close();
+        setSearchWorkspaceActive(sourceModeWorkspaceRef.current);
+      }
       if (matchDrafts[facet]) return;
       if (recipeClauseCount(query, matchDrafts) >= MAX_RECIPE_CLAUSES) {
         handleRecipeLimit();
@@ -291,7 +296,14 @@ export default function Home() {
         [facet]: { kind: "text", facet, text: "" },
       }));
     },
-    [handleRecipeLimit, leaveUploadedReference, matchDrafts, query],
+    [
+      facetSourceSearch,
+      handleRecipeLimit,
+      leaveUploadedReference,
+      matchDrafts,
+      query,
+      sourceReferenceFacet,
+    ],
   );
 
   const handleFacetTextChange = useCallback(
@@ -415,30 +427,32 @@ export default function Home() {
     [applySourceFacet],
   );
 
-  const handleSourcePickerChoose = useCallback(
+  const handleSourceReferenceChoose = useCallback(
     (shot: SearchResult) => {
-      if (!sourcePickerFacet) return;
-      const targetFacet = sourcePickerFacet;
-      const draft = sourceDraftFromShot(sourcePickerFacet, shot);
+      if (!sourceReferenceFacet) return;
+      const targetFacet = sourceReferenceFacet;
+      const draft = sourceDraftFromShot(sourceReferenceFacet, shot);
       if (!draft) {
-        setSourcePickerFacet(null);
+        facetSourceSearch.close();
+        setSearchWorkspaceActive(sourceModeWorkspaceRef.current);
         setError("This scene does not have an exact searchable frame.");
         focusFacetBrowse(targetFacet);
         return;
       }
-      setSourcePickerFacet(null);
+      facetSourceSearch.close();
       applySourceFacet(targetFacet, draft);
       focusFacetBrowse(targetFacet);
     },
-    [applySourceFacet, sourcePickerFacet],
+    [applySourceFacet, facetSourceSearch, sourceReferenceFacet],
   );
 
-  const handleSourcePickerCancel = useCallback(() => {
-    const targetFacet = sourcePickerFacet;
+  const handleSourceReferenceCancel = useCallback(() => {
+    const targetFacet = sourceReferenceFacet;
     setActiveShot(null);
-    setSourcePickerFacet(null);
+    facetSourceSearch.close();
+    setSearchWorkspaceActive(sourceModeWorkspaceRef.current);
     if (targetFacet) focusFacetBrowse(targetFacet);
-  }, [sourcePickerFacet]);
+  }, [facetSourceSearch, sourceReferenceFacet]);
 
   const handleMovieScopeChange = useCallback(
     (filmIds: string[]) => {
@@ -448,6 +462,16 @@ export default function Home() {
       setLoading(false);
       setSelectedFilmIds(filmIds);
       setActiveShot(null);
+
+      if (sourceReferenceFacet) {
+        if (
+          (facetSourceSearch.hasSearched || facetSourceSearch.loading) &&
+          facetSourceSearch.query.trim()
+        ) {
+          void facetSourceSearch.search(filmIds);
+        }
+        return;
+      }
 
       const hasReference = Boolean(
         referenceBlobRef.current && referenceLabelRef.current,
@@ -472,15 +496,21 @@ export default function Home() {
     },
     [
       cancelPendingScopeSearch,
+      facetSourceSearch,
       matchDrafts,
       query,
       runImageSearch,
       runRecipe,
+      sourceReferenceFacet,
     ],
   );
 
   const handleVoiceTranscript = useCallback(
     (transcript: string) => {
+      if (sourceReferenceFacet) {
+        facetSourceSearch.setQuery(transcript);
+        return;
+      }
       cancelPendingScopeSearch();
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
@@ -488,11 +518,18 @@ export default function Home() {
       setQuery(transcript);
       setHasCompletedSearch(false);
     },
-    [cancelPendingScopeSearch],
+    [cancelPendingScopeSearch, facetSourceSearch, sourceReferenceFacet],
   );
 
   const handleVoiceComplete = useCallback(
     (transcript: string) => {
+      if (sourceReferenceFacet) {
+        facetSourceSearch.setQuery(transcript);
+        setSearchWorkspaceActive(true);
+        void facetSourceSearch.search(selectedFilmIds, transcript);
+        inputRef.current?.focus();
+        return;
+      }
       setQuery(transcript);
       inputRef.current?.focus();
       if (referenceBlobRef.current && referenceLabelRef.current) {
@@ -506,7 +543,14 @@ export default function Home() {
         void runRecipe(transcript, matchDrafts);
       }
     },
-    [matchDrafts, runImageSearch, runRecipe, selectedFilmIds],
+    [
+      facetSourceSearch,
+      matchDrafts,
+      runImageSearch,
+      runRecipe,
+      selectedFilmIds,
+      sourceReferenceFacet,
+    ],
   );
 
   const speech = useSpeechRecognition({
@@ -518,9 +562,13 @@ export default function Home() {
     (facet: RecipeMatchFacet) => {
       speech.cancel();
       setActiveShot(null);
-      setSourcePickerFacet(facet);
+      if (!sourceReferenceFacet) {
+        sourceModeWorkspaceRef.current = searchWorkspaceActive;
+      }
+      facetSourceSearch.open(facet);
+      window.requestAnimationFrame(() => inputRef.current?.focus());
     },
-    [speech],
+    [facetSourceSearch, searchWorkspaceActive, sourceReferenceFacet, speech],
   );
 
   const resetSearchHome = useCallback(() => {
@@ -529,7 +577,7 @@ export default function Home() {
     searchAbortRef.current?.abort();
     searchAbortRef.current = null;
     clearReference();
-    setSourcePickerFacet(null);
+    facetSourceSearch.close();
     setActiveTab("search");
     setQuery("");
     setMatchDrafts({});
@@ -543,7 +591,7 @@ export default function Home() {
     setResultGrouping("all");
     setActiveShot(null);
     window.requestAnimationFrame(() => inputRef.current?.focus());
-  }, [cancelPendingScopeSearch, clearReference, speech]);
+  }, [cancelPendingScopeSearch, clearReference, facetSourceSearch, speech]);
 
   const handleReferenceFile = useCallback(
     (file: File) => {
@@ -620,7 +668,10 @@ export default function Home() {
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     speech.cancel();
-    if (referenceBlobRef.current && referenceLabelRef.current) {
+    if (sourceReferenceFacet) {
+      setSearchWorkspaceActive(true);
+      void facetSourceSearch.search();
+    } else if (referenceBlobRef.current && referenceLabelRef.current) {
       void runImageSearch(
         referenceBlobRef.current,
         referenceLabelRef.current,
@@ -633,27 +684,41 @@ export default function Home() {
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape" && speech.status !== "idle") {
+    if (event.key === "Escape" && sourceReferenceFacet) {
+      event.preventDefault();
+      handleSourceReferenceCancel();
+    } else if (event.key === "Escape" && speech.status !== "idle") {
       event.preventDefault();
       speech.cancel();
       inputRef.current?.focus();
     }
   };
 
-  const isHome = !searchWorkspaceActive && !sourcePickerFacet;
+  const isHome = !searchWorkspaceActive;
   const clauseCount = recipeClauseCount(query, matchDrafts);
   const recipeOverLimit = clauseCount > MAX_RECIPE_CLAUSES;
   const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
-  const searchDisabled =
-    loading ||
-    recipeOverLimit ||
-    (!referenceLabel && buildRecipeClauses(query, matchDrafts).length === 0);
+  const searchDisabled = sourceReferenceFacet
+    ? facetSourceSearch.loading || !facetSourceSearch.query.trim()
+    : loading ||
+      recipeOverLimit ||
+      (!referenceLabel && buildRecipeClauses(query, matchDrafts).length === 0);
   const displayedResults = useMemo(
     () =>
       resultGrouping === "best-per-movie"
         ? bestResultPerFilm(results)
         : results,
     [resultGrouping, results],
+  );
+  const displayedSourceResults = useMemo(
+    () =>
+      facetSourceSearch.grouping === "best-per-movie"
+        ? bestResultPerFilm(facetSourceSearch.results)
+        : facetSourceSearch.results,
+    [
+      facetSourceSearch.grouping,
+      facetSourceSearch.results,
+    ],
   );
   const bookmarkedUnitIds = useMemo(
     () => new Set(bookmarkByUnit.keys()),
@@ -663,6 +728,9 @@ export default function Home() {
     ? bookmarkByUnit.get(activeShot.unit_id)
     : undefined;
   const voiceActive = speech.status !== "idle";
+  const activeLoading = sourceReferenceFacet
+    ? facetSourceSearch.loading
+    : loading;
   const voiceStatus =
     speech.status === "requesting"
       ? "Starting microphone…"
@@ -702,7 +770,7 @@ export default function Home() {
                 return;
               }
               speech.cancel();
-              setSourcePickerFacet(null);
+              facetSourceSearch.close();
               setActiveTab(tab.id);
             }}
             style={{
@@ -790,18 +858,7 @@ export default function Home() {
               scene-recall
             </button>
 
-            {/* Search recipe or independent scene-source picker. */}
-            {sourcePickerFacet ? (
-              <SourcePicker
-                targetFacet={sourcePickerFacet}
-                mainText={query}
-                drafts={matchDrafts}
-                selectedFilmIds={selectedFilmIds}
-                onCancel={handleSourcePickerCancel}
-                onChoose={handleSourcePickerChoose}
-                onPreview={setActiveShot}
-              />
-            ) : (
+            {/* One stable workspace for both recipes and scene references. */}
             <form
               className="search-workspace-form"
               onSubmit={handleSubmit}
@@ -820,19 +877,41 @@ export default function Home() {
                   alignItems: "center",
                 }}
               >
+                {sourceReferenceFacet && (
+                  <button
+                    type="button"
+                    className="facet-reference-chip"
+                    onClick={handleSourceReferenceCancel}
+                    aria-label={`Stop finding a scene for ${FACET_LABELS[sourceReferenceFacet]}`}
+                    title="Return to your search"
+                  >
+                    <span>{FACET_LABELS[sourceReferenceFacet]} reference</span>
+                    <span aria-hidden="true">{"\u00d7"}</span>
+                  </button>
+                )}
                 <input
                   ref={inputRef}
                   type="text"
-                  value={query}
+                  value={sourceReferenceFacet ? facetSourceSearch.query : query}
                   maxLength={500}
-                  onChange={(event) => handleQueryChange(event.target.value)}
+                  onChange={(event) =>
+                    sourceReferenceFacet
+                      ? facetSourceSearch.setQuery(event.target.value)
+                      : handleQueryChange(event.target.value)
+                  }
                   onKeyDown={handleKeyDown}
                   placeholder={
-                    referenceLabel
-                      ? "add a broad text constraint…"
-                      : "describe anything you remember…"
+                    sourceReferenceFacet
+                      ? "find a scene…"
+                      : referenceLabel
+                        ? "add a broad text constraint…"
+                        : "describe anything you remember…"
                   }
-                  aria-label="Describe a scene"
+                  aria-label={
+                    sourceReferenceFacet
+                      ? `Find a scene for ${FACET_LABELS[sourceReferenceFacet]}`
+                      : "Describe a scene"
+                  }
                   aria-describedby={voiceStatus ? voiceStatusId : undefined}
                   autoFocus
                   style={{
@@ -842,13 +921,22 @@ export default function Home() {
                     borderRadius: "6px",
                     color: "#ededed",
                     fontSize: isHome ? "1.25rem" : "1rem",
-                    padding: speech.isSupported
+                    paddingTop: isHome ? "18px" : "13px",
+                    paddingRight: speech.isSupported
                       ? isHome
-                        ? "18px 126px 18px 20px"
-                        : "13px 116px 13px 16px"
+                        ? "126px"
+                        : "116px"
                       : isHome
-                        ? "18px 88px 18px 20px"
-                        : "13px 78px 13px 16px",
+                        ? "88px"
+                        : "78px",
+                    paddingBottom: isHome ? "18px" : "13px",
+                    paddingLeft: sourceReferenceFacet
+                      ? isHome
+                        ? "162px"
+                        : "156px"
+                      : isHome
+                        ? "20px"
+                        : "16px",
                     outline: "none",
                     transition: "font-size 0.3s ease, padding 0.3s ease, border-color 0.15s ease",
                     caretColor: "#d4a96a",
@@ -874,14 +962,17 @@ export default function Home() {
                 <button
                   type="button"
                   className="image-search-button"
-                  disabled={loading}
-                  aria-label="Choose a composition reference"
-                  title="Choose a composition reference"
+                  disabled={activeLoading || Boolean(sourceReferenceFacet)}
+                  aria-hidden={Boolean(sourceReferenceFacet)}
+                  tabIndex={sourceReferenceFacet ? -1 : 0}
+                  aria-label="Choose a framing reference"
+                  title="Choose a framing reference"
                   onClick={() => {
                     speech.cancel();
                     imageInputRef.current?.click();
                   }}
                   style={{
+                    visibility: sourceReferenceFacet ? "hidden" : "visible",
                     right: speech.isSupported
                       ? isHome
                         ? "78px"
@@ -932,7 +1023,11 @@ export default function Home() {
                             ? "Finishing voice search"
                             : "Search by voice"
                     }
-                    onClick={() => speech.toggle(query)}
+                    onClick={() =>
+                      speech.toggle(
+                        sourceReferenceFacet ? facetSourceSearch.query : query,
+                      )
+                    }
                     style={{
                       right: isHome ? "46px" : "40px",
                     }}
@@ -974,7 +1069,7 @@ export default function Home() {
                     transition: "color 0.15s ease",
                   }}
                 >
-                  {loading ? (
+                  {activeLoading ? (
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <circle cx="12" cy="12" r="10" strokeOpacity="0.3" />
                       <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round">
@@ -1001,6 +1096,7 @@ export default function Home() {
                   onBrowse={handleBrowseFacet}
                   onSource={applySourceFacet}
                   onLimit={handleRecipeLimit}
+                  targetFacet={sourceReferenceFacet ?? undefined}
                 />
               )}
 
@@ -1045,8 +1141,8 @@ export default function Home() {
                     <span>{referenceLabel}</span>
                     <span>
                       {query.trim()
-                        ? "Uploaded composition + broad text"
-                        : "Uploaded composition reference"}
+                        ? "Uploaded framing + broad text"
+                        : "Uploaded framing reference"}
                     </span>
                   </span>
                   <button
@@ -1063,10 +1159,14 @@ export default function Home() {
               {isHome && !referenceLabel && (
                 <div
                   className={`search-examples${
-                    query.trim() || hasFacetDrafts ? " is-hidden" : ""
+                    query.trim() || hasFacetDrafts || sourceReferenceFacet
+                      ? " is-hidden"
+                      : ""
                   }`}
                   aria-label="Example searches"
-                  aria-hidden={Boolean(query.trim() || hasFacetDrafts)}
+                  aria-hidden={Boolean(
+                    query.trim() || hasFacetDrafts || sourceReferenceFacet,
+                  )}
                 >
                   <span>Try</span>
                   {["a lonely figure under red neon", '"I remember everything"'].map(
@@ -1074,7 +1174,11 @@ export default function Home() {
                       <button
                         key={example}
                         type="button"
-                        tabIndex={query.trim() || hasFacetDrafts ? -1 : 0}
+                        tabIndex={
+                          query.trim() || hasFacetDrafts || sourceReferenceFacet
+                            ? -1
+                            : 0
+                        }
                         onClick={() => {
                           setQuery(example);
                           void runRecipe(example, matchDrafts);
@@ -1086,18 +1190,21 @@ export default function Home() {
                   )}
                   <button
                     type="button"
-                    tabIndex={query.trim() || hasFacetDrafts ? -1 : 0}
+                    tabIndex={
+                      query.trim() || hasFacetDrafts || sourceReferenceFacet
+                        ? -1
+                        : 0
+                    }
                     onClick={() => imageInputRef.current?.click()}
                   >
-                    upload a frame for composition
+                    upload a frame for framing
                   </button>
                 </div>
               )}
             </form>
-            )}
 
             {/* error */}
-            {!sourcePickerFacet && error && (
+            {(sourceReferenceFacet ? facetSourceSearch.error : error) && (
               <p
                 style={{
                   marginTop: "16px",
@@ -1105,17 +1212,18 @@ export default function Home() {
                   fontSize: "0.85rem",
                 }}
               >
-                {error}
+                {sourceReferenceFacet ? facetSourceSearch.error : error}
               </p>
             )}
 
             {/* no results */}
-            {!loading &&
-              !sourcePickerFacet &&
-              !error &&
+            {!activeLoading &&
+              !(sourceReferenceFacet ? facetSourceSearch.error : error) &&
               speech.status === "idle" &&
-              results.length === 0 &&
-              hasCompletedSearch && (
+              (sourceReferenceFacet
+                ? facetSourceSearch.results.length === 0 &&
+                  facetSourceSearch.hasSearched
+                : results.length === 0 && hasCompletedSearch) && (
                 <p
                   style={{
                     marginTop: "24px",
@@ -1128,8 +1236,8 @@ export default function Home() {
               )}
           </div>
 
-          {/* Keep the recipe grid mounted so Cancel restores its reveal state. */}
-          <div hidden={Boolean(sourcePickerFacet)}>
+          {/* Keep the recipe grid mounted while reference mode is active. */}
+          <div hidden={Boolean(sourceReferenceFacet)}>
             <ResultGrid
               results={displayedResults}
               grouping={resultGrouping}
@@ -1146,6 +1254,22 @@ export default function Home() {
               similarDisabled={loading}
             />
           </div>
+          {sourceReferenceFacet && (
+            <ResultGrid
+              results={displayedSourceResults}
+              grouping={facetSourceSearch.grouping}
+              onGroupingChange={facetSourceSearch.setGrouping}
+              revealDisabled={facetSourceSearch.loading}
+              onShotClick={setActiveShot}
+              onUseInSearch={handleSourceReferenceChoose}
+              sourceReferenceFacet={sourceReferenceFacet}
+              onToggleBookmark={(shot) => void toggleBookmark(shot)}
+              bookmarkedUnitIds={bookmarkedUnitIds}
+              pendingBookmarkUnitIds={pendingBookmarkUnitIds}
+              bookmarkDisabled={bookmarksLoading}
+              debug={false}
+            />
+          )}
         </>
       )}
 
@@ -1160,14 +1284,14 @@ export default function Home() {
         <VideoModal
           shot={activeShot}
           onClose={() => setActiveShot(null)}
-          onMatchComposition={
-            sourcePickerFacet ? undefined : handleFindSimilar
+          onMatchFraming={
+            sourceReferenceFacet ? undefined : handleFindSimilar
           }
           onUseInSearch={
-            sourcePickerFacet ? handleSourcePickerChoose : handleUseInSearch
+            sourceReferenceFacet ? handleSourceReferenceChoose : handleUseInSearch
           }
-          sourcePickerFacet={sourcePickerFacet ?? undefined}
-          matchCompositionDisabled={loading}
+          sourceReferenceFacet={sourceReferenceFacet ?? undefined}
+          matchFramingDisabled={loading}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
           bookmarked={Boolean(activeShotBookmark)}
           bookmarkDisabled={

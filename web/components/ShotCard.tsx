@@ -15,7 +15,7 @@ interface ShotCardProps {
   onClick: (shot: SearchResult) => void;
   onFindSimilar?: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
-  sourcePickerFacet?: RecipeMatchFacet;
+  sourceReferenceFacet?: RecipeMatchFacet;
   similarDisabled?: boolean;
   bookmarked?: boolean;
   bookmarkDisabled?: boolean;
@@ -58,7 +58,7 @@ export default function ShotCard({
   onClick,
   onFindSimilar,
   onUseInSearch,
-  sourcePickerFacet,
+  sourceReferenceFacet,
   similarDisabled = false,
   bookmarked = false,
   bookmarkDisabled = false,
@@ -106,12 +106,12 @@ export default function ShotCard({
 
   return (
     <article
-      className={`result-card${debug ? " result-card-debug" : ""}${sourcePickerFacet ? " is-source-picker-result" : ""}`}
+      className={`result-card${debug ? " result-card-debug" : ""}${sourceReferenceFacet ? " is-source-reference-result" : ""}`}
       draggable={Boolean(
-        !sourcePickerFacet && onUseInSearch && sourceAvailable,
+        !sourceReferenceFacet && onUseInSearch && sourceAvailable,
       )}
       onDragStart={(event) => {
-        if (sourcePickerFacet) {
+        if (sourceReferenceFacet) {
           event.preventDefault();
           return;
         }
@@ -269,19 +269,19 @@ export default function ShotCard({
               </svg>
             </button>
           )}
-          {onUseInSearch && sourcePickerFacet ? (
+          {onUseInSearch && sourceReferenceFacet ? (
             <button
               type="button"
               className="result-card-action source-picker-use-action"
               disabled={!sourceAvailable}
-              onClick={() => onUseInSearch(shot, sourcePickerFacet)}
+              onClick={() => onUseInSearch(shot, sourceReferenceFacet)}
               onFocus={handleMouseEnter}
               onBlur={handleMouseLeave}
               onDragStart={(event) => event.preventDefault()}
-              aria-label={`Use result ${displayedRank} for ${FACET_LABELS[sourcePickerFacet]}`}
+              aria-label={`Use result ${displayedRank} for ${FACET_LABELS[sourceReferenceFacet]}`}
             >
-              <FacetIcon facet={sourcePickerFacet} size={14} />
-              <span>Use for {FACET_LABELS[sourcePickerFacet]}</span>
+              <FacetIcon facet={sourceReferenceFacet} size={14} />
+              <span>Use for {FACET_LABELS[sourceReferenceFacet]}</span>
             </button>
           ) : onUseInSearch ? (
             <UseInSearchMenu
@@ -290,7 +290,7 @@ export default function ShotCard({
               disabled={!sourceAvailable}
             />
           ) : null}
-          {onFindSimilar && !sourcePickerFacet && (
+          {onFindSimilar && !sourceReferenceFacet && (
             <button
               type="button"
               className="result-card-action composition-button"
@@ -299,8 +299,8 @@ export default function ShotCard({
               onFocus={handleMouseEnter}
               onBlur={handleMouseLeave}
               onDragStart={(event) => event.preventDefault()}
-              aria-label={`Match the composition of result ${displayedRank}`}
-              title="Match composition"
+              aria-label={`Match the framing of result ${displayedRank}`}
+              title="Match framing"
             >
               <svg
                 width="17"
@@ -319,7 +319,7 @@ export default function ShotCard({
                 <path d="M8 21H3v-5" />
                 <circle cx="12" cy="12" r="3" />
               </svg>
-              <span>Composition</span>
+              <span>Framing</span>
             </button>
           )}
         </div>

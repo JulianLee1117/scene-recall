@@ -203,17 +203,18 @@ The responsive grid initially shows three complete rows and can reveal more of
 the 48-result production window.
 
 The main bar remains a broad scene search. **Match by** adds up to three total
-search parts across the main bar and the explicit **Scene**, **Words**, **Look**,
-**Composition**, and **Mood** facets. Type into a facet, drag a result onto one,
-or use a result's **Use in search** menu. The result-card **Composition** action
-remains a one-click shortcut. Composition supplies the mandatory candidate
+search parts across the main bar and the explicit **Action**, **Words**, **Look**,
+**Framing**, and **Mood** facets. Type into a facet, drag a result onto one,
+or use a result's **Use in search** menu. The result-card **Framing** action
+remains a one-click shortcut. Framing supplies the mandatory candidate
 set; other active parts can rerank it but cannot introduce visually unrelated
-shots. Result-source composition search keeps the cross-film discovery default
+shots. Result-source Framing search keeps the cross-film discovery default
 to prevent the source movie's style from consuming the bounded shortlist.
-Each facet's **Find scene** action temporarily opens an independent broad search
-without changing the current recipe; cancel returns to it unchanged, while
-choosing a scene adds that source and reruns the combined recipe. Press Enter in
-a facet's text editor to run the current recipe with that explicit constraint.
+Each facet's scene-reference icon temporarily turns the existing main field into
+an independent broad search without moving the workspace or changing the current
+recipe. Clear its compact mode chip to return unchanged; choosing a scene adds
+that source and reruns the combined recipe. Press Enter in a facet's text editor
+to run the current recipe with that explicit constraint.
 
 The image icon remains a separate uploaded-reference workflow for JPEG, PNG,
 or WebP stills and can take the main bar as a text constraint. Its active chip
@@ -258,3 +259,20 @@ their `--judgments-from` input without treating human grading as a code change.
 Use `--limit 100` for candidate-recall experiments; this deeper evaluation
 window is independent from the 48-result production window and 12-result UI
 display batch.
+
+To score a Match Cut matcher after it has written a gate-by-gate ranked-results
+document, run:
+
+```bash
+uv run python -m pipeline.eval.match_cut score \
+  --cases pipeline/eval/match_cut_cases.yaml \
+  --rankings pipeline/eval/runs/match-cut-shadow.json \
+  --output pipeline/eval/runs/match-cut-shadow-score.json
+```
+
+The scorer validates matcher, corpus, profile, vector-space, and gate lineage,
+then reports known-positive recall, hard-negative retrieval, criterion-specific
+ordering, and positives lost or gained between gates. It consumes rankings
+only: it does not run a model, combine vector scores, invent judgments, or
+treat ungraded candidates as negatives. The initial cases are diagnostic seeds
+and must be expanded and human-graded before Match Cut activation.

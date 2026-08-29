@@ -25,7 +25,7 @@ text query
   -> exact-word candidates
   -> rank fusion and filtering
 
-reference image
+reference image (production Framing)
   -> PE frame candidates
   -> bounded spatial reranking
 
@@ -41,6 +41,27 @@ typed recipe (one to three clauses)
 
 result
   -> film + timestamp + matched frame/text + playable media
+```
+
+The product calls the current reference workflow **Framing**; the API retains
+the `composition` facet name for compatibility. It is coarse appearance and
+position matching, not an exact editorial Match Cut mode.
+
+The accepted experimental boundary is deliberately separate:
+
+```text
+indexed reference frame (shadow Match Cut; not product-active)
+  -> independent grounded-layout candidates + PE candidates
+  -> union by stable frame identity, never by mixing vector scores
+  -> exact grounded-layout reranking
+  -> human promotion gate and complete profile manifest
+  -> bounded source-backed refinement inside top shots
+  -> actual decoded timestamp for the proposed cut instant
+
+short source window (future Motion Match; not implemented)
+  -> camera motion + subject/object residual trajectories
+  -> independent temporal candidates and window reranking
+  -> separate action-heavy evaluation and activation
 ```
 
 ## Durable evidence and replaceable derivations
@@ -84,7 +105,12 @@ the absolute final boundary of a film deterministically falls back to its last
 unit. Missing or temporarily unavailable source/index data leaves an explicit
 unavailable bookmark rather than silently rebinding or deleting user state.
 
-## Implemented dataflow
+## Dataflow
+
+The ingestion, retrieval, and recipe sections below describe production
+behavior. The Match Cut section is explicitly shadow-only, and its refinement
+and Motion Match subsection defines accepted future boundaries rather than
+implemented behavior.
 
 ### Ingestion
 
@@ -126,7 +152,7 @@ Deterministic filtering handles unrequested credits, logos, title cards, blank
 frames, and static artifacts. Visual deduplication suppresses near-identical
 evidence, and unscoped searches apply a soft film-diversity preference.
 
-### Reference retrieval
+### Reference and Framing retrieval
 
 Reference-image search retrieves PE frame candidates and spatially reranks a
 bounded shortlist using an on-demand learned 6x6 feature grid. This represents
@@ -148,6 +174,89 @@ Frontend best-per-movie grouping retains the highest-ranked item for each film
 already present in the returned window. It is presentation, not guaranteed
 per-film retrieval, and does not imply that every indexed film is relevant or
 present in the global candidate pool.
+
+### Match Cut shadow profile
+
+Match Cut is not an alias or silent upgrade for the current Framing workflow.
+It is an approved, separate shadow experiment under ADR-0008. Inspected
+tight-profile references exposed missing candidates as well as poor ordering:
+useful side-profile matches fell outside bounded PE/spatial pools, while
+frontal or motion-confounded people ranked ahead of closer geometry. Adjusting
+the 6x6 spatial weight cannot supply the missing entity, scale, orientation, or
+pose evidence.
+
+The shadow `match-layout-v1` contract represents the active picture plus a
+bounded, salience-ordered set of normalized entities. Entity evidence may
+include class or family, box, silhouette, pose, and screen orientation, but an
+extractor records only supported evidence and never fabricates low-confidence
+pose. Zero-detection frames remain explicit profile rows so completeness is
+measurable rather than biased toward easy images. The corresponding coarse
+vector and exact scoring contract belong to the same versioned profile.
+
+Candidate generation searches grounded-layout and legacy PE spaces
+independently, unions their bounded rankings by stable frame identity, and then
+uses an inspectable layout scorer over the pooled shortlist. Raw vector scores
+from incompatible spaces are never normalized together. Exact scoring follows
+the human criteria in `pipeline/eval/match_cut_cases.yaml`: subject/object,
+normalized position, scale, viewpoint/orientation, pose, and relations or
+negative space. Match Cut retains cross-film discovery by default while
+respecting explicit movie scope.
+
+The initial Dune cases demonstrate the failures but are not an acceptance
+corpus. Before Match Cut becomes product behavior, the human-owned set must
+grow to 10-15 representative references and freeze a 12-reference acceptance
+slice covering profiles, full-body pose, objects, multi-subject relations,
+scale, orientation, and negative space.
+
+The first grounded-score probe is not activation-ready: case A positives scored
+.602/.542/.632 versus hard negatives .457/.544/.536, while case B positives
+scored .677/.583 versus hard negatives .672/.759/.603. No orientation evidence
+was emitted, and the second case's confounders can outrank its positives.
+
+Against current Framing, a later challenger must:
+
+- win at least 8 of 12 blinded side-by-side choices;
+- improve median per-case nDCG@10 by at least 20% on fully judged pooled top
+  tens, with no more than two case regressions and every initial Dune case
+  improved or held;
+- place at least three judged positives with grade-2 or grade-3 geometry in the
+  tight-profile case's top ten; and
+- keep warm p95 candidate-union plus static-rerank latency below 250 ms on the
+  target hardware.
+
+Passing quality and latency is still insufficient without a complete manifest
+for the current published frame generation. Shadow outputs never affect
+production ranking until both requirements pass and the profile is explicitly
+selected.
+
+### Exact-frame refinement and Motion Match
+
+The one-or-three keyframes retained for a shot are candidate-recall evidence,
+not a guarantee that an indexed image is the best cut instant. After the static
+Match Cut profile passes its gate, an exact-frame refiner may operate only on a
+bounded set of top candidate shots. It decodes coarse samples from the retained
+source film, searches a finer neighborhood around each local winner, and
+returns the actual decoded presentation timestamp and frame evidence. A paused
+player timestamp may be the source query instant; otherwise the indexed
+keyframe timestamp remains the source anchor.
+
+The backend resolves the source film, unit interval, and legal timestamp. A
+browser path or vector is never authoritative. Decoded frames and layouts are
+replaceable caches keyed by source identity, unit/time range, decoder contract,
+and extractor/scorer profile. This design avoids a library-wide every-frame
+index while preserving enough source evidence to repeat or backfill a result.
+Exact-frame refinement needs a separate human comparison that judges the
+returned instant rather than only its containing shot before it can change
+product results.
+
+Motion Match remains a separate future short-window profile. It must describe
+temporal direction using optical flow, estimated global camera motion, and
+tracked subject/object trajectories after that camera motion is removed. It
+does not reuse a still layout score as proof of motion similarity, and Framing
+or still Match Cut is never a fallback presented under the Motion Match label.
+Activation requires its own versioned manifest, latency budget, and
+action-heavy human cases containing direction, relative-motion, and camera
+motion confounders.
 
 ### Modular recipe retrieval
 
@@ -218,14 +327,31 @@ piecemeal after upstream weights change.
 Any future visual or multimodal replacement must use a separate versioned table
 with exact revision lineage and its own activation manifest.
 
+The grounded Match Cut profile is such a separate visual derivation. Its
+manifest records extractor model IDs, immutable revisions or weight hashes,
+library versions, preprocessing and active-picture normalization, thresholds
+and label mapping, layout schema, vector contract and dimensions, scorer
+versions, input frame generation, frame-identity coverage digest, and expected
+and completed row counts. It is complete only when every target frame has a
+row, including zero detections.
+
+If that manifest or any required profile data is missing, stale, partial,
+corrupt, incompatible, or unavailable at query time, Match Cut is disabled as
+a whole. Production Framing remains independently usable, but it is never a
+silent Match Cut fallback. Exact-frame refinement and Motion Match follow the
+same whole-profile activation rule when implemented.
+
 ## Known limitations
 
 - Film, frame, and unit writes are not cross-table atomic.
 - The legacy PE baseline lacks immutable checkpoint lineage.
 - Hosted annotations record the requested model identifier, not a
   provider-resolved immutable revision.
-- Sparse keyframes cannot reliably encode temporal direction, brief action, or
-  camera movement.
+- Sparse keyframes can propose shots but can miss the best match-cut instant;
+  exact source-backed within-shot refinement is not product-active.
+- Grounded Match Cut and Motion Match are not product-active. Current Framing
+  cannot reliably match pose, temporal direction, brief action, or camera
+  movement.
 - Dialogue is embedded at shot level rather than as utterance rows.
 - OCR comes from the general annotator rather than a dedicated OCR pass.
 - `scene` and `mood` reuse current annotation views rather than independently
@@ -261,25 +387,33 @@ problem. Temporal retrieval is justified only when action or camera-motion
 failures recur. RAG is justified only for grounded reasoning, comparison, or
 reel-building above retrieved evidence.
 
+Match Cut is the concrete exception now admitted to shadow evaluation because
+inspected references showed both candidate and ordering failures. It follows
+the stricter human, latency, completeness, and explicit-selection gates above.
+That approval does not activate exact-frame refinement or Motion Match.
+
 Paid library-wide processing, global model activation, and removal of a working
 fallback require the small comparison above. Structural versioning, cache
 preservation, and safe backfills do not require a permanent golden corpus.
 
 ## Current next action
 
-Grade the paired position/relation prompts in
-`pipeline/eval/compositional_queries.yaml` before changing retrieval. If useful
-shots are absent from the pooled candidate window, test a separate versioned
-grounded layout representation on a representative subset. If those shots are
-present but ordered poorly, shadow-test a shortlist reranker instead. A query
-router or LLM decomposition layer is not a substitute for evidence the index
-does not contain and must not become an always-on dependency without the same
-paired comparison.
+Expand and human-grade `pipeline/eval/match_cut_cases.yaml`, then compare the
+current Framing baseline with the `match-layout-v1` candidate union and exact
+reranker at every declared gate. Backfill only a representative shadow subset
+until the acceptance slice shows that the profile clears the ADR-0008 quality
+and latency thresholds. The evaluation must distinguish a candidate lost
+before reranking from a candidate ordered poorly afterward.
 
-If action or camera-motion failures recur, the next experiment is one separate
-temporal profile over a small action-heavy subset, not a full-library migration.
-Temporal, audio, reranking, routing, RAG, pose/face analysis, scene graphs, and
-speculative metadata remain deferred until they pass the decision gates.
+Only after the static grounded profile passes should exact-frame refinement be
+tested inside top shots. Motion Match follows later as one separate temporal
+profile over an action-heavy subset; it must not be smuggled into the static
+layout score. A query router or LLM decomposition layer cannot replace missing
+visual or temporal evidence and must not become an always-on dependency without
+its own demonstrated need.
+
+Audio, routing, RAG, scene graphs, and speculative metadata remain deferred
+until they pass the decision gates.
 
 Historical rationale is recorded in
 [`docs/decisions/`](decisions/README.md).

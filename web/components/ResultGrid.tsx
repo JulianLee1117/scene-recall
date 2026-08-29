@@ -18,7 +18,7 @@ interface ResultGridProps {
   onShotClick: (shot: SearchResult) => void;
   onFindSimilar?: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
-  sourcePickerFacet?: RecipeMatchFacet;
+  sourceReferenceFacet?: RecipeMatchFacet;
   onToggleBookmark?: (shot: SearchResult) => void;
   bookmarkedUnitIds?: ReadonlySet<string>;
   pendingBookmarkUnitIds?: ReadonlySet<string>;
@@ -27,7 +27,10 @@ interface ResultGridProps {
   similarDisabled?: boolean;
 }
 
-function resolvedColumnCount(grid: HTMLOListElement): number {
+function resolvedColumnCount(grid: HTMLOListElement): number | null {
+  // A temporarily hidden recipe grid keeps its reveal state while a facet
+  // reference search is visible. Do not reinterpret display:none as one column.
+  if (grid.getBoundingClientRect().width === 0) return null;
   const template = window.getComputedStyle(grid).gridTemplateColumns.trim();
   if (!template || template === "none") return 1;
   return Math.max(1, template.split(/\s+/).length);
@@ -41,7 +44,7 @@ export default function ResultGrid({
   onShotClick,
   onFindSimilar,
   onUseInSearch,
-  sourcePickerFacet,
+  sourceReferenceFacet,
   onToggleBookmark,
   bookmarkedUnitIds = EMPTY_UNIT_IDS,
   pendingBookmarkUnitIds = EMPTY_UNIT_IDS,
@@ -64,6 +67,7 @@ export default function ResultGrid({
 
     const updateColumnCount = () => {
       const nextCount = resolvedColumnCount(grid);
+      if (nextCount === null) return;
       setColumnCount((currentCount) =>
         currentCount === nextCount ? currentCount : nextCount,
       );
@@ -129,7 +133,7 @@ export default function ResultGrid({
               onClick={onShotClick}
               onFindSimilar={onFindSimilar}
               onUseInSearch={onUseInSearch}
-              sourcePickerFacet={sourcePickerFacet}
+              sourceReferenceFacet={sourceReferenceFacet}
               onToggleBookmark={onToggleBookmark}
               bookmarked={bookmarkedUnitIds.has(shot.unit_id)}
               bookmarkDisabled={

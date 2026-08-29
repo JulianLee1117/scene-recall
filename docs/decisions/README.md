@@ -66,3 +66,4 @@ The accepted boundary or behavior.
 | [0005](0005-cross-film-composition-candidates.md) | Accepted | Exclude the source film before composition candidate generation |
 | [0006](0006-separate-durable-user-state.md) | Accepted | Keep bookmarks outside replaceable search indexes |
 | [0007](0007-typed-modular-search-recipes.md) | Accepted | Compose explicit search facets over current evidence |
+| [0008](0008-grounded-match-cut-and-temporal-motion-boundaries.md) | Accepted | Separate grounded still matching, exact-frame refinement, and temporal motion |
