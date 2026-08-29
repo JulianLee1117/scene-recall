@@ -6,6 +6,7 @@ import type { SearchResult } from "@/types/api";
 
 const INITIAL_VISIBLE_ROWS = 3;
 const ROWS_PER_REVEAL = 2;
+const EMPTY_UNIT_IDS: ReadonlySet<string> = new Set();
 
 export type ResultGrouping = "all" | "best-per-movie";
 
@@ -16,6 +17,10 @@ interface ResultGridProps {
   revealDisabled?: boolean;
   onShotClick: (shot: SearchResult) => void;
   onFindSimilar: (shot: SearchResult) => void;
+  onToggleBookmark?: (shot: SearchResult) => void;
+  bookmarkedUnitIds?: ReadonlySet<string>;
+  pendingBookmarkUnitIds?: ReadonlySet<string>;
+  bookmarkDisabled?: boolean;
   debug: boolean;
   similarDisabled?: boolean;
 }
@@ -33,6 +38,10 @@ export default function ResultGrid({
   revealDisabled = false,
   onShotClick,
   onFindSimilar,
+  onToggleBookmark,
+  bookmarkedUnitIds = EMPTY_UNIT_IDS,
+  pendingBookmarkUnitIds = EMPTY_UNIT_IDS,
+  bookmarkDisabled = false,
   debug,
   similarDisabled = false,
 }: ResultGridProps) {
@@ -115,6 +124,11 @@ export default function ResultGrid({
               debug={debug}
               onClick={onShotClick}
               onFindSimilar={onFindSimilar}
+              onToggleBookmark={onToggleBookmark}
+              bookmarked={bookmarkedUnitIds.has(shot.unit_id)}
+              bookmarkDisabled={
+                bookmarkDisabled || pendingBookmarkUnitIds.has(shot.unit_id)
+              }
               similarDisabled={similarDisabled}
             />
           </li>

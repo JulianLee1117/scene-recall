@@ -55,6 +55,8 @@ export interface SearchResult {
   matched_frame_url?: string;
   matched_frame_index?: number;
   matched_frame_timestamp?: number;
+  /** Durable source moment supplied when a Saved scene is rehydrated. */
+  evidence_timestamp?: number;
   /** Best independent text view supporting this result. */
   matched_text_view?: string;
   matched_text?: string;
@@ -64,6 +66,25 @@ export interface SearchResponse {
   results: SearchResult[];
   /** Backend-defined diversity/display page size. Older APIs omit it. */
   display_batch_size?: number;
+}
+
+export type BookmarkAvailability = "indexed" | "source_only" | "missing";
+
+export interface BookmarkRecord {
+  bookmark_id: string;
+  film_id: string;
+  film_title: string;
+  source_unit_id: string;
+  evidence_timestamp: number;
+  frame_index?: number | null;
+  created_at: string;
+  availability: BookmarkAvailability;
+  /** Current indexed scene resolved from the durable film + timestamp anchor. */
+  scene: SearchResult | null;
+}
+
+export interface BookmarkResponse {
+  bookmarks: BookmarkRecord[];
 }
 
 export interface LibraryFilm {

@@ -11,8 +11,10 @@ import {
 import ResultGrid, { type ResultGrouping } from "@/components/ResultGrid";
 import VideoModal from "@/components/VideoModal";
 import LibraryView from "@/components/LibraryView";
+import SavedView from "@/components/SavedView";
 import MovieScopeFilter from "@/components/MovieScopeFilter";
 import SearchOptions from "@/components/SearchOptions";
+import { useBookmarks } from "@/hooks/useBookmarks";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { bestResultPerFilm } from "@/lib/searchResults";
 import type { SearchResult, SearchResponse } from "@/types/api";
@@ -20,7 +22,13 @@ import type { SearchResult, SearchResponse } from "@/types/api";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const MOVIE_SCOPE_SEARCH_DEBOUNCE_MS = 350;
 
-type Tab = "search" | "library";
+type Tab = "search" | "saved" | "library";
+
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "search", label: "Search" },
+  { id: "saved", label: "Saved" },
+  { id: "library", label: "Films" },
+];
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("search");
@@ -50,6 +58,15 @@ export default function Home() {
   const referenceLabelRef = useRef<string | null>(null);
   const referencePreviewUrlRef = useRef<string | null>(null);
   const voiceStatusId = useId();
+  const {
+    bookmarks,
+    bookmarkByUnit,
+    pendingUnitIds: pendingBookmarkUnitIds,
+    loading: bookmarksLoading,
+    error: bookmarkError,
+    toggleBookmark,
+    removeBookmark,
+  } = useBookmarks();
 
   const cancelPendingScopeSearch = useCallback(() => {
     if (scopeSearchTimerRef.current === null) return;
@@ -316,6 +333,7 @@ export default function Home() {
   const handleFindSimilar = useCallback(
     async (shot: SearchResult) => {
       if (loading) return;
+      setActiveTab("search");
       cancelPendingScopeSearch();
       speech.cancel();
       searchAbortRef.current?.abort();
@@ -455,6 +473,13 @@ export default function Home() {
         : results,
     [resultGrouping, results],
   );
+  const bookmarkedUnitIds = useMemo(
+    () => new Set(bookmarkByUnit.keys()),
+    [bookmarkByUnit],
+  );
+  const activeShotBookmark = activeShot
+    ? bookmarkByUnit.get(activeShot.unit_id)
+    : undefined;
   const voiceActive = speech.status !== "idle";
   const voiceStatus =
     speech.status === "requesting"
@@ -486,24 +511,24 @@ export default function Home() {
           padding: "0 20px",
         }}
       >
-        {(["search", "library"] as const).map((tab) => (
+        {TABS.map((tab) => (
           <button
-            key={tab}
+            key={tab.id}
             onClick={() => {
-              if (tab !== "search") speech.cancel();
-              setActiveTab(tab);
+              if (tab.id !== "search") speech.cancel();
+              setActiveTab(tab.id);
             }}
             style={{
               background: "none",
               border: "none",
               borderBottom:
-                activeTab === tab
+                activeTab === tab.id
                   ? "2px solid #d4a96a"
                   : "2px solid transparent",
-              color: activeTab === tab ? "#ededed" : "#555",
+              color: activeTab === tab.id ? "#ededed" : "#555",
               cursor: "pointer",
               fontSize: "0.82rem",
-              fontWeight: activeTab === tab ? 500 : 400,
+              fontWeight: activeTab === tab.id ? 500 : 400,
               letterSpacing: "0.04em",
               marginBottom: "-1px",
               padding: "13px 14px",
@@ -511,21 +536,35 @@ export default function Home() {
               transition: "color 0.15s",
             }}
             onMouseEnter={(e) => {
-              if (activeTab !== tab)
+              if (activeTab !== tab.id)
                 e.currentTarget.style.color = "#888";
             }}
             onMouseLeave={(e) => {
-              if (activeTab !== tab)
+              if (activeTab !== tab.id)
                 e.currentTarget.style.color = "#555";
             }}
           >
-            {tab === "library" ? "Films" : "Search"}
+            {tab.label}
           </button>
         ))}
       </div>
 
       {/* Library view */}
       {activeTab === "library" && <LibraryView />}
+
+      {/* Saved view */}
+      {activeTab === "saved" && (
+        <SavedView
+          bookmarks={bookmarks}
+          loading={bookmarksLoading}
+          error={bookmarkError}
+          pendingUnitIds={pendingBookmarkUnitIds}
+          onShotClick={setActiveShot}
+          onFindSimilar={handleFindSimilar}
+          onToggleBookmark={(shot) => void toggleBookmark(shot)}
+          onRemoveBookmark={(bookmark) => void removeBookmark(bookmark)}
+        />
+      )}
 
       {/* Search view */}
       {activeTab === "search" && (
@@ -873,20 +912,35 @@ export default function Home() {
             revealDisabled={loading}
             onShotClick={setActiveShot}
             onFindSimilar={handleFindSimilar}
+            onToggleBookmark={(shot) => void toggleBookmark(shot)}
+            bookmarkedUnitIds={bookmarkedUnitIds}
+            pendingBookmarkUnitIds={pendingBookmarkUnitIds}
+            bookmarkDisabled={bookmarksLoading}
             debug={debug}
             similarDisabled={loading}
           />
-
-          {/* video modal */}
-          {activeShot && (
-            <VideoModal
-              shot={activeShot}
-              onClose={() => setActiveShot(null)}
-              onMatchComposition={handleFindSimilar}
-              matchCompositionDisabled={loading}
-            />
-          )}
         </>
+      )}
+
+      {bookmarkError && activeTab !== "saved" && (
+        <p className="bookmark-error" role="status">
+          {bookmarkError}
+        </p>
+      )}
+
+      {/* Shared player for Search and Saved scenes. */}
+      {activeShot && (
+        <VideoModal
+          shot={activeShot}
+          onClose={() => setActiveShot(null)}
+          onMatchComposition={handleFindSimilar}
+          matchCompositionDisabled={loading}
+          onToggleBookmark={(shot) => void toggleBookmark(shot)}
+          bookmarked={Boolean(activeShotBookmark)}
+          bookmarkDisabled={
+            bookmarksLoading || pendingBookmarkUnitIds.has(activeShot.unit_id)
+          }
+        />
       )}
     </main>
   );

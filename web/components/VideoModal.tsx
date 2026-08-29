@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useId, useState } from "react";
 import type { SearchResult } from "@/types/api";
 import { formatTime, filmLabel } from "@/lib/format";
 
@@ -9,6 +9,9 @@ interface VideoModalProps {
   onClose: () => void;
   onMatchComposition?: (shot: SearchResult) => void;
   matchCompositionDisabled?: boolean;
+  bookmarked?: boolean;
+  bookmarkDisabled?: boolean;
+  onToggleBookmark?: (shot: SearchResult) => void;
 }
 
 const TEXT_VIEW_LABELS: Record<string, string> = {
@@ -23,10 +26,14 @@ export default function VideoModal({
   onClose,
   onMatchComposition,
   matchCompositionDisabled = false,
+  bookmarked = false,
+  bookmarkDisabled = false,
+  onToggleBookmark,
 }: VideoModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hasSeenCanPlay = useRef(false);
   const [timestampCopied, setTimestampCopied] = useState(false);
+  const titleId = useId();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
   const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
   const seekTarget = Math.max(0, evidenceTime - 1);
@@ -84,45 +91,50 @@ export default function VideoModal({
       }}
     >
       <div
-        style={{
-          position: "relative",
-          width: "min(90vw, 1200px)",
-          background: "#0a0a0a",
-        }}
+        className="modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
       >
         {/* header */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "10px 14px",
-            borderBottom: "1px solid #222",
-          }}
-        >
-          <span style={{ color: "#d4a96a", fontWeight: 600, fontSize: "0.9rem" }}>
+        <div className="modal-header">
+          <span id={titleId} className="modal-title">
             {shot.film_title ?? filmLabel(shot.film_id)}
           </span>
-          <span style={{ color: "#6b6b6b", fontSize: "0.85rem" }}>
+          <span className="modal-time">
             {typeof shot.matched_frame_timestamp === "number"
               ? `${formatTime(evidenceTime)} match`
               : `${formatTime(shot.t_start)} – ${formatTime(shot.t_end)}`}
           </span>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              background: "none",
-              border: "none",
-              color: "#6b6b6b",
-              cursor: "pointer",
-              fontSize: "1.3rem",
-              lineHeight: 1,
-              padding: "2px 6px",
-            }}
-          >
-            ✕
-          </button>
+          <div className="modal-header-actions">
+            {onToggleBookmark && (
+              <button
+                type="button"
+                className={bookmarked ? "is-active" : undefined}
+                disabled={bookmarkDisabled}
+                onClick={() => onToggleBookmark(shot)}
+                aria-label={bookmarked ? "Remove scene from Saved" : "Save scene"}
+                aria-pressed={bookmarked}
+                title={bookmarked ? "Remove from Saved" : "Save this scene"}
+              >
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill={bookmarked ? "currentColor" : "none"}
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z" />
+                </svg>
+              </button>
+            )}
+            <button type="button" onClick={onClose} aria-label="Close">
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* video */}

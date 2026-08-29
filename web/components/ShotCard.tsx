@@ -8,9 +8,13 @@ interface ShotCardProps {
   shot: SearchResult;
   position: number;
   debug: boolean;
+  showRank?: boolean;
   onClick: (shot: SearchResult) => void;
-  onFindSimilar: (shot: SearchResult) => void;
+  onFindSimilar?: (shot: SearchResult) => void;
   similarDisabled?: boolean;
+  bookmarked?: boolean;
+  bookmarkDisabled?: boolean;
+  onToggleBookmark?: (shot: SearchResult) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -45,9 +49,13 @@ export default function ShotCard({
   shot,
   position,
   debug,
+  showRank = true,
   onClick,
   onFindSimilar,
   similarDisabled = false,
+  bookmarked = false,
+  bookmarkDisabled = false,
+  onToggleBookmark,
 }: ShotCardProps) {
   const [hovered, setHovered] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -78,8 +86,12 @@ export default function ShotCard({
 
   const handleFindSimilar = useCallback(() => {
     handleMouseLeave();
-    onFindSimilar(shot);
+    onFindSimilar?.(shot);
   }, [handleMouseLeave, onFindSimilar, shot]);
+
+  const handleToggleBookmark = useCallback(() => {
+    onToggleBookmark?.(shot);
+  }, [onToggleBookmark, shot]);
 
   return (
     <article
@@ -121,9 +133,11 @@ export default function ShotCard({
             }}
           />
 
-          <span className="rank-badge" aria-hidden="true">
-            {displayedRank}
-          </span>
+          {showRank && (
+            <span className="rank-badge" aria-hidden="true">
+              {displayedRank}
+            </span>
+          )}
 
           <span
             className="result-card-overlay"
@@ -189,35 +203,73 @@ export default function ShotCard({
         )}
       </button>
 
-      <button
-        type="button"
-        className="find-similar-button"
-        disabled={similarDisabled}
-        onClick={handleFindSimilar}
-        onFocus={handleMouseEnter}
-        onBlur={handleMouseLeave}
-        aria-label={`Match the composition of result ${displayedRank}`}
-        title="Match composition"
-      >
-        <svg
-          width="17"
-          height="17"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M8 3H3v5" />
-          <path d="M16 3h5v5" />
-          <path d="M21 16v5h-5" />
-          <path d="M8 21H3v-5" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-        <span>Composition</span>
-      </button>
+      {(onToggleBookmark || onFindSimilar) && (
+        <div className="result-card-actions">
+          {onToggleBookmark && (
+            <button
+              type="button"
+              className={`result-card-action bookmark-button${bookmarked ? " is-active" : ""}`}
+              disabled={bookmarkDisabled}
+              onClick={handleToggleBookmark}
+              onFocus={handleMouseEnter}
+              onBlur={handleMouseLeave}
+              onDragStart={(event) => event.preventDefault()}
+              aria-label={
+                bookmarked
+                  ? `Remove result ${displayedRank} from Saved`
+                  : `Save result ${displayedRank}`
+              }
+              aria-pressed={bookmarked}
+              title={bookmarked ? "Remove from Saved" : "Save scene"}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill={bookmarked ? "currentColor" : "none"}
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z" />
+              </svg>
+            </button>
+          )}
+          {onFindSimilar && (
+            <button
+              type="button"
+              className="result-card-action composition-button"
+              disabled={similarDisabled}
+              onClick={handleFindSimilar}
+              onFocus={handleMouseEnter}
+              onBlur={handleMouseLeave}
+              onDragStart={(event) => event.preventDefault()}
+              aria-label={`Match the composition of result ${displayedRank}`}
+              title="Match composition"
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 3H3v5" />
+                <path d="M16 3h5v5" />
+                <path d="M21 16v5h-5" />
+                <path d="M8 21H3v-5" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <span>Composition</span>
+            </button>
+          )}
+        </div>
+      )}
     </article>
   );
 }
