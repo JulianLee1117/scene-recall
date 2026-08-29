@@ -180,6 +180,24 @@ uv run python -m pipeline.cli index-frames
 This step is local, idempotent, and does not call OpenAI or Gemini. New ingests
 build the frame index automatically.
 
+Cache the existing keyframes' 6x6 spatial grids so Framing queries encode only
+the reference image instead of re-encoding up to 96 candidate images:
+
+```bash
+uv run python -m pipeline.cli index-framing
+```
+
+This local, idempotent backfill does not decode or reingest source films and
+does not call a hosted model. It stores about 72 KiB per PE Core keyframe
+(roughly 3.94 GB for 53,414 frames, before database overhead). Search uses the
+cache only when its model- and contract-versioned manifest covers the complete
+current frame generation. Publishing another film makes that proof stale, so
+during a multi-film ingest Framing safely uses its existing live reranker; run
+`index-framing` once after the batch finishes to embed only new or changed
+frames and reactivate the cache. A completed single film can instead be filled
+with `index-framing --film-id FILM_ID`, but derived backfills do not run while
+an ingest owns the shared resource lock.
+
 Build or repair the independent Qwen semantic-text profile from already
 published captions, dialogue, OCR, and facets with:
 
@@ -222,9 +240,12 @@ replaces the facet rail; clear it, or deliberately use one of its results as a
 new facet source, to return to modular search. Uploading a reference clears
 facet clauses, so the interface does not imply an unsupported combination.
 Look and composition use the existing local frame index; composition adds a
-learned 6x6 spatial feature grid. Neither calls OpenAI or Gemini or requires
-re-ingestion. Treat composition as coarse framing and position similarity, not
-exact subject-relation, skeletal-pose, or motion matching.
+learned 6x6 spatial feature grid. A complete optional Framing cache removes
+candidate-image encoding from the interactive query; missing, stale, or
+partial cache data falls back for the whole query to the established live
+reranker. Neither path calls OpenAI or Gemini or requires re-ingestion. Treat
+composition as coarse framing and position similarity, not exact
+subject-relation, skeletal-pose, or motion matching.
 
 Hover a result and use its bookmark action to save that source moment. Saved
 scenes persist in `paths.state_dir` independently of search-index repair or a

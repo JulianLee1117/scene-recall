@@ -399,6 +399,67 @@ def test_extract_dialogue_fallback_saves_dialogue_json(config: Config, tmp_path:
     assert (film.asset_dir / "dialogue.json").exists()
 
 
+def test_extract_dialogue_reports_bounded_whisper_progress(
+    config: Config,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The ingest log advances while faster-whisper's lazy iterator is consumed."""
+    from pipeline.ingest.dialogue import extract_dialogue
+
+    film = _make_film(tmp_path, has_embedded_subs=False)
+    segments = [
+        MagicMock(start=0.0, end=5.0, text=" first"),
+        MagicMock(start=5.0, end=12.0, text=" second"),
+        MagicMock(start=12.0, end=27.0, text=" third"),
+        MagicMock(start=27.0, end=98.0, text=" fourth"),
+    ]
+    info = MagicMock()
+    info.duration = 100.0
+    fake_model = MagicMock()
+    fake_model.transcribe.return_value = (iter(segments), info)
+
+    with patch("pipeline.ingest.dialogue.WhisperModel", return_value=fake_model):
+        extract_dialogue(film, config)
+
+    progress = capsys.readouterr().out.splitlines()
+    assert progress == [
+        f"[dialogue] loading Whisper model ({config.models.whisper})",
+        "[dialogue] transcribing audio: 0%",
+        "[dialogue] transcribing audio: 10%",
+        "[dialogue] transcribing audio: 20%",
+        "[dialogue] transcribing audio: 90%",
+        "[dialogue] transcribing audio: 100%",
+    ]
+
+
+@pytest.mark.parametrize("reported_duration", [None, 0.0, -1.0, float("nan")])
+def test_extract_dialogue_handles_invalid_whisper_duration(
+    config: Config,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    reported_duration: float | None,
+) -> None:
+    """Missing or unusable duration metadata falls back to stage-level progress."""
+    from pipeline.ingest.dialogue import extract_dialogue
+
+    film = _make_film(tmp_path, has_embedded_subs=False)
+    segment = MagicMock(start=0.0, end=2.0, text=" line")
+    info = MagicMock()
+    info.duration = reported_duration
+    fake_model = MagicMock()
+    fake_model.transcribe.return_value = (iter([segment]), info)
+
+    with patch("pipeline.ingest.dialogue.WhisperModel", return_value=fake_model):
+        extract_dialogue(film, config)
+
+    progress = capsys.readouterr().out.splitlines()
+    assert progress[-2:] == [
+        "[dialogue] transcribing audio",
+        "[dialogue] transcription complete",
+    ]
+
+
 def test_extract_dialogue_maps_selected_text_subtitle_stream(
     config: Config,
     tmp_path: Path,

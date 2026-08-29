@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from pathlib import Path
 import re
 from collections import Counter
 from collections.abc import Iterable
@@ -28,6 +29,10 @@ from pipeline.config import (
     DEFAULT_SEARCH_CANDIDATE_LIMIT,
     DEFAULT_SEARCH_RESULT_WINDOW,
     Config,
+)
+from pipeline.index.framing_features import (
+    load_framing_grids,
+    resolve_ready_framing_profile,
 )
 from pipeline.index.text_features import (
     TEXT_VIEWS,
@@ -1669,11 +1674,33 @@ def _reference_frame_candidates(
     if "frames" not in table_names(db):
         return []
 
+    framing_profile = resolve_ready_framing_profile(
+        config,
+        db,
+        validate_frame_ids=False,
+    )
+    query_model_revision = (
+        framing_profile.model_revision
+        if framing_profile is not None
+        else None
+    )
+    query_embed_kwargs: dict[str, Any] = {
+        "grid_size": _REFERENCE_SPATIAL_GRID_SIZE,
+    }
+    if query_model_revision is not None:
+        query_embed_kwargs["model_revision"] = query_model_revision
     query_global, query_spatial = embed_spatial_images(
         [image],
         config,
-        grid_size=_REFERENCE_SPATIAL_GRID_SIZE,
+        **query_embed_kwargs,
     )
+    if framing_profile is not None and query_spatial is not None:
+        if query_spatial.shape[1:] != (
+            framing_profile.grid_size,
+            framing_profile.grid_size,
+            framing_profile.feature_dim,
+        ):
+            framing_profile = None
     frame_query = (
         db.open_table("frames")
         .search(query_global[0], vector_column_name="visual_vec")
@@ -1691,47 +1718,73 @@ def _reference_frame_candidates(
     )
     if not frame_rows:
         return []
+    if framing_profile is not None:
+        # Candidate retrieval and manifest resolution are separate reads. A
+        # film can publish a new frames generation between them, so validate
+        # the complete manifest again after the candidate snapshot was read.
+        if resolve_ready_framing_profile(config, db) != framing_profile:
+            framing_profile = None
 
-    valid_rows: list[dict[str, Any]] = []
-    candidate_images: list[Image.Image] = []
     spatial_shortlist_limit = min(
         candidate_limit,
         _REFERENCE_SPATIAL_CANDIDATE_LIMIT,
     )
-    seen_units: set[str] = set()
-    for row in frame_rows:
-        unit_id = str(row.get("unit_id") or row.get("shot_id") or "")
-        if not unit_id or unit_id in seen_units:
-            continue
-        if len(valid_rows) < spatial_shortlist_limit:
-            raw_path = row.get("path")
-            if not isinstance(raw_path, str) or not raw_path:
-                continue
-            try:
-                with Image.open(raw_path) as candidate:
-                    candidate_images.append(candidate.convert("RGB"))
-            except (OSError, ValueError):
-                continue
-        valid_rows.append(dict(row))
-        seen_units.add(unit_id)
-        if len(valid_rows) >= candidate_limit:
-            break
+    valid_rows, candidate_images = _reference_valid_rows(
+        frame_rows,
+        spatial_shortlist_limit=spatial_shortlist_limit,
+        candidate_limit=candidate_limit,
+        load_images=framing_profile is None,
+    )
 
     if not valid_rows:
         return []
 
     spatial_scores: np.ndarray | None = None
-    if query_spatial is not None and candidate_images:
+    candidate_spatial: np.ndarray | None = None
+    if query_spatial is not None and framing_profile is not None:
+        cached_frame_ids = [
+            str(row.get("frame_id") or "")
+            for row in valid_rows[:spatial_shortlist_limit]
+        ]
+        if all(cached_frame_ids):
+            candidate_spatial = load_framing_grids(
+                db,
+                framing_profile,
+                cached_frame_ids,
+            )
+        if candidate_spatial is None:
+            # A malformed/unreadable active cache never contributes partially.
+            # Rebuild the whole shortlist through the established live path.
+            _LOGGER.warning(
+                "Framing spatial cache unavailable during query; "
+                "using complete live candidate reranking"
+            )
+            valid_rows, candidate_images = _reference_valid_rows(
+                frame_rows,
+                spatial_shortlist_limit=spatial_shortlist_limit,
+                candidate_limit=candidate_limit,
+                load_images=True,
+            )
+    if (
+        query_spatial is not None
+        and candidate_spatial is None
+        and candidate_images
+    ):
         _candidate_global, candidate_spatial = embed_spatial_images(
             candidate_images,
             config,
             grid_size=_REFERENCE_SPATIAL_GRID_SIZE,
+            **(
+                {"model_revision": query_model_revision}
+                if query_model_revision is not None
+                else {}
+            ),
         )
-        if candidate_spatial is not None:
-            spatial_scores = _spatial_grid_scores(
-                query_spatial[0],
-                candidate_spatial,
-            )
+    if query_spatial is not None and candidate_spatial is not None:
+        spatial_scores = _spatial_grid_scores(
+            query_spatial[0],
+            candidate_spatial,
+        )
 
     spatial_ranks: dict[int, int] = {}
     if spatial_scores is not None:
@@ -1793,6 +1846,42 @@ def _reference_frame_candidates(
         ),
     )
     return [*spatial_shortlist, *semantic_backfill]
+
+
+def _reference_valid_rows(
+    frame_rows: Iterable[dict[str, Any]],
+    *,
+    spatial_shortlist_limit: int,
+    candidate_limit: int,
+    load_images: bool,
+) -> tuple[list[dict[str, Any]], list[Image.Image]]:
+    """Select unique-shot rows and optionally decode the spatial shortlist."""
+    valid_rows: list[dict[str, Any]] = []
+    candidate_images: list[Image.Image] = []
+    seen_units: set[str] = set()
+    for row in frame_rows:
+        unit_id = str(row.get("unit_id") or row.get("shot_id") or "")
+        if not unit_id or unit_id in seen_units:
+            continue
+        if len(valid_rows) < spatial_shortlist_limit:
+            raw_path = row.get("path")
+            if (
+                not isinstance(raw_path, str)
+                or not raw_path
+                or not Path(raw_path).is_file()
+            ):
+                continue
+            if load_images:
+                try:
+                    with Image.open(raw_path) as candidate:
+                        candidate_images.append(candidate.convert("RGB"))
+                except (OSError, ValueError):
+                    continue
+        valid_rows.append(dict(row))
+        seen_units.add(unit_id)
+        if len(valid_rows) >= candidate_limit:
+            break
+    return valid_rows, candidate_images
 
 
 def _is_reference_temporal_duplicate(

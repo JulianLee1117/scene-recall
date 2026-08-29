@@ -18,6 +18,11 @@ Model-specific text feature tables are created separately with
 legacy ``units.txt_vec`` column, allowing a new text model to be built,
 validated, activated, and removed without migrating the durable shot rows.
 
+Production Framing can also cache its learned spatial grids in a separate
+profile table.  The descriptor is opaque bytes rather than a Lance vector:
+it is fetched by stable frame identity and compared cell-for-cell after the
+legacy PE vector search has already produced the bounded shortlist.
+
 Vector dimension
 ----------------
 Use :func:`make_units_schema` to build the ``units`` schema for a specific
@@ -42,6 +47,9 @@ FRAMES_SCHEMA_VERSION: int = 1
 
 #: Current row contract for model-specific text feature tables.
 TEXT_FEATURES_SCHEMA_VERSION: int = 1
+
+#: Current row contract for model-specific Framing spatial caches.
+FRAMING_FEATURES_SCHEMA_VERSION: int = 1
 
 # ---------------------------------------------------------------------------
 # Schema factories
@@ -146,6 +154,37 @@ def make_text_features_schema(vector_dim: int) -> pa.Schema:
             pa.field("source_sha256", pa.string()),
             pa.field("is_representative", pa.bool_()),
             pa.field("vector", pa.list_(pa.float32(), vector_dim)),
+        ]
+    )
+
+
+def make_framing_features_schema() -> pa.Schema:
+    """Return the schema for one compatible Framing spatial-cache profile.
+
+    ``descriptor`` stores a fixed-shape, row-major float matrix as bytes. Its
+    grid size, feature dimension, dtype, model lineage, and extraction
+    contract are fields in both the row and the active profile manifest.
+    Keeping this out of the ANN vector columns prevents Lance from treating a
+    reranking cache as a new candidate vector space.
+    """
+    return pa.schema(
+        [
+            pa.field("schema_version", pa.int16()),
+            pa.field("frame_id", pa.string()),
+            pa.field("profile_id", pa.string()),
+            pa.field("model_id", pa.string()),
+            pa.field("model_revision", pa.string()),
+            pa.field("extraction_contract_version", pa.int16()),
+            pa.field("grid_size", pa.int16()),
+            pa.field("feature_dim", pa.int32()),
+            pa.field("storage_dtype", pa.string()),
+            pa.field("film_id", pa.string()),
+            pa.field("unit_id", pa.string()),
+            pa.field("source_path", pa.string()),
+            pa.field("source_size", pa.int64()),
+            pa.field("source_mtime_ns", pa.int64()),
+            pa.field("descriptor_sha256", pa.string()),
+            pa.field("descriptor", pa.binary()),
         ]
     )
 

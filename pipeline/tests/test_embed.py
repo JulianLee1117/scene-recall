@@ -467,19 +467,33 @@ def test_shot_embedding_dtype(tmp_path: Path, config: Config) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_load_model_cached_on_second_call(config: Config) -> None:
+def test_load_model_cached_on_second_call(
+    config: Config,
+    tmp_path: Path,
+) -> None:
     """_load_model returns the same objects on the second call without re-loading."""
     from pipeline.ingest import embed
 
     embed._MODEL_CACHE.clear()
+    embed._DEFAULT_MODEL_REVISIONS.clear()
 
     fake_model = MagicMock()
     fake_model.to.return_value = fake_model
     fake_model.eval.return_value = fake_model
     fake_preprocess = MagicMock()
     fake_tokenizer = MagicMock()
+    lineage = embed.VisualModelLineage(
+        config_name="pe_core_l14",
+        model_id="timm/PE-Core-L-14-336",
+        model_revision="a" * 40,
+        snapshot_dir=tmp_path / "snapshot-a",
+    )
 
     with (
+        patch(
+            "pipeline.ingest.embed.resolve_visual_model_lineage",
+            return_value=lineage,
+        ) as resolve_lineage,
         patch(
             "open_clip.create_model_and_transforms",
             return_value=(fake_model, MagicMock(), fake_preprocess),
@@ -489,10 +503,12 @@ def test_load_model_cached_on_second_call(config: Config) -> None:
         r1 = embed._load_model("pe_core_l14")
         r2 = embed._load_model("pe_core_l14")
 
-    mock_create.assert_called_once_with("hf-hub:timm/PE-Core-L-14-336")
+    mock_create.assert_called_once_with(f"local-dir:{lineage.snapshot_dir}")
+    resolve_lineage.assert_called_once()
     assert r1 is r2, "Second call must return the same cached encoder"
 
     embed._MODEL_CACHE.clear()
+    embed._DEFAULT_MODEL_REVISIONS.clear()
 
 
 def test_load_model_unknown_name_raises(config: Config) -> None:
@@ -501,6 +517,179 @@ def test_load_model_unknown_name_raises(config: Config) -> None:
 
     with pytest.raises(ValueError, match="Unknown"):
         embed._load_model("not_a_real_model")
+
+
+def test_load_model_cache_is_scoped_by_immutable_revision(
+    tmp_path: Path,
+) -> None:
+    from pipeline.ingest import embed
+
+    embed._MODEL_CACHE.clear()
+    embed._DEFAULT_MODEL_REVISIONS.clear()
+    revisions = ("a" * 40, "b" * 40)
+
+    def lineage_for(
+        _model_name: str,
+        *,
+        model_revision: str | None,
+        ensure_weights: bool,
+    ) -> embed.VisualModelLineage:
+        assert ensure_weights
+        revision = model_revision or revisions[0]
+        return embed.VisualModelLineage(
+            config_name="pe_core_l14",
+            model_id="timm/PE-Core-L-14-336",
+            model_revision=revision,
+            snapshot_dir=tmp_path / revision,
+        )
+
+    models = [MagicMock(), MagicMock()]
+    for model in models:
+        model.to.return_value = model
+        model.eval.return_value = model
+    with (
+        patch(
+            "pipeline.ingest.embed.resolve_visual_model_lineage",
+            side_effect=lineage_for,
+        ),
+        patch(
+            "open_clip.create_model_and_transforms",
+            side_effect=[
+                (models[0], MagicMock(), MagicMock()),
+                (models[1], MagicMock(), MagicMock()),
+            ],
+        ) as create,
+        patch("open_clip.get_tokenizer", return_value=MagicMock()),
+    ):
+        first = embed._load_model("pe_core_l14", revisions[0])
+        repeated = embed._load_model("pe_core_l14", revisions[0])
+        second = embed._load_model("pe_core_l14", revisions[1])
+
+    assert first is repeated
+    assert second is not first
+    assert create.call_count == 2
+    embed._MODEL_CACHE.clear()
+    embed._DEFAULT_MODEL_REVISIONS.clear()
+
+
+def test_unpinned_load_pins_an_explicitly_cached_revision(
+    tmp_path: Path,
+) -> None:
+    """Reusing an exact cached model still fixes the process default."""
+    from pipeline.ingest import embed
+
+    embed._MODEL_CACHE.clear()
+    embed._DEFAULT_MODEL_REVISIONS.clear()
+    first_revision = "a" * 40
+    later_revision = "b" * 40
+    mutable_main = [first_revision]
+
+    def lineage_for(
+        _model_name: str,
+        *,
+        model_revision: str | None,
+        ensure_weights: bool,
+    ) -> embed.VisualModelLineage:
+        assert ensure_weights
+        revision = model_revision or mutable_main[0]
+        return embed.VisualModelLineage(
+            config_name="pe_core_l14",
+            model_id="timm/PE-Core-L-14-336",
+            model_revision=revision,
+            snapshot_dir=tmp_path / revision,
+        )
+
+    fake_model = MagicMock()
+    fake_model.to.return_value = fake_model
+    fake_model.eval.return_value = fake_model
+    with (
+        patch(
+            "pipeline.ingest.embed.resolve_visual_model_lineage",
+            side_effect=lineage_for,
+        ) as resolve_lineage,
+        patch(
+            "open_clip.create_model_and_transforms",
+            return_value=(fake_model, MagicMock(), MagicMock()),
+        ) as create,
+        patch("open_clip.get_tokenizer", return_value=MagicMock()),
+    ):
+        exact = embed._load_model("pe_core_l14", first_revision)
+        reused = embed._load_model("pe_core_l14")
+        mutable_main[0] = later_revision
+        still_pinned = embed._load_model("pe_core_l14")
+
+    assert exact is reused is still_pinned
+    assert embed._DEFAULT_MODEL_REVISIONS["pe_core_l14"] == first_revision
+    assert resolve_lineage.call_count == 2
+    create.assert_called_once()
+    embed._MODEL_CACHE.clear()
+    embed._DEFAULT_MODEL_REVISIONS.clear()
+
+
+def test_snapshot_revision_uses_lexical_symlink_path(
+    tmp_path: Path,
+) -> None:
+    """Linux blob symlinks must not erase their snapshots/<commit> parent."""
+    from pipeline.ingest.embed import _snapshot_revision_from_cache_path
+
+    revision = "c" * 40
+    snapshot_dir = tmp_path / "models--example" / "snapshots" / revision
+    snapshot_dir.mkdir(parents=True)
+    blob = tmp_path / "models--example" / "blobs" / "weight"
+    blob.parent.mkdir()
+    blob.write_bytes(b"weights")
+    artifact = snapshot_dir / "model.safetensors"
+    try:
+        artifact.symlink_to(blob)
+    except OSError:
+        artifact.write_bytes(b"weights")
+
+    with patch.object(
+        Path,
+        "resolve",
+        side_effect=AssertionError("must not dereference HF snapshot symlink"),
+    ):
+        assert _snapshot_revision_from_cache_path(artifact) == revision
+
+
+def test_lineage_pins_weights_to_resolved_config_revision(
+    tmp_path: Path,
+) -> None:
+    """A mutable-main config lookup cannot race a newer weight lookup."""
+    from pipeline.ingest import embed
+
+    revision = "d" * 40
+    snapshot = tmp_path / "snapshots" / revision
+    config_path = snapshot / "open_clip_config.json"
+    weight_path = snapshot / "open_clip_model.safetensors"
+    lookups: list[tuple[str, str]] = []
+
+    def artifact(
+        _model_id: str,
+        filename: str,
+        *,
+        revision: str,
+        ensure: bool,
+    ) -> Path:
+        assert ensure
+        lookups.append((filename, revision))
+        return config_path if filename.endswith(".json") else weight_path
+
+    with patch(
+        "pipeline.ingest.embed._cached_or_downloaded_file",
+        side_effect=artifact,
+    ):
+        lineage = embed.resolve_visual_model_lineage(
+            "pe_core_l14",
+            ensure_weights=True,
+        )
+
+    assert lineage is not None
+    assert lineage.model_revision == revision
+    assert lookups == [
+        ("open_clip_config.json", "main"),
+        ("open_clip_model.safetensors", revision),
+    ]
 
 
 # ---------------------------------------------------------------------------

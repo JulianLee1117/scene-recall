@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 import subprocess
 from dataclasses import asdict, dataclass
+from numbers import Real
 from pathlib import Path
 
 from faster_whisper import WhisperModel
@@ -115,16 +117,58 @@ def _extract_via_ffmpeg(
 
 def _extract_via_whisper(film: FilmRecord, config: Config) -> list[DialogueLine]:
     """Transcribe *film* with faster-whisper and return segment-level DialogueLines."""
+    print(
+        f"[dialogue] loading Whisper model ({config.models.whisper})",
+        flush=True,
+    )
     model = WhisperModel(config.models.whisper, device="auto", compute_type="default")
-    segments, _info = model.transcribe(str(film.path), word_timestamps=False)
+    segments, info = model.transcribe(str(film.path), word_timestamps=False)
+    duration = _valid_duration(getattr(info, "duration", None))
+    if duration is None:
+        print("[dialogue] transcribing audio", flush=True)
+    else:
+        print("[dialogue] transcribing audio: 0%", flush=True)
 
     lines: list[DialogueLine] = []
+    reported_progress = 0
     for seg in segments:
         text = seg.text.strip()
         if text:
             lines.append(DialogueLine(start=float(seg.start), end=float(seg.end), text=text))
 
+        progress = _coarse_progress(getattr(seg, "end", None), duration)
+        if progress is not None and progress > reported_progress:
+            reported_progress = progress
+            print(f"[dialogue] transcribing audio: {progress}%", flush=True)
+
+    if duration is None:
+        print("[dialogue] transcription complete", flush=True)
+    else:
+        print("[dialogue] transcribing audio: 100%", flush=True)
+
     return lines
+
+
+def _valid_duration(value: object) -> float | None:
+    """Return a positive finite duration reported by faster-whisper, if any."""
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    duration = float(value)
+    return duration if duration > 0 and math.isfinite(duration) else None
+
+
+def _coarse_progress(segment_end: object, duration: float | None) -> int | None:
+    """Map a segment timestamp to a bounded 10% progress bucket."""
+    if (
+        duration is None
+        or isinstance(segment_end, bool)
+        or not isinstance(segment_end, Real)
+    ):
+        return None
+    end = float(segment_end)
+    if not math.isfinite(end):
+        return None
+    return min(90, max(0, int(100 * end / duration) // 10 * 10))
 
 
 # ---------------------------------------------------------------------------

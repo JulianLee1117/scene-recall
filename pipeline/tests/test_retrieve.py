@@ -1867,6 +1867,271 @@ def test_search_by_image_blends_semantics_with_aligned_spatial_cells(
     assert results[0]["matched_frame_url"] == "/media/keyframe/second/0"
 
 
+def test_search_by_image_uses_active_spatial_cache_without_candidate_encoding(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A complete compatible cache leaves only the reference image on GPU."""
+    from pipeline.index.framing_features import FramingSpatialProfile
+    from pipeline.search.retrieve import search_by_image
+
+    paths = [tmp_path / "first.webp", tmp_path / "second.webp"]
+    for path in paths:
+        Image.new("RGB", (64, 36), "navy").save(path)
+    units_rows = [
+        _make_unit_row("first", "film_one"),
+        _make_unit_row("second", "film_one"),
+    ]
+    frame_rows = [
+        {
+            "frame_id": f"{unit_id}_0",
+            "unit_id": unit_id,
+            "shot_id": unit_id,
+            "film_id": "film_one",
+            "frame_index": 0,
+            "timestamp": timestamp,
+            "path": str(path),
+            "_distance": distance,
+        }
+        for unit_id, timestamp, path, distance in (
+            ("first", 10.0, paths[0], 0.10),
+            ("second", 130.0, paths[1], 0.15),
+        )
+    ]
+    frames = MagicMock()
+    frames.search.return_value = _make_query_chain(frame_rows)
+    _mark_frames_as_current_profile(frames, len(frame_rows))
+    units = MagicMock()
+    units.search.return_value = _make_query_chain(units_rows)
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames", "units"]
+    db.open_table.side_effect = lambda name: {
+        "frames": frames,
+        "units": units,
+    }[name]
+    profile = FramingSpatialProfile(
+        profile_id="test",
+        table_name="frame_framing_test",
+        encoder_name="pe_core_l14",
+        model_id="test",
+        model_revision="a" * 40,
+        open_clip_version="test",
+        timm_version="test",
+        torch_version="test",
+        torchvision_version="test",
+        pillow_version="test",
+        row_schema_version=1,
+        grid_size=6,
+        feature_dim=2,
+        extraction_contract_version=1,
+        storage_dtype="float16-le",
+    )
+    global_query = np.zeros((1, VEC_DIM), dtype=np.float32)
+    query_grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    query_grid[..., 0] = 1.0
+    cached = np.zeros((2, 6, 6, 2), dtype=np.float32)
+    cached[0, ..., 0] = -1.0
+    cached[1, ..., 0] = 1.0
+    spatial_embed = MagicMock(return_value=(global_query, query_grid))
+
+    with (
+        patch(
+            "pipeline.search.retrieve.resolve_ready_framing_profile",
+            return_value=profile,
+        ),
+        patch(
+            "pipeline.search.retrieve.load_framing_grids",
+            return_value=cached,
+        ) as load_cache,
+        patch(
+            "pipeline.search.retrieve.embed_spatial_images",
+            spatial_embed,
+        ),
+    ):
+        results = search_by_image(
+            Image.new("RGB", (64, 36), "navy"),
+            db,
+            config,
+        )
+
+    assert [result["unit_id"] for result in results] == ["second", "first"]
+    spatial_embed.assert_called_once()
+    assert spatial_embed.call_args.kwargs["model_revision"] == "a" * 40
+    load_cache.assert_called_once_with(db, profile, ["first_0", "second_0"])
+
+
+def test_unreadable_spatial_cache_falls_back_for_whole_shortlist(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """No candidate receives cached evidence when the active lookup fails."""
+    from pipeline.index.framing_features import FramingSpatialProfile
+    from pipeline.search.retrieve import _reference_frame_candidates
+
+    paths = [tmp_path / "first.webp", tmp_path / "second.webp"]
+    for path in paths:
+        Image.new("RGB", (64, 36), "navy").save(path)
+    rows = [
+        {
+            "frame_id": f"{unit_id}_0",
+            "unit_id": unit_id,
+            "shot_id": unit_id,
+            "film_id": "film_one",
+            "path": str(path),
+            "_distance": distance,
+        }
+        for unit_id, path, distance in (
+            ("first", paths[0], 0.1),
+            ("second", paths[1], 0.2),
+        )
+    ]
+    frames = MagicMock()
+    frames.search.return_value = _make_query_chain(rows)
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames"]
+    db.open_table.return_value = frames
+    profile = FramingSpatialProfile(
+        profile_id="test",
+        table_name="frame_framing_test",
+        encoder_name="pe_core_l14",
+        model_id="test",
+        model_revision="a" * 40,
+        open_clip_version="test",
+        timm_version="test",
+        torch_version="test",
+        torchvision_version="test",
+        pillow_version="test",
+        row_schema_version=1,
+        grid_size=6,
+        feature_dim=2,
+        extraction_contract_version=1,
+        storage_dtype="float16-le",
+    )
+    global_query = np.zeros((1, VEC_DIM), dtype=np.float32)
+    query_grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    query_grid[..., 0] = 1.0
+    live_grids = np.repeat(query_grid, 2, axis=0)
+    spatial_embed = MagicMock(
+        side_effect=[
+            (global_query, query_grid),
+            (np.repeat(global_query, 2, axis=0), live_grids),
+        ]
+    )
+
+    with (
+        patch(
+            "pipeline.search.retrieve.resolve_ready_framing_profile",
+            return_value=profile,
+        ),
+        patch(
+            "pipeline.search.retrieve.load_framing_grids",
+            return_value=None,
+        ),
+        patch(
+            "pipeline.search.retrieve.embed_spatial_images",
+            spatial_embed,
+        ),
+    ):
+        candidates = _reference_frame_candidates(
+            Image.new("RGB", (64, 36), "navy"),
+            db,
+            config,
+            (),
+            candidate_limit=2,
+        )
+
+    assert len(candidates) == 2
+    assert all(row["_spatial_score"] is not None for row in candidates)
+    assert len(spatial_embed.call_args_list) == 2
+    assert len(spatial_embed.call_args_list[1].args[0]) == 2
+    assert all(
+        call.kwargs["model_revision"] == "a" * 40
+        for call in spatial_embed.call_args_list
+    )
+
+
+def test_frames_generation_change_after_candidates_disables_cache(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Manifest readiness is rechecked after the frame ANN snapshot is read."""
+    from pipeline.index.framing_features import FramingSpatialProfile
+    from pipeline.search.retrieve import _reference_frame_candidates
+
+    path = tmp_path / "candidate.webp"
+    Image.new("RGB", (64, 36), "navy").save(path)
+    rows = [
+        {
+            "frame_id": "candidate_0",
+            "unit_id": "candidate",
+            "shot_id": "candidate",
+            "film_id": "film_one",
+            "path": str(path),
+            "_distance": 0.1,
+        }
+    ]
+    frames = MagicMock()
+    frames.search.return_value = _make_query_chain(rows)
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames"]
+    db.open_table.return_value = frames
+    profile = FramingSpatialProfile(
+        profile_id="test",
+        table_name="frame_framing_test",
+        encoder_name="pe_core_l14",
+        model_id="test",
+        model_revision="a" * 40,
+        open_clip_version="test",
+        timm_version="test",
+        torch_version="test",
+        torchvision_version="test",
+        pillow_version="test",
+        row_schema_version=1,
+        grid_size=6,
+        feature_dim=2,
+        extraction_contract_version=1,
+        storage_dtype="float16-le",
+    )
+    global_query = np.zeros((1, VEC_DIM), dtype=np.float32)
+    query_grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    query_grid[..., 0] = 1.0
+    spatial_embed = MagicMock(
+        side_effect=[
+            (global_query, query_grid),
+            (global_query, query_grid),
+        ]
+    )
+
+    with (
+        patch(
+            "pipeline.search.retrieve.resolve_ready_framing_profile",
+            side_effect=[profile, None],
+        ) as resolve_profile,
+        patch(
+            "pipeline.search.retrieve.load_framing_grids",
+        ) as load_cache,
+        patch(
+            "pipeline.search.retrieve.embed_spatial_images",
+            spatial_embed,
+        ),
+    ):
+        candidates = _reference_frame_candidates(
+            Image.new("RGB", (64, 36), "navy"),
+            db,
+            config,
+            (),
+            candidate_limit=1,
+        )
+
+    assert len(candidates) == 1
+    assert resolve_profile.call_count == 2
+    assert resolve_profile.call_args_list[0].kwargs == {
+        "validate_frame_ids": False
+    }
+    load_cache.assert_not_called()
+    assert len(spatial_embed.call_args_list) == 2
+
+
 def test_reference_image_semantic_backfill_follows_spatial_shortlist(
     tmp_path: Path,
     config: Config,

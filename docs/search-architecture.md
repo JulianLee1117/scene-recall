@@ -155,8 +155,24 @@ evidence, and unscoped searches apply a soft film-diversity preference.
 ### Reference and Framing retrieval
 
 Reference-image search retrieves PE frame candidates and spatially reranks a
-bounded shortlist using an on-demand learned 6x6 feature grid. This represents
-composition and subject position, not pose or motion.
+bounded shortlist using a learned 6x6 feature grid. The query image is encoded
+once. Candidate grids come from a complete compatible Framing cache when one
+is active; otherwise every candidate in the bounded spatial shortlist is
+encoded through the established live path. Cached and live candidate evidence
+are never mixed within one query. This represents composition and subject
+position, not pose or motion.
+
+The Framing cache is an optional, independently backfillable acceleration of
+the existing scorer, not a candidate vector space or a new retrieval mode. One
+profile table stores float16 grids by stable frame identity and is scoped by
+the resolved immutable PE checkpoint revision, extraction contract, grid and
+feature dimensions, row schema, storage dtype, and relevant OpenCLIP, timm,
+Torch, Torchvision, and Pillow versions. Backfill and compatible-cache queries
+load that exact checkpoint revision rather than resolving mutable `main`
+independently. Its manifest proves exact coverage of one published `frames`
+generation, including the frame-identity digest and profile-table generation.
+The idempotent `index-framing` command derives it from retained keyframes
+without raw-film decoding or hosted inference.
 
 The result-card composition workflow defaults to a composition-only search of
 other films. Its source-film exclusion is applied before candidate generation,
@@ -318,11 +334,34 @@ Existing films build or repair this profile with the idempotent `index-text`
 command documented in `README.md`. New ingestion attempts the same derivation
 after publication; failure leaves the film searchable through the fallback.
 
+The production Framing spatial cache has its own whole-profile activation
+manifest tied to the exact `frames` table version, row count, and stable-ID
+digest. Every current frame must have one row whose source file metadata,
+resolved model revision, library versions, extraction contract, grid shape,
+and storage dtype match the selected profile. Descriptor bytes are checksummed
+when loaded and during idempotent reconciliation, so corrupt rows are
+repairable. Missing, stale, partial, duplicate, corrupt, or incompatible cache
+data disables the cache for the whole query; Framing then runs its
+established bounded live candidate encoding with the same candidate set and
+scoring formula. A query never combines cached grids for some candidates with
+newly encoded grids for others. The cache's explicit float16 storage can move
+an almost-tied adjacent result by a minute amount; changing that storage
+contract requires a new profile.
+
+Film publication intentionally does not make this optional acceleration part
+of the canonical ingest transaction. Each new `frames` generation therefore
+invalidates the previous cache manifest immediately. During a multi-film
+batch, Framing remains correct through live fallback. Running `index-framing`
+after the batch reconciles all metadata, embeds only new or stale keyframes,
+and atomically reactivates complete coverage; a scoped run may do the same
+after one film, but it cannot overlap the shared ingest lock.
+
 The PE visual tables are a frozen legacy exception. Frame rows contain only a
-coarse encoder name, unit rows lack exact visual-model lineage, and the loader
-does not pin an immutable upstream checkpoint. Search and publication reject a
-configured encoder-name mismatch, but this baseline must not be rebuilt
-piecemeal after upstream weights change.
+coarse encoder name and unit rows lack exact visual-model lineage. The runtime
+loader now resolves one immutable upstream checkpoint per model operation, but
+those legacy row and table contracts still do not record or activate that
+revision. Search and publication reject a configured encoder-name mismatch,
+but this baseline must not be rebuilt piecemeal after upstream weights change.
 
 Any future visual or multimodal replacement must use a separate versioned table
 with exact revision lineage and its own activation manifest.
@@ -349,6 +388,9 @@ same whole-profile activation rule when implemented.
   provider-resolved immutable revision.
 - Sparse keyframes can propose shots but can miss the best match-cut instant;
   exact source-backed within-shot refinement is not product-active.
+- The optional Framing cache becomes inactive after any film publication until
+  `index-framing` reconciles the new frame generation; live Framing remains
+  available during that interval.
 - Grounded Match Cut and Motion Match are not product-active. Current Framing
   cannot reliably match pose, temporal direction, brief action, or camera
   movement.

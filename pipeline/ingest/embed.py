@@ -1,7 +1,9 @@
 """embed.py — visual and text embedding via PE Core L/14 (primary) or SigLIP-2 (fallback).
 
-Models are loaded once per process (singleton keyed by model name) and cached
-in ``_MODEL_CACHE``.  All outputs are L2-normalised (cosine-similarity ready).
+Models are cached once per process by ``(model name, immutable revision)`` in
+``_MODEL_CACHE``. Calls without an explicit revision pin their first resolved
+revision as that process's default. All outputs are L2-normalised
+(cosine-similarity ready).
 
 Supported ``config.models.visual_encoder`` values
 --------------------------------------------------
@@ -22,6 +24,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any, Protocol
 
 import numpy as np
@@ -36,9 +39,21 @@ from pipeline.ingest.shots import Shot
 # Model registry
 # ---------------------------------------------------------------------------
 
-_MODEL_IDS: dict[str, str] = {
-    "pe_core_l14": "hf-hub:timm/PE-Core-L-14-336",
+_MODEL_REPOS: dict[str, str] = {
+    "pe_core_l14": "timm/PE-Core-L-14-336",
     "siglip2_so400m": "google/siglip2-so400m-patch14-384",
+}
+
+_MODEL_CONFIG_FILES: dict[str, str] = {
+    "pe_core_l14": "open_clip_config.json",
+    "siglip2_so400m": "config.json",
+}
+
+_MODEL_WEIGHT_FILES: dict[str, str | None] = {
+    "pe_core_l14": "open_clip_model.safetensors",
+    # Transformers resolves a possibly sharded checkpoint from this immutable
+    # revision when the model is constructed.
+    "siglip2_so400m": None,
 }
 
 # Nominal embedding dimensions (for documentation / validation)
@@ -67,6 +82,16 @@ class _Encoder(Protocol):
     ) -> tuple[torch.Tensor, torch.Tensor | None]: ...
 
     def encode_texts(self, texts: list[str]) -> torch.Tensor: ...
+
+
+@dataclass(frozen=True)
+class VisualModelLineage:
+    """One locally resolved immutable visual-model snapshot."""
+
+    config_name: str
+    model_id: str
+    model_revision: str
+    snapshot_dir: Path
 
 
 @dataclass
@@ -170,15 +195,133 @@ class _TransformersEncoder:
         return getattr(features, "pooler_output", features)
 
 
-# Module-level singleton cache   {model_name: encoder}
-_MODEL_CACHE: dict[str, _Encoder] = {}
+# Module-level singleton cache   {(model_name, immutable_revision): encoder}
+_MODEL_CACHE: dict[tuple[str, str], _Encoder] = {}
+# Calls that do not request an exact revision retain the original process-wide
+# singleton behavior. Once ``main`` resolves for a model, that immutable
+# revision remains the default for the process so two halves of one operation
+# cannot cross an upstream ref update.
+_DEFAULT_MODEL_REVISIONS: dict[str, str] = {}
 # Torch model construction and inference share one process-wide gate.  This
 # prevents concurrent API requests from loading the same large model twice or
 # overlapping GPU work on a singleton encoder.
 _MODEL_LOCK = threading.RLock()
 
 
-def _load_model(model_name: str) -> _Encoder:
+def _snapshot_revision_from_cache_path(path: Path) -> str:
+    """Read a HF snapshot revision lexically without dereferencing its file.
+
+    Hugging Face snapshot files are commonly symlinks into ``blobs`` on Linux.
+    Resolving the symlink loses the ``snapshots/<commit>`` parent and therefore
+    the immutable revision. Only the lexical cache path carries that identity.
+    """
+    snapshot_dir = path.parent
+    if snapshot_dir.parent.name != "snapshots":
+        raise RuntimeError(
+            "visual encoder artifact is not beneath an immutable HF snapshot: "
+            f"{path}"
+        )
+    revision = snapshot_dir.name
+    if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+        raise RuntimeError(
+            f"visual encoder snapshot has invalid revision {revision!r}"
+        )
+    return revision
+
+
+def _cached_or_downloaded_file(
+    model_id: str,
+    filename: str,
+    *,
+    revision: str,
+    ensure: bool,
+) -> Path | None:
+    from huggingface_hub import hf_hub_download, try_to_load_from_cache
+
+    cached = try_to_load_from_cache(
+        model_id,
+        filename,
+        revision=revision,
+    )
+    if isinstance(cached, str):
+        return Path(cached)
+    if not ensure:
+        return None
+    try:
+        return Path(
+            hf_hub_download(
+                repo_id=model_id,
+                filename=filename,
+                revision=revision,
+            )
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"could not resolve {filename!r} for visual encoder "
+            f"{model_id!r} at revision {revision!r}"
+        ) from exc
+
+
+def resolve_visual_model_lineage(
+    model_name: str,
+    *,
+    model_revision: str | None = None,
+    ensure_weights: bool = False,
+) -> VisualModelLineage | None:
+    """Resolve one exact HF snapshot without mixing mutable ``main`` files."""
+    model_id = _MODEL_REPOS.get(model_name)
+    config_filename = _MODEL_CONFIG_FILES.get(model_name)
+    if model_id is None or config_filename is None:
+        raise ValueError(
+            f"Unknown visual_encoder {model_name!r}. "
+            f"Known models: {sorted(_MODEL_REPOS)}"
+        )
+
+    requested_revision = model_revision or "main"
+    config_path = _cached_or_downloaded_file(
+        model_id,
+        config_filename,
+        revision=requested_revision,
+        ensure=ensure_weights,
+    )
+    if config_path is None:
+        return None
+    resolved_revision = _snapshot_revision_from_cache_path(config_path)
+    if model_revision is not None and resolved_revision != model_revision:
+        raise RuntimeError(
+            f"visual encoder resolved revision {resolved_revision!r}, "
+            f"expected {model_revision!r}"
+        )
+
+    weight_filename = _MODEL_WEIGHT_FILES[model_name]
+    if weight_filename is not None:
+        # Pin the weight lookup to the config's already resolved commit. This
+        # closes a mutable-main race between two hub downloads.
+        weight_path = _cached_or_downloaded_file(
+            model_id,
+            weight_filename,
+            revision=resolved_revision,
+            ensure=ensure_weights,
+        )
+        if weight_path is None:
+            return None
+        if _snapshot_revision_from_cache_path(weight_path) != resolved_revision:
+            raise RuntimeError(
+                "visual encoder config and weights crossed HF revisions"
+            )
+
+    return VisualModelLineage(
+        config_name=model_name,
+        model_id=model_id,
+        model_revision=resolved_revision,
+        snapshot_dir=config_path.parent,
+    )
+
+
+def _load_model(
+    model_name: str,
+    model_revision: str | None = None,
+) -> _Encoder:
     """Load *model_name* and return a cached encoder adapter.
 
     PE Core uses its official OpenCLIP-remapped checkpoint. SigLIP 2 uses
@@ -188,36 +331,61 @@ def _load_model(model_name: str) -> _Encoder:
     Parameters
     ----------
     model_name:
-        Must be a key in ``_MODEL_IDS`` (e.g. ``"pe_core_l14"``).
+        Must be a key in ``_MODEL_REPOS`` (e.g. ``"pe_core_l14"``).
 
     Raises
     ------
     ValueError
-        If *model_name* is not in ``_MODEL_IDS``.
+        If *model_name* is not in ``_MODEL_REPOS``.
     """
     with _MODEL_LOCK:
-        if model_name in _MODEL_CACHE:
-            return _MODEL_CACHE[model_name]
-
-        model_id = _MODEL_IDS.get(model_name)
-        if model_id is None:
-            raise ValueError(
-                f"Unknown visual_encoder {model_name!r}. "
-                f"Known models: {sorted(_MODEL_IDS)}"
-            )
+        if model_revision is None:
+            default_revision = _DEFAULT_MODEL_REVISIONS.get(model_name)
+            if default_revision is not None:
+                cached = _MODEL_CACHE.get((model_name, default_revision))
+                if cached is not None:
+                    return cached
+                # Tests and controlled process maintenance may clear the model
+                # objects without clearing the selected default revision.
+                _DEFAULT_MODEL_REVISIONS.pop(model_name, None)
+        if model_revision is not None:
+            cached = _MODEL_CACHE.get((model_name, model_revision))
+            if cached is not None:
+                return cached
+        lineage = resolve_visual_model_lineage(
+            model_name,
+            model_revision=model_revision,
+            ensure_weights=True,
+        )
+        if lineage is None:  # pragma: no cover - ensure_weights raises
+            raise RuntimeError(f"visual encoder {model_name!r} is unavailable")
+        cache_key = (model_name, lineage.model_revision)
+        cached = _MODEL_CACHE.get(cache_key)
+        if cached is not None:
+            if model_revision is None:
+                _DEFAULT_MODEL_REVISIONS[model_name] = (
+                    lineage.model_revision
+                )
+            return cached
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         if model_name == "pe_core_l14":
             import open_clip
 
+            exact_model_id = f"local-dir:{lineage.snapshot_dir}"
             try:
                 model, _preprocess_train, preprocess = (
-                    open_clip.create_model_and_transforms(model_id)
+                    open_clip.create_model_and_transforms(exact_model_id)
                 )
             except Exception as exc:
-                raise RuntimeError(_load_failure_hint(model_id)) from exc
-            tokenizer = open_clip.get_tokenizer(model_id)
+                raise RuntimeError(
+                    _load_failure_hint(
+                        lineage.model_id,
+                        lineage.model_revision,
+                    )
+                ) from exc
+            tokenizer = open_clip.get_tokenizer(exact_model_id)
             model = model.to(device)
             model.eval()
             encoder: _Encoder = _OpenClipEncoder(
@@ -230,10 +398,21 @@ def _load_model(model_name: str) -> _Encoder:
             from transformers import AutoModel, AutoProcessor
 
             try:
-                processor = AutoProcessor.from_pretrained(model_id)
-                model = AutoModel.from_pretrained(model_id)
+                processor = AutoProcessor.from_pretrained(
+                    lineage.model_id,
+                    revision=lineage.model_revision,
+                )
+                model = AutoModel.from_pretrained(
+                    lineage.model_id,
+                    revision=lineage.model_revision,
+                )
             except Exception as exc:
-                raise RuntimeError(_load_failure_hint(model_id)) from exc
+                raise RuntimeError(
+                    _load_failure_hint(
+                        lineage.model_id,
+                        lineage.model_revision,
+                    )
+                ) from exc
             model = model.to(device)
             model.eval()
             encoder = _TransformersEncoder(
@@ -242,7 +421,9 @@ def _load_model(model_name: str) -> _Encoder:
                 device=device,
             )
 
-        _MODEL_CACHE[model_name] = encoder
+        _MODEL_CACHE[cache_key] = encoder
+        if model_revision is None:
+            _DEFAULT_MODEL_REVISIONS[model_name] = lineage.model_revision
         return encoder
 
 
@@ -251,7 +432,10 @@ def _load_model(model_name: str) -> _Encoder:
 # ---------------------------------------------------------------------------
 
 
-def _load_failure_hint(model_id: str) -> str:
+def _load_failure_hint(
+    model_id: str,
+    model_revision: str | None = None,
+) -> str:
     """Explain the usual cause of a model-load failure in offline mode."""
     import os
 
@@ -261,7 +445,12 @@ def _load_failure_hint(model_id: str) -> str:
             " HF_HUB_OFFLINE is set (see .env); if this model has not been "
             "downloaded yet, unset it once to download, then re-enable."
         )
-    return f"Could not load encoder {model_id!r}.{hint}"
+    revision_detail = (
+        f" at immutable revision {model_revision!r}"
+        if model_revision is not None
+        else ""
+    )
+    return f"Could not load encoder {model_id!r}{revision_detail}.{hint}"
 
 
 def _l2_normalize(arr: np.ndarray) -> np.ndarray:
@@ -388,6 +577,7 @@ def embed_spatial_images(
     config: Config,
     *,
     grid_size: int = 6,
+    model_revision: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Embed images globally and, when supported, as a spatial patch grid.
 
@@ -404,7 +594,10 @@ def embed_spatial_images(
             None,
         )
 
-    encoder = _load_model(config.models.visual_encoder)
+    encoder = _load_model(
+        config.models.visual_encoder,
+        model_revision=model_revision,
+    )
     global_batches: list[np.ndarray] = []
     spatial_batches: list[np.ndarray] = []
     spatial_supported = True
