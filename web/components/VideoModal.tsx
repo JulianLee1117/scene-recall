@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useId, useState } from "react";
-import type { SearchResult } from "@/types/api";
-import { formatTime, filmLabel } from "@/lib/format";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import UseInSearchMenu from "./UseInSearchMenu";
+import { filmLabel, formatTime } from "@/lib/format";
+import { FACET_LABELS } from "@/lib/searchRecipe";
+import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 
 interface VideoModalProps {
   shot: SearchResult;
   onClose: () => void;
   onMatchComposition?: (shot: SearchResult) => void;
+  onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   matchCompositionDisabled?: boolean;
   bookmarked?: boolean;
   bookmarkDisabled?: boolean;
@@ -25,12 +28,16 @@ export default function VideoModal({
   shot,
   onClose,
   onMatchComposition,
+  onUseInSearch,
   matchCompositionDisabled = false,
   bookmarked = false,
   bookmarkDisabled = false,
   onToggleBookmark,
 }: VideoModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
   const hasSeenCanPlay = useRef(false);
   const [timestampCopied, setTimestampCopied] = useState(false);
   const titleId = useId();
@@ -40,36 +47,80 @@ export default function VideoModal({
   const matchedTextLabel = shot.matched_text_view
     ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
     : null;
+  const matchedFacetLabels = Array.from(
+    new Set((shot.matches ?? []).map((match) => FACET_LABELS[match.facet])),
+  );
 
-  // Reset the one-shot guard whenever the shot changes
   useEffect(() => {
     hasSeenCanPlay.current = false;
   }, [shot]);
 
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   const handleCanPlay = useCallback(() => {
-    const vid = videoRef.current;
-    if (!vid || hasSeenCanPlay.current) return;
+    const video = videoRef.current;
+    if (!video || hasSeenCanPlay.current) return;
     hasSeenCanPlay.current = true;
-    vid.currentTime = seekTarget;
-    vid.play().catch(() => {
-      // autoplay blocked — user can press play
+    video.currentTime = seekTarget;
+    video.play().catch(() => {
+      // Autoplay may be blocked; native controls remain available.
     });
   }, [seekTarget]);
 
-  // close on Escape
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const focusFrame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
 
-  // prevent background scroll
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), video[controls], [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute("hidden"));
+
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", handleKeyDown);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, []);
+
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
     };
   }, []);
 
@@ -86,17 +137,18 @@ export default function VideoModal({
   return (
     <div
       className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
+        ref={dialogRef}
         className="modal-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        tabIndex={-1}
       >
-        {/* header */}
         <div className="modal-header">
           <span id={titleId} className="modal-title">
             {shot.film_title ?? filmLabel(shot.film_id)}
@@ -131,13 +183,17 @@ export default function VideoModal({
                 </svg>
               </button>
             )}
-            <button type="button" onClick={onClose} aria-label="Close">
-              ✕
+            <button
+              ref={closeButtonRef}
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              ×
             </button>
           </div>
         </div>
 
-        {/* video */}
         <video
           ref={videoRef}
           src={`${apiUrl}/video/${shot.film_id}`}
@@ -153,6 +209,16 @@ export default function VideoModal({
               <span>{shot.matched_text}</span>
             </div>
           )}
+          {matchedFacetLabels.length > 0 && (
+            <div
+              className="modal-match-facets"
+              aria-label={`Matched by ${matchedFacetLabels.join(", ")}`}
+            >
+              {matchedFacetLabels.map((label) => (
+                <span key={label}>{label}</span>
+              ))}
+            </div>
+          )}
           {shot.caption &&
             !(
               shot.matched_text_view === "caption" &&
@@ -162,6 +228,14 @@ export default function VideoModal({
             <button type="button" onClick={copyTimestamp}>
               {timestampCopied ? "Timestamp copied" : "Copy timestamp"}
             </button>
+            {onUseInSearch && (
+              <UseInSearchMenu
+                shot={shot}
+                onUse={onUseInSearch}
+                variant="modal"
+                disabled={!Number.isInteger(shot.keyframe_index)}
+              />
+            )}
             {onMatchComposition && (
               <button
                 type="button"

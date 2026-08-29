@@ -5,21 +5,11 @@ import { useEffect, useId, useRef, useState } from "react";
 interface SearchOptionsProps {
   showRankingDetails: boolean;
   onShowRankingDetailsChange: (enabled: boolean) => void;
-  compositionOtherMovies: boolean;
-  onCompositionOtherMoviesChange: (enabled: boolean) => void;
-  compositionScopeLocked: boolean;
-  compositionUseCurrentText: boolean;
-  onCompositionUseCurrentTextChange: (enabled: boolean) => void;
 }
 
 export default function SearchOptions({
   showRankingDetails,
   onShowRankingDetailsChange,
-  compositionOtherMovies,
-  onCompositionOtherMoviesChange,
-  compositionScopeLocked,
-  compositionUseCurrentText,
-  onCompositionUseCurrentTextChange,
 }: SearchOptionsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -27,11 +17,7 @@ export default function SearchOptions({
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const headingId = useId();
-  const changedOptionCount = [
-    showRankingDetails,
-    !compositionOtherMovies,
-    compositionUseCurrentText,
-  ].filter(Boolean).length;
+  const changedOptionCount = showRankingDetails ? 1 : 0;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -58,8 +44,6 @@ export default function SearchOptions({
 
   const reset = () => {
     onShowRankingDetailsChange(false);
-    onCompositionOtherMoviesChange(true);
-    onCompositionUseCurrentTextChange(false);
   };
 
   return (
@@ -148,43 +132,6 @@ export default function SearchOptions({
               </button>
             </div>
           </div>
-
-          <fieldset className="search-options-section">
-            <legend>When matching a result</legend>
-            <label className="search-option-row">
-              <input
-                type="checkbox"
-                checked={compositionOtherMovies}
-                disabled={compositionScopeLocked}
-                onChange={(event) =>
-                  onCompositionOtherMoviesChange(event.target.checked)
-                }
-              />
-              <span className="search-option-indicator" aria-hidden="true" />
-              <span className="search-option-copy">
-                <span>Search other movies only</span>
-                <span>
-                  {compositionScopeLocked
-                    ? "Single-movie scope controls which movie is searched."
-                    : "Remove the source movie before composition candidates are chosen."}
-                </span>
-              </span>
-            </label>
-            <label className="search-option-row">
-              <input
-                type="checkbox"
-                checked={compositionUseCurrentText}
-                onChange={(event) =>
-                  onCompositionUseCurrentTextChange(event.target.checked)
-                }
-              />
-              <span className="search-option-indicator" aria-hidden="true" />
-              <span className="search-option-copy">
-                <span>Keep current text as a constraint</span>
-                <span>Otherwise the result action starts a composition-only search.</span>
-              </span>
-            </label>
-          </fieldset>
 
           <fieldset className="search-options-section">
             <legend>Advanced</legend>

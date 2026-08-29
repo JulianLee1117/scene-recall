@@ -1,7 +1,11 @@
 "use client";
 
 import ShotCard from "./ShotCard";
-import type { BookmarkRecord, SearchResult } from "@/types/api";
+import type {
+  BookmarkRecord,
+  RecipeMatchFacet,
+  SearchResult,
+} from "@/types/api";
 import { filmLabel, formatTime } from "@/lib/format";
 
 interface SavedViewProps {
@@ -11,6 +15,7 @@ interface SavedViewProps {
   pendingUnitIds: ReadonlySet<string>;
   onShotClick: (shot: SearchResult) => void;
   onFindSimilar: (shot: SearchResult) => void;
+  onUseInSearch: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   onToggleBookmark: (shot: SearchResult) => void;
   onRemoveBookmark: (bookmark: BookmarkRecord) => void;
 }
@@ -22,6 +27,7 @@ export default function SavedView({
   pendingUnitIds,
   onShotClick,
   onFindSimilar,
+  onUseInSearch,
   onToggleBookmark,
   onRemoveBookmark,
 }: SavedViewProps) {
@@ -77,6 +83,7 @@ export default function SavedView({
                   debug={false}
                   onClick={onShotClick}
                   onFindSimilar={onFindSimilar}
+                  onUseInSearch={onUseInSearch}
                   onToggleBookmark={onToggleBookmark}
                   bookmarked
                   bookmarkDisabled={
@@ -89,7 +96,7 @@ export default function SavedView({
               <li className="result-grid-item" key={bookmark.bookmark_id}>
                 <article className="saved-unavailable">
                   <div>
-                    <span>Source unavailable</span>
+                    <span>Scene unavailable</span>
                     <strong>
                       {bookmark.film_title || filmLabel(bookmark.film_id)}
                     </strong>

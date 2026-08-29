@@ -12,15 +12,48 @@ import ResultGrid, { type ResultGrouping } from "@/components/ResultGrid";
 import VideoModal from "@/components/VideoModal";
 import LibraryView from "@/components/LibraryView";
 import SavedView from "@/components/SavedView";
+import MatchByRail from "@/components/MatchByRail";
 import MovieScopeFilter from "@/components/MovieScopeFilter";
 import SearchOptions from "@/components/SearchOptions";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import {
+  MAX_RECIPE_CLAUSES,
+  buildRecipeClauses,
+  matchDraftHasClause,
+  recipeClauseCount,
+  sourceDraftFromShot,
+  type MatchDraft,
+  type MatchDrafts,
+  type TextMatchFacet,
+} from "@/lib/searchRecipe";
 import { bestResultPerFilm } from "@/lib/searchResults";
-import type { SearchResult, SearchResponse } from "@/types/api";
+import type {
+  RecipeMatchFacet,
+  SearchRecipeRequest,
+  SearchRecipeResponse,
+  SearchResult,
+  SearchResponse,
+} from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const MOVIE_SCOPE_SEARCH_DEBOUNCE_MS = 350;
+
+async function searchError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as {
+      detail?: string | Array<{ msg?: string }>;
+    };
+    if (typeof body.detail === "string" && body.detail) return body.detail;
+    if (Array.isArray(body.detail)) {
+      const message = body.detail.find((item) => item.msg)?.msg;
+      if (message) return message;
+    }
+  } catch {
+    // Keep the status-based fallback for non-JSON errors.
+  }
+  return `Search failed (${response.status})`;
+}
 
 type Tab = "search" | "saved" | "library";
 
@@ -36,7 +69,9 @@ export default function Home() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [completedQuery, setCompletedQuery] = useState<string | null>(null);
+  const [recipeNotice, setRecipeNotice] = useState<string | null>(null);
+  const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
+  const [matchDrafts, setMatchDrafts] = useState<MatchDrafts>({});
   const [referenceLabel, setReferenceLabel] = useState<string | null>(null);
   const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(
     null,
@@ -44,17 +79,12 @@ export default function Home() {
   const [activeShot, setActiveShot] = useState<SearchResult | null>(null);
   const [debug, setDebug] = useState(false);
   const [resultGrouping, setResultGrouping] = useState<ResultGrouping>("all");
-  const [compositionOtherMovies, setCompositionOtherMovies] = useState(true);
-  const [compositionUseCurrentText, setCompositionUseCurrentText] =
-    useState(false);
   const [selectedFilmIds, setSelectedFilmIds] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const scopeSearchTimerRef = useRef<number | null>(null);
   const referenceBlobRef = useRef<Blob | null>(null);
-  const referenceExcludeRef = useRef<string | null>(null);
-  const referenceExcludeFilmRef = useRef<string | null>(null);
   const referenceLabelRef = useRef<string | null>(null);
   const referencePreviewUrlRef = useRef<string | null>(null);
   const voiceStatusId = useId();
@@ -81,8 +111,6 @@ export default function Home() {
       URL.revokeObjectURL(referencePreviewUrlRef.current);
     }
     referenceBlobRef.current = null;
-    referenceExcludeRef.current = null;
-    referenceExcludeFilmRef.current = null;
     referenceLabelRef.current = null;
     referencePreviewUrlRef.current = null;
     setReferenceLabel(null);
@@ -90,33 +118,44 @@ export default function Home() {
   }, [cancelPendingScopeSearch]);
 
   const activateReference = useCallback(
-    (
-      image: Blob,
-      label: string,
-      excludeUnitId: string | null = null,
-      excludeFilmId: string | null = null,
-    ) => {
+    (image: Blob, label: string) => {
       if (referencePreviewUrlRef.current) {
         URL.revokeObjectURL(referencePreviewUrlRef.current);
       }
       const previewUrl = URL.createObjectURL(image);
       referenceBlobRef.current = image;
-      referenceExcludeRef.current = excludeUnitId;
-      referenceExcludeFilmRef.current = excludeFilmId;
       referenceLabelRef.current = label;
       referencePreviewUrlRef.current = previewUrl;
       setReferenceLabel(label);
       setReferencePreviewUrl(previewUrl);
-      setCompletedQuery(null);
+      setHasCompletedSearch(false);
       setActiveShot(null);
     },
     [],
   );
 
-  const runSearch = useCallback(
-    async (q: string, scope: readonly string[] = selectedFilmIds) => {
-      const trimmed = q.trim();
-      if (!trimmed) return;
+  const runRecipe = useCallback(
+    async (
+      mainText: string,
+      drafts: MatchDrafts,
+      scope: readonly string[] = selectedFilmIds,
+    ) => {
+      const clauses = buildRecipeClauses(mainText, drafts);
+      if (clauses.length === 0) {
+        cancelPendingScopeSearch();
+        searchAbortRef.current?.abort();
+        searchAbortRef.current = null;
+        setLoading(false);
+        setResults([]);
+        setError(null);
+        setRecipeNotice(null);
+        setHasCompletedSearch(false);
+        return;
+      }
+      if (clauses.length > MAX_RECIPE_CLAUSES) {
+        setRecipeNotice("Use up to three search parts.");
+        return;
+      }
 
       cancelPendingScopeSearch();
       searchAbortRef.current?.abort();
@@ -124,34 +163,29 @@ export default function Home() {
       searchAbortRef.current = controller;
       setLoading(true);
       setError(null);
-      setCompletedQuery(null);
+      setRecipeNotice(null);
+      setHasCompletedSearch(false);
 
-      const params = new URLSearchParams({ q: trimmed });
-      scope.forEach((filmId) => params.append("film_id", filmId));
+      const request: SearchRecipeRequest = {
+        clauses,
+        ...(scope.length ? { film_ids: [...scope] } : {}),
+      };
 
       try {
-        const res = await fetch(`${API_URL}/search?${params.toString()}`, {
+        const response = await fetch(`${API_URL}/search/recipe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
           signal: controller.signal,
         });
-        if (!res.ok) {
-          let message = `API error ${res.status}`;
-          try {
-            const body = (await res.json()) as { detail?: string };
-            if (typeof body.detail === "string" && body.detail) {
-              message = body.detail;
-            }
-          } catch {
-            // Keep the status-based fallback for non-JSON errors.
-          }
-          throw new Error(message);
-        }
-        const data: SearchResponse = await res.json();
+        if (!response.ok) throw new Error(await searchError(response));
+        const data: SearchRecipeResponse = await response.json();
         if (searchAbortRef.current !== controller) return;
         setResults(data.results);
-        setCompletedQuery(trimmed);
-      } catch (err) {
+        setHasCompletedSearch(true);
+      } catch (reason) {
         if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : "Search failed");
+        setError(reason instanceof Error ? reason.message : "Search failed");
         setResults([]);
       } finally {
         if (searchAbortRef.current === controller) {
@@ -167,8 +201,6 @@ export default function Home() {
     async (
       image: Blob,
       label: string,
-      excludeUnitId: string | null = null,
-      excludeFilmId: string | null = null,
       scope: readonly string[] = selectedFilmIds,
       textQuery: string = "",
     ) => {
@@ -178,21 +210,11 @@ export default function Home() {
       searchAbortRef.current = controller;
       setLoading(true);
       setError(null);
-      setCompletedQuery(null);
+      setRecipeNotice(null);
+      setHasCompletedSearch(false);
 
       const params = new URLSearchParams();
       scope.forEach((filmId) => params.append("film_id", filmId));
-      if (excludeUnitId) {
-        params.set("exclude_unit_id", excludeUnitId);
-      }
-      const effectiveFilmExclusion =
-        excludeFilmId &&
-        !(scope.length === 1 && scope[0] === excludeFilmId)
-          ? excludeFilmId
-          : null;
-      if (effectiveFilmExclusion) {
-        params.set("exclude_film_id", effectiveFilmExclusion);
-      }
       const trimmedTextQuery = textQuery.trim();
       if (trimmedTextQuery) {
         params.set("q", trimmedTextQuery);
@@ -208,21 +230,12 @@ export default function Home() {
           },
           signal: controller.signal,
         });
-        if (!res.ok) {
-          let message = `API error ${res.status}`;
-          try {
-            const detail = (await res.json()) as { detail?: string };
-            if (detail.detail) message = detail.detail;
-          } catch {
-            // Keep the status-based fallback for non-JSON errors.
-          }
-          throw new Error(message);
-        }
+        if (!res.ok) throw new Error(await searchError(res));
         const data: SearchResponse = await res.json();
         if (searchAbortRef.current !== controller) return;
         setResults(data.results);
         setReferenceLabel(label);
-        setCompletedQuery(trimmedTextQuery || null);
+        setHasCompletedSearch(true);
       } catch (err) {
         if (controller.signal.aborted) return;
         setError(
@@ -239,6 +252,127 @@ export default function Home() {
     [cancelPendingScopeSearch, selectedFilmIds],
   );
 
+  const leaveUploadedReference = useCallback(() => {
+    if (!referenceBlobRef.current) return;
+    clearReference();
+    searchAbortRef.current = null;
+    setLoading(false);
+  }, [clearReference]);
+
+  const handleRecipeLimit = useCallback(() => {
+    setRecipeNotice("Use up to three search parts.");
+  }, []);
+
+  const handleActivateTextFacet = useCallback(
+    (facet: TextMatchFacet) => {
+      if (matchDrafts[facet]) return;
+      if (recipeClauseCount(query, matchDrafts) >= MAX_RECIPE_CLAUSES) {
+        handleRecipeLimit();
+        return;
+      }
+      leaveUploadedReference();
+      setRecipeNotice(null);
+      setHasCompletedSearch(false);
+      setMatchDrafts((current) => ({
+        ...current,
+        [facet]: { kind: "text", facet, text: "" },
+      }));
+    },
+    [handleRecipeLimit, leaveUploadedReference, matchDrafts, query],
+  );
+
+  const handleFacetTextChange = useCallback(
+    (facet: TextMatchFacet, text: string) => {
+      const previous = matchDrafts[facet];
+      const previouslyActive = matchDraftHasClause(previous);
+      const nextDraft: MatchDraft = { kind: "text", facet, text };
+      const nextDrafts = { ...matchDrafts, [facet]: nextDraft };
+      const nextCount = recipeClauseCount(query, nextDrafts);
+      if (!previouslyActive && text.trim() && nextCount > MAX_RECIPE_CLAUSES) {
+        handleRecipeLimit();
+        return;
+      }
+
+      cancelPendingScopeSearch();
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
+      setLoading(false);
+      leaveUploadedReference();
+      setMatchDrafts(nextDrafts);
+      setRecipeNotice(null);
+      setHasCompletedSearch(false);
+      if (previouslyActive && !text.trim()) {
+        void runRecipe(query, nextDrafts);
+      }
+    },
+    [
+      cancelPendingScopeSearch,
+      handleRecipeLimit,
+      leaveUploadedReference,
+      matchDrafts,
+      query,
+      runRecipe,
+    ],
+  );
+
+  const handleRemoveFacet = useCallback(
+    (facet: RecipeMatchFacet) => {
+      const removedClause = matchDraftHasClause(matchDrafts[facet]);
+      const nextDrafts = { ...matchDrafts };
+      delete nextDrafts[facet];
+      setMatchDrafts(nextDrafts);
+      setRecipeNotice(null);
+      setHasCompletedSearch(false);
+      if (removedClause) void runRecipe(query, nextDrafts);
+    },
+    [matchDrafts, query, runRecipe],
+  );
+
+  const applySourceFacet = useCallback(
+    (facet: RecipeMatchFacet, draft: MatchDraft) => {
+      if (draft.kind !== "source") return;
+      const replacingClause = matchDraftHasClause(matchDrafts[facet]);
+      if (
+        !replacingClause &&
+        recipeClauseCount(query, matchDrafts) >= MAX_RECIPE_CLAUSES
+      ) {
+        handleRecipeLimit();
+        return;
+      }
+
+      leaveUploadedReference();
+      const nextDrafts: MatchDrafts = {
+        ...matchDrafts,
+        [facet]: { ...draft, facet },
+      };
+      setMatchDrafts(nextDrafts);
+      setRecipeNotice(null);
+      setHasCompletedSearch(false);
+      setActiveTab("search");
+      setActiveShot(null);
+      void runRecipe(query, nextDrafts);
+    },
+    [
+      handleRecipeLimit,
+      leaveUploadedReference,
+      matchDrafts,
+      query,
+      runRecipe,
+    ],
+  );
+
+  const handleUseInSearch = useCallback(
+    (shot: SearchResult, facet: RecipeMatchFacet) => {
+      const draft = sourceDraftFromShot(facet, shot);
+      if (!draft) {
+        setError("This scene does not have an exact searchable frame.");
+        return;
+      }
+      applySourceFacet(facet, draft);
+    },
+    [applySourceFacet],
+  );
+
   const handleMovieScopeChange = useCallback(
     (filmIds: string[]) => {
       cancelPendingScopeSearch();
@@ -252,7 +386,8 @@ export default function Home() {
         referenceBlobRef.current && referenceLabelRef.current,
       );
       const pendingQuery = query.trim();
-      if (!hasReference && !pendingQuery) return;
+      const hasRecipe = buildRecipeClauses(pendingQuery, matchDrafts).length > 0;
+      if (!hasReference && !hasRecipe) return;
 
       scopeSearchTimerRef.current = window.setTimeout(() => {
         scopeSearchTimerRef.current = null;
@@ -260,21 +395,20 @@ export default function Home() {
           void runImageSearch(
             referenceBlobRef.current,
             referenceLabelRef.current,
-            referenceExcludeRef.current,
-            referenceExcludeFilmRef.current,
             filmIds,
             pendingQuery,
           );
-        } else if (pendingQuery) {
-          void runSearch(pendingQuery, filmIds);
+        } else if (hasRecipe) {
+          void runRecipe(pendingQuery, matchDrafts, filmIds);
         }
       }, MOVIE_SCOPE_SEARCH_DEBOUNCE_MS);
     },
     [
       cancelPendingScopeSearch,
+      matchDrafts,
       query,
       runImageSearch,
-      runSearch,
+      runRecipe,
     ],
   );
 
@@ -285,6 +419,7 @@ export default function Home() {
       searchAbortRef.current = null;
       setLoading(false);
       setQuery(transcript);
+      setHasCompletedSearch(false);
     },
     [cancelPendingScopeSearch],
   );
@@ -297,16 +432,14 @@ export default function Home() {
         void runImageSearch(
           referenceBlobRef.current,
           referenceLabelRef.current,
-          referenceExcludeRef.current,
-          referenceExcludeFilmRef.current,
           selectedFilmIds,
           transcript,
         );
       } else {
-        void runSearch(transcript);
+        void runRecipe(transcript, matchDrafts);
       }
     },
-    [runImageSearch, runSearch, selectedFilmIds],
+    [matchDrafts, runImageSearch, runRecipe, selectedFilmIds],
   );
 
   const speech = useSpeechRecognition({
@@ -317,12 +450,12 @@ export default function Home() {
   const handleReferenceFile = useCallback(
     (file: File) => {
       speech.cancel();
+      setMatchDrafts({});
+      setRecipeNotice(null);
       activateReference(file, file.name || "Uploaded frame");
       void runImageSearch(
         file,
         file.name || "Uploaded frame",
-        null,
-        null,
         selectedFilmIds,
         query,
       );
@@ -331,84 +464,27 @@ export default function Home() {
   );
 
   const handleFindSimilar = useCallback(
-    async (shot: SearchResult) => {
-      if (loading) return;
-      setActiveTab("search");
-      cancelPendingScopeSearch();
+    (shot: SearchResult) => {
       speech.cancel();
-      searchAbortRef.current?.abort();
-      const controller = new AbortController();
-      searchAbortRef.current = controller;
-      setLoading(true);
-      setError(null);
-      setActiveShot(null);
-      const referenceUrl =
-        shot.matched_frame_url ?? shot.keyframe_url;
-      try {
-        // The same URL was already loaded by <img> in no-CORS mode. Avoid
-        // reusing that opaque browser cache entry for this CORS fetch.
-        const response = await fetch(`${API_URL}${referenceUrl}`, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          throw new Error(`Could not load reference frame (${response.status})`);
-        }
-        const image = await response.blob();
-        if (searchAbortRef.current !== controller) return;
-        const label = `Result ${shot.rank ?? ""} frame`.trim();
-        const excludeFilmId = compositionOtherMovies ? shot.film_id : null;
-        const textConstraint = compositionUseCurrentText ? query : "";
-        if (!compositionUseCurrentText) setQuery("");
-        activateReference(image, label, shot.unit_id, excludeFilmId);
-        await runImageSearch(
-          image,
-          label,
-          shot.unit_id,
-          excludeFilmId,
-          selectedFilmIds,
-          textConstraint,
-        );
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        setError(
-          err instanceof Error ? err.message : "Reference search failed",
-        );
-      } finally {
-        if (searchAbortRef.current === controller) {
-          searchAbortRef.current = null;
-          setLoading(false);
-        }
-      }
+      handleUseInSearch(shot, "composition");
     },
-    [
-      activateReference,
-      cancelPendingScopeSearch,
-      compositionOtherMovies,
-      compositionUseCurrentText,
-      loading,
-      query,
-      runImageSearch,
-      selectedFilmIds,
-      speech,
-    ],
+    [handleUseInSearch, speech],
   );
 
   const handleClearReference = useCallback(() => {
     searchAbortRef.current?.abort();
     clearReference();
     setActiveShot(null);
-    const remainingQuery = query.trim();
-    if (remainingQuery) {
-      void runSearch(remainingQuery);
+    if (buildRecipeClauses(query, matchDrafts).length > 0) {
+      void runRecipe(query, matchDrafts);
     } else {
       setResults([]);
       setError(null);
-      setCompletedQuery(null);
+      setHasCompletedSearch(false);
       setLoading(false);
     }
     inputRef.current?.focus();
-  }, [clearReference, query, runSearch]);
+  }, [clearReference, matchDrafts, query, runRecipe]);
 
   useEffect(
     () => () => {
@@ -421,51 +497,61 @@ export default function Home() {
     [cancelPendingScopeSearch],
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const submittedQuery = query.trim();
+  const handleQueryChange = useCallback(
+    (nextQuery: string) => {
+      speech.cancel();
+      speech.clearError();
+      cancelPendingScopeSearch();
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
+      setLoading(false);
+      const removedMainClause = Boolean(query.trim()) && !nextQuery.trim();
+      setQuery(nextQuery);
+      setHasCompletedSearch(false);
+      setRecipeNotice(
+        recipeClauseCount(nextQuery, matchDrafts) > MAX_RECIPE_CLAUSES
+          ? "Remove one match to search."
+          : null,
+      );
+
+      if (removedMainClause && !referenceBlobRef.current) {
+        void runRecipe(nextQuery, matchDrafts);
+      }
+    },
+    [cancelPendingScopeSearch, matchDrafts, query, runRecipe, speech],
+  );
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
     speech.cancel();
     if (referenceBlobRef.current && referenceLabelRef.current) {
       void runImageSearch(
         referenceBlobRef.current,
         referenceLabelRef.current,
-        referenceExcludeRef.current,
-        referenceExcludeFilmRef.current,
         selectedFilmIds,
-        submittedQuery,
+        query,
       );
-    } else if (submittedQuery) {
-      void runSearch(submittedQuery);
+    } else {
+      void runRecipe(query, matchDrafts);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape" && speech.status !== "idle") {
-      e.preventDefault();
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape" && speech.status !== "idle") {
+      event.preventDefault();
       speech.cancel();
       inputRef.current?.focus();
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const submittedQuery = query.trim();
-      speech.cancel();
-      if (referenceBlobRef.current && referenceLabelRef.current) {
-        void runImageSearch(
-          referenceBlobRef.current,
-          referenceLabelRef.current,
-          referenceExcludeRef.current,
-          referenceExcludeFilmRef.current,
-          selectedFilmIds,
-          submittedQuery,
-        );
-      } else if (submittedQuery) {
-        void runSearch(submittedQuery);
-      }
     }
   };
 
   const isEmpty = results.length === 0 && !loading && !error;
+  const clauseCount = recipeClauseCount(query, matchDrafts);
+  const recipeOverLimit = clauseCount > MAX_RECIPE_CLAUSES;
+  const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
+  const searchDisabled =
+    loading ||
+    recipeOverLimit ||
+    (!referenceLabel && buildRecipeClauses(query, matchDrafts).length === 0);
   const displayedResults = useMemo(
     () =>
       resultGrouping === "best-per-movie"
@@ -561,6 +647,7 @@ export default function Home() {
           pendingUnitIds={pendingBookmarkUnitIds}
           onShotClick={setActiveShot}
           onFindSimilar={handleFindSimilar}
+          onUseInSearch={handleUseInSearch}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
           onRemoveBookmark={(bookmark) => void removeBookmark(bookmark)}
         />
@@ -602,7 +689,7 @@ export default function Home() {
               onSubmit={handleSubmit}
               style={{
                 width: "100%",
-                maxWidth: isEmpty ? "640px" : "520px",
+                maxWidth: isEmpty ? "760px" : "720px",
                 padding: "0 16px",
                 transition: "max-width 0.3s ease",
               }}
@@ -618,20 +705,13 @@ export default function Home() {
                   ref={inputRef}
                   type="text"
                   value={query}
-                  onChange={(e) => {
-                    speech.cancel();
-                    speech.clearError();
-                    cancelPendingScopeSearch();
-                    searchAbortRef.current?.abort();
-                    searchAbortRef.current = null;
-                    setLoading(false);
-                    setQuery(e.target.value);
-                  }}
+                  maxLength={500}
+                  onChange={(event) => handleQueryChange(event.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={
                     referenceLabel
-                      ? "add a text constraint…"
-                      : "describe a scene…"
+                      ? "add a broad text constraint…"
+                      : "describe anything you remember…"
                   }
                   aria-label="Describe a scene"
                   aria-describedby={voiceStatus ? voiceStatusId : undefined}
@@ -760,15 +840,15 @@ export default function Home() {
                 {/* search button */}
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={searchDisabled}
                   aria-label="Search"
                   style={{
                     position: "absolute",
                     right: isEmpty ? "14px" : "10px",
                     background: "none",
                     border: "none",
-                    cursor: loading ? "default" : "pointer",
-                    color: loading ? "#444" : "#d4a96a",
+                    cursor: searchDisabled ? "default" : "pointer",
+                    color: searchDisabled ? "#444" : "#d4a96a",
                     padding: "4px",
                     display: "flex",
                     alignItems: "center",
@@ -790,6 +870,24 @@ export default function Home() {
                   )}
                 </button>
               </div>
+
+              {!referenceLabel && (
+                <MatchByRail
+                  mainText={query}
+                  drafts={matchDrafts}
+                  onActivateText={handleActivateTextFacet}
+                  onTextChange={handleFacetTextChange}
+                  onRemove={handleRemoveFacet}
+                  onSource={applySourceFacet}
+                  onLimit={handleRecipeLimit}
+                />
+              )}
+
+              {recipeNotice && (
+                <p className="match-notice" role="status">
+                  {recipeNotice}
+                </p>
+              )}
 
               <div className="search-meta">
                 <span
@@ -814,11 +912,6 @@ export default function Home() {
                   <SearchOptions
                     showRankingDetails={debug}
                     onShowRankingDetailsChange={setDebug}
-                    compositionOtherMovies={compositionOtherMovies}
-                    onCompositionOtherMoviesChange={setCompositionOtherMovies}
-                    compositionScopeLocked={selectedFilmIds.length === 1}
-                    compositionUseCurrentText={compositionUseCurrentText}
-                    onCompositionUseCurrentTextChange={setCompositionUseCurrentText}
                   />
                 </div>
               </div>
@@ -831,8 +924,8 @@ export default function Home() {
                     <span>{referenceLabel}</span>
                     <span>
                       {query.trim()
-                        ? "Composition reference + text constraint"
-                        : "Composition reference"}
+                        ? "Uploaded composition + broad text"
+                        : "Uploaded composition reference"}
                     </span>
                   </span>
                   <button
@@ -846,7 +939,7 @@ export default function Home() {
                 </div>
               )}
 
-              {isEmpty && !query.trim() && !referenceLabel && (
+              {isEmpty && !query.trim() && !referenceLabel && !hasFacetDrafts && (
                 <div className="search-examples" aria-label="Example searches">
                   <span>Try</span>
                   {["a lonely figure under red neon", '"I remember everything"'].map(
@@ -856,7 +949,7 @@ export default function Home() {
                         type="button"
                         onClick={() => {
                           setQuery(example);
-                          void runSearch(example);
+                          void runRecipe(example, matchDrafts);
                         }}
                       >
                         {example}
@@ -891,7 +984,7 @@ export default function Home() {
               !error &&
               speech.status === "idle" &&
               results.length === 0 &&
-              (completedQuery === query.trim() || referenceLabel !== null) && (
+              hasCompletedSearch && (
                 <p
                   style={{
                     marginTop: "24px",
@@ -912,6 +1005,7 @@ export default function Home() {
             revealDisabled={loading}
             onShotClick={setActiveShot}
             onFindSimilar={handleFindSimilar}
+            onUseInSearch={handleUseInSearch}
             onToggleBookmark={(shot) => void toggleBookmark(shot)}
             bookmarkedUnitIds={bookmarkedUnitIds}
             pendingBookmarkUnitIds={pendingBookmarkUnitIds}
@@ -934,6 +1028,7 @@ export default function Home() {
           shot={activeShot}
           onClose={() => setActiveShot(null)}
           onMatchComposition={handleFindSimilar}
+          onUseInSearch={handleUseInSearch}
           matchCompositionDisabled={loading}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
           bookmarked={Boolean(activeShotBookmark)}

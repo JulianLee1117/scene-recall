@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import ShotCard from "./ShotCard";
-import type { SearchResult } from "@/types/api";
+import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 
 const INITIAL_VISIBLE_ROWS = 3;
 const ROWS_PER_REVEAL = 2;
@@ -17,6 +17,7 @@ interface ResultGridProps {
   revealDisabled?: boolean;
   onShotClick: (shot: SearchResult) => void;
   onFindSimilar: (shot: SearchResult) => void;
+  onUseInSearch: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   onToggleBookmark?: (shot: SearchResult) => void;
   bookmarkedUnitIds?: ReadonlySet<string>;
   pendingBookmarkUnitIds?: ReadonlySet<string>;
@@ -38,6 +39,7 @@ export default function ResultGrid({
   revealDisabled = false,
   onShotClick,
   onFindSimilar,
+  onUseInSearch,
   onToggleBookmark,
   bookmarkedUnitIds = EMPTY_UNIT_IDS,
   pendingBookmarkUnitIds = EMPTY_UNIT_IDS,
@@ -124,6 +126,7 @@ export default function ResultGrid({
               debug={debug}
               onClick={onShotClick}
               onFindSimilar={onFindSimilar}
+              onUseInSearch={onUseInSearch}
               onToggleBookmark={onToggleBookmark}
               bookmarked={bookmarkedUnitIds.has(shot.unit_id)}
               bookmarkDisabled={

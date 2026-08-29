@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useCallback, useId } from "react";
-import type { SearchResult } from "@/types/api";
+import UseInSearchMenu from "./UseInSearchMenu";
+import { FACET_LABELS, writeSceneSourceDrag } from "@/lib/searchRecipe";
+import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { formatTime, filmLabel } from "@/lib/format";
 
 interface ShotCardProps {
@@ -11,6 +13,7 @@ interface ShotCardProps {
   showRank?: boolean;
   onClick: (shot: SearchResult) => void;
   onFindSimilar?: (shot: SearchResult) => void;
+  onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   similarDisabled?: boolean;
   bookmarked?: boolean;
   bookmarkDisabled?: boolean;
@@ -52,6 +55,7 @@ export default function ShotCard({
   showRank = true,
   onClick,
   onFindSimilar,
+  onUseInSearch,
   similarDisabled = false,
   bookmarked = false,
   bookmarkDisabled = false,
@@ -65,6 +69,10 @@ export default function ShotCard({
   const matchedTextLabel = shot.matched_text_view
     ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
     : null;
+  const matchedFacetLabels = Array.from(
+    new Set((shot.matches ?? []).map((match) => FACET_LABELS[match.facet])),
+  );
+  const sourceAvailable = Number.isInteger(shot.keyframe_index);
 
   const handleMouseEnter = useCallback(() => {
     setHovered(true);
@@ -96,6 +104,12 @@ export default function ShotCard({
   return (
     <article
       className={`result-card${debug ? " result-card-debug" : ""}`}
+      draggable={Boolean(onUseInSearch && sourceAvailable)}
+      onDragStart={(event) => {
+        if (!writeSceneSourceDrag(event.dataTransfer, shot)) {
+          event.preventDefault();
+        }
+      }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -151,6 +165,16 @@ export default function ShotCard({
                 <span>{shot.matched_text}</span>
               </span>
             )}
+            {matchedFacetLabels.length > 0 && (
+              <span
+                className="result-match-facets"
+                aria-label={`Matched by ${matchedFacetLabels.join(", ")}`}
+              >
+                {matchedFacetLabels.map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
+              </span>
+            )}
             <span className="result-film">
               {shot.film_title ?? filmLabel(shot.film_id)}
             </span>
@@ -203,7 +227,7 @@ export default function ShotCard({
         )}
       </button>
 
-      {(onToggleBookmark || onFindSimilar) && (
+      {(onToggleBookmark || onFindSimilar || onUseInSearch) && (
         <div className="result-card-actions">
           {onToggleBookmark && (
             <button
@@ -235,6 +259,13 @@ export default function ShotCard({
                 <path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z" />
               </svg>
             </button>
+          )}
+          {onUseInSearch && (
+            <UseInSearchMenu
+              shot={shot}
+              onUse={onUseInSearch}
+              disabled={!sourceAvailable}
+            />
           )}
           {onFindSimilar && (
             <button

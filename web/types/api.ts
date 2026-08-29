@@ -1,4 +1,48 @@
 export type SearchChannel = "img" | "txt" | "lex" | "spatial";
+export type SearchFacet =
+  | "all"
+  | "scene"
+  | "words"
+  | "look"
+  | "composition"
+  | "mood";
+export type RecipeMatchFacet = Exclude<SearchFacet, "all">;
+export type RecipeTextFacet = Exclude<SearchFacet, "composition">;
+
+export interface RecipeSource {
+  unit_id: string;
+  frame_index?: number;
+}
+
+export type SearchRecipeClause =
+  | {
+      id: string;
+      kind: "text";
+      facet: RecipeTextFacet;
+      text: string;
+    }
+  | {
+      id: string;
+      kind: "source";
+      facet: RecipeMatchFacet;
+      source: RecipeSource;
+    };
+
+export interface SearchRecipeRequest {
+  clauses: SearchRecipeClause[];
+  film_ids?: string[];
+}
+
+export type SearchMatchEvidence =
+  | { type: "text"; view: string; text: string }
+  | { type: "frame"; frame_index: number; timestamp?: number };
+
+export interface SearchMatch {
+  clause_id: string;
+  facet: SearchFacet;
+  rank: number;
+  evidence?: SearchMatchEvidence;
+}
 
 export interface MatchedFrameDebug {
   frame_id?: string;
@@ -46,6 +90,8 @@ export interface SearchResult {
   t_end: number;
   caption: string;
   keyframe_url: string;
+  /** Exact frame displayed by keyframe_url and used by source recipe clauses. */
+  keyframe_index: number;
   preview_url: string;
   /** One-based rank in the backend's final result order. */
   rank?: number;
@@ -60,6 +106,8 @@ export interface SearchResult {
   /** Best independent text view supporting this result. */
   matched_text_view?: string;
   matched_text?: string;
+  /** Per-clause evidence returned by modular recipe search. */
+  matches?: SearchMatch[];
 }
 
 export interface SearchResponse {
@@ -67,6 +115,8 @@ export interface SearchResponse {
   /** Backend-defined diversity/display page size. Older APIs omit it. */
   display_batch_size?: number;
 }
+
+export type SearchRecipeResponse = SearchResponse;
 
 export type BookmarkAvailability = "indexed" | "source_only" | "missing";
 

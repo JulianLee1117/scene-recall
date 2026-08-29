@@ -193,30 +193,38 @@ partial or stale data falls back as a whole to the compatible legacy index.
 
 Once more than one film is indexed, use the compact **All movies** control to
 search one movie, several movies, or the whole library. The picker gains title
-search automatically as the library grows. Open **Options** to show the best
-scene per movie represented in the returned search window or to reveal ranking
-details. This display grouping does not force an irrelevant result from every
-indexed movie. Search uses bounded ranked candidate and result windows, not a
+search automatically as the library grows. The results toolbar switches between
+**All scenes** and **One per movie** for the movies already represented in the
+returned window; it does not force an irrelevant result from every indexed
+movie. Search uses bounded ranked candidate and result windows, not a
 minimum-similarity cutoff, so a globally uncompetitive movie may be absent;
 select that movie in **All movies** when complete movie-specific recall matters.
+The responsive grid initially shows three complete rows and can reveal more of
+the 48-result production window.
 
-For composition matching, click the image icon and choose a JPEG, PNG, or WebP
-still, or hover a result and click **Composition** to use its matched keyframe.
-The result action starts a composition-only search across other movies by
-default, preventing source-film style matches from consuming its candidate
-window. **Options** can include the source movie or keep the current text as a
-constraint. You may also type a new constraint such as “at night with two
-people.” The reference shortlist remains mandatory and matching text evidence
-reranks it; unrelated text-only shots do not enter. Reference retrieval uses
-the existing local frame index and a learned 6x6 spatial feature grid, so it
-does not call OpenAI or Gemini or require re-ingestion. Treat it as
-framing/position similarity, not exact subject-relation, skeletal-pose, or
-motion matching.
+The main bar remains a broad scene search. **Match by** adds up to three total
+search parts across the main bar and the explicit **Scene**, **Words**, **Look**,
+**Composition**, and **Mood** facets. Type into a facet, drag a result onto one,
+or use a result's **Use in search** menu. The result-card **Composition** action
+remains a one-click shortcut. Composition supplies the mandatory candidate
+set; other active parts can rerank it but cannot introduce visually unrelated
+shots. Result-source composition search keeps the cross-film discovery default
+to prevent the source movie's style from consuming the bounded shortlist.
+
+The image icon remains a separate uploaded-reference workflow for JPEG, PNG,
+or WebP stills and can take the main bar as a text constraint. Its active chip
+replaces the facet rail; clear it, or deliberately use one of its results as a
+new facet source, to return to modular search. Uploading a reference clears
+facet clauses, so the interface does not imply an unsupported combination.
+Look and composition use the existing local frame index; composition adds a
+learned 6x6 spatial feature grid. Neither calls OpenAI or Gemini or requires
+re-ingestion. Treat composition as coarse framing and position similarity, not
+exact subject-relation, skeletal-pose, or motion matching.
 
 Hover a result and use its bookmark action to save that source moment. Saved
 scenes persist in `paths.state_dir` independently of search-index repair or a
-compatible reingest; unavailable sources remain listed until explicitly
-removed.
+compatible reingest; the same action is available in the player, and
+unavailable scenes remain listed until explicitly removed.
 
 ## Optional retrieval comparison
 
