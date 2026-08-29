@@ -9,6 +9,7 @@ import type {
 export const MAX_RECIPE_CLAUSES = 3;
 export const SCENE_SOURCE_MIME = "application/x-scene-recall-source";
 const SCENE_SOURCE_META_MIME = "application/x-scene-recall-source-meta";
+const SCENE_SOURCE_ORIGIN_MIME = "application/x-scene-recall-source-origin";
 
 export const MATCH_FACETS: readonly RecipeMatchFacet[] = [
   "scene",
@@ -99,6 +100,30 @@ export function writeSceneSourceDrag(
   transfer.setData(SCENE_SOURCE_META_MIME, JSON.stringify(draft.display ?? {}));
   transfer.setData("text/plain", JSON.stringify(draft.source));
   return true;
+}
+
+export function writeFacetSourceDrag(
+  transfer: DataTransfer,
+  draft: MatchDraft,
+  originFacet: RecipeMatchFacet,
+): boolean {
+  if (draft.kind !== "source") return false;
+
+  transfer.effectAllowed = "move";
+  transfer.setData(SCENE_SOURCE_MIME, JSON.stringify(draft.source));
+  transfer.setData(SCENE_SOURCE_META_MIME, JSON.stringify(draft.display ?? {}));
+  transfer.setData(SCENE_SOURCE_ORIGIN_MIME, originFacet);
+  transfer.setData("text/plain", JSON.stringify(draft.source));
+  return true;
+}
+
+export function readFacetSourceDragOrigin(
+  transfer: DataTransfer,
+): RecipeMatchFacet | null {
+  const facet = transfer.getData(SCENE_SOURCE_ORIGIN_MIME);
+  return MATCH_FACETS.includes(facet as RecipeMatchFacet)
+    ? (facet as RecipeMatchFacet)
+    : null;
 }
 
 export function readSceneSourceDrag(

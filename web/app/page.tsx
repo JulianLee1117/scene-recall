@@ -71,6 +71,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [recipeNotice, setRecipeNotice] = useState<string | null>(null);
   const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
+  const [searchWorkspaceActive, setSearchWorkspaceActive] = useState(false);
   const [matchDrafts, setMatchDrafts] = useState<MatchDrafts>({});
   const [referenceLabel, setReferenceLabel] = useState<string | null>(null);
   const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(
@@ -146,10 +147,8 @@ export default function Home() {
         searchAbortRef.current?.abort();
         searchAbortRef.current = null;
         setLoading(false);
-        setResults([]);
         setError(null);
         setRecipeNotice(null);
-        setHasCompletedSearch(false);
         return;
       }
       if (clauses.length > MAX_RECIPE_CLAUSES) {
@@ -161,6 +160,7 @@ export default function Home() {
       searchAbortRef.current?.abort();
       const controller = new AbortController();
       searchAbortRef.current = controller;
+      setSearchWorkspaceActive(true);
       setLoading(true);
       setError(null);
       setRecipeNotice(null);
@@ -208,6 +208,7 @@ export default function Home() {
       searchAbortRef.current?.abort();
       const controller = new AbortController();
       searchAbortRef.current = controller;
+      setSearchWorkspaceActive(true);
       setLoading(true);
       setError(null);
       setRecipeNotice(null);
@@ -329,12 +330,28 @@ export default function Home() {
   );
 
   const applySourceFacet = useCallback(
-    (facet: RecipeMatchFacet, draft: MatchDraft) => {
+    (
+      facet: RecipeMatchFacet,
+      draft: MatchDraft,
+      originFacet?: RecipeMatchFacet,
+    ) => {
       if (draft.kind !== "source") return;
-      const replacingClause = matchDraftHasClause(matchDrafts[facet]);
+      const originDraft = originFacet ? matchDrafts[originFacet] : undefined;
+      const isMovingSource = Boolean(
+        originFacet &&
+          originFacet !== facet &&
+          originDraft?.kind === "source" &&
+          originDraft.source.unit_id === draft.source.unit_id &&
+          originDraft.source.frame_index === draft.source.frame_index,
+      );
+      if (originFacet === facet) return;
+
+      const baseDrafts = { ...matchDrafts };
+      if (isMovingSource && originFacet) delete baseDrafts[originFacet];
+      const replacingClause = matchDraftHasClause(baseDrafts[facet]);
       if (
         !replacingClause &&
-        recipeClauseCount(query, matchDrafts) >= MAX_RECIPE_CLAUSES
+        recipeClauseCount(query, baseDrafts) >= MAX_RECIPE_CLAUSES
       ) {
         handleRecipeLimit();
         return;
@@ -342,7 +359,7 @@ export default function Home() {
 
       leaveUploadedReference();
       const nextDrafts: MatchDrafts = {
-        ...matchDrafts,
+        ...baseDrafts,
         [facet]: { ...draft, facet },
       };
       setMatchDrafts(nextDrafts);
@@ -447,6 +464,27 @@ export default function Home() {
     onComplete: handleVoiceComplete,
   });
 
+  const resetSearchHome = useCallback(() => {
+    speech.cancel();
+    cancelPendingScopeSearch();
+    searchAbortRef.current?.abort();
+    searchAbortRef.current = null;
+    clearReference();
+    setActiveTab("search");
+    setQuery("");
+    setMatchDrafts({});
+    setResults([]);
+    setLoading(false);
+    setError(null);
+    setRecipeNotice(null);
+    setHasCompletedSearch(false);
+    setSearchWorkspaceActive(false);
+    setSelectedFilmIds([]);
+    setResultGrouping("all");
+    setActiveShot(null);
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, [cancelPendingScopeSearch, clearReference, speech]);
+
   const handleReferenceFile = useCallback(
     (file: File) => {
       speech.cancel();
@@ -478,9 +516,7 @@ export default function Home() {
     if (buildRecipeClauses(query, matchDrafts).length > 0) {
       void runRecipe(query, matchDrafts);
     } else {
-      setResults([]);
       setError(null);
-      setHasCompletedSearch(false);
       setLoading(false);
     }
     inputRef.current?.focus();
@@ -544,7 +580,7 @@ export default function Home() {
     }
   };
 
-  const isEmpty = results.length === 0 && !loading && !error;
+  const isHome = !searchWorkspaceActive;
   const clauseCount = recipeClauseCount(query, matchDrafts);
   const recipeOverLimit = clauseCount > MAX_RECIPE_CLAUSES;
   const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
@@ -601,7 +637,11 @@ export default function Home() {
           <button
             key={tab.id}
             onClick={() => {
-              if (tab.id !== "search") speech.cancel();
+              if (tab.id === "search") {
+                resetSearchHome();
+                return;
+              }
+              speech.cancel();
               setActiveTab(tab.id);
             }}
             style={{
@@ -662,19 +702,24 @@ export default function Home() {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              justifyContent: isEmpty ? "center" : "flex-start",
-              minHeight: isEmpty ? "calc(100vh - 45px)" : "auto",
-              paddingTop: isEmpty ? 0 : "40px",
+              justifyContent: isHome ? "center" : "flex-start",
+              minHeight: isHome ? "calc(100vh - 45px)" : "auto",
+              paddingTop: isHome ? 0 : "40px",
               paddingBottom: "32px",
               transition: "min-height 0.3s ease",
             }}
           >
             {/* wordmark */}
-            <div
+            <button
+              type="button"
+              className="search-wordmark"
+              onClick={resetSearchHome}
+              aria-label="Return to Scene Recall home"
+              title="Home"
               style={{
                 marginBottom: "28px",
                 letterSpacing: "0.2em",
-                fontSize: isEmpty ? "1.1rem" : "0.85rem",
+                fontSize: isHome ? "1.1rem" : "0.85rem",
                 color: "#d4a96a",
                 fontWeight: 500,
                 textTransform: "uppercase",
@@ -682,14 +727,14 @@ export default function Home() {
               }}
             >
               scene-recall
-            </div>
+            </button>
 
             {/* search bar */}
             <form
               onSubmit={handleSubmit}
               style={{
                 width: "100%",
-                maxWidth: isEmpty ? "760px" : "720px",
+                maxWidth: isHome ? "760px" : "720px",
                 padding: "0 16px",
                 transition: "max-width 0.3s ease",
               }}
@@ -722,12 +767,12 @@ export default function Home() {
                     border: "1px solid #2a2a2a",
                     borderRadius: "6px",
                     color: "#ededed",
-                    fontSize: isEmpty ? "1.25rem" : "1rem",
+                    fontSize: isHome ? "1.25rem" : "1rem",
                     padding: speech.isSupported
-                      ? isEmpty
+                      ? isHome
                         ? "18px 126px 18px 20px"
                         : "13px 116px 13px 16px"
-                      : isEmpty
+                      : isHome
                         ? "18px 88px 18px 20px"
                         : "13px 78px 13px 16px",
                     outline: "none",
@@ -764,10 +809,10 @@ export default function Home() {
                   }}
                   style={{
                     right: speech.isSupported
-                      ? isEmpty
+                      ? isHome
                         ? "78px"
                         : "70px"
-                      : isEmpty
+                      : isHome
                         ? "46px"
                         : "40px",
                   }}
@@ -815,7 +860,7 @@ export default function Home() {
                     }
                     onClick={() => speech.toggle(query)}
                     style={{
-                      right: isEmpty ? "46px" : "40px",
+                      right: isHome ? "46px" : "40px",
                     }}
                   >
                     <svg
@@ -844,7 +889,7 @@ export default function Home() {
                   aria-label="Search"
                   style={{
                     position: "absolute",
-                    right: isEmpty ? "14px" : "10px",
+                    right: isHome ? "14px" : "10px",
                     background: "none",
                     border: "none",
                     cursor: searchDisabled ? "default" : "pointer",
@@ -939,14 +984,21 @@ export default function Home() {
                 </div>
               )}
 
-              {isEmpty && !query.trim() && !referenceLabel && !hasFacetDrafts && (
-                <div className="search-examples" aria-label="Example searches">
+              {isHome && !referenceLabel && (
+                <div
+                  className={`search-examples${
+                    query.trim() || hasFacetDrafts ? " is-hidden" : ""
+                  }`}
+                  aria-label="Example searches"
+                  aria-hidden={Boolean(query.trim() || hasFacetDrafts)}
+                >
                   <span>Try</span>
                   {["a lonely figure under red neon", '"I remember everything"'].map(
                     (example) => (
                       <button
                         key={example}
                         type="button"
+                        tabIndex={query.trim() || hasFacetDrafts ? -1 : 0}
                         onClick={() => {
                           setQuery(example);
                           void runRecipe(example, matchDrafts);
@@ -958,6 +1010,7 @@ export default function Home() {
                   )}
                   <button
                     type="button"
+                    tabIndex={query.trim() || hasFacetDrafts ? -1 : 0}
                     onClick={() => imageInputRef.current?.click()}
                   >
                     upload a frame for composition
