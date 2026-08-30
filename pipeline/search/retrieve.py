@@ -1,22 +1,24 @@
 """Hybrid retrieval over the LanceDB ``units`` and ``frames`` tables.
 
 Enabled channels independently retrieve visual, semantic-text, and native
-full-text candidates.  Their ranked lists are combined with weighted
+full-text candidates. Their ranked lists are combined with weighted
 reciprocal-rank fusion (RRF), so incomparable cosine distances and BM25
-scores are never added together.  A zero channel weight is a true ablation:
-that channel performs no retrieval (and lexical-only search loads no model).
+scores are never added together. Broad single-term concepts conditionally omit
+the full-text vote; a zero channel weight remains a true ablation, and a
+lexical-only search still loads no model.
 """
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Iterable
+from itertools import combinations
 import json
 import logging
 import math
 from pathlib import Path
 import re
-from collections import Counter
-from collections.abc import Iterable
-from itertools import combinations
+from time import perf_counter
 from typing import Any
 
 import lancedb
@@ -45,6 +47,11 @@ from pipeline.ingest.text_embed import embed_semantic_query
 
 
 _LOGGER = logging.getLogger(__name__)
+# Application loggers do not inherit Uvicorn's configured handler. Keep this
+# development diagnostic on the server logger so each Framing request proves
+# whether it used cached descriptors or the live fallback without changing the
+# response contract or product UI.
+_SERVER_LOGGER = logging.getLogger("uvicorn.error")
 
 _CANDIDATE_LIMIT = DEFAULT_SEARCH_CANDIDATE_LIMIT
 _REFERENCE_SPATIAL_CANDIDATE_LIMIT = 96
@@ -55,6 +62,13 @@ _REFERENCE_RESULT_TEMPORAL_GAP_SECONDS = 90.0
 _REFERENCE_QUERY_WEIGHT = 0.5
 _TEXT_CONSTRAINT_WEIGHT = 0.5
 _MAX_LEXICAL_QUERY_TERMS = 12
+# Unscoped broad search needs a deeper per-channel pool than the final fused
+# window. Otherwise one prolific film can consume every bounded slot before
+# the existing film-diversity pass has a chance to consider another film. The
+# multiplier stays bounded and applies only to the browse-like broad surface;
+# explicit film scopes and internal recipe clause rankings retain the
+# configured candidate depth.
+_UNSCOPED_BROAD_CANDIDATE_MULTIPLIER = 3
 # The default is a ranked search window, not a frontend page size. Callers may
 # request a smaller stable prefix or a deeper evaluation window explicitly.
 SEARCH_RESULT_LIMIT = DEFAULT_SEARCH_RESULT_WINDOW
@@ -269,6 +283,36 @@ def _unique_query_terms(value: Any) -> list[str]:
     return list(dict.fromkeys(_query_tokens(value)))[:_MAX_LEXICAL_QUERY_TERMS]
 
 
+def _is_explicitly_quoted_query(value: str) -> bool:
+    """Return whether the complete query is enclosed in visible quote marks."""
+    query = value.strip()
+    return (
+        len(query) >= 2
+        and (query[0], query[-1])
+        in {('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’")}
+    )
+
+
+def _broad_query_uses_lexical_vote(
+    query: str,
+    enabled_channels: set[str],
+) -> bool:
+    """Choose whether FTS contributes an independent broad-search vote.
+
+    A single unquoted term in the main search is normally an open concept
+    (for example ``beautiful``), where one incidental caption or subtitle hit
+    should not outrank stronger visual and semantic matches. Quotes make exact
+    word intent explicit, while compound prompts retain lexical corroboration.
+    Lexical-only ablations also remain real retrieval modes.
+    """
+    if "lex" not in enabled_channels:
+        return False
+    query_tokens = _tokens(query)
+    if len(query_tokens) != 1 or _is_explicitly_quoted_query(query):
+        return True
+    return not bool(enabled_channels & {"img", "txt"})
+
+
 def _row_text(row: dict[str, Any]) -> str:
     """Combine text fields for content classification."""
     return " ".join(
@@ -462,8 +506,9 @@ def _attach_image_vectors(
 ) -> list[tuple[dict[str, Any], float]]:
     """Fetch ``img_vec`` for the bounded ranked rows the dedup pass will see.
 
-    The corpus scan deliberately omits vectors; only the ≤``_CANDIDATE_LIMIT``
-    rows that survive lexical ranking need visual evidence downstream.
+    The corpus scan deliberately omits vectors; only rows that survive bounded
+    lexical ranking need visual evidence downstream. Normal unscoped broad
+    search may use its documented expanded cross-film depth.
     """
     unit_ids = tuple(
         dict.fromkeys(
@@ -948,10 +993,21 @@ def _any_of(column: str, values: tuple[str, ...]) -> Any | None:
     """Build a safe Lance expression matching any of *values* in *column*."""
     if not values:
         return None
-    expression = col(column) == lit(values[0])
-    for value in values[1:]:
-        expression = expression | (col(column) == lit(value))
-    return expression
+    expressions = [col(column) == lit(value) for value in values]
+    # LanceDB renders and evaluates this expression tree recursively. A
+    # left-deep chain of a few hundred IDs can overflow the native Windows
+    # stack inside ``_lancedb.pyd`` before Python can raise an exception.
+    # Pairwise reduction preserves identical OR semantics while keeping the
+    # tree depth logarithmic as candidate breadth grows.
+    while len(expressions) > 1:
+        next_level = [
+            expressions[index] | expressions[index + 1]
+            for index in range(0, len(expressions) - 1, 2)
+        ]
+        if len(expressions) % 2:
+            next_level.append(expressions[-1])
+        expressions = next_level
+    return expressions[0]
 
 
 def _film_filter(film_ids: tuple[str, ...]) -> Any | None:
@@ -1025,6 +1081,59 @@ def _validated_search_limits(
             "retrieval.candidate_limit must be at least result_limit"
         )
     return candidate_limit, result_limit
+
+
+def _broad_channel_candidate_limit(
+    candidate_limit: int,
+    scoped_film_ids: tuple[str, ...],
+    *,
+    apply_film_diversity: bool | None,
+    defer_result_preferences: bool,
+) -> int:
+    """Return a bounded cross-film pool for the normal unscoped surface."""
+    if (
+        scoped_film_ids
+        or apply_film_diversity is False
+        or defer_result_preferences
+    ):
+        return candidate_limit
+    return candidate_limit * _UNSCOPED_BROAD_CANDIDATE_MULTIPLIER
+
+
+def _cross_film_candidate_reserve(
+    candidates: list[dict[str, Any]],
+    *,
+    candidate_limit: int,
+    reserve_limit: int,
+) -> list[dict[str, Any]]:
+    """Add one best deep candidate for a bounded set of missing films.
+
+    The ordinary fused prefix remains intact. The reserve gives the later soft
+    diversity pass evidence it could not previously see without sending every
+    deep candidate through the quadratic visual-deduplication pass.
+    """
+    if len(candidates) <= candidate_limit or reserve_limit <= 0:
+        return candidates[:candidate_limit]
+
+    selected = list(candidates[:candidate_limit])
+    represented_films = {
+        str(candidate["row"].get("film_id") or "")
+        for candidate in selected
+    }
+    reserved_films: set[str] = set()
+    for candidate in candidates[candidate_limit:]:
+        film_id = str(candidate["row"].get("film_id") or "")
+        if (
+            not film_id
+            or film_id in represented_films
+            or film_id in reserved_films
+        ):
+            continue
+        selected.append(candidate)
+        reserved_films.add(film_id)
+        if len(reserved_films) >= reserve_limit:
+            break
+    return selected
 
 
 def _progressive_film_diversity(
@@ -1134,6 +1243,13 @@ def search(
     table = db.open_table("units")
     scoped_film_ids = _normalise_film_ids(film_ids)
     representative_filter = _representative_filter(scoped_film_ids)
+    channel_candidate_limit = _broad_channel_candidate_limit(
+        candidate_limit,
+        scoped_film_ids,
+        apply_film_diversity=apply_film_diversity,
+        defer_result_preferences=_defer_result_preferences,
+    )
+    use_lexical_vote = _broad_query_uses_lexical_vote(query, enabled)
 
     text_rows: list[dict[str, Any]] = []
     text_profile = _ready_text_profile(config, db) if "txt" in enabled else None
@@ -1153,7 +1269,7 @@ def search(
                     table,
                     text_profile,
                     scoped_film_ids,
-                    candidate_limit=candidate_limit,
+                    candidate_limit=channel_candidate_limit,
                 )
             except Exception as exc:
                 # The manifest proves stored coverage, not that local weights
@@ -1177,22 +1293,22 @@ def search(
                     table.search(pe_vector, vector_column_name="txt_vec")
                     .metric("cosine")
                     .where(representative_filter)
-                    .limit(candidate_limit)
+                    .limit(channel_candidate_limit)
                     .to_list(),
                     scoped_film_ids,
                 ),
-                candidate_limit=candidate_limit,
+                candidate_limit=channel_candidate_limit,
             )
 
     lexical_ranked: list[tuple[dict[str, Any], float]] = []
-    if "lex" in enabled:
+    if use_lexical_vote:
         lexical_ranked = _attach_image_vectors(
             _native_lexical_ranking(
                 query,
                 table,
                 representative_filter,
                 scoped_film_ids,
-                candidate_limit=candidate_limit,
+                candidate_limit=channel_candidate_limit,
             ),
             table,
             scoped_film_ids,
@@ -1206,7 +1322,7 @@ def search(
             db,
             table,
             scoped_film_ids,
-            candidate_limit=candidate_limit,
+            candidate_limit=channel_candidate_limit,
         )
         if not image_rows:
             image_rows = _stable_vector_ranking(
@@ -1214,11 +1330,11 @@ def search(
                     table.search(pe_vector, vector_column_name="img_vec")
                     .metric("cosine")
                     .where(representative_filter)
-                    .limit(candidate_limit)
+                    .limit(channel_candidate_limit)
                     .to_list(),
                     scoped_film_ids,
                 ),
-                candidate_limit=candidate_limit,
+                candidate_limit=channel_candidate_limit,
             )
 
     fused: dict[str, dict[str, Any]] = {}
@@ -1291,6 +1407,12 @@ def search(
             str(candidate["row"].get("unit_id") or ""),
         ),
     )
+    if channel_candidate_limit > candidate_limit:
+        ordered = _cross_film_candidate_reserve(
+            ordered,
+            candidate_limit=candidate_limit,
+            reserve_limit=int(config.retrieval.diversity.page_size),
+        )
 
     if _defer_result_preferences:
         eligible = ordered
@@ -1662,6 +1784,27 @@ def _spatial_grid_scores(
     )
 
 
+def _log_framing_query(
+    *,
+    started_at: float,
+    cache: str,
+    reason: str,
+    candidate_count: int,
+    spatial_candidate_count: int,
+) -> None:
+    """Emit one compact server diagnostic for a Framing candidate query."""
+    elapsed_ms = max(0.0, (perf_counter() - started_at) * 1000.0)
+    _SERVER_LOGGER.info(
+        "framing_search cache=%s reason=%s elapsed_ms=%.1f "
+        "candidates=%d spatial_candidates=%d",
+        cache,
+        reason,
+        elapsed_ms,
+        candidate_count,
+        spatial_candidate_count,
+    )
+
+
 def _reference_frame_candidates(
     image: Image.Image,
     db: lancedb.DBConnection,
@@ -1671,13 +1814,26 @@ def _reference_frame_candidates(
     candidate_limit: int = _CANDIDATE_LIMIT,
 ) -> list[dict[str, Any]]:
     """Retrieve global image neighbors, then compare learned spatial grids."""
+    started_at = perf_counter()
     if "frames" not in table_names(db):
+        _log_framing_query(
+            started_at=started_at,
+            cache="unavailable",
+            reason="frames_table_missing",
+            candidate_count=0,
+            spatial_candidate_count=0,
+        )
         return []
 
     framing_profile = resolve_ready_framing_profile(
         config,
         db,
         validate_frame_ids=False,
+    )
+    cache_reason = (
+        "profile_ready"
+        if framing_profile is not None
+        else "profile_unavailable"
     )
     query_model_revision = (
         framing_profile.model_revision
@@ -1701,6 +1857,7 @@ def _reference_frame_candidates(
             framing_profile.feature_dim,
         ):
             framing_profile = None
+            cache_reason = "query_grid_incompatible"
     frame_query = (
         db.open_table("frames")
         .search(query_global[0], vector_column_name="visual_vec")
@@ -1717,6 +1874,13 @@ def _reference_frame_candidates(
         candidate_limit=candidate_limit * 3,
     )
     if not frame_rows:
+        _log_framing_query(
+            started_at=started_at,
+            cache="unavailable",
+            reason="no_candidates",
+            candidate_count=0,
+            spatial_candidate_count=0,
+        )
         return []
     if framing_profile is not None:
         # Candidate retrieval and manifest resolution are separate reads. A
@@ -1724,6 +1888,7 @@ def _reference_frame_candidates(
         # the complete manifest again after the candidate snapshot was read.
         if resolve_ready_framing_profile(config, db) != framing_profile:
             framing_profile = None
+            cache_reason = "profile_changed"
 
     spatial_shortlist_limit = min(
         candidate_limit,
@@ -1737,10 +1902,18 @@ def _reference_frame_candidates(
     )
 
     if not valid_rows:
+        _log_framing_query(
+            started_at=started_at,
+            cache="unavailable",
+            reason="no_valid_candidates",
+            candidate_count=0,
+            spatial_candidate_count=0,
+        )
         return []
 
     spatial_scores: np.ndarray | None = None
     candidate_spatial: np.ndarray | None = None
+    cache_path = "unavailable"
     if query_spatial is not None and framing_profile is not None:
         cached_frame_ids = [
             str(row.get("frame_id") or "")
@@ -1752,6 +1925,8 @@ def _reference_frame_candidates(
                 framing_profile,
                 cached_frame_ids,
             )
+        else:
+            cache_reason = "candidate_identity_missing"
         if candidate_spatial is None:
             # A malformed/unreadable active cache never contributes partially.
             # Rebuild the whole shortlist through the established live path.
@@ -1759,17 +1934,22 @@ def _reference_frame_candidates(
                 "Framing spatial cache unavailable during query; "
                 "using complete live candidate reranking"
             )
+            if cache_reason == "profile_ready":
+                cache_reason = "cache_read_failed"
             valid_rows, candidate_images = _reference_valid_rows(
                 frame_rows,
                 spatial_shortlist_limit=spatial_shortlist_limit,
                 candidate_limit=candidate_limit,
                 load_images=True,
             )
+        else:
+            cache_path = "hit"
     if (
         query_spatial is not None
         and candidate_spatial is None
         and candidate_images
     ):
+        cache_path = "live"
         _candidate_global, candidate_spatial = embed_spatial_images(
             candidate_images,
             config,
@@ -1780,6 +1960,8 @@ def _reference_frame_candidates(
                 else {}
             ),
         )
+    elif query_spatial is None:
+        cache_reason = "query_grid_unavailable"
     if query_spatial is not None and candidate_spatial is not None:
         spatial_scores = _spatial_grid_scores(
             query_spatial[0],
@@ -1831,6 +2013,13 @@ def _reference_frame_candidates(
     )
     if spatial_scores is None:
         valid_rows.sort(key=score_key)
+        _log_framing_query(
+            started_at=started_at,
+            cache=cache_path,
+            reason=cache_reason,
+            candidate_count=len(valid_rows),
+            spatial_candidate_count=0,
+        )
         return valid_rows
 
     # Scores that include spatial evidence are not calibrated against the
@@ -1845,7 +2034,15 @@ def _reference_frame_candidates(
             str(row.get("frame_id") or ""),
         ),
     )
-    return [*spatial_shortlist, *semantic_backfill]
+    results = [*spatial_shortlist, *semantic_backfill]
+    _log_framing_query(
+        started_at=started_at,
+        cache=cache_path,
+        reason=cache_reason,
+        candidate_count=len(results),
+        spatial_candidate_count=spatial_count,
+    )
+    return results
 
 
 def _reference_valid_rows(

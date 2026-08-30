@@ -8,6 +8,7 @@ export type SearchFacet =
   | "mood";
 export type RecipeMatchFacet = Exclude<SearchFacet, "all">;
 export type RecipeTextFacet = Exclude<SearchFacet, "composition">;
+export type RecipeImageFacet = "visual";
 
 export interface RecipeSource {
   unit_id: string;
@@ -26,11 +27,50 @@ export type SearchRecipeClause =
       kind: "source";
       facet: RecipeMatchFacet;
       source: RecipeSource;
+    }
+  | {
+      id: string;
+      kind: "image";
+      facet: RecipeImageFacet;
     };
 
 export interface SearchRecipeRequest {
   clauses: SearchRecipeClause[];
   film_ids?: string[];
+}
+
+export type SourceInputEvidence =
+  | {
+      type: "text";
+      view: "caption" | "dialogue" | "ocr" | "mood";
+      text: string;
+    }
+  | {
+      type: "frame";
+      frame_index: number;
+      mode: "global_visual" | "spatial_visual";
+    }
+  | {
+      type: "image";
+      mode: "global_visual" | "spatial_visual" | "global_spatial_visual";
+    };
+
+export type ResolvedRecipeSource =
+  | RecipeSource
+  | { kind: "uploaded_image" };
+
+export interface ResolvedSourceEvidence {
+  clause_id: string;
+  facet: RecipeMatchFacet | RecipeImageFacet;
+  source: ResolvedRecipeSource;
+  adapter:
+    | "caption"
+    | "dialogue+ocr"
+    | "mood"
+    | "pe_global"
+    | "pe_global+spatial_6x6";
+  effective_text?: string;
+  evidence: SourceInputEvidence[];
 }
 
 export type SearchMatchEvidence =
@@ -39,7 +79,7 @@ export type SearchMatchEvidence =
 
 export interface SearchMatch {
   clause_id: string;
-  facet: SearchFacet;
+  facet: SearchFacet | RecipeImageFacet;
   rank: number;
   evidence?: SearchMatchEvidence;
 }
@@ -116,7 +156,10 @@ export interface SearchResponse {
   display_batch_size?: number;
 }
 
-export type SearchRecipeResponse = SearchResponse;
+export interface SearchRecipeResponse extends SearchResponse {
+  /** Authoritative input derived from each dragged source scene. */
+  source_evidence?: ResolvedSourceEvidence[];
+}
 
 export type BookmarkAvailability = "indexed" | "source_only" | "missing";
 
@@ -194,5 +237,6 @@ export interface ImportFilmRequest {
 export interface ImportFilmResponse {
   path: string;
   filename: string;
+  subtitle_filename: string | null;
   job: IngestJob | null;
 }

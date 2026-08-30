@@ -16,6 +16,7 @@ All LanceDB and embed_text calls are mocked — no real DB or model in CI.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -99,6 +100,39 @@ def _make_query_chain(rows: list[dict]) -> MagicMock:
     chain.limit.return_value = chain
     chain.to_list.return_value = rows
     return chain
+
+
+def test_any_of_balances_large_candidate_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Large ID filters stay shallow enough for LanceDB's native stack."""
+    import pipeline.search.retrieve as retrieve
+
+    class FakeExpression:
+        def __init__(self, values: frozenset[str], depth: int = 1) -> None:
+            self.values = values
+            self.depth = depth
+
+        def __eq__(self, value: object) -> "FakeExpression":  # type: ignore[override]
+            return FakeExpression(frozenset({str(value)}))
+
+        def __or__(self, other: "FakeExpression") -> "FakeExpression":
+            return FakeExpression(
+                self.values | other.values,
+                max(self.depth, other.depth) + 1,
+            )
+
+    monkeypatch.setattr(
+        retrieve,
+        "col",
+        lambda column: FakeExpression(frozenset({column})),
+    )
+    monkeypatch.setattr(retrieve, "lit", lambda value: value)
+
+    values = tuple(f"unit-{index}" for index in range(600))
+    expression = retrieve._any_of("unit_id", values)
+
+    assert expression is not None
+    assert expression.values == frozenset(values)
+    assert expression.depth <= 11
 
 
 def _make_hybrid_mock_db(
@@ -628,6 +662,91 @@ def test_search_fuses_channel_ranks_with_config_weights(config: Config) -> None:
     embed.assert_called_once_with(["cigarette"], config)
 
 
+def test_broad_single_term_does_not_get_an_incidental_lexical_vote(
+    config: Config,
+) -> None:
+    """An unquoted concept relies on visual and semantic evidence, not FTS."""
+    from pipeline.search.retrieve import search
+
+    conceptual = _make_unit_row(
+        "conceptual",
+        "film_visual",
+        caption="Soft golden light falls across a peaceful face",
+        searchable_text="soft golden light peaceful face",
+        img_vec=_basis_vec(0),
+    )
+    incidental_words = _make_unit_row(
+        "incidental_words",
+        "film_subtitle",
+        caption="Two people argue in a dark corridor",
+        searchable_text="two people argue dark corridor",
+        dialogue='["It was beautiful and horrifying."]',
+        img_vec=_basis_vec(1),
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[conceptual],
+        text_rows=[conceptual],
+        lexical_rows=[incidental_words],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("beautiful", db, config)
+
+    assert [result["unit_id"] for result in results] == ["conceptual"]
+    assert set(results[0]["debug"]["channels"]) == {"img", "txt"}
+
+
+def test_quoted_single_term_retains_explicit_lexical_retrieval(
+    config: Config,
+) -> None:
+    """Quotes express word intent and keep native FTS as an independent vote."""
+    from pipeline.search.retrieve import search
+
+    lexical = _make_unit_row(
+        "lexical",
+        "film_subtitle",
+        caption="Two people argue in a dark corridor",
+        searchable_text="two people argue dark corridor beautiful",
+        dialogue='["It was beautiful and horrifying."]',
+        img_vec=_basis_vec(1),
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[],
+        text_rows=[],
+        lexical_rows=[lexical],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search('"beautiful"', db, config)
+
+    assert [result["unit_id"] for result in results] == ["lexical"]
+    assert set(results[0]["debug"]["channels"]) == {"lex"}
+
+
+def test_single_term_lexical_only_ablation_still_retrieves(config: Config) -> None:
+    """The broad-query policy must not turn a lexical-only eval into no-op."""
+    from pipeline.search.retrieve import search
+
+    config.retrieval.weights.img = 0.0
+    config.retrieval.weights.txt = 0.0
+    config.retrieval.weights.lex = 1.0
+    lexical = _make_unit_row(
+        "lexical",
+        caption="A beautiful landscape",
+        searchable_text="beautiful landscape",
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[],
+        text_rows=[],
+        lexical_rows=[lexical],
+    )
+
+    results = search("beautiful", db, config)
+
+    assert [result["unit_id"] for result in results] == ["lexical"]
+    assert set(results[0]["debug"]["channels"]) == {"lex"}
+
+
 def test_search_filters_junk_unless_query_explicitly_requests_it(
     config: Config,
 ) -> None:
@@ -832,6 +951,88 @@ def test_search_soft_film_diversity_backfills_by_relevance(config: Config) -> No
         "crowded_4",
     ]
     assert len(results) == 6
+
+
+def test_unscoped_broad_search_exposes_deeper_cross_film_candidates(
+    config: Config,
+) -> None:
+    """Film diversity can see an agreed hit below the old per-channel depth."""
+    from pipeline.search.retrieve import search
+
+    config.retrieval.candidate_limit = 200
+    config.retrieval.diversity.page_size = 12
+    config.retrieval.diversity.film_results_per_page_target = 4
+    crowded = [
+        _make_unit_row(
+            f"crowded_{index:03d}",
+            "film_crowded",
+            caption=f"Quiet moment {index}",
+            searchable_text=f"quiet moment {index}",
+            t_start=float(index * 100),
+            t_end=float(index * 100 + 2),
+            img_vec=[],
+            _distance=0.001 + index * 0.001,
+        )
+        for index in range(205)
+    ]
+    deeper_other_film = _make_unit_row(
+        "deeper_other_film",
+        "film_other",
+        caption="A quiet moment in another film",
+        searchable_text="quiet moment another film",
+        t_start=30_000.0,
+        t_end=30_002.0,
+        img_vec=[],
+        _distance=0.9,
+    )
+    rows = [*crowded, deeper_other_film]
+    db = _make_hybrid_mock_db(
+        image_rows=rows,
+        text_rows=rows,
+        lexical_rows=[],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("quiet moment", db, config, result_limit=24)
+
+    unit_ids = [result["unit_id"] for result in results]
+    assert unit_ids[:4] == [f"crowded_{index:03d}" for index in range(4)]
+    assert unit_ids[4] == "deeper_other_film"
+    assert unit_ids[5:] == [
+        f"crowded_{index:03d}" for index in range(4, 23)
+    ]
+
+
+def test_cross_film_reserve_is_bounded_and_keeps_one_best_missing_film() -> None:
+    from pipeline.search.retrieve import _cross_film_candidate_reserve
+
+    def candidate(unit_id: str, film_id: str) -> dict:
+        return {"row": {"unit_id": unit_id, "film_id": film_id}}
+
+    candidates = [
+        candidate("a1", "film_a"),
+        candidate("a2", "film_a"),
+        candidate("b1", "film_b"),
+        candidate("a3", "film_a"),
+        candidate("c1", "film_c"),
+        candidate("c2", "film_c"),
+        candidate("d1", "film_d"),
+        candidate("e1", "film_e"),
+    ]
+
+    reserved = _cross_film_candidate_reserve(
+        candidates,
+        candidate_limit=3,
+        reserve_limit=2,
+    )
+
+    assert [item["row"]["unit_id"] for item in reserved] == [
+        "a1",
+        "a2",
+        "b1",
+        "c1",
+        "d1",
+    ]
 
 
 def test_single_all_recipe_preserves_deep_normal_search_diversity(
@@ -1125,7 +1326,7 @@ def test_search_uses_middle_keyframe_and_serializable_debug(
     )
 
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
-        result = search("rainy", db, config)[0]
+        result = search("rainy night", db, config)[0]
 
     assert result["keyframe_url"] == f"/media/keyframe/{shot_id}/1"
     assert result["rank"] == 1
@@ -1870,6 +2071,7 @@ def test_search_by_image_blends_semantics_with_aligned_spatial_cells(
 def test_search_by_image_uses_active_spatial_cache_without_candidate_encoding(
     tmp_path: Path,
     config: Config,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A complete compatible cache leaves only the reference image on GPU."""
     from pipeline.index.framing_features import FramingSpatialProfile
@@ -1935,6 +2137,7 @@ def test_search_by_image_uses_active_spatial_cache_without_candidate_encoding(
     spatial_embed = MagicMock(return_value=(global_query, query_grid))
 
     with (
+        caplog.at_level(logging.INFO, logger="uvicorn.error"),
         patch(
             "pipeline.search.retrieve.resolve_ready_framing_profile",
             return_value=profile,
@@ -1958,11 +2161,17 @@ def test_search_by_image_uses_active_spatial_cache_without_candidate_encoding(
     spatial_embed.assert_called_once()
     assert spatial_embed.call_args.kwargs["model_revision"] == "a" * 40
     load_cache.assert_called_once_with(db, profile, ["first_0", "second_0"])
+    assert any(
+        "framing_search cache=hit reason=profile_ready" in message
+        and "candidates=2 spatial_candidates=2" in message
+        for message in caplog.messages
+    )
 
 
 def test_unreadable_spatial_cache_falls_back_for_whole_shortlist(
     tmp_path: Path,
     config: Config,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """No candidate receives cached evidence when the active lookup fails."""
     from pipeline.index.framing_features import FramingSpatialProfile
@@ -2019,6 +2228,7 @@ def test_unreadable_spatial_cache_falls_back_for_whole_shortlist(
     )
 
     with (
+        caplog.at_level(logging.INFO, logger="uvicorn.error"),
         patch(
             "pipeline.search.retrieve.resolve_ready_framing_profile",
             return_value=profile,
@@ -2047,6 +2257,11 @@ def test_unreadable_spatial_cache_falls_back_for_whole_shortlist(
     assert all(
         call.kwargs["model_revision"] == "a" * 40
         for call in spatial_embed.call_args_list
+    )
+    assert any(
+        "framing_search cache=live reason=cache_read_failed" in message
+        and "candidates=2 spatial_candidates=2" in message
+        for message in caplog.messages
     )
 
 

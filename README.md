@@ -52,7 +52,7 @@ Start the API server and the Next.js dev server in separate terminals:
 
 ```bash
 # Terminal 1 — FastAPI backend
-uv run uvicorn pipeline.api.main:app --reload
+uv run uvicorn pipeline.api.main:app --host 127.0.0.1 --port 8000
 
 # Terminal 2 — Next.js frontend
 cd web && npm run dev
@@ -60,6 +60,10 @@ cd web && npm run dev
 
 On Windows PowerShell, use `npm.cmd run dev` if the execution policy blocks
 `npm.ps1`.
+
+The ingestion queue lives in the API process. Keep the backend running without
+`--reload` while jobs are active; a backend reload discards queued job status.
+Use `--reload` only for backend development when no ingestion is queued.
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
@@ -88,6 +92,11 @@ video in each release (the largest supported file), a title, year, and final
 finished, then add it to the library and optionally queue ingestion. The move
 is instant because `incoming` and `films` are on the same drive. Other videos
 inside that release folder are left in place and are not offered as films.
+When a release contains one usable English-marked SRT clearly associated with
+the selected feature, import also preserves it beside the canonical film as
+`Title (Year) [Edition].en.srt`; the original release copy remains in
+`incoming` as raw evidence. Malformed, oversized, trivial, or promo-only SRTs
+are left in the release and are not promoted to canonical dialogue evidence.
 
 Ingestion is FIFO and runs one film at a time in an isolated, low-priority
 child process. The Films screen polls only while work is active; completed
@@ -115,6 +124,31 @@ directory. If an ingest is interrupted, re-running the same file reuses
 matching dialogue, media, and annotation artifacts instead of paying for those
 annotation calls again. Changing the annotation model, prompt, settings, or
 keyframe content selects a new cache profile without overwriting the old one.
+Dialogue prefers a usable canonical English SRT sidecar, then a convertible
+embedded subtitle stream, then local Whisper. Canonical sidecars receive the
+same non-destructive content check, so an already-present malformed, oversized,
+trivial, or promo-only file is ignored rather than cached as dialogue. The
+cache manifest includes the sidecar hash, embedded stream identity, or Whisper
+model and transcription profile so changed evidence is rebuilt instead of
+silently reusing stale text.
+
+Known release-ad cues are excluded from sidecar-derived dialogue while the raw
+SRT remains byte-for-byte unchanged. This derivation rule is profile-versioned,
+so an older cached sidecar is cleaned on its next ingest.
+
+Whisper fallback transcribes the source language after VAD. A canonical `en`
+or `eng` tag on the primary audio stream is used as an English hint so a
+foreign-language cold open cannot pin an otherwise English film to the wrong
+global language. Missing, `und`, and other tags remain on automatic detection,
+which majority-votes up to five voiced 30-second windows. Previous-window text
+conditioning is disabled to reduce silence hallucinations and repetition
+loops. The profile records the exact language option and its source, the other
+settings, and the faster-whisper package version. A versioned, conservative
+structural gate discards gross repetition-loop output and continues with
+caption and visual evidence instead of allowing hallucinated dialogue to enter
+search. Raw film audio is never changed, and authoritative sidecar or embedded
+subtitles bypass this gate.
+
 The final text derivation is local and non-blocking; a safely published film
 remains searchable through the legacy baseline if that optional step fails.
 
@@ -148,6 +182,11 @@ It is a dry run unless `--apply` is supplied and never moves or deletes either
 raw file. Apply mode writes a per-film recovery journal before changing cache
 metadata; rerunning the same command completes or rolls back an interrupted
 relink before doing anything new.
+
+If the indexed movie has a canonical `<old-stem>.en.srt` sidecar, copy it beside
+the new movie as `<new-stem>.en.srt` and verify the two subtitle files have the
+same full SHA-256 hash. `relink-film` does not move or validate subtitle files;
+retain the old sidecar until dialogue and search checks pass.
 
 ```powershell
 # Validate the copy and show the planned metadata changes.
@@ -199,7 +238,8 @@ with `index-framing --film-id FILM_ID`, but derived backfills do not run while
 an ingest owns the shared resource lock.
 
 Build or repair the independent Qwen semantic-text profile from already
-published captions, dialogue, OCR, and facets with:
+published captions, dialogue, OCR, broad facets, and dedicated mood/energy
+views with:
 
 ```bash
 uv run python -m pipeline.cli index-text
@@ -208,37 +248,67 @@ uv run python -m pipeline.cli index-text
 This command is also local and idempotent. Its model-versioned profile becomes
 active only when its manifest exactly covers the current units generation;
 partial or stale data falls back as a whole to the compatible legacy index.
+The dedicated Mood view excludes framing, setting, palette, subjects, and
+other broad facets; it can be backfilled from existing units without
+reingesting films or calling the hosted annotator.
 
 Once more than one film is indexed, use the compact **All movies** control to
 search one movie, several movies, or the whole library. The picker gains title
-search automatically as the library grows. The results toolbar switches between
-**All scenes** and **One per movie** for the movies already represented in the
-returned window; it does not force an irrelevant result from every indexed
-movie. Search uses bounded ranked candidate and result windows, not a
-minimum-similarity cutoff, so a globally uncompetitive movie may be absent;
-select that movie in **All movies** when complete movie-specific recall matters.
-The responsive grid initially shows three complete rows and can reveal more of
-the 48-result production window.
+search automatically as the library grows. The same compact control row
+switches between **All scenes** and **Best per movie** for the movies already
+represented in the returned window; it does not force an irrelevant result
+from every indexed movie. Search uses bounded ranked candidate and result
+windows, not a minimum-similarity cutoff, so a globally uncompetitive movie
+may be absent; select that movie in **All movies** when complete movie-specific
+recall matters.
+The responsive grid shows at least three complete rows, expands its initial
+window to fill the available viewport, and can reveal more of the 48-result
+production window.
 
-The main bar remains a broad scene search. **Match by** adds up to three total
-search parts across the main bar and the explicit **Action**, **Words**, **Look**,
+An unquoted one-word query in the main bar is treated as a broad concept: its
+visual and semantic matches rank without a separate exact-word vote, so an
+incidental subtitle occurrence cannot promote a weak result. Quote the word
+when its literal occurrence matters; multi-word searches retain full-text
+corroboration. Unscoped broad search also uses a deeper bounded candidate pool
+before its passive film-diversity pass, while selected-movie searches preserve
+strict relevance order. This improves discovery without adding an Explore mode
+or forcing one result from every film.
+
+The main bar remains a broad scene search. **Match by** combines up to three
+inputs across the main bar and the explicit **Scene**, **Words**, **Look**,
 **Framing**, and **Mood** facets. Type into a facet, drag a result onto one,
-or use a result's **Use in search** menu. The result-card **Framing** action
-remains a one-click shortcut. Framing supplies the mandatory candidate
-set; other active parts can rerank it but cannot introduce visually unrelated
-shots. Result-source Framing search keeps the cross-film discovery default
-to prevent the source movie's style from consuming the bounded shortlist.
+or use a result's single **Match by…** menu. Results supported by more inputs
+rise.
+Open a dragged source's compact info control (shown on hover or focus) to see
+the exact caption, dialogue/OCR, or mood/energy text it contributes. Look and
+Framing sources remain explicitly visual rather than being translated into
+invented words. Choosing Framing from the result menu and dragging that result
+onto the Framing tile create the same source clause. Framing supplies the
+mandatory candidate set; other active parts can rerank it but cannot introduce
+visually unrelated shots. Result-source Framing search keeps the cross-film
+discovery default to prevent the source movie's style from consuming the
+bounded shortlist.
 Each facet's scene-reference icon temporarily turns the existing main field into
 an independent broad search without moving the workspace or changing the current
 recipe. Clear its compact mode chip to return unchanged; choosing a scene adds
 that source and reruns the combined recipe. Press Enter in a facet's text editor
 to run the current recipe with that explicit constraint.
 
-The image icon remains a separate uploaded-reference workflow for JPEG, PNG,
-or WebP stills and can take the main bar as a text constraint. Its active chip
-replaces the facet rail; clear it, or deliberately use one of its results as a
-new facet source, to return to modular search. Uploading a reference clears
-facet clauses, so the interface does not imply an unsupported combination.
+The main search bar accepts one JPEG, PNG, or WebP through its image button or
+a direct file drop. The still stays visible as a compact main-bar reference and
+automatically searches broad visual similarity. The backend retrieves by
+global appearance, then applies the existing bounded 6x6 spatial-layout
+reranker; those are correlated stages of one visual input, not two fusion votes.
+That visual shortlist is mandatory. Optional main-bar text or category inputs
+can use the other two recipe slots to refine its order, but cannot introduce a
+visually unrelated result.
+
+The upload is not forced into an arbitrary category. Category boxes continue
+to accept typed text or indexed library scenes for their explicit meaning;
+removing the compact main-bar reference clears the uploaded-image input. The
+image exists only for the request, is never added to the library, and never
+becomes invented Scene, Words, or Mood text.
+
 Look and composition use the existing local frame index; composition adds a
 learned 6x6 spatial feature grid. A complete optional Framing cache removes
 candidate-image encoding from the interactive query; missing, stale, or
@@ -278,8 +348,8 @@ only for explicitly non-reproducible diagnostics. Local run snapshots live in
 the ignored `pipeline/eval/runs/` directory; later snapshots record the hash of
 their `--judgments-from` input without treating human grading as a code change.
 Use `--limit 100` for candidate-recall experiments; this deeper evaluation
-window is independent from the 48-result production window and 12-result UI
-display batch.
+window is independent from the 48-result production window and the UI's
+viewport-responsive display batches.
 
 To score a Match Cut matcher after it has written a gate-by-gate ranked-results
 document, run:

@@ -15,7 +15,7 @@ Usage::
 Idempotency rules
 -----------------
 - ``probe``    — always runs (needed to obtain the FilmRecord and film_id)
-- ``dialogue`` — skipped when ``<asset_dir>/dialogue.json`` exists (loaded from cache)
+- ``dialogue`` — reused only when its cached source manifest still matches
 - ``shots``    — reuses a compatible ``<asset_dir>/shots.json`` cache
 - ``media``    — validates and resumes every expected keyframe and preview
 - ``annotate`` — reuses a matching profile-versioned per-shot cache
@@ -43,7 +43,11 @@ from pipeline.index.writer import (
     require_current_film_source,
 )
 from pipeline.ingest.annotate import annotate_shot
-from pipeline.ingest.dialogue import DialogueLine, extract_dialogue
+from pipeline.ingest.dialogue import (
+    DialogueLine,
+    dialogue_cache_is_current,
+    extract_dialogue,
+)
 from pipeline.ingest.embed import (
     embed_images,
     embed_text,
@@ -129,10 +133,12 @@ def _run_pipeline_locked(
     # Stage 2: Dialogue — skip if cached
     # ------------------------------------------------------------------
     dialogue_path = film.asset_dir / "dialogue.json"
-    if dialogue_path.exists():
+    if dialogue_cache_is_current(film, config):
         print("[dialogue] skipped (cached)")
         dialogue = _load_dialogue(dialogue_path)
     else:
+        if dialogue_path.exists():
+            print("[dialogue] cache source changed; rebuilding", flush=True)
         t = time.perf_counter()
         dialogue = extract_dialogue(film, config)
         print(f"[dialogue] {time.perf_counter() - t:.2f}s")

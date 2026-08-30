@@ -313,7 +313,7 @@ def index_frames_cmd(film_id: str | None, batch_size: int) -> None:
     help="Only rebuild text features belonging to this film ID.",
 )
 def index_text_cmd(film_id: str | None) -> None:
-    """Build independent local caption/dialogue/OCR/facet embeddings.
+    """Build independent local caption/dialogue/OCR/facet/mood embeddings.
 
     A scoped run is safe but activates the new search profile only when every
     current unit in the library has matching feature rows.

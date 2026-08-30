@@ -1,4 +1,5 @@
 import type {
+  RecipeImageFacet,
   RecipeMatchFacet,
   RecipeSource,
   SearchFacet,
@@ -22,9 +23,10 @@ export const MATCH_FACETS: readonly RecipeMatchFacet[] = [
 export const TEXT_MATCH_FACETS = ["scene", "words", "look", "mood"] as const;
 export type TextMatchFacet = (typeof TEXT_MATCH_FACETS)[number];
 
-export const FACET_LABELS: Record<SearchFacet, string> = {
+export const FACET_LABELS: Record<SearchFacet | RecipeImageFacet, string> = {
   all: "Search",
-  scene: "Action",
+  visual: "Image",
+  scene: "Scene",
   words: "Words",
   look: "Look",
   composition: "Framing",
@@ -35,6 +37,16 @@ export interface RecipeSourceDisplay {
   filmTitle?: string;
   timestamp?: number;
   keyframeUrl?: string;
+}
+
+export interface RecipeImageDisplay {
+  label: string;
+  previewUrl: string;
+}
+
+export interface RecipeImageInput {
+  file: File;
+  display: RecipeImageDisplay;
 }
 
 export type MatchDraft =
@@ -98,7 +110,6 @@ export function writeSceneSourceDrag(
   transfer.effectAllowed = "copy";
   transfer.setData(SCENE_SOURCE_MIME, JSON.stringify(draft.source));
   transfer.setData(SCENE_SOURCE_META_MIME, JSON.stringify(draft.display ?? {}));
-  transfer.setData("text/plain", JSON.stringify(draft.source));
   return true;
 }
 
@@ -113,7 +124,6 @@ export function writeFacetSourceDrag(
   transfer.setData(SCENE_SOURCE_MIME, JSON.stringify(draft.source));
   transfer.setData(SCENE_SOURCE_META_MIME, JSON.stringify(draft.display ?? {}));
   transfer.setData(SCENE_SOURCE_ORIGIN_MIME, originFacet);
-  transfer.setData("text/plain", JSON.stringify(draft.source));
   return true;
 }
 
@@ -163,9 +173,11 @@ export function matchDraftHasClause(draft: MatchDraft | undefined): boolean {
 export function recipeClauseCount(
   mainText: string,
   drafts: MatchDrafts,
+  mainImage?: RecipeImageInput | null,
 ): number {
   return (
     (mainText.trim() ? 1 : 0) +
+    (mainImage ? 1 : 0) +
     MATCH_FACETS.filter((facet) => matchDraftHasClause(drafts[facet])).length
   );
 }
@@ -173,11 +185,15 @@ export function recipeClauseCount(
 export function buildRecipeClauses(
   mainText: string,
   drafts: MatchDrafts,
+  mainImage?: RecipeImageInput | null,
 ): SearchRecipeClause[] {
   const clauses: SearchRecipeClause[] = [];
   const trimmedMain = mainText.trim();
   if (trimmedMain) {
     clauses.push({ id: "main", kind: "text", facet: "all", text: trimmedMain });
+  }
+  if (mainImage) {
+    clauses.push({ id: "main-image", kind: "image", facet: "visual" });
   }
 
   MATCH_FACETS.forEach((facet) => {

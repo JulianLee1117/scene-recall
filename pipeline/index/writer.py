@@ -345,7 +345,11 @@ def _database_write_lock(
     The in-process publication lock still protects those callers.
     """
     uri = getattr(db, "uri", None)
-    if not isinstance(uri, (str, os.PathLike)):
+    # ``MagicMock`` and other dynamic doubles can synthesize ``__fspath__``
+    # and otherwise masquerade as ``os.PathLike``. LanceDB's local
+    # connection exposes a concrete string; accept Path for direct callers
+    # and keep every synthetic/remote connection on the in-process lock only.
+    if not isinstance(uri, (str, Path)):
         return nullcontext()
     uri_text = os.fspath(uri)
     if "://" in uri_text:
@@ -356,6 +360,7 @@ def _database_write_lock(
     return FileLock(
         root / _DATABASE_WRITE_LOCK,
         timeout=_DATABASE_WRITE_LOCK_TIMEOUT_SECONDS,
+        preserve_lock_file=True,
     )
 
 

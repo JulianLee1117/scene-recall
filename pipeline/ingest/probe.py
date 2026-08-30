@@ -62,6 +62,7 @@ class FilmRecord:
     has_embedded_subs: bool  # True if at least one subtitle stream exists
     title: str          # From the authoritative filename stem
     text_subtitle_stream_index: int | None = None
+    primary_audio_language_tag: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +94,7 @@ def probe_film(path: Path, config: Config) -> FilmRecord:
     fps = _parse_fps(meta)
     has_subs = _has_subtitle_streams(meta)
     text_subtitle_stream_index = _text_subtitle_stream_index(meta)
+    primary_audio_language_tag = _primary_audio_language_tag(meta)
     title = _parse_title(meta, path)
 
     asset_dir = config.paths.assets_dir / film_id
@@ -107,6 +109,7 @@ def probe_film(path: Path, config: Config) -> FilmRecord:
         has_embedded_subs=has_subs,
         title=title,
         text_subtitle_stream_index=text_subtitle_stream_index,
+        primary_audio_language_tag=primary_audio_language_tag,
     )
 
 
@@ -147,8 +150,27 @@ def _ffprobe(path: Path) -> dict:
         "-show_format",
         str(path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return json.loads(result.stdout)
+    # ffprobe emits UTF-8 JSON. Capture bytes so Windows does not decode the
+    # pipe with its locale codec (for example cp1252, where byte 0x8d is
+    # undefined even when it is part of a valid UTF-8 sequence).
+    result = subprocess.run(cmd, capture_output=True, check=True)
+    try:
+        output = result.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(
+            f"ffprobe returned non-UTF-8 JSON for {path.name}: {exc}"
+        ) from exc
+    try:
+        metadata = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"ffprobe returned invalid JSON for {path.name}: {exc}"
+        ) from exc
+    if not isinstance(metadata, dict):
+        raise RuntimeError(
+            f"ffprobe returned a non-object JSON document for {path.name}"
+        )
+    return metadata
 
 
 def _parse_duration(meta: dict) -> float:
@@ -212,6 +234,28 @@ def _text_subtitle_stream_index(meta: dict) -> int | None:
             index = stream.get("index")
             if isinstance(index, int) and not isinstance(index, bool) and index >= 0:
                 return index
+    return None
+
+
+def _primary_audio_language_tag(meta: dict) -> str | None:
+    """Return a trusted English tag on the first audio stream, if present.
+
+    faster-whisper decodes the container's primary audio stream by default, so
+    only that stream's tag can safely inform its language option. Other tags
+    remain on model detection until a measured case justifies extending this
+    deliberately narrow mapping.
+    """
+    for stream in meta.get("streams", []):
+        if stream.get("codec_type") != "audio":
+            continue
+        tags = stream.get("tags")
+        if not isinstance(tags, dict):
+            return None
+        language = tags.get("language")
+        if not isinstance(language, str):
+            return None
+        normalized = language.strip().casefold()
+        return normalized if normalized in {"en", "eng"} else None
     return None
 
 

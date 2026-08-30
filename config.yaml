@@ -23,7 +23,7 @@ ingest:
 
 retrieval:
   weights: {img: 0.4, txt: 0.4, lex: 0.2}
-  candidate_limit: 200       # candidates retained per enabled retrieval channel
+  candidate_limit: 200       # base per-channel depth; unscoped broad search uses 3x
   result_window: 48          # stable ranked window returned by production search
   max_result_limit: 100      # bounded deeper window available to evaluations
   diversity:

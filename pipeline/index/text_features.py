@@ -36,8 +36,13 @@ from pipeline.ingest.text_embed import (
 
 
 _TABLE_PREFIX = "unit_text"
-_MANIFEST_SCHEMA_VERSION = 1
-TEXT_VIEWS = ("caption", "dialogue", "ocr", "facets")
+_MANIFEST_SCHEMA_VERSION = 2
+# Version 1 projected caption, dialogue, OCR, and one broad facets document.
+# Version 2 adds a narrow mood-and-energy document without changing the Qwen
+# vector space.  The manifest records this contract separately from the table
+# identity so compatible existing view vectors can be reused during backfill.
+TEXT_VIEW_CONTRACT_VERSION = 2
+TEXT_VIEWS = ("caption", "dialogue", "ocr", "facets", "mood")
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,8 @@ class TextIndexManifest:
     embedding_contract_version: int
     query_instruction: str
     query_instruction_version: str
+    view_contract_version: int
+    views: tuple[str, ...]
     units_version: int
     units_row_count: int
     feature_table_version: int
@@ -178,8 +185,30 @@ def _source_hash(view: str, text: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def build_mood_view_text(row: dict[str, Any]) -> str:
+    """Return the narrow Mood document derived from stored unit evidence.
+
+    Mood labels carry feeling; ``energy`` carries intensity or pace.  Unknown
+    energy is not evidence.  Keeping the labels in a stable serialization
+    makes dragged-scene queries and indexed documents use the same concepts.
+    """
+    unit_id = str(row.get("unit_id") or "").strip()
+    if not unit_id:
+        raise ValueError("mood view source requires unit_id")
+
+    parts: list[str] = []
+    moods = _json_strings(row.get("mood"), field="mood", unit_id=unit_id)
+    if moods:
+        parts.append(f"mood: {', '.join(moods)}")
+
+    energy = str(row.get("energy") or "").strip()
+    if energy and energy.lower() != "unknown":
+        parts.append(f"energy: {energy}")
+    return "; ".join(parts)
+
+
 def build_text_feature_sources(row: dict[str, Any]) -> list[TextFeatureSource]:
-    """Project one unit into independent non-empty caption/dialogue/OCR/facet views."""
+    """Project one unit into independent non-empty semantic text views."""
     unit_id = str(row.get("unit_id") or "").strip()
     film_id = str(row.get("film_id") or "").strip()
     if not unit_id or not film_id:
@@ -221,6 +250,10 @@ def build_text_feature_sources(row: dict[str, Any]) -> list[TextFeatureSource]:
             facet_parts.append(f"{label}: {', '.join(values)}")
     if facet_parts:
         views["facets"] = "; ".join(facet_parts)
+
+    mood_text = build_mood_view_text(row)
+    if mood_text:
+        views["mood"] = mood_text
 
     representative = bool(row.get("is_representative", True))
     return [
@@ -348,6 +381,8 @@ def publish_text_index_manifest(
         embedding_contract_version=TEXT_EMBEDDING_CONTRACT_VERSION,
         query_instruction=SEMANTIC_QUERY_INSTRUCTION,
         query_instruction_version=SEMANTIC_QUERY_INSTRUCTION_VERSION,
+        view_contract_version=TEXT_VIEW_CONTRACT_VERSION,
+        views=TEXT_VIEWS,
         units_version=_table_version(units),
         units_row_count=int(units.count_rows()),
         feature_table_version=_table_version(features),
@@ -378,6 +413,9 @@ def _read_manifest(path: Path) -> TextIndexManifest | None:
         return None
     if not isinstance(payload, dict):
         return None
+    views = payload.get("views")
+    if isinstance(views, list):
+        payload["views"] = tuple(views)
     try:
         return TextIndexManifest(**payload)
     except (TypeError, ValueError):
@@ -405,6 +443,8 @@ def resolve_ready_text_profile(
         "embedding_contract_version": TEXT_EMBEDDING_CONTRACT_VERSION,
         "query_instruction": SEMANTIC_QUERY_INSTRUCTION,
         "query_instruction_version": SEMANTIC_QUERY_INSTRUCTION_VERSION,
+        "view_contract_version": TEXT_VIEW_CONTRACT_VERSION,
+        "views": TEXT_VIEWS,
     }
     if any(getattr(manifest, key) != value for key, value in expected.items()):
         return None

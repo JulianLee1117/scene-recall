@@ -68,3 +68,10 @@ The accepted boundary or behavior.
 | [0007](0007-typed-modular-search-recipes.md) | Accepted | Compose explicit search facets over current evidence |
 | [0008](0008-grounded-match-cut-and-temporal-motion-boundaries.md) | Accepted | Separate grounded still matching, exact-frame refinement, and temporal motion |
 | [0009](0009-complete-framing-spatial-cache.md) | Accepted | Cache production Framing grids only under complete profile activation |
+| [0010](0010-dedicated-mood-semantic-view.md) | Accepted | Isolate Mood to stored feeling and energy evidence |
+| [0011](0011-expose-resolved-source-inputs.md) | Accepted | Explain exact dragged-source inputs without inventing visual text |
+| [0012](0012-query-bound-uploaded-image-recipes.md) | Accepted | Use one uploaded still as a bounded broad-visual recipe signal |
+| [0013](0013-broad-query-evidence-and-candidate-breadth.md) | Accepted | Match broad-query lexical intent and expose passive cross-film candidates |
+| [0014](0014-preserve-external-subtitle-evidence.md) | Accepted | Preserve selected external subtitle evidence before dialogue derivation |
+| [0015](0015-fail-closed-on-degenerate-whisper-output.md) | Accepted | Discard structurally degenerate Whisper rows while preserving visual search |
+| [0016](0016-trust-explicit-english-primary-audio-tags.md) | Accepted | Prevent foreign-language cold opens from overriding explicit English audio metadata |

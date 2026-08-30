@@ -19,6 +19,7 @@ def film_operation_lock(asset_dir: Path) -> FileLock:
     return FileLock(
         asset_dir / _FILM_OPERATION_LOCK,
         timeout=_FILM_OPERATION_LOCK_TIMEOUT_SECONDS,
+        preserve_lock_file=True,
     )
 
 
@@ -27,7 +28,11 @@ def global_ingest_lock(assets_dir: Path) -> FileLock:
     assets_dir.mkdir(parents=True, exist_ok=True)
     # API jobs are already queued. A separate CLI process should fail clearly
     # instead of appearing to hang behind an hours-long ingest.
-    return FileLock(assets_dir / _GLOBAL_INGEST_LOCK, timeout=0)
+    return FileLock(
+        assets_dir / _GLOBAL_INGEST_LOCK,
+        timeout=0,
+        preserve_lock_file=True,
+    )
 
 
 def film_relink_journal_path(asset_dir: Path) -> Path:

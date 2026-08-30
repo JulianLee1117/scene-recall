@@ -10,10 +10,9 @@ import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 interface VideoModalProps {
   shot: SearchResult;
   onClose: () => void;
-  onMatchFraming?: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
+  disabledUseFacets?: ReadonlySet<RecipeMatchFacet>;
   sourceReferenceFacet?: RecipeMatchFacet;
-  matchFramingDisabled?: boolean;
   bookmarked?: boolean;
   bookmarkDisabled?: boolean;
   onToggleBookmark?: (shot: SearchResult) => void;
@@ -24,15 +23,15 @@ const TEXT_VIEW_LABELS: Record<string, string> = {
   dialogue: "Dialogue",
   ocr: "On-screen text",
   facets: "Scene detail",
+  mood: "Mood",
 };
 
 export default function VideoModal({
   shot,
   onClose,
-  onMatchFraming,
   onUseInSearch,
+  disabledUseFacets,
   sourceReferenceFacet,
-  matchFramingDisabled = false,
   bookmarked = false,
   bookmarkDisabled = false,
   onToggleBookmark,
@@ -247,17 +246,9 @@ export default function VideoModal({
                 onUse={onUseInSearch}
                 variant="modal"
                 disabled={!Number.isInteger(shot.keyframe_index)}
+                disabledFacets={disabledUseFacets}
               />
             ) : null}
-            {onMatchFraming && !sourceReferenceFacet && (
-              <button
-                type="button"
-                disabled={matchFramingDisabled}
-                onClick={() => onMatchFraming(shot)}
-              >
-                Match framing
-              </button>
-            )}
           </div>
         </div>
       </div>

@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pipeline.config import Config
 
 
@@ -36,6 +38,30 @@ def _api_client(config: Config, *, ingest_runner=None):
 
             with TestClient(api_mod.app) as client:
                 yield client
+
+
+def _usable_external_srt(prefix: str = "Ordinary dialogue") -> str:
+    return "\n".join(
+        f"{index}\n"
+        f"00:00:{index * 2 - 1:02d},000 --> 00:00:{index * 2:02d},000\n"
+        f"{prefix} line {index} has several spoken words.\n"
+        for index in range(1, 9)
+    ) + "\n"
+
+
+def _promo_only_srt() -> str:
+    promotions = (
+        "Official YIFY movies site: YTS.MX",
+        "Downloaded from www.OpenSubtitles.org",
+        "Support us and become a VIP member",
+        "Remove all ads at https://example.invalid",
+    )
+    return "\n".join(
+        f"{index}\n"
+        f"00:00:{index * 2 - 1:02d},000 --> 00:00:{index * 2:02d},000\n"
+        f"{text}\n"
+        for index, text in enumerate(promotions, start=1)
+    ) + "\n"
 
 
 def test_incoming_groups_release_folder_and_selects_largest_video(
@@ -149,6 +175,147 @@ def test_import_sanitizes_name_moves_file_and_suppresses_release_extras(
     assert after.status_code == 200
     assert after.json() == []
     assert extra_import.status_code == 409
+
+
+def test_import_preserves_best_english_srt_as_canonical_sidecar(
+    config: Config,
+) -> None:
+    release = config.paths.incoming_dir / "Singin.in.the.Rain.1952.1080p"
+    source = release / "Singin.in.the.Rain.1952.mp4"
+    subtitles = release / "Subs"
+    subtitles.mkdir(parents=True)
+    source.write_bytes(b"feature")
+    english = subtitles / "Singin.in.the.Rain.1952.Eng.srt"
+    english_content = _usable_external_srt()
+    english.write_text(english_content, encoding="utf-8")
+    commentary = subtitles / "Singin.in.the.Rain.1952.English.Commentary.srt"
+    commentary.write_text(
+        _usable_external_srt("Director commentary"), encoding="utf-8"
+    )
+
+    with _api_client(config) as client:
+        response = client.post(
+            "/films/import",
+            json={
+                "relative_path": (
+                    "Singin.in.the.Rain.1952.1080p/"
+                    "Singin.in.the.Rain.1952.mp4"
+                ),
+                "title": "Singin in the Rain",
+                "year": 1952,
+                "ingest": False,
+                "confirm_finished": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["subtitle_filename"] == (
+        "Singin in the Rain (1952).en.srt"
+    )
+    imported = config.paths.films_dir / response.json()["subtitle_filename"]
+    assert imported.read_text(encoding="utf-8") == english_content
+    assert english.exists(), "the incoming subtitle remains as raw release evidence"
+
+
+def test_sidecar_selection_declines_forced_or_ambiguous_english_tracks(
+    config: Config,
+) -> None:
+    from pipeline.api.main import _select_english_sidecar
+
+    incoming = config.paths.incoming_dir
+    release = incoming / "Film.2020"
+    release.mkdir(parents=True)
+    source = release / "Film.2020.mkv"
+    source.write_bytes(b"feature")
+    forced = release / "Film.2020.en.forced.srt"
+    forced.write_text(_usable_external_srt("Forced subtitle"), encoding="utf-8")
+
+    assert _select_english_sidecar(incoming, source, release) is None
+
+    forced.unlink()
+    (release / "Film.2020.en.srt").write_text(
+        _usable_external_srt("First subtitle"), encoding="utf-8"
+    )
+    (release / "Film.2020.eng.srt").write_text(
+        _usable_external_srt("Second subtitle"), encoding="utf-8"
+    )
+
+    assert _select_english_sidecar(incoming, source, release) is None
+
+
+@pytest.mark.parametrize(
+    "subtitle_name",
+    [
+        "Film.2020.srt",
+        "Film.2020.French.srt",
+        "Different.Movie.English.srt",
+        "Film.2020.Featurette.English.srt",
+        "Film.2020.English.Spanish.srt",
+    ],
+)
+def test_sidecar_selection_requires_source_association_and_english_evidence(
+    config: Config,
+    subtitle_name: str,
+) -> None:
+    from pipeline.api.main import _select_english_sidecar
+
+    incoming = config.paths.incoming_dir
+    release = incoming / "Film.2020"
+    release.mkdir(parents=True)
+    source = release / "Film.2020.mkv"
+    source.write_bytes(b"feature")
+    subtitle = release / subtitle_name
+    subtitle.write_text(_usable_external_srt(), encoding="utf-8")
+
+    assert _select_english_sidecar(incoming, source, release) is None
+
+
+def test_import_rejects_trivial_promo_only_srt_but_preserves_release_copy(
+    config: Config,
+) -> None:
+    release = config.paths.incoming_dir / "Parasite.2019.1080p"
+    release.mkdir(parents=True)
+    source = release / "Parasite.2019.mkv"
+    source.write_bytes(b"feature")
+    promo = release / "Parasite.2019.en.srt"
+    promo.write_text(_promo_only_srt(), encoding="utf-8")
+
+    with _api_client(config) as client:
+        response = client.post(
+            "/films/import",
+            json={
+                "relative_path": "Parasite.2019.1080p/Parasite.2019.mkv",
+                "title": "Parasite",
+                "year": 2019,
+                "ingest": False,
+                "confirm_finished": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["subtitle_filename"] is None
+    assert promo.exists(), "rejected raw evidence remains in the release"
+    assert not (config.paths.films_dir / "Parasite (2019).en.srt").exists()
+
+
+def test_copy_file_no_replace_preserves_a_racing_destination(
+    tmp_path: Path,
+) -> None:
+    from pipeline.api.main import _copy_file_no_replace
+
+    source = tmp_path / "source.srt"
+    destination = tmp_path / "destination.srt"
+    source.write_text("new", encoding="utf-8")
+    destination.write_text("existing", encoding="utf-8")
+
+    try:
+        _copy_file_no_replace(source, destination)
+    except FileExistsError:
+        pass
+    else:
+        raise AssertionError("exclusive sidecar copy unexpectedly replaced a peer")
+
+    assert destination.read_text(encoding="utf-8") == "existing"
 
 
 def test_import_refuses_filename_collision_without_moving_source(

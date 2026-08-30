@@ -20,6 +20,7 @@ import { useFacetSourceSearch } from "@/hooks/useFacetSourceSearch";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import {
   FACET_LABELS,
+  MATCH_FACETS,
   MAX_RECIPE_CLAUSES,
   buildRecipeClauses,
   matchDraftHasClause,
@@ -27,19 +28,45 @@ import {
   sourceDraftFromShot,
   type MatchDraft,
   type MatchDrafts,
+  type RecipeImageInput,
   type TextMatchFacet,
 } from "@/lib/searchRecipe";
 import { bestResultPerFilm } from "@/lib/searchResults";
 import type {
   RecipeMatchFacet,
+  ResolvedSourceEvidence,
   SearchRecipeRequest,
   SearchRecipeResponse,
   SearchResult,
-  SearchResponse,
 } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const MOVIE_SCOPE_SEARCH_DEBOUNCE_MS = 350;
+const RECIPE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function isSupportedRecipeImage(file: File): boolean {
+  // Some OS drag sources omit the browser MIME type. The backend still
+  // verifies the decoded format before using the image.
+  return !file.type || RECIPE_IMAGE_TYPES.has(file.type);
+}
+
+function containsFile(transfer: DataTransfer): boolean {
+  return transfer.types.includes("Files");
+}
+
+function dragLeftElement(event: React.DragEvent<HTMLElement>): boolean {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return (
+    event.clientX <= bounds.left ||
+    event.clientX >= bounds.right ||
+    event.clientY <= bounds.top ||
+    event.clientY >= bounds.bottom
+  );
+}
+
+function revokeImageInput(image: RecipeImageInput | null | undefined) {
+  if (image) URL.revokeObjectURL(image.display.previewUrl);
+}
 
 async function searchError(response: Response): Promise<string> {
   try {
@@ -83,10 +110,12 @@ export default function Home() {
   const [hasCompletedSearch, setHasCompletedSearch] = useState(false);
   const [searchWorkspaceActive, setSearchWorkspaceActive] = useState(false);
   const [matchDrafts, setMatchDrafts] = useState<MatchDrafts>({});
-  const [referenceLabel, setReferenceLabel] = useState<string | null>(null);
-  const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(
-    null,
-  );
+  const [mainImage, setMainImage] = useState<RecipeImageInput | null>(null);
+  const mainImageRef = useRef<RecipeImageInput | null>(null);
+  const [mainImageDragOver, setMainImageDragOver] = useState(false);
+  const [sourceEvidenceByFacet, setSourceEvidenceByFacet] = useState<
+    Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>
+  >({});
   const [activeShot, setActiveShot] = useState<SearchResult | null>(null);
   const [debug, setDebug] = useState(false);
   const [resultGrouping, setResultGrouping] = useState<ResultGrouping>("all");
@@ -97,10 +126,8 @@ export default function Home() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const scopeSearchTimerRef = useRef<number | null>(null);
-  const referenceBlobRef = useRef<Blob | null>(null);
-  const referenceLabelRef = useRef<string | null>(null);
-  const referencePreviewUrlRef = useRef<string | null>(null);
   const sourceModeWorkspaceRef = useRef(false);
+  const sourceModeRecipeDirtyRef = useRef(false);
   const voiceStatusId = useId();
   const {
     bookmarks,
@@ -118,43 +145,14 @@ export default function Home() {
     scopeSearchTimerRef.current = null;
   }, []);
 
-  const clearReference = useCallback(() => {
-    cancelPendingScopeSearch();
-    searchAbortRef.current?.abort();
-    if (referencePreviewUrlRef.current) {
-      URL.revokeObjectURL(referencePreviewUrlRef.current);
-    }
-    referenceBlobRef.current = null;
-    referenceLabelRef.current = null;
-    referencePreviewUrlRef.current = null;
-    setReferenceLabel(null);
-    setReferencePreviewUrl(null);
-  }, [cancelPendingScopeSearch]);
-
-  const activateReference = useCallback(
-    (image: Blob, label: string) => {
-      if (referencePreviewUrlRef.current) {
-        URL.revokeObjectURL(referencePreviewUrlRef.current);
-      }
-      const previewUrl = URL.createObjectURL(image);
-      referenceBlobRef.current = image;
-      referenceLabelRef.current = label;
-      referencePreviewUrlRef.current = previewUrl;
-      setReferenceLabel(label);
-      setReferencePreviewUrl(previewUrl);
-      setHasCompletedSearch(false);
-      setActiveShot(null);
-    },
-    [],
-  );
-
   const runRecipe = useCallback(
     async (
       mainText: string,
       drafts: MatchDrafts,
       scope: readonly string[] = selectedFilmIds,
+      image: RecipeImageInput | null = mainImageRef.current,
     ) => {
-      const clauses = buildRecipeClauses(mainText, drafts);
+      const clauses = buildRecipeClauses(mainText, drafts, image);
       if (clauses.length === 0) {
         cancelPendingScopeSearch();
         searchAbortRef.current?.abort();
@@ -162,10 +160,11 @@ export default function Home() {
         setLoading(false);
         setError(null);
         setRecipeNotice(null);
+        setSourceEvidenceByFacet({});
         return;
       }
       if (clauses.length > MAX_RECIPE_CLAUSES) {
-        setRecipeNotice("Use up to three search parts.");
+        setRecipeNotice("Use up to three matches at once.");
         return;
       }
 
@@ -177,6 +176,7 @@ export default function Home() {
       setLoading(true);
       setError(null);
       setRecipeNotice(null);
+      setSourceEvidenceByFacet({});
       setHasCompletedSearch(false);
 
       const request: SearchRecipeRequest = {
@@ -185,21 +185,41 @@ export default function Home() {
       };
 
       try {
-        const response = await fetch(`${API_URL}/search/recipe`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(request),
-          signal: controller.signal,
-        });
+        const formData = image ? new FormData() : null;
+        if (formData && image) {
+          formData.append("recipe", JSON.stringify(request));
+          formData.append("image", image.file, image.file.name);
+        }
+        const response = await fetch(
+          `${API_URL}${image ? "/search/recipe/image" : "/search/recipe"}`,
+          {
+            method: "POST",
+            ...(formData
+              ? { body: formData }
+              : {
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(request),
+                }),
+            signal: controller.signal,
+          },
+        );
         if (!response.ok) throw new Error(await searchError(response));
         const data: SearchRecipeResponse = await response.json();
         if (searchAbortRef.current !== controller) return;
         setResults(data.results);
+        setSourceEvidenceByFacet(
+          Object.fromEntries(
+            (data.source_evidence ?? [])
+              .filter((evidence) => evidence.facet !== "visual")
+              .map((evidence) => [evidence.facet, evidence]),
+          ) as Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>,
+        );
         setHasCompletedSearch(true);
       } catch (reason) {
         if (controller.signal.aborted) return;
         setError(reason instanceof Error ? reason.message : "Search failed");
         setResults([]);
+        setSourceEvidenceByFacet({});
       } finally {
         if (searchAbortRef.current === controller) {
           searchAbortRef.current = null;
@@ -209,86 +229,29 @@ export default function Home() {
     },
     [cancelPendingScopeSearch, selectedFilmIds],
   );
-
-  const runImageSearch = useCallback(
-    async (
-      image: Blob,
-      label: string,
-      scope: readonly string[] = selectedFilmIds,
-      textQuery: string = "",
-    ) => {
-      cancelPendingScopeSearch();
-      searchAbortRef.current?.abort();
-      const controller = new AbortController();
-      searchAbortRef.current = controller;
-      setSearchWorkspaceActive(true);
-      setLoading(true);
-      setError(null);
-      setRecipeNotice(null);
-      setHasCompletedSearch(false);
-
-      const params = new URLSearchParams();
-      scope.forEach((filmId) => params.append("film_id", filmId));
-      const trimmedTextQuery = textQuery.trim();
-      if (trimmedTextQuery) {
-        params.set("q", trimmedTextQuery);
-      }
-      const suffix = params.size ? `?${params.toString()}` : "";
-
-      try {
-        const res = await fetch(`${API_URL}/search/image${suffix}`, {
-          method: "POST",
-          body: image,
-          headers: {
-            "Content-Type": image.type || "application/octet-stream",
-          },
-          signal: controller.signal,
-        });
-        if (!res.ok) throw new Error(await searchError(res));
-        const data: SearchResponse = await res.json();
-        if (searchAbortRef.current !== controller) return;
-        setResults(data.results);
-        setReferenceLabel(label);
-        setHasCompletedSearch(true);
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        setError(
-          err instanceof Error ? err.message : "Reference search failed",
-        );
-        setResults([]);
-      } finally {
-        if (searchAbortRef.current === controller) {
-          searchAbortRef.current = null;
-          setLoading(false);
-        }
-      }
-    },
-    [cancelPendingScopeSearch, selectedFilmIds],
-  );
-
-  const leaveUploadedReference = useCallback(() => {
-    if (!referenceBlobRef.current) return;
-    clearReference();
-    searchAbortRef.current = null;
-    setLoading(false);
-  }, [clearReference]);
 
   const handleRecipeLimit = useCallback(() => {
-    setRecipeNotice("Use up to three search parts.");
+    setRecipeNotice("Use up to three matches at once.");
   }, []);
 
   const handleActivateTextFacet = useCallback(
     (facet: TextMatchFacet) => {
       if (sourceReferenceFacet) {
+        const refreshRecipe = sourceModeRecipeDirtyRef.current;
+        sourceModeRecipeDirtyRef.current = false;
         facetSourceSearch.close();
         setSearchWorkspaceActive(sourceModeWorkspaceRef.current);
+        if (refreshRecipe) {
+          void runRecipe(query, matchDrafts, selectedFilmIds);
+        }
       }
       if (matchDrafts[facet]) return;
-      if (recipeClauseCount(query, matchDrafts) >= MAX_RECIPE_CLAUSES) {
+      if (
+        recipeClauseCount(query, matchDrafts, mainImage) >= MAX_RECIPE_CLAUSES
+      ) {
         handleRecipeLimit();
         return;
       }
-      leaveUploadedReference();
       setRecipeNotice(null);
       setHasCompletedSearch(false);
       setMatchDrafts((current) => ({
@@ -299,9 +262,11 @@ export default function Home() {
     [
       facetSourceSearch,
       handleRecipeLimit,
-      leaveUploadedReference,
+      mainImage,
       matchDrafts,
       query,
+      runRecipe,
+      selectedFilmIds,
       sourceReferenceFacet,
     ],
   );
@@ -312,7 +277,7 @@ export default function Home() {
       const previouslyActive = matchDraftHasClause(previous);
       const nextDraft: MatchDraft = { kind: "text", facet, text };
       const nextDrafts = { ...matchDrafts, [facet]: nextDraft };
-      const nextCount = recipeClauseCount(query, nextDrafts);
+      const nextCount = recipeClauseCount(query, nextDrafts, mainImage);
       if (!previouslyActive && text.trim() && nextCount > MAX_RECIPE_CLAUSES) {
         handleRecipeLimit();
         return;
@@ -322,7 +287,6 @@ export default function Home() {
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
       setLoading(false);
-      leaveUploadedReference();
       setMatchDrafts(nextDrafts);
       setRecipeNotice(null);
       setHasCompletedSearch(false);
@@ -333,7 +297,7 @@ export default function Home() {
     [
       cancelPendingScopeSearch,
       handleRecipeLimit,
-      leaveUploadedReference,
+      mainImage,
       matchDrafts,
       query,
       runRecipe,
@@ -388,13 +352,12 @@ export default function Home() {
       const replacingClause = matchDraftHasClause(baseDrafts[facet]);
       if (
         !replacingClause &&
-        recipeClauseCount(query, baseDrafts) >= MAX_RECIPE_CLAUSES
+        recipeClauseCount(query, baseDrafts, mainImage) >= MAX_RECIPE_CLAUSES
       ) {
         handleRecipeLimit();
         return;
       }
 
-      leaveUploadedReference();
       const nextDrafts: MatchDrafts = {
         ...baseDrafts,
         [facet]: { ...draft, facet },
@@ -406,25 +369,7 @@ export default function Home() {
       setActiveShot(null);
       void runRecipe(query, nextDrafts);
     },
-    [
-      handleRecipeLimit,
-      leaveUploadedReference,
-      matchDrafts,
-      query,
-      runRecipe,
-    ],
-  );
-
-  const handleUseInSearch = useCallback(
-    (shot: SearchResult, facet: RecipeMatchFacet) => {
-      const draft = sourceDraftFromShot(facet, shot);
-      if (!draft) {
-        setError("This scene does not have an exact searchable frame.");
-        return;
-      }
-      applySourceFacet(facet, draft);
-    },
-    [applySourceFacet],
+    [handleRecipeLimit, mainImage, matchDrafts, query, runRecipe],
   );
 
   const handleSourceReferenceChoose = useCallback(
@@ -440,6 +385,7 @@ export default function Home() {
         return;
       }
       facetSourceSearch.close();
+      sourceModeRecipeDirtyRef.current = false;
       applySourceFacet(targetFacet, draft);
       focusFacetBrowse(targetFacet);
     },
@@ -448,11 +394,23 @@ export default function Home() {
 
   const handleSourceReferenceCancel = useCallback(() => {
     const targetFacet = sourceReferenceFacet;
+    const refreshRecipe = sourceModeRecipeDirtyRef.current;
+    sourceModeRecipeDirtyRef.current = false;
     setActiveShot(null);
     facetSourceSearch.close();
     setSearchWorkspaceActive(sourceModeWorkspaceRef.current);
+    if (refreshRecipe) {
+      void runRecipe(query, matchDrafts, selectedFilmIds);
+    }
     if (targetFacet) focusFacetBrowse(targetFacet);
-  }, [facetSourceSearch, sourceReferenceFacet]);
+  }, [
+    facetSourceSearch,
+    matchDrafts,
+    query,
+    runRecipe,
+    selectedFilmIds,
+    sourceReferenceFacet,
+  ]);
 
   const handleMovieScopeChange = useCallback(
     (filmIds: string[]) => {
@@ -463,7 +421,11 @@ export default function Home() {
       setSelectedFilmIds(filmIds);
       setActiveShot(null);
 
+      const pendingQuery = query.trim();
+      const hasRecipe =
+        buildRecipeClauses(pendingQuery, matchDrafts, mainImage).length > 0;
       if (sourceReferenceFacet) {
+        sourceModeRecipeDirtyRef.current = hasRecipe;
         if (
           (facetSourceSearch.hasSearched || facetSourceSearch.loading) &&
           facetSourceSearch.query.trim()
@@ -473,33 +435,19 @@ export default function Home() {
         return;
       }
 
-      const hasReference = Boolean(
-        referenceBlobRef.current && referenceLabelRef.current,
-      );
-      const pendingQuery = query.trim();
-      const hasRecipe = buildRecipeClauses(pendingQuery, matchDrafts).length > 0;
-      if (!hasReference && !hasRecipe) return;
-
-      scopeSearchTimerRef.current = window.setTimeout(() => {
-        scopeSearchTimerRef.current = null;
-        if (referenceBlobRef.current && referenceLabelRef.current) {
-          void runImageSearch(
-            referenceBlobRef.current,
-            referenceLabelRef.current,
-            filmIds,
-            pendingQuery,
-          );
-        } else if (hasRecipe) {
+      if (hasRecipe) {
+        scopeSearchTimerRef.current = window.setTimeout(() => {
+          scopeSearchTimerRef.current = null;
           void runRecipe(pendingQuery, matchDrafts, filmIds);
-        }
-      }, MOVIE_SCOPE_SEARCH_DEBOUNCE_MS);
+        }, MOVIE_SCOPE_SEARCH_DEBOUNCE_MS);
+      }
     },
     [
       cancelPendingScopeSearch,
       facetSourceSearch,
+      mainImage,
       matchDrafts,
       query,
-      runImageSearch,
       runRecipe,
       sourceReferenceFacet,
     ],
@@ -532,21 +480,11 @@ export default function Home() {
       }
       setQuery(transcript);
       inputRef.current?.focus();
-      if (referenceBlobRef.current && referenceLabelRef.current) {
-        void runImageSearch(
-          referenceBlobRef.current,
-          referenceLabelRef.current,
-          selectedFilmIds,
-          transcript,
-        );
-      } else {
-        void runRecipe(transcript, matchDrafts);
-      }
+      void runRecipe(transcript, matchDrafts);
     },
     [
       facetSourceSearch,
       matchDrafts,
-      runImageSearch,
       runRecipe,
       selectedFilmIds,
       sourceReferenceFacet,
@@ -558,12 +496,26 @@ export default function Home() {
     onComplete: handleVoiceComplete,
   });
 
+  const handleUseInSearch = useCallback(
+    (shot: SearchResult, facet: RecipeMatchFacet) => {
+      speech.cancel();
+      const draft = sourceDraftFromShot(facet, shot);
+      if (!draft) {
+        setError("This scene does not have an exact searchable frame.");
+        return;
+      }
+      applySourceFacet(facet, draft);
+    },
+    [applySourceFacet, speech],
+  );
+
   const handleBrowseFacet = useCallback(
     (facet: RecipeMatchFacet) => {
       speech.cancel();
       setActiveShot(null);
       if (!sourceReferenceFacet) {
         sourceModeWorkspaceRef.current = searchWorkspaceActive;
+        sourceModeRecipeDirtyRef.current = false;
       }
       facetSourceSearch.open(facet);
       window.requestAnimationFrame(() => inputRef.current?.focus());
@@ -576,11 +528,15 @@ export default function Home() {
     cancelPendingScopeSearch();
     searchAbortRef.current?.abort();
     searchAbortRef.current = null;
-    clearReference();
     facetSourceSearch.close();
+    sourceModeRecipeDirtyRef.current = false;
     setActiveTab("search");
     setQuery("");
+    revokeImageInput(mainImageRef.current);
+    mainImageRef.current = null;
     setMatchDrafts({});
+    setMainImage(null);
+    setSourceEvidenceByFacet({});
     setResults([]);
     setLoading(false);
     setError(null);
@@ -591,52 +547,74 @@ export default function Home() {
     setResultGrouping("all");
     setActiveShot(null);
     window.requestAnimationFrame(() => inputRef.current?.focus());
-  }, [cancelPendingScopeSearch, clearReference, facetSourceSearch, speech]);
+  }, [
+    cancelPendingScopeSearch,
+    facetSourceSearch,
+    speech,
+  ]);
 
-  const handleReferenceFile = useCallback(
+  const handleMainImageFile = useCallback(
     (file: File) => {
+      if (sourceReferenceFacet) return;
       speech.cancel();
-      setMatchDrafts({});
-      setRecipeNotice(null);
-      activateReference(file, file.name || "Uploaded frame");
-      void runImageSearch(
+      if (!isSupportedRecipeImage(file)) {
+        setError("Use a JPEG, PNG, or WebP reference image.");
+        return;
+      }
+
+      if (
+        !mainImageRef.current &&
+        recipeClauseCount(query, matchDrafts) >= MAX_RECIPE_CLAUSES
+      ) {
+        setRecipeNotice("Remove one match before adding an image.");
+        return;
+      }
+
+      const nextImage: RecipeImageInput = {
         file,
-        file.name || "Uploaded frame",
-        selectedFilmIds,
-        query,
-      );
-    },
-    [activateReference, query, runImageSearch, selectedFilmIds, speech],
-  );
-
-  const handleFindSimilar = useCallback(
-    (shot: SearchResult) => {
-      speech.cancel();
-      handleUseInSearch(shot, "composition");
-    },
-    [handleUseInSearch, speech],
-  );
-
-  const handleClearReference = useCallback(() => {
-    searchAbortRef.current?.abort();
-    clearReference();
-    setActiveShot(null);
-    if (buildRecipeClauses(query, matchDrafts).length > 0) {
-      void runRecipe(query, matchDrafts);
-    } else {
+        display: {
+          label: file.name || "Uploaded frame",
+          previewUrl: URL.createObjectURL(file),
+        },
+      };
+      const previousImage = mainImageRef.current;
+      mainImageRef.current = nextImage;
+      setMainImage(nextImage);
+      revokeImageInput(previousImage);
+      setSourceEvidenceByFacet({});
       setError(null);
-      setLoading(false);
-    }
-    inputRef.current?.focus();
-  }, [clearReference, matchDrafts, query, runRecipe]);
+      setRecipeNotice(null);
+      setHasCompletedSearch(false);
+      setActiveTab("search");
+      setActiveShot(null);
+      void runRecipe(query, matchDrafts, selectedFilmIds, nextImage);
+    },
+    [
+      matchDrafts,
+      query,
+      runRecipe,
+      selectedFilmIds,
+      sourceReferenceFacet,
+      speech,
+    ],
+  );
+
+  const handleRemoveMainImage = useCallback(() => {
+    const previousImage = mainImageRef.current;
+    if (!previousImage) return;
+    mainImageRef.current = null;
+    setMainImage(null);
+    revokeImageInput(previousImage);
+    setRecipeNotice(null);
+    setHasCompletedSearch(false);
+    void runRecipe(query, matchDrafts, selectedFilmIds, null);
+  }, [matchDrafts, query, runRecipe, selectedFilmIds]);
 
   useEffect(
     () => () => {
       cancelPendingScopeSearch();
       searchAbortRef.current?.abort();
-      if (referencePreviewUrlRef.current) {
-        URL.revokeObjectURL(referencePreviewUrlRef.current);
-      }
+      revokeImageInput(mainImageRef.current);
     },
     [cancelPendingScopeSearch],
   );
@@ -653,16 +631,24 @@ export default function Home() {
       setQuery(nextQuery);
       setHasCompletedSearch(false);
       setRecipeNotice(
-        recipeClauseCount(nextQuery, matchDrafts) > MAX_RECIPE_CLAUSES
+        recipeClauseCount(nextQuery, matchDrafts, mainImage) >
+        MAX_RECIPE_CLAUSES
           ? "Remove one match to search."
           : null,
       );
 
-      if (removedMainClause && !referenceBlobRef.current) {
+      if (removedMainClause) {
         void runRecipe(nextQuery, matchDrafts);
       }
     },
-    [cancelPendingScopeSearch, matchDrafts, query, runRecipe, speech],
+    [
+      cancelPendingScopeSearch,
+      mainImage,
+      matchDrafts,
+      query,
+      runRecipe,
+      speech,
+    ],
   );
 
   const handleSubmit = (event: React.FormEvent) => {
@@ -671,13 +657,6 @@ export default function Home() {
     if (sourceReferenceFacet) {
       setSearchWorkspaceActive(true);
       void facetSourceSearch.search();
-    } else if (referenceBlobRef.current && referenceLabelRef.current) {
-      void runImageSearch(
-        referenceBlobRef.current,
-        referenceLabelRef.current,
-        selectedFilmIds,
-        query,
-      );
     } else {
       void runRecipe(query, matchDrafts);
     }
@@ -695,14 +674,25 @@ export default function Home() {
   };
 
   const isHome = !searchWorkspaceActive;
-  const clauseCount = recipeClauseCount(query, matchDrafts);
+  const clauseCount = recipeClauseCount(query, matchDrafts, mainImage);
+  const disabledUseFacets = useMemo(
+    () =>
+      clauseCount < MAX_RECIPE_CLAUSES
+        ? new Set<RecipeMatchFacet>()
+        : new Set(
+            MATCH_FACETS.filter(
+              (facet) => !matchDraftHasClause(matchDrafts[facet]),
+            ),
+          ),
+    [clauseCount, matchDrafts],
+  );
   const recipeOverLimit = clauseCount > MAX_RECIPE_CLAUSES;
   const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
   const searchDisabled = sourceReferenceFacet
     ? facetSourceSearch.loading || !facetSourceSearch.query.trim()
     : loading ||
       recipeOverLimit ||
-      (!referenceLabel && buildRecipeClauses(query, matchDrafts).length === 0);
+      buildRecipeClauses(query, matchDrafts, mainImage).length === 0;
   const displayedResults = useMemo(
     () =>
       resultGrouping === "best-per-movie"
@@ -731,6 +721,12 @@ export default function Home() {
   const activeLoading = sourceReferenceFacet
     ? facetSourceSearch.loading
     : loading;
+  const activeGrouping = sourceReferenceFacet
+    ? facetSourceSearch.grouping
+    : resultGrouping;
+  const activeResultCount = sourceReferenceFacet
+    ? facetSourceSearch.results.length
+    : results.length;
   const voiceStatus =
     speech.status === "requesting"
       ? "Starting microphone…"
@@ -742,6 +738,27 @@ export default function Home() {
 
   return (
     <main
+      onDragOver={(event) => {
+        if (!containsFile(event.dataTransfer)) return;
+        if (
+          event.target instanceof Element &&
+          event.target.closest(".search-bar-shell")
+        ) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "none";
+      }}
+      onDrop={(event) => {
+        if (!containsFile(event.dataTransfer)) return;
+        if (
+          event.target instanceof Element &&
+          event.target.closest(".search-bar-shell")
+        ) {
+          return;
+        }
+        event.preventDefault();
+      }}
       style={{
         minHeight: "100vh",
         background: "#0a0a0a",
@@ -815,8 +832,8 @@ export default function Home() {
           error={bookmarkError}
           pendingUnitIds={pendingBookmarkUnitIds}
           onShotClick={setActiveShot}
-          onFindSimilar={handleFindSimilar}
           onUseInSearch={handleUseInSearch}
+          disabledUseFacets={disabledUseFacets}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
           onRemoveBookmark={(bookmark) => void removeBookmark(bookmark)}
         />
@@ -834,7 +851,7 @@ export default function Home() {
               justifyContent: isHome ? "center" : "flex-start",
               minHeight: isHome ? "calc(100vh - 45px)" : "auto",
               paddingTop: isHome ? 0 : "40px",
-              paddingBottom: "32px",
+              paddingBottom: isHome ? "32px" : "2px",
               transition: "min-height 0.3s ease",
             }}
           >
@@ -864,13 +881,41 @@ export default function Home() {
               onSubmit={handleSubmit}
               style={{
                 width: "100%",
-                maxWidth: isHome ? "980px" : "960px",
+                maxWidth: "1280px",
                 padding: "0 16px",
                 transition: "max-width 0.3s ease",
               }}
             >
               <div
-                className="search-bar-shell"
+                className={`search-bar-shell${
+                  mainImageDragOver ? " is-image-drag-over" : ""
+                }`}
+                onDragEnter={(event) => {
+                  if (!containsFile(event.dataTransfer)) return;
+                  event.preventDefault();
+                  if (sourceReferenceFacet) return;
+                  setMainImageDragOver(true);
+                }}
+                onDragOver={(event) => {
+                  if (!containsFile(event.dataTransfer)) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = sourceReferenceFacet
+                    ? "none"
+                    : "copy";
+                  if (sourceReferenceFacet) return;
+                  setMainImageDragOver(true);
+                }}
+                onDragLeave={(event) => {
+                  if (dragLeftElement(event)) setMainImageDragOver(false);
+                }}
+                onDrop={(event) => {
+                  if (!containsFile(event.dataTransfer)) return;
+                  event.preventDefault();
+                  setMainImageDragOver(false);
+                  if (sourceReferenceFacet) return;
+                  const file = event.dataTransfer.files.item(0);
+                  if (file) handleMainImageFile(file);
+                }}
                 style={{
                   position: "relative",
                   display: "flex",
@@ -889,8 +934,34 @@ export default function Home() {
                     <span aria-hidden="true">{"\u00d7"}</span>
                   </button>
                 )}
+                {mainImage && !sourceReferenceFacet && (
+                  <div
+                    className="main-image-chip"
+                    title={mainImage.display.label}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={mainImage.display.previewUrl}
+                      alt=""
+                      draggable={false}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleRemoveMainImage}
+                      aria-label="Remove reference image"
+                      title="Remove reference image"
+                    >
+                      {"\u00d7"}
+                    </button>
+                  </div>
+                )}
                 <input
                   ref={inputRef}
+                  className={
+                    sourceReferenceFacet
+                      ? "is-source-reference-input"
+                      : undefined
+                  }
                   type="text"
                   value={sourceReferenceFacet ? facetSourceSearch.query : query}
                   maxLength={500}
@@ -903,9 +974,7 @@ export default function Home() {
                   placeholder={
                     sourceReferenceFacet
                       ? "find a scene…"
-                      : referenceLabel
-                        ? "add a broad text constraint…"
-                        : "describe anything you remember…"
+                      : "describe anything you remember…"
                   }
                   aria-label={
                     sourceReferenceFacet
@@ -922,18 +991,30 @@ export default function Home() {
                     color: "#ededed",
                     fontSize: isHome ? "1.25rem" : "1rem",
                     paddingTop: isHome ? "18px" : "13px",
-                    paddingRight: speech.isSupported
-                      ? isHome
-                        ? "126px"
-                        : "116px"
-                      : isHome
-                        ? "88px"
-                        : "78px",
+                    paddingRight: sourceReferenceFacet
+                      ? speech.isSupported
+                        ? isHome
+                          ? "84px"
+                          : "78px"
+                        : isHome
+                          ? "48px"
+                          : "42px"
+                      : speech.isSupported
+                        ? isHome
+                          ? "126px"
+                          : "116px"
+                        : isHome
+                          ? "88px"
+                          : "78px",
                     paddingBottom: isHome ? "18px" : "13px",
                     paddingLeft: sourceReferenceFacet
                       ? isHome
                         ? "162px"
                         : "156px"
+                      : mainImage
+                        ? isHome
+                          ? "82px"
+                          : "74px"
                       : isHome
                         ? "20px"
                         : "16px",
@@ -956,17 +1037,21 @@ export default function Home() {
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     event.target.value = "";
-                    if (file) handleReferenceFile(file);
+                    if (file) handleMainImageFile(file);
                   }}
                 />
                 <button
                   type="button"
                   className="image-search-button"
-                  disabled={activeLoading || Boolean(sourceReferenceFacet)}
+                  disabled={Boolean(sourceReferenceFacet)}
                   aria-hidden={Boolean(sourceReferenceFacet)}
                   tabIndex={sourceReferenceFacet ? -1 : 0}
-                  aria-label="Choose a framing reference"
-                  title="Choose a framing reference"
+                  aria-label={
+                    mainImage ? "Replace reference image" : "Add a reference image"
+                  }
+                  title={
+                    mainImage ? "Replace reference image" : "Add a reference image"
+                  }
                   onClick={() => {
                     speech.cancel();
                     imageInputRef.current?.click();
@@ -995,7 +1080,8 @@ export default function Home() {
                   >
                     <rect x="3" y="4" width="18" height="16" rx="2" />
                     <circle cx="8.5" cy="9" r="1.5" />
-                    <path d="m4 17 4.5-4.5 3 3 2-2 6.5 6.5" />
+                    <path d="m4 17 4.5-4.5 3 3 2-2 3 3" />
+                    <path d="M17 2v7M14.5 4.5 17 2l2.5 2.5" />
                   </svg>
                 </button>
                 {speech.isSupported && (
@@ -1085,20 +1171,20 @@ export default function Home() {
                 </button>
               </div>
 
-              {!referenceLabel && (
-                <MatchByRail
-                  mainText={query}
-                  drafts={matchDrafts}
-                  onActivateText={handleActivateTextFacet}
-                  onTextChange={handleFacetTextChange}
-                  onSubmitText={handleFacetTextSubmit}
-                  onRemove={handleRemoveFacet}
-                  onBrowse={handleBrowseFacet}
-                  onSource={applySourceFacet}
-                  onLimit={handleRecipeLimit}
-                  targetFacet={sourceReferenceFacet ?? undefined}
-                />
-              )}
+              <MatchByRail
+                clauseCount={clauseCount}
+                drafts={matchDrafts}
+                sourceEvidence={sourceEvidenceByFacet}
+                debug={debug}
+                onActivateText={handleActivateTextFacet}
+                onTextChange={handleFacetTextChange}
+                onSubmitText={handleFacetTextSubmit}
+                onRemove={handleRemoveFacet}
+                onBrowse={handleBrowseFacet}
+                onSource={applySourceFacet}
+                onLimit={handleRecipeLimit}
+                targetFacet={sourceReferenceFacet ?? undefined}
+              />
 
               {recipeNotice && (
                 <p className="match-notice" role="status">
@@ -1126,46 +1212,65 @@ export default function Home() {
                     selectedFilmIds={selectedFilmIds}
                     onChange={handleMovieScopeChange}
                   />
-                  <SearchOptions
-                    showRankingDetails={debug}
-                    onShowRankingDetailsChange={setDebug}
-                  />
+                  {activeResultCount > 0 && (
+                    <>
+                      <div
+                        className="result-view-toggle"
+                        role="group"
+                        aria-label="Scenes shown per movie"
+                      >
+                        <button
+                          type="button"
+                          aria-pressed={activeGrouping === "all"}
+                          onClick={() =>
+                            sourceReferenceFacet
+                              ? facetSourceSearch.setGrouping("all")
+                              : setResultGrouping("all")
+                          }
+                        >
+                          All scenes
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={activeGrouping === "best-per-movie"}
+                          aria-label="Show the best scene from each represented movie"
+                          title="Keep the highest-ranked returned scene from each movie"
+                          onClick={() =>
+                            sourceReferenceFacet
+                              ? facetSourceSearch.setGrouping("best-per-movie")
+                              : setResultGrouping("best-per-movie")
+                          }
+                        >
+                          Best per movie
+                        </button>
+                      </div>
+                      {!sourceReferenceFacet && (
+                        <SearchOptions
+                          showRankingDetails={debug}
+                          onShowRankingDetailsChange={setDebug}
+                        />
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
 
-              {referencePreviewUrl && referenceLabel && (
-                <div className="reference-query-chip" role="status">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={referencePreviewUrl} alt="" />
-                  <span className="reference-query-copy">
-                    <span>{referenceLabel}</span>
-                    <span>
-                      {query.trim()
-                        ? "Uploaded framing + broad text"
-                        : "Uploaded framing reference"}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleClearReference}
-                    aria-label="Clear reference image"
-                    title="Clear reference"
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
-
-              {isHome && !referenceLabel && (
+              {isHome && (
                 <div
                   className={`search-examples${
-                    query.trim() || hasFacetDrafts || sourceReferenceFacet
+                    query.trim() ||
+                    hasFacetDrafts ||
+                    mainImage ||
+                    sourceReferenceFacet
                       ? " is-hidden"
                       : ""
                   }`}
                   aria-label="Example searches"
                   aria-hidden={Boolean(
-                    query.trim() || hasFacetDrafts || sourceReferenceFacet,
+                    query.trim() ||
+                      hasFacetDrafts ||
+                      mainImage ||
+                      sourceReferenceFacet,
                   )}
                 >
                   <span>Try</span>
@@ -1175,7 +1280,10 @@ export default function Home() {
                         key={example}
                         type="button"
                         tabIndex={
-                          query.trim() || hasFacetDrafts || sourceReferenceFacet
+                          query.trim() ||
+                          hasFacetDrafts ||
+                          mainImage ||
+                          sourceReferenceFacet
                             ? -1
                             : 0
                         }
@@ -1191,13 +1299,16 @@ export default function Home() {
                   <button
                     type="button"
                     tabIndex={
-                      query.trim() || hasFacetDrafts || sourceReferenceFacet
+                      query.trim() ||
+                      hasFacetDrafts ||
+                      mainImage ||
+                      sourceReferenceFacet
                         ? -1
                         : 0
                     }
                     onClick={() => imageInputRef.current?.click()}
                   >
-                    upload a frame for framing
+                    add a reference image
                   </button>
                 </div>
               )}
@@ -1240,25 +1351,20 @@ export default function Home() {
           <div hidden={Boolean(sourceReferenceFacet)}>
             <ResultGrid
               results={displayedResults}
-              grouping={resultGrouping}
-              onGroupingChange={setResultGrouping}
               revealDisabled={loading}
               onShotClick={setActiveShot}
-              onFindSimilar={handleFindSimilar}
               onUseInSearch={handleUseInSearch}
+              disabledUseFacets={disabledUseFacets}
               onToggleBookmark={(shot) => void toggleBookmark(shot)}
               bookmarkedUnitIds={bookmarkedUnitIds}
               pendingBookmarkUnitIds={pendingBookmarkUnitIds}
               bookmarkDisabled={bookmarksLoading}
               debug={debug}
-              similarDisabled={loading}
             />
           </div>
           {sourceReferenceFacet && (
             <ResultGrid
               results={displayedSourceResults}
-              grouping={facetSourceSearch.grouping}
-              onGroupingChange={facetSourceSearch.setGrouping}
               revealDisabled={facetSourceSearch.loading}
               onShotClick={setActiveShot}
               onUseInSearch={handleSourceReferenceChoose}
@@ -1284,14 +1390,11 @@ export default function Home() {
         <VideoModal
           shot={activeShot}
           onClose={() => setActiveShot(null)}
-          onMatchFraming={
-            sourceReferenceFacet ? undefined : handleFindSimilar
-          }
           onUseInSearch={
             sourceReferenceFacet ? handleSourceReferenceChoose : handleUseInSearch
           }
+          disabledUseFacets={disabledUseFacets}
           sourceReferenceFacet={sourceReferenceFacet ?? undefined}
-          matchFramingDisabled={loading}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
           bookmarked={Boolean(activeShotBookmark)}
           bookmarkDisabled={

@@ -8,7 +8,7 @@ dependencies = [
     "click>=8.4.2",
     "fastapi>=0.138.1",
     "faster-whisper>=1.2.1",
-    "filelock>=3.20,<4",
+    "filelock>=3.30,<4",
     "google-genai>=2.10.0",
     # Native FTS is experimental and its 0.33 index-maintenance contract is
     # covered by integration tests. Certify newer minor releases before use.
@@ -19,6 +19,7 @@ dependencies = [
     "pillow>=10.0.0",
     "pyarrow>=14.0.0",
     "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.20",
     "pyyaml>=6.0.3",
     "torch>=2.11.0",
     "torchvision>=0.26.0",

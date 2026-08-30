@@ -1,6 +1,7 @@
 """Tests for pipeline/ingest/probe.py — written before implementation (TDD)."""
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -112,6 +113,56 @@ def test_parse_title_uses_canonical_filename_over_container_tag() -> None:
     assert title == "Canonical Film (2001)"
 
 
+def test_ffprobe_decodes_utf8_json_without_windows_locale_text_mode() -> None:
+    """A UTF-8 continuation byte undefined in cp1252 remains valid JSON."""
+    from pipeline.ingest.probe import _ffprobe
+
+    payload = b'{"format":{"tags":{"title":"Cure \xc3\x8d"}},"streams":[]}'
+    assert b"\x8d" in payload
+    completed = subprocess.CompletedProcess(
+        args=["ffprobe"],
+        returncode=0,
+        stdout=payload,
+        stderr=b"",
+    )
+
+    with patch("pipeline.ingest.probe.subprocess.run", return_value=completed) as run:
+        metadata = _ffprobe(Path("Cure (1997).mkv"))
+
+    assert metadata["format"]["tags"]["title"] == "Cure Í"
+    assert run.call_args.kwargs == {"capture_output": True, "check": True}
+
+
+@pytest.mark.parametrize(
+    ("stdout", "description"),
+    [
+        (b'{"title":"\x8d"}', "non-UTF-8 JSON"),
+        (b"not JSON", "invalid JSON"),
+        (b"[]", "non-object JSON document"),
+    ],
+)
+def test_ffprobe_reports_malformed_output_with_film_name(
+    stdout: bytes,
+    description: str,
+) -> None:
+    from pipeline.ingest.probe import _ffprobe
+
+    completed = subprocess.CompletedProcess(
+        args=["ffprobe"],
+        returncode=0,
+        stdout=stdout,
+        stderr=b"",
+    )
+    with (
+        patch("pipeline.ingest.probe.subprocess.run", return_value=completed),
+        pytest.raises(RuntimeError) as error,
+    ):
+        _ffprobe(Path("Cure (1997).mkv"))
+
+    assert description in str(error.value)
+    assert "Cure (1997).mkv" in str(error.value)
+
+
 def test_probe_film_duration_is_float(test_clip: Path, config: Config) -> None:
     """duration is stored as a float (not int or str)."""
     from pipeline.ingest.probe import probe_film
@@ -136,6 +187,26 @@ def test_probe_film_has_embedded_subs_true(test_clip: Path, config: Config) -> N
         record = probe_film(test_clip, config)
 
     assert record.has_embedded_subs is True
+
+
+def test_probe_film_carries_trusted_primary_audio_language_tag(
+    test_clip: Path,
+    config: Config,
+) -> None:
+    from pipeline.ingest.probe import probe_film
+
+    fake_meta = {
+        "format": {"duration": "30.0"},
+        "streams": [
+            {"codec_type": "audio", "tags": {"language": " ENG "}},
+            {"codec_type": "video", "r_frame_rate": "30/1"},
+        ],
+    }
+
+    with patch("pipeline.ingest.probe._ffprobe", return_value=fake_meta):
+        record = probe_film(test_clip, config)
+
+    assert record.primary_audio_language_tag == "eng"
 
 
 def test_text_subtitle_stream_skips_pgs_and_selects_subrip() -> None:
@@ -171,3 +242,64 @@ def test_text_subtitle_stream_is_none_for_pgs_only() -> None:
     }
 
     assert _text_subtitle_stream_index(meta) is None
+
+
+@pytest.mark.parametrize(
+    ("tag", "expected"),
+    [
+        ("en", "en"),
+        ("eng", "eng"),
+        (" ENG ", "eng"),
+        ("und", None),
+        ("deu", None),
+        ("kor", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_primary_audio_language_tag_is_normalized(
+    tag: str | None,
+    expected: str | None,
+) -> None:
+    from pipeline.ingest.probe import _primary_audio_language_tag
+
+    meta = {
+        "streams": [
+            {"codec_type": "video", "tags": {"language": "fra"}},
+            {"codec_type": "audio", "tags": {"language": tag}},
+            {"codec_type": "audio", "tags": {"language": "jpn"}},
+        ]
+    }
+
+    assert _primary_audio_language_tag(meta) == expected
+
+
+def test_primary_audio_language_tag_does_not_use_later_audio_stream() -> None:
+    from pipeline.ingest.probe import _primary_audio_language_tag
+
+    meta = {
+        "streams": [
+            {"codec_type": "audio", "tags": {}},
+            {"codec_type": "audio", "tags": {"language": "eng"}},
+        ]
+    }
+
+    assert _primary_audio_language_tag(meta) is None
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {},
+        {"streams": []},
+        {"streams": [{"codec_type": "video", "tags": {"language": "eng"}}]},
+        {"streams": [{"codec_type": "audio", "tags": "eng"}]},
+        {"streams": [{"codec_type": "audio"}]},
+    ],
+)
+def test_primary_audio_language_tag_handles_missing_or_malformed_metadata(
+    meta: dict,
+) -> None:
+    from pipeline.ingest.probe import _primary_audio_language_tag
+
+    assert _primary_audio_language_tag(meta) is None

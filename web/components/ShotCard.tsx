@@ -4,7 +4,11 @@ import { useState, useRef, useCallback, useId } from "react";
 import UseInSearchMenu from "./UseInSearchMenu";
 import FacetIcon from "./FacetIcon";
 import { FACET_LABELS, writeSceneSourceDrag } from "@/lib/searchRecipe";
-import type { RecipeMatchFacet, SearchResult } from "@/types/api";
+import type {
+  RecipeMatchFacet,
+  SearchMatch,
+  SearchResult,
+} from "@/types/api";
 import { formatTime, filmLabel } from "@/lib/format";
 
 interface ShotCardProps {
@@ -13,10 +17,9 @@ interface ShotCardProps {
   debug: boolean;
   showRank?: boolean;
   onClick: (shot: SearchResult) => void;
-  onFindSimilar?: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
+  disabledUseFacets?: ReadonlySet<RecipeMatchFacet>;
   sourceReferenceFacet?: RecipeMatchFacet;
-  similarDisabled?: boolean;
   bookmarked?: boolean;
   bookmarkDisabled?: boolean;
   onToggleBookmark?: (shot: SearchResult) => void;
@@ -34,6 +37,7 @@ const TEXT_VIEW_LABELS: Record<string, string> = {
   dialogue: "Dialogue",
   ocr: "On-screen text",
   facets: "Scene detail",
+  mood: "Mood",
 };
 
 function unitSuffix(unitId: string): string {
@@ -50,16 +54,32 @@ function formatScore(score: number | undefined): string {
     : "—";
 }
 
+function matchEvidenceText(match: SearchMatch): string {
+  const label = `${FACET_LABELS[match.facet]} #${match.rank}`;
+  if (match.evidence?.type === "text") {
+    const viewLabel =
+      TEXT_VIEW_LABELS[match.evidence.view] ?? match.evidence.view;
+    return `${label} · ${viewLabel}: ${match.evidence.text}`;
+  }
+  if (match.evidence?.type === "frame") {
+    const timestamp =
+      typeof match.evidence.timestamp === "number"
+        ? ` at ${formatTime(match.evidence.timestamp)}`
+        : "";
+    return `${label} · frame ${match.evidence.frame_index + 1}${timestamp}`;
+  }
+  return label;
+}
+
 export default function ShotCard({
   shot,
   position,
   debug,
   showRank = true,
   onClick,
-  onFindSimilar,
   onUseInSearch,
+  disabledUseFacets,
   sourceReferenceFacet,
-  similarDisabled = false,
   bookmarked = false,
   bookmarkDisabled = false,
   onToggleBookmark,
@@ -94,11 +114,6 @@ export default function ShotCard({
     handleMouseLeave();
     onClick(shot);
   }, [handleMouseLeave, onClick, shot]);
-
-  const handleFindSimilar = useCallback(() => {
-    handleMouseLeave();
-    onFindSimilar?.(shot);
-  }, [handleMouseLeave, onFindSimilar, shot]);
 
   const handleToggleBookmark = useCallback(() => {
     onToggleBookmark?.(shot);
@@ -220,6 +235,15 @@ export default function ShotCard({
                 <span>text #{shot.debug.query_ranks.text ?? "—"}</span>
               </span>
             )}
+            {(shot.matches?.length ?? 0) > 0 && (
+              <span className="result-debug-matches">
+                {shot.matches?.map((match) => (
+                  <span key={match.clause_id} title={matchEvidenceText(match)}>
+                    {matchEvidenceText(match)}
+                  </span>
+                ))}
+              </span>
+            )}
             <span className="result-debug-channels">
               {(Object.keys(CHANNEL_LABELS) as Array<
                 keyof typeof CHANNEL_LABELS
@@ -236,7 +260,7 @@ export default function ShotCard({
         )}
       </button>
 
-      {(onToggleBookmark || onFindSimilar || onUseInSearch) && (
+      {(onToggleBookmark || onUseInSearch) && (
         <div className="result-card-actions">
           {onToggleBookmark && (
             <button
@@ -279,6 +303,7 @@ export default function ShotCard({
               onBlur={handleMouseLeave}
               onDragStart={(event) => event.preventDefault()}
               aria-label={`Use result ${displayedRank} for ${FACET_LABELS[sourceReferenceFacet]}`}
+              title={`Use for ${FACET_LABELS[sourceReferenceFacet]}`}
             >
               <FacetIcon facet={sourceReferenceFacet} size={14} />
               <span>Use for {FACET_LABELS[sourceReferenceFacet]}</span>
@@ -288,40 +313,9 @@ export default function ShotCard({
               shot={shot}
               onUse={onUseInSearch}
               disabled={!sourceAvailable}
+              disabledFacets={disabledUseFacets}
             />
           ) : null}
-          {onFindSimilar && !sourceReferenceFacet && (
-            <button
-              type="button"
-              className="result-card-action composition-button"
-              disabled={similarDisabled}
-              onClick={handleFindSimilar}
-              onFocus={handleMouseEnter}
-              onBlur={handleMouseLeave}
-              onDragStart={(event) => event.preventDefault()}
-              aria-label={`Match the framing of result ${displayedRank}`}
-              title="Match framing"
-            >
-              <svg
-                width="17"
-                height="17"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M8 3H3v5" />
-                <path d="M16 3h5v5" />
-                <path d="M21 16v5h-5" />
-                <path d="M8 21H3v-5" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-              <span>Framing</span>
-            </button>
-          )}
         </div>
       )}
     </article>

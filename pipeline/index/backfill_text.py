@@ -1,9 +1,10 @@
 """Build a versioned semantic-text index from already-ingested unit evidence.
 
 This backfill is local-only.  It does not decode film media or call a hosted
-annotator; it projects the caption, dialogue, OCR, and typed facets already in
-``units`` into independent Qwen embeddings.  A complete-coverage manifest is
-published only after every current unit has matching feature rows.
+annotator; it projects the caption, dialogue, OCR, broad facets, and narrow
+mood/energy evidence already in ``units`` into independent Qwen embeddings.
+A complete-coverage manifest is published only after every current unit has
+matching feature rows.
 """
 
 from __future__ import annotations

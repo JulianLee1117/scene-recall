@@ -9,6 +9,7 @@ interface UseInSearchMenuProps {
   shot: SearchResult;
   onUse: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   disabled?: boolean;
+  disabledFacets?: ReadonlySet<RecipeMatchFacet>;
   variant?: "card" | "modal";
 }
 
@@ -16,6 +17,7 @@ export default function UseInSearchMenu({
   shot,
   onUse,
   disabled = false,
+  disabledFacets,
   variant = "card",
 }: UseInSearchMenuProps) {
   const [open, setOpen] = useState(false);
@@ -41,16 +43,18 @@ export default function UseInSearchMenu({
       }
 
       const items = Array.from(
-        menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ??
-          [],
+        menuRef.current?.querySelectorAll<HTMLButtonElement>(
+          "[role=menuitem]:not(:disabled)",
+        ) ?? [],
       );
       if (!items.length || !rootRef.current?.contains(event.target as Node)) {
         return;
       }
 
-      const currentIndex = items.indexOf(
+      const focusedIndex = items.indexOf(
         document.activeElement as HTMLButtonElement,
       );
+      const currentIndex = focusedIndex >= 0 ? focusedIndex : 0;
       let nextIndex: number | null = null;
       if (event.key === "ArrowDown" || event.key === "ArrowRight") {
         nextIndex = (currentIndex + 1) % items.length;
@@ -64,14 +68,15 @@ export default function UseInSearchMenu({
       if (nextIndex === null) return;
       event.preventDefault();
       event.stopPropagation();
-      setActiveIndex(nextIndex);
       items[nextIndex].focus();
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     window.requestAnimationFrame(() => {
-      menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      menuRef.current
+        ?.querySelector<HTMLButtonElement>("[role=menuitem]:not(:disabled)")
+        ?.focus();
     });
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
@@ -93,13 +98,16 @@ export default function UseInSearchMenu({
         type="button"
         className={variant === "card" ? "result-card-action use-in-search-trigger" : "use-in-search-trigger"}
         disabled={disabled}
-        aria-label="Use scene in search"
+        aria-label="Choose how to match this scene"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        title="Use in search"
+        title="Match by…"
         onClick={() => {
-          setActiveIndex(0);
+          const firstEnabled = MATCH_FACETS.findIndex(
+            (facet) => !disabledFacets?.has(facet),
+          );
+          setActiveIndex(Math.max(0, firstEnabled));
           setOpen((current) => !current);
         }}
       >
@@ -117,7 +125,7 @@ export default function UseInSearchMenu({
           <circle cx="10.5" cy="10.5" r="6.5" />
           <path d="m15.5 15.5 4 4M10.5 7.5v6M7.5 10.5h6" />
         </svg>
-        {variant === "modal" && <span>Use in search</span>}
+        {variant === "modal" && <span>Match by…</span>}
       </button>
 
       {open && (
@@ -126,18 +134,26 @@ export default function UseInSearchMenu({
           id={menuId}
           className="use-in-search-menu"
           role="menu"
-          aria-label="Use scene as"
+          aria-label="Choose what to match"
         >
           {MATCH_FACETS.map((facet, index) => (
             <button
               key={facet}
               type="button"
               role="menuitem"
-              tabIndex={index === activeIndex ? 0 : -1}
+              disabled={disabledFacets?.has(facet)}
+              tabIndex={
+                !disabledFacets?.has(facet) && index === activeIndex ? 0 : -1
+              }
               aria-label={`Use scene for ${FACET_LABELS[facet]}`}
-              title={FACET_LABELS[facet]}
+              title={
+                disabledFacets?.has(facet)
+                  ? "Remove a match to use this category"
+                  : FACET_LABELS[facet]
+              }
               onFocus={() => setActiveIndex(index)}
               onClick={() => {
+                if (disabledFacets?.has(facet)) return;
                 setOpen(false);
                 triggerRef.current?.focus();
                 onUse(shot, facet);

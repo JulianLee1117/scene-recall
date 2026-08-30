@@ -22,30 +22,32 @@ evidence, but it must not invent first-stage results.
 text query
   -> PE text-to-frame candidates
   -> semantic text-view candidates
-  -> exact-word candidates
+  -> conditional full-text candidates
   -> rank fusion and filtering
 
-reference image (production Framing)
+reference image (standalone API compatibility)
   -> PE frame candidates
   -> bounded spatial reranking
 
-reference image + text
+reference image + text (standalone API compatibility)
   -> mandatory reference shortlist
   -> text reranks only that shortlist
 
-typed recipe (one to three clauses)
-  -> explicit evidence adapters
-  -> equal reciprocal-rank fusion
-  -> mandatory composition gate when present
+typed recipe (product UI; one to three total clauses)
+  -> explicit text or indexed-scene evidence adapters
+  -> optional query-bound broad-visual upload adapter
+  -> one ranking per independent input and reciprocal-rank fusion
+  -> mandatory uploaded-visual or composition gate when present
   -> final filtering and diversity
 
 result
   -> film + timestamp + matched frame/text + playable media
 ```
 
-The product calls the current reference workflow **Framing**; the API retains
-the `composition` facet name for compatibility. It is coarse appearance and
-position matching, not an exact editorial Match Cut mode.
+The product calls spatial reference matching **Framing**; the standalone API
+and recipe contract retain the `composition` name for compatibility. It is
+coarse appearance and position matching, not an exact editorial Match Cut
+mode.
 
 The accepted experimental boundary is deliberately separate:
 
@@ -70,21 +72,25 @@ Durable assets are the source film and timestamped evidence that can support
 future derivations:
 
 - source identity, hash, and path;
+- a selected raw external subtitle sidecar when the release provides one;
 - shot and time boundaries;
 - extracted frames and media recipes;
-- original dialogue with timestamps;
 - reconstructable clip ranges.
 
 Model outputs are replaceable derivations:
 
 - annotations and semantic views;
+- parsed subtitle and speech-transcript rows;
 - embeddings and indexes;
 - future clip, audio, or summary profiles;
 - active-profile manifests.
 
 A derivation must be independently backfillable and identified by its model,
-revision, dimensions, contract, inputs, and relevant schema or prompt. Never
-mix incompatible vector spaces. Preserve old profiles until a replacement is
+available immutable revision, dimensions, contract, inputs, and relevant
+schema or prompt. When a model resolver exposes only an alias, the manifest
+must at least include that exact identifier plus the engine and profile
+versions, and the alias must not be refreshed without a profile bump. Never mix
+incompatible vector spaces. Preserve old profiles until a replacement is
 complete and deliberately activated; missing optional derivations must degrade
 to a known-safe baseline.
 
@@ -117,7 +123,9 @@ implemented behavior.
 The current pipeline performs:
 
 1. Content-addressed film probing.
-2. Subtitle extraction or local speech transcription.
+2. Dialogue extraction from a usable canonical English SRT sidecar, a
+   convertible embedded subtitle stream, or local speech transcription, in
+   that order.
 3. Shot detection and bounded subdivision of long shots.
 4. One or three ordered keyframes per shot.
 5. Local preview generation.
@@ -130,6 +138,30 @@ Hosted annotation caches are scoped by provider, requested model, prompt,
 schema, settings, and ordered frame hashes. Changed profiles coexist instead of
 overwriting prior generations.
 
+Film intake copies one usable English-marked SRT with minimally useful dialogue
+that is filename-associated with the selected feature beside the canonical
+film as `<film-stem>.en.srt` while retaining the release copy. A shared,
+non-destructive content floor rejects malformed, oversized, trivial, and
+promo-only external SRTs both at intake and dialogue resolution; it is not a
+language or completeness classifier. Dialogue derivation records a
+contract-versioned manifest containing the selected sidecar content hash,
+embedded stream identity, or Whisper model and transcription profile. The
+sidecar derivation profile removes known promotional cues from parsed dialogue
+without changing the raw file. The Whisper fallback uses VAD and
+source-language transcription. A canonical `en` or `eng` tag on the primary
+audio stream supplies an English language hint; missing, `und`, and all other
+tags retain automatic majority voting over up to five voiced 30-second
+language-detection windows. The manifest records the exact resolved language
+option and the primary-audio-tag evidence when used, along with the remaining
+options and faster-whisper package version. Previous-window text conditioning
+is disabled. A versioned Whisper-only structural gate rejects
+high-confidence exact repetition loops before dialogue publication. Rejection
+stores empty dialogue for that profile and continues through visual and hosted
+caption evidence; external and embedded subtitle text bypasses the heuristic.
+Changing or rejecting a source, transcription profile, or gate invalidates only
+dialogue and its downstream derivations; it does not mutate the immutable film
+identity or rejected raw evidence.
+
 Publication spans separate LanceDB transactions. Units are the visibility
 boundary for a new film. Replacing an existing film can briefly expose new
 frames beside old unit metadata; removing that legacy window requires
@@ -141,16 +173,40 @@ Normal text search independently ranks:
 
 - PE text-to-frame visual matches;
 - the active semantic text profile;
-- native full-text matches over `searchable_text`.
+- native full-text matches over `searchable_text` when the broad query is
+  compound or explicitly quoted.
+
+An unquoted broad query with exactly one word token omits full-text as an
+independent fusion vote when a visual or semantic channel is active. This is a
+query-shape policy, not a vocabulary classifier: it prevents an incidental
+caption, subtitle, or OCR occurrence from promoting an otherwise weaker match
+for an open concept such as `beautiful`. Quoting the term restores explicit
+word evidence, compound broad queries retain lexical corroboration, and a
+lexical-only evaluation remains a true retrieval mode. The focused Words facet
+continues to search only dialogue and OCR semantic views.
 
 The semantic profile uses Qwen3-Embedding-0.6B and stores independent non-empty
-`caption`, `dialogue`, `ocr`, and `facets` views. Matching views collapse to one
-vote per unit before weighted reciprocal-rank fusion. The winning view and text
-are returned as evidence.
+`caption`, `dialogue`, `ocr`, `facets`, and `mood` views. `facets` remains the
+broad structured document used by normal text search. The narrow `mood` view
+contains only stored mood labels and known energy, serialized as labeled text;
+it excludes setting, framing, time, camera, palette, and subjects. Matching
+views collapse to one vote per unit before weighted reciprocal-rank fusion. The
+winning view and text are returned as evidence.
 
 Deterministic filtering handles unrequested credits, logos, title cards, blank
 frames, and static artifacts. Visual deduplication suppresses near-identical
-evidence, and unscoped searches apply a soft film-diversity preference.
+evidence, and unscoped searches apply a soft film-diversity preference. Normal
+unscoped broad search retrieves three times the configured per-channel
+candidate depth before fusion so that a film outside a source-heavy top window
+can become eligible through cross-channel agreement and the first-page
+diversity pass. After fusion, it retains the configured candidate prefix plus
+the best deep candidate from each of at most one page's worth of films absent
+from that prefix. This bounded reserve prevents the deeper pool from expanding
+quadratic visual-deduplication work. Explicit film scopes, internal
+multi-clause rankings, and the bounded Framing shortlist keep their established
+candidate depths. Diversity preserves up to the configured per-film target on
+each page and relevance-backfills every unfilled slot; its cumulative target
+relaxes on later pages and never guarantees a result from every film.
 
 ### Reference and Framing retrieval
 
@@ -174,12 +230,14 @@ generation, including the frame-identity digest and profile-table generation.
 The idempotent `index-framing` command derives it from retained keyframes
 without raw-film decoding or hosted inference.
 
-The result-card composition workflow defaults to a composition-only search of
-other films. Its source-film exclusion is applied before candidate generation,
-so source style cannot consume the bounded reference shortlist. Explicit film
-scope still controls the allowed library; a scope containing only the source
-film takes precedence rather than becoming an empty cross-film search. Users
-may deliberately include the source film or retain their current text clause.
+The frontend exposes one result action for all five modular facets rather than
+a separate Framing shortcut. Choosing Framing, or dragging the same result onto
+the Framing tile, adds the same composition source clause to the active recipe;
+existing clauses remain within the three-clause limit. Its source-film
+exclusion is applied server-side before candidate generation, so source style
+cannot consume the bounded reference shortlist. Explicit film scope still
+controls the allowed library, and a scope containing only the source film takes
+precedence rather than becoming an empty cross-film search.
 
 Text and reference clauses can be combined. The reference result set remains
 mandatory; text reranks only those candidates and cannot introduce a visually
@@ -276,11 +334,16 @@ motion confounders.
 
 ### Modular recipe retrieval
 
-`POST /search/recipe` composes one to three explicit clauses without adding a
-router, query LLM, model, index, or ingestion dependency. Clause IDs and facets
-must be unique. Text clauses support broad `all` search plus `scene`, `words`,
-`look`, and `mood`; indexed-scene sources support those same focused facets
-except `all`, and also support `composition`.
+`POST /search/recipe` composes one to three explicit JSON clauses without
+adding a router, query LLM, model, index, or ingestion dependency. The
+multipart `POST /search/recipe/image` variant carries exactly one bounded
+uploaded still as a broad-visual clause, alone or with at most two text or
+indexed-scene refinements. The complete recipe therefore remains bounded to
+one to three total clauses. Clause IDs and typed-refinement facets must be
+unique. Text clauses support broad `all` search plus `scene`, `words`, `look`,
+and `mood`; indexed-scene sources support those same focused facets except
+`all`, and also support `composition`. The uploaded still is request-level
+visual evidence and has no category facet.
 
 The adapters deliberately expose evidence already present in the current
 system:
@@ -290,30 +353,69 @@ system:
 - `words` searches dialogue and OCR semantic views;
 - `look` uses the paired PE text/frame space without spatial reranking;
 - `composition` uses the indexed source frame and existing spatial reranker;
-- `mood` searches the existing structured-facet semantic view.
+- `mood` searches only the dedicated mood-and-energy semantic view.
+
+The broad-visual upload adapter embeds the still once through the existing PE
+image tower. It uses global frame appearance to retrieve a bounded candidate
+set, then applies the existing 6x6 spatial-layout reranker. Global appearance
+and spatial layout are correlated stages of one visual ranking; they never
+enter reciprocal-rank fusion as two independent votes. The resulting visual
+set is a mandatory recipe gate, so text or indexed-scene refinements may rerank
+it but cannot introduce visually unrelated units. The upload has no source
+film to exclude, so explicit movie scope and the normal unscoped diversity
+preference apply. Uploaded images are query-bound inputs: they are validated
+and decoded for that request, never persisted as library evidence, and
+introduce no new vector space or backfill.
+
+The frontend's sole upload affordance is the main search bar, which also
+accepts a direct file drop. It shows at most one compact query-local reference
+and automatically submits it through the broad-visual adapter; replacing or
+removing that reference replaces or removes the clause. Category boxes accept
+typed text or indexed library scenes. They have no redundant image-upload
+control, and the uploaded still is not forced into or moved between Look and
+Framing. Up to two optional category or main-text refinements remain visible
+beside the compact reference and use only backend-owned recipe ranking. The
+standalone image endpoint remains API-compatible, and the product never
+maintains a separate browser-fused reference result state.
 
 Source clauses address an indexed unit and, for `look` or `composition`, an
 exact frame index. The server resolves the corresponding unit, film, vector,
 and file path from the active index; browser-supplied paths or vectors are
-never trusted. Every source and its facet-required evidence is validated before
-an empty composition target scope can return no results. Every referenced
-source unit is removed from the result set.
+never trusted. A scene used as a `mood` source derives its query from the same
+labeled mood-and-energy serialization as the indexed view. Every source and
+its facet-required evidence is validated before an empty composition target
+scope can return no results. Every referenced source unit is removed from the
+result set.
 Composition retains the ADR-0005 cross-film default and is a mandatory
 candidate gate. Its effective result-film scope is resolved before any bounded
 clause retrieval and shared by every clause, so source-film hits cannot consume
 an auxiliary clause's candidate window. Other clauses may rerank composition
-candidates but cannot introduce composition-unrelated results.
+candidates but cannot introduce composition-unrelated results. The uploaded
+broad-visual clause is likewise a mandatory gate; its global retrieval and
+spatial reranking remain internal to that one clause.
 
 A recipe containing only one broad `all` text clause delegates to normal text
 search, preserving its complete bounded candidate union and diversity behavior,
 then adds the recipe match evidence. All other facet adapters return bounded
 raw rankings; recipes with multiple clauses combine them using equal
-reciprocal-rank fusion. Existing junk suppression, visual deduplication,
+reciprocal-rank fusion inside any mandatory candidate gate. A broad-visual
+upload contributes one ranking regardless of its global and spatial internal
+scores. Existing junk suppression, visual deduplication,
 reference temporal spread when applicable, and final film diversity are then
 applied once to the resulting ordering. Each returned product result includes
 stable `keyframe_index` evidence and a `matches` entry for every clause that
 retrieved it, including the contributing rank and matched text or frame when
 available.
+
+The recipe response describes each resolved source input separately from
+result-match evidence, deriving that description from the same resolved
+in-memory source input passed to its ranking adapter. Caption, dialogue/OCR,
+and mood sources expose the exact effective text used by their adapter. Look and
+composition sources expose a global-visual or spatial-visual frame mode and
+never fabricate an English description for a vector or learned grid. An
+upload produces one source-evidence record explicitly labeled as query-bound
+broad-visual input and names its global-candidate and spatial-reranking stages;
+it likewise never receives generated text.
 
 Focused `scene`, `words`, and `mood` clauses require a complete active
 semantic-text profile. They fail explicitly when it is unavailable instead of
@@ -323,8 +425,11 @@ retains the established safe fallback.
 ## Activation and fallback
 
 The semantic-text table identity includes its model revision, dimensions, and
-embedding contract. Its manifest must exactly cover the current units
-generation before the profile becomes active.
+embedding contract. Its manifest additionally records the complete ordered
+view-projection contract. Its manifest must exactly cover the current units
+generation before the profile becomes active. A view-contract change
+invalidates an older manifest, while unchanged rows in the same compatible
+Qwen vector space may be reused by reconciliation.
 
 If the profile or manifest is missing, stale, partial, corrupt, unreadable, or
 unavailable at query time, the complete dense-text channel falls back to the
@@ -396,8 +501,9 @@ same whole-profile activation rule when implemented.
   movement.
 - Dialogue is embedded at shot level rather than as utterance rows.
 - OCR comes from the general annotator rather than a dedicated OCR pass.
-- `scene` and `mood` reuse current annotation views rather than independently
-  learned representations; there is no dedicated plot representation.
+- `scene` uses the current caption annotation and `mood` is a narrow projection
+  of current mood/energy annotations rather than an independently learned
+  representation; there is no dedicated plot representation.
 - There are no clip, audio, scene-summary, reranker, router, or RAG indexes.
 - Saved scenes are local to one configured state database; named collections
   and account synchronization are not implemented.

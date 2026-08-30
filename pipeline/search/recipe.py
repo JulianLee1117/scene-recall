@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from pipeline.config import Config
+from pipeline.index.text_features import build_mood_view_text
 from pipeline.search.retrieve import (
     SemanticTextProfileUnavailable,
     apply_recipe_result_preferences,
@@ -35,11 +36,13 @@ SearchFacet = Literal[
     "scene",
     "words",
     "look",
+    "visual",
     "composition",
     "mood",
 ]
-ClauseKind = Literal["text", "source"]
+ClauseKind = Literal["text", "source", "image"]
 _RRF_K = 60
+_CORRELATED_VISUAL_FACETS = frozenset({"visual", "composition"})
 
 
 class RecipeSourceNotFound(LookupError):
@@ -63,6 +66,15 @@ class SearchClause:
     facet: SearchFacet
     text: str | None = None
     source: SourceReference | None = None
+    image: Image.Image | None = None
+
+
+@dataclass(frozen=True)
+class SearchRecipeExecution:
+    """One recipe's results and the exact source inputs used to produce them."""
+
+    results: list[dict[str, Any]]
+    source_evidence: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -116,6 +128,7 @@ def _resolve_unit(
             "dialogue",
             "on_screen_text",
             "mood",
+            "energy",
         ),
     )
     if row is None:
@@ -206,15 +219,16 @@ def _source_text(facet: SearchFacet, unit: dict[str, Any]) -> str:
             "This scene has no dialogue or on-screen text to match"
         )
     if facet == "mood":
-        moods = _json_strings(
-            unit.get("mood"),
-            field="mood",
-            unit_id=unit_id,
-        )
-        if moods:
-            return ", ".join(moods)
+        try:
+            text = build_mood_view_text(unit)
+        except ValueError as exc:
+            raise RecipeSourceUnavailable(
+                f"Source scene {unit_id!r} has invalid mood evidence"
+            ) from exc
+        if text:
+            return text
         raise RecipeSourceUnavailable(
-            f"Source scene {unit_id!r} has no mood evidence"
+            f"Source scene {unit_id!r} has no mood or energy evidence"
         )
     raise ValueError(f"facet {facet!r} does not derive a text source")
 
@@ -283,6 +297,144 @@ def _resolve_source_clauses(
     return resolved
 
 
+def _recipe_source_evidence(
+    clauses: Sequence[SearchClause],
+    resolved_sources: dict[str, _ResolvedSourceEvidence],
+) -> list[dict[str, Any]]:
+    """Describe the authoritative input contributed by each source clause.
+
+    This is product-facing explainability, not ranking evidence for a result.
+    Text-backed adapters expose the exact effective text. Visual adapters stay
+    explicitly visual instead of inventing an English description for a frame
+    vector or spatial grid.
+    """
+    described: list[dict[str, Any]] = []
+    for clause in clauses:
+        if clause.kind == "image":
+            if clause.image is None:
+                raise RecipeSourceUnavailable(
+                    "uploaded image source is unavailable"
+                )
+            if clause.facet != "visual":
+                raise ValueError("uploaded images require the visual facet")
+            described.append(
+                {
+                    "clause_id": clause.clause_id,
+                    "facet": clause.facet,
+                    "source": {"kind": "uploaded_image"},
+                    "adapter": "pe_global+spatial_6x6",
+                    "evidence": [
+                        {
+                            "type": "image",
+                            "mode": "global_spatial_visual",
+                        }
+                    ],
+                }
+            )
+            continue
+        if clause.kind != "source" or clause.source is None:
+            continue
+        source = clause.source
+        resolved = resolved_sources[clause.clause_id]
+        unit = resolved.unit
+
+        source_payload: dict[str, Any] = {"unit_id": source.unit_id}
+        if source.frame_index is not None:
+            source_payload["frame_index"] = source.frame_index
+        payload: dict[str, Any] = {
+            "clause_id": clause.clause_id,
+            "facet": clause.facet,
+            "source": source_payload,
+        }
+
+        if clause.facet == "scene":
+            effective_text = resolved.query_text
+            payload.update(
+                {
+                    "adapter": "caption",
+                    "effective_text": effective_text,
+                    "evidence": [
+                        {
+                            "type": "text",
+                            "view": "caption",
+                            "text": effective_text,
+                        }
+                    ],
+                }
+            )
+        elif clause.facet == "words":
+            effective_text = resolved.query_text
+            dialogue = _json_strings(
+                unit.get("dialogue"),
+                field="dialogue",
+                unit_id=str(unit["unit_id"]),
+            )
+            evidence = [
+                {"type": "text", "view": "dialogue", "text": line}
+                for line in dialogue
+            ]
+            on_screen_text = str(unit.get("on_screen_text") or "").strip()
+            if on_screen_text:
+                evidence.append(
+                    {
+                        "type": "text",
+                        "view": "ocr",
+                        "text": on_screen_text,
+                    }
+                )
+            payload.update(
+                {
+                    "adapter": "dialogue+ocr",
+                    "effective_text": effective_text,
+                    "evidence": evidence,
+                }
+            )
+        elif clause.facet == "mood":
+            effective_text = resolved.query_text
+            payload.update(
+                {
+                    "adapter": "mood",
+                    "effective_text": effective_text,
+                    "evidence": [
+                        {
+                            "type": "text",
+                            "view": "mood",
+                            "text": effective_text,
+                        }
+                    ],
+                }
+            )
+        elif clause.facet in {"look", "composition"}:
+            if source.frame_index is None or resolved.frame is None:
+                raise RecipeSourceUnavailable(
+                    f"{clause.facet} source requires an exact frame"
+                )
+            frame_index = int(resolved.frame["frame_index"])
+            spatial = clause.facet == "composition"
+            payload.update(
+                {
+                    "adapter": (
+                        "pe_global+spatial_6x6" if spatial else "pe_global"
+                    ),
+                    "evidence": [
+                        {
+                            "type": "frame",
+                            "frame_index": frame_index,
+                            "mode": (
+                                "spatial_visual" if spatial else "global_visual"
+                            ),
+                        }
+                    ],
+                }
+            )
+        else:
+            raise ValueError(
+                f"facet {clause.facet!r} does not accept a source"
+            )
+        described.append(payload)
+    return described
+
+
 def _without_sources(
     results: Sequence[dict[str, Any]],
     source_unit_ids: set[str],
@@ -340,7 +492,7 @@ def _run_text_clause(
     if clause.facet == "mood":
         return search_semantic_views(
             query,
-            ("facets",),
+            ("mood",),
             db,
             config,
             film_ids=film_ids,
@@ -370,6 +522,24 @@ def _run_clause(
                 result_limit,
             ),
             query,
+        )
+
+    if clause.kind == "image":
+        if clause.image is None:
+            raise RecipeSourceUnavailable("uploaded image source is unavailable")
+        if clause.facet != "visual":
+            raise ValueError("uploaded images require the visual facet")
+        return _ClauseRanking(
+            clause,
+            search_by_image(
+                clause.image,
+                db,
+                config,
+                film_ids=film_ids,
+                result_limit=result_limit,
+                _defer_result_preferences=True,
+            ),
+            "",
         )
 
     if clause.source is None:
@@ -440,7 +610,7 @@ def _match_evidence(
         "facet": clause.facet,
         "rank": rank,
     }
-    if clause.facet in {"look", "composition"}:
+    if clause.facet in {"look", "visual", "composition"}:
         try:
             frame_index = int(
                 result.get("matched_frame_index", result["keyframe_index"])
@@ -492,12 +662,18 @@ def _fuse_rankings(
             hits[unit_id] = (rank, result)
         by_clause[ranking.clause.clause_id] = hits
 
-    composition = next(
-        (ranking for ranking in rankings if ranking.clause.facet == "composition"),
-        None,
-    )
-    if composition is not None:
-        eligible = set(by_clause[composition.clause.clause_id])
+    mandatory_visual_rankings = [
+        ranking
+        for ranking in rankings
+        if ranking.clause.facet in _CORRELATED_VISUAL_FACETS
+    ]
+    if mandatory_visual_rankings:
+        eligible = set.intersection(
+            *(
+                set(by_clause[ranking.clause.clause_id])
+                for ranking in mandatory_visual_rankings
+            )
+        )
     else:
         eligible = {
             unit_id
@@ -527,7 +703,7 @@ def _fuse_rankings(
             clause_index, ranking, rank, _result = contributor
             facet_priority = (
                 0
-                if ranking.clause.facet == "composition"
+                if ranking.clause.facet in _CORRELATED_VISUAL_FACETS
                 else 1
                 if ranking.clause.facet == "look"
                 else 2
@@ -583,20 +759,33 @@ def _annotate_single_clause_results(
     return annotated
 
 
-def search_recipe(
+def execute_search_recipe(
     clauses: Sequence[SearchClause],
     db: lancedb.DBConnection,
     config: Config,
     *,
     film_ids: Sequence[str] = (),
-) -> list[dict[str, Any]]:
-    """Run one to three typed clauses and return one final ranked window."""
+) -> SearchRecipeExecution:
+    """Run a recipe and return results with its resolved source snapshot."""
     if not 1 <= len(clauses) <= 3:
         raise ValueError("a search recipe requires one to three clauses")
     if len({clause.clause_id for clause in clauses}) != len(clauses):
         raise ValueError("search recipe clause IDs must be unique")
     if len({clause.facet for clause in clauses}) != len(clauses):
         raise ValueError("search recipe facets must be unique")
+    if any(
+        clause.facet == "visual" and clause.kind != "image"
+        for clause in clauses
+    ):
+        raise ValueError("the visual facet requires an uploaded image")
+    image_clauses = [clause for clause in clauses if clause.kind == "image"]
+    if len(image_clauses) > 1:
+        raise ValueError("a search recipe accepts at most one uploaded image")
+    for clause in image_clauses:
+        if clause.facet != "visual":
+            raise ValueError("uploaded images require the visual facet")
+        if clause.image is None:
+            raise RecipeSourceUnavailable("uploaded image source is unavailable")
 
     normalized_film_ids = tuple(
         dict.fromkeys(
@@ -618,9 +807,13 @@ def search_recipe(
             film_ids=normalized_film_ids,
             result_limit=int(config.retrieval.result_window),
         )
-        return _annotate_single_clause_results(only_clause, normal_results)
+        return SearchRecipeExecution(
+            results=_annotate_single_clause_results(only_clause, normal_results),
+            source_evidence=[],
+        )
 
     resolved_sources = _resolve_source_clauses(clauses, db)
+    source_evidence = _recipe_source_evidence(clauses, resolved_sources)
     result_film_ids = normalized_film_ids
     apply_film_diversity: bool | None = None
     composition_clause = next(
@@ -628,7 +821,10 @@ def search_recipe(
         None,
     )
     if composition_clause is not None:
-        if composition_clause.source is None:
+        if (
+            composition_clause.kind != "source"
+            or composition_clause.source is None
+        ):
             raise ValueError("composition clause requires a source scene")
         composition_unit = resolved_sources[composition_clause.clause_id].unit
         scope = resolve_reference_result_scope(
@@ -637,7 +833,10 @@ def search_recipe(
             str(composition_unit["film_id"]),
         )
         if scope is None:
-            return []
+            return SearchRecipeExecution(
+                results=[],
+                source_evidence=source_evidence,
+            )
         result_film_ids, apply_film_diversity = scope
 
     rankings = [
@@ -660,18 +859,38 @@ def search_recipe(
     requested_text = " ".join(
         ranking.query_text for ranking in rankings if ranking.query_text
     )
-    return apply_recipe_result_preferences(
-        _without_sources(fused, source_unit_ids),
+    return SearchRecipeExecution(
+        results=apply_recipe_result_preferences(
+            _without_sources(fused, source_unit_ids),
+            db,
+            config,
+            film_ids=result_film_ids,
+            requested_text=requested_text,
+            result_limit=int(config.retrieval.result_window),
+            apply_reference_temporal_spread=any(
+                clause.facet in _CORRELATED_VISUAL_FACETS
+                for clause in clauses
+            ),
+            apply_film_diversity=apply_film_diversity,
+        ),
+        source_evidence=source_evidence,
+    )
+
+
+def search_recipe(
+    clauses: Sequence[SearchClause],
+    db: lancedb.DBConnection,
+    config: Config,
+    *,
+    film_ids: Sequence[str] = (),
+) -> list[dict[str, Any]]:
+    """Run one to three typed clauses and return one final ranked window."""
+    return execute_search_recipe(
+        clauses,
         db,
         config,
-        film_ids=result_film_ids,
-        requested_text=requested_text,
-        result_limit=int(config.retrieval.result_window),
-        apply_reference_temporal_spread=any(
-            clause.facet == "composition" for clause in clauses
-        ),
-        apply_film_diversity=apply_film_diversity,
-    )
+        film_ids=film_ids,
+    ).results
 
 
 __all__ = [
@@ -679,7 +898,9 @@ __all__ = [
     "RecipeSourceUnavailable",
     "SearchClause",
     "SearchFacet",
+    "SearchRecipeExecution",
     "SemanticTextProfileUnavailable",
     "SourceReference",
+    "execute_search_recipe",
     "search_recipe",
 ]

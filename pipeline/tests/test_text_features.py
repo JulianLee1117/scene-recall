@@ -117,13 +117,33 @@ def test_build_text_sources_keeps_views_independent() -> None:
     )
 
     by_view = {source.view: source.text for source in sources}
-    assert tuple(by_view) == ("caption", "dialogue", "ocr", "facets")
+    assert tuple(by_view) == (
+        "caption",
+        "dialogue",
+        "ocr",
+        "facets",
+        "mood",
+    )
     assert by_view["caption"] == "A figure waits in a hallway."
     assert by_view["dialogue"] == "Who is there? Come in."
     assert by_view["ocr"] == "ROOM 237"
     assert "framing: wide" in by_view["facets"]
+    assert by_view["mood"] == "mood: uneasy, quiet; energy: calm"
+    assert "framing" not in by_view["mood"]
+    assert "palette" not in by_view["mood"]
     assert "Who is there?" not in by_view["caption"]
-    assert len({source.source_sha256 for source in sources}) == 4
+    assert len({source.source_sha256 for source in sources}) == 5
+
+
+def test_mood_view_uses_known_energy_when_mood_labels_are_empty() -> None:
+    from pipeline.index.text_features import build_mood_view_text
+
+    assert build_mood_view_text(
+        {"unit_id": "unit-a", "mood": "[]", "energy": "high"}
+    ) == "energy: high"
+    assert build_mood_view_text(
+        {"unit_id": "unit-b", "mood": "[]", "energy": "unknown"}
+    ) == ""
 
 
 def test_backfill_builds_and_activates_complete_profile(
@@ -145,8 +165,8 @@ def test_backfill_builds_and_activates_complete_profile(
         result = backfill_text_features(config)
 
     assert result.units_discovered == 1
-    assert result.features_discovered == 4
-    assert result.embedded == 4
+    assert result.features_discovered == 5
+    assert result.embedded == 5
     assert result.activated is True
     embed.assert_called_once()
 
@@ -158,6 +178,7 @@ def test_backfill_builds_and_activates_complete_profile(
         "dialogue",
         "ocr",
         "facets",
+        "mood",
     }
     assert all(row["model_id"] == profile.model_id for row in rows)
     assert resolve_ready_text_profile(config, db) == profile
@@ -184,7 +205,7 @@ def test_backfill_is_idempotent_and_does_not_reembed_current_views(
     embed.assert_not_called()
     assert result.embedded == 0
     assert result.replaced == 0
-    assert result.skipped_current == 4
+    assert result.skipped_current == 5
     assert result.activated is True
 
 
@@ -227,6 +248,40 @@ def test_units_change_invalidates_active_manifest(
     _write_unit(config, tmp_path, "film_b")
 
     assert resolve_ready_text_profile(config, open_db(config)) is None
+
+
+def test_manifest_requires_the_current_text_view_contract(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    from pipeline.index.backfill_text import backfill_text_features
+    from pipeline.index.text_features import (
+        TEXT_VIEW_CONTRACT_VERSION,
+        TEXT_VIEWS,
+        configured_text_profile,
+        manifest_path,
+        resolve_ready_text_profile,
+    )
+    from pipeline.index.writer import open_db
+
+    _write_unit(config, tmp_path, "film_a")
+    with patch(
+        "pipeline.index.backfill_text.embed_semantic_documents",
+        side_effect=_fake_embeddings,
+    ):
+        backfill_text_features(config)
+
+    db = open_db(config)
+    profile = configured_text_profile(config)
+    path = manifest_path(config, profile)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["view_contract_version"] == TEXT_VIEW_CONTRACT_VERSION
+    assert payload["views"] == list(TEXT_VIEWS)
+
+    payload["views"] = [view for view in TEXT_VIEWS if view != "mood"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert resolve_ready_text_profile(config, db) is None
 
 
 def test_full_backfill_prunes_features_for_deleted_films(
@@ -285,7 +340,7 @@ def test_full_backfill_repairs_duplicate_feature_ids(
     table = db.open_table(profile.table_name)
     duplicate = table.search().limit(1).to_list()[0]
     table.add([duplicate])
-    assert table.count_rows() == 5
+    assert table.count_rows() == 6
 
     with patch(
         "pipeline.index.backfill_text.embed_semantic_documents",
@@ -294,7 +349,7 @@ def test_full_backfill_repairs_duplicate_feature_ids(
         result = backfill_text_features(config)
 
     embed.assert_not_called()
-    assert db.open_table(profile.table_name).count_rows() == 4
+    assert db.open_table(profile.table_name).count_rows() == 5
     assert result.activated is True
 
 

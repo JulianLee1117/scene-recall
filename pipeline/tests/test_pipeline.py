@@ -190,6 +190,12 @@ def test_run_pipeline_reuses_cached_dialogue(
         json.dumps([{"start": 0.0, "end": 1.0, "text": "Cached"}]),
         encoding="utf-8",
     )
+    from pipeline.ingest.dialogue import _dialogue_source
+
+    (film.asset_dir / "dialogue.manifest.json").write_text(
+        json.dumps(_dialogue_source(film, config), sort_keys=True),
+        encoding="utf-8",
+    )
     call_order: list[str] = []
     mocks, context = _pipeline_mocks(film, shots, call_order)
 

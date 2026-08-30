@@ -4,6 +4,7 @@ Endpoints
 ---------
 GET /search?q=...                   Dense semantic search; {"results": [...]}
 POST /search/recipe                 Typed modular scene-search clauses
+POST /search/recipe/image           Recipe with one uploaded visual clause
 POST /search/image?q=...            Reference composition + optional text
 GET /bookmarks                      List durable saved scenes
 PUT /bookmarks/{unit_id}            Save one indexed scene
@@ -20,7 +21,7 @@ GET /ingest/jobs                    Poll current and completed ingest jobs
 
 Start with::
 
-    uv run uvicorn pipeline.api.main:app --reload
+    uv run uvicorn pipeline.api.main:app --host 127.0.0.1 --port 8000
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -40,18 +42,37 @@ from collections import deque
 from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
-from typing import Annotated, Any, Callable, Iterator, Literal
+from tempfile import NamedTemporaryFile
+from typing import Annotated, Any, Callable, Iterator, Literal, Sequence
 
 from dotenv import load_dotenv
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Path as ApiPath, Query, Request, Response
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Path as ApiPath,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from lancedb.expr import col, lit
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from pipeline.bookmarks import Bookmark, BookmarkStore
 from pipeline.config import VIDEO_EXTENSIONS, Config, load_config
@@ -61,6 +82,7 @@ from pipeline.index.writer import (
     published_film_ids,
     table_names,
 )
+from pipeline.ingest.subtitles import external_srt_is_usable
 from pipeline.search.retrieve import (
     search as _search,
     search_by_image as _search_by_image,
@@ -71,7 +93,7 @@ from pipeline.search.recipe import (
     SearchClause as InternalSearchClause,
     SemanticTextProfileUnavailable,
     SourceReference as InternalSourceReference,
-    search_recipe as _search_recipe,
+    execute_search_recipe as _execute_search_recipe,
 )
 
 
@@ -117,6 +139,40 @@ def _require_search_ready(request: Request) -> None:
         )
 
 
+def _require_writable_runtime_directory(
+    directory: Path,
+    *,
+    purpose: str,
+) -> None:
+    """Fail startup before a native lock can hide a permission problem."""
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        with NamedTemporaryFile(
+            dir=directory,
+            prefix=".scene-recall-write-test-",
+        ) as probe:
+            probe.write(b"ok")
+            probe.flush()
+    except OSError as exc:
+        raise RuntimeError(
+            f"Scene Recall cannot write to its {purpose} directory at "
+            f"{directory}. Start the API with filesystem access to that "
+            f"configured path. Underlying error: {exc}"
+        ) from exc
+
+
+def _preflight_runtime_paths(config: Config) -> None:
+    """Verify every API-owned mutable root before opening native storage."""
+    _require_writable_runtime_directory(
+        config.paths.assets_dir / "db",
+        purpose="database",
+    )
+    _require_writable_runtime_directory(
+        config.paths.state_dir,
+        purpose="user-state",
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Open config and DB on startup; yield; clean up on shutdown.
@@ -126,6 +182,7 @@ async def lifespan(app: FastAPI):
     endpoints should be immediately ready.
     """
     config: Config = load_config()
+    _preflight_runtime_paths(config)
     db = open_db(config)
     # One-time legacy migration plus a correctness check for rows added by a
     # prior interrupted ingest. Search traffic is not accepted until native
@@ -759,8 +816,25 @@ class SearchSourceClause(BaseModel):
         return self
 
 
+class SearchImageClause(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=_RECIPE_CLAUSE_ID_PATTERN,
+    )
+    kind: Literal["image"]
+    facet: Literal["visual"]
+
+
 SearchRecipeClause = Annotated[
     SearchTextClause | SearchSourceClause,
+    Field(discriminator="kind"),
+]
+
+SearchImageRecipeClause = Annotated[
+    SearchTextClause | SearchSourceClause | SearchImageClause,
     Field(discriminator="kind"),
 ]
 
@@ -791,6 +865,150 @@ class SearchRecipeRequest(BaseModel):
         if len(facets) != len(set(facets)):
             raise ValueError("search recipe facets must be unique")
         return self
+
+
+class SearchImageRecipeRequest(BaseModel):
+    """Multipart recipe metadata for exactly one uploaded visual clause."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    clauses: list[SearchImageRecipeClause] = Field(min_length=1, max_length=3)
+    film_ids: list[str] = Field(default_factory=list, max_length=1_000)
+
+    @field_validator("film_ids")
+    @classmethod
+    def normalize_film_ids(cls, values: list[str]) -> list[str]:
+        return list(
+            dict.fromkeys(
+                normalized
+                for value in values
+                if (normalized := value.strip())
+            )
+        )
+
+    @model_validator(mode="after")
+    def require_valid_image_recipe(self) -> "SearchImageRecipeRequest":
+        clause_ids = [clause.id for clause in self.clauses]
+        if len(clause_ids) != len(set(clause_ids)):
+            raise ValueError("search recipe clause IDs must be unique")
+        facets = [clause.facet for clause in self.clauses]
+        if len(facets) != len(set(facets)):
+            raise ValueError("search recipe facets must be unique")
+        image_count = sum(
+            isinstance(clause, SearchImageClause) for clause in self.clauses
+        )
+        if image_count != 1:
+            raise ValueError(
+                "uploaded-image recipes require exactly one image clause"
+            )
+        return self
+
+
+def _internal_recipe_clauses(
+    clauses: Sequence[
+        SearchTextClause | SearchSourceClause | SearchImageClause
+    ],
+    *,
+    uploaded_image: Image.Image | None = None,
+) -> list[InternalSearchClause]:
+    return [
+        InternalSearchClause(
+            clause_id=clause.id,
+            kind=clause.kind,
+            facet=clause.facet,
+            text=clause.text if isinstance(clause, SearchTextClause) else None,
+            source=(
+                InternalSourceReference(
+                    unit_id=clause.source.unit_id,
+                    frame_index=clause.source.frame_index,
+                )
+                if isinstance(clause, SearchSourceClause)
+                else None
+            ),
+            image=(
+                uploaded_image
+                if isinstance(clause, SearchImageClause)
+                else None
+            ),
+        )
+        for clause in clauses
+    ]
+
+
+async def _read_uploaded_reference(upload: UploadFile) -> Image.Image:
+    media_type = (
+        str(upload.content_type or "").partition(";")[0].strip().lower()
+    )
+    if media_type not in _REFERENCE_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail="Use a JPEG, PNG, or WebP reference image",
+        )
+
+    payload_buffer = bytearray()
+    while chunk := await upload.read(_CHUNK_SIZE):
+        if len(payload_buffer) + len(chunk) > _MAX_REFERENCE_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Reference image must be 10 MB or smaller",
+            )
+        payload_buffer.extend(chunk)
+    if not payload_buffer:
+        raise HTTPException(status_code=400, detail="Reference image is empty")
+    return _decode_reference_image(bytes(payload_buffer))
+
+
+async def _run_recipe_execution(
+    request: Request,
+    clauses: list[InternalSearchClause],
+    film_ids: list[str],
+) -> Any:
+    """Execute one validated recipe under the required GPU guard."""
+    config: Config = request.app.state.config
+    db = request.app.state.db
+    uses_serialized_image_work = any(
+        clause.kind == "image" or clause.facet == "composition"
+        for clause in clauses
+    )
+    acquired_slot = False
+    if uses_serialized_image_work:
+        try:
+            request.app.state.image_search_slots.get_nowait()
+            acquired_slot = True
+        except asyncio.QueueEmpty:
+            raise HTTPException(
+                status_code=429,
+                detail="Reference search is busy; try again in a moment",
+            ) from None
+
+    try:
+        return await (
+            _run_serialized_image_work(
+                request,
+                _execute_search_recipe,
+                clauses,
+                db,
+                config,
+                film_ids=film_ids,
+            )
+            if uses_serialized_image_work
+            else asyncio.to_thread(
+                _execute_search_recipe,
+                clauses,
+                db,
+                config,
+                film_ids=film_ids,
+            )
+        )
+    except RecipeSourceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    except RecipeSourceUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except SemanticTextProfileUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    finally:
+        if acquired_slot:
+            request.app.state.image_search_slots.put_nowait(None)
 
 
 # ---------------------------------------------------------------------------
@@ -832,69 +1050,46 @@ async def search_recipe_endpoint(
     """Search one to three explicit, independently evidenced clauses."""
     _require_search_ready(request)
     config: Config = request.app.state.config
-    db = request.app.state.db
-    clauses = [
-        InternalSearchClause(
-            clause_id=clause.id,
-            kind=clause.kind,
-            facet=clause.facet,
-            text=clause.text if isinstance(clause, SearchTextClause) else None,
-            source=(
-                InternalSourceReference(
-                    unit_id=clause.source.unit_id,
-                    frame_index=clause.source.frame_index,
-                )
-                if isinstance(clause, SearchSourceClause)
-                else None
-            ),
-        )
-        for clause in payload.clauses
-    ]
-    uses_composition = any(
-        clause.facet == "composition" for clause in clauses
-    )
-    acquired_slot = False
-    if uses_composition:
-        try:
-            request.app.state.image_search_slots.get_nowait()
-            acquired_slot = True
-        except asyncio.QueueEmpty:
-            raise HTTPException(
-                status_code=429,
-                detail="Reference search is busy; try again in a moment",
-            ) from None
-
-    try:
-        results = await (
-            _run_serialized_image_work(
-                request,
-                _search_recipe,
-                clauses,
-                db,
-                config,
-                film_ids=payload.film_ids,
-            )
-            if uses_composition
-            else asyncio.to_thread(
-                _search_recipe,
-                clauses,
-                db,
-                config,
-                film_ids=payload.film_ids,
-            )
-        )
-    except RecipeSourceNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from None
-    except RecipeSourceUnavailable as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from None
-    except SemanticTextProfileUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from None
-    finally:
-        if acquired_slot:
-            request.app.state.image_search_slots.put_nowait(None)
+    clauses = _internal_recipe_clauses(payload.clauses)
+    execution = await _run_recipe_execution(request, clauses, payload.film_ids)
 
     return {
-        "results": _with_film_titles(request, results),
+        "results": _with_film_titles(request, execution.results),
+        "source_evidence": execution.source_evidence,
+        "display_batch_size": config.retrieval.diversity.page_size,
+    }
+
+
+@app.post("/search/recipe/image")
+async def image_recipe_endpoint(
+    request: Request,
+    recipe: Annotated[str, Form()],
+    image: Annotated[UploadFile, File()],
+) -> dict:
+    """Search a multipart recipe containing one transient uploaded still."""
+    _require_search_ready(request)
+    try:
+        try:
+            payload = SearchImageRecipeRequest.model_validate_json(recipe)
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors(), body=recipe) from exc
+        decoded_image = await _read_uploaded_reference(image)
+        clauses = _internal_recipe_clauses(
+            payload.clauses,
+            uploaded_image=decoded_image,
+        )
+        execution = await _run_recipe_execution(
+            request,
+            clauses,
+            payload.film_ids,
+        )
+    finally:
+        await image.close()
+
+    config: Config = request.app.state.config
+    return {
+        "results": _with_film_titles(request, execution.results),
+        "source_evidence": execution.source_evidence,
         "display_batch_size": config.retrieval.diversity.page_size,
     }
 
@@ -1507,6 +1702,171 @@ def _videos_in_release(root: Path, release: Path) -> list[Path]:
     return videos
 
 
+def _subtitle_files_in_release(root: Path, release: Path) -> list[Path]:
+    """Return safe SRT candidates without following release reparse points."""
+    subtitles: list[Path] = []
+    for directory, child_dirs, filenames in os.walk(release, followlinks=False):
+        directory_path = Path(directory)
+        child_dirs[:] = [
+            name
+            for name in child_dirs
+            if not _is_link_or_junction(directory_path / name)
+        ]
+        for filename in filenames:
+            path = directory_path / filename
+            try:
+                if (
+                    path.suffix.lower() == ".srt"
+                    and path.is_file()
+                    and not path.is_symlink()
+                    and path.resolve().is_relative_to(root)
+                ):
+                    subtitles.append(path)
+            except OSError:
+                continue
+    return subtitles
+
+
+def _select_english_sidecar(
+    incoming_root: Path,
+    source: Path,
+    release_dir: Path | None,
+) -> Path | None:
+    """Choose one source-associated English SRT, failing closed on ambiguity."""
+    if release_dir is None:
+        candidates = [
+            source.with_name(source.stem + suffix)
+            for suffix in (".en.srt", ".eng.srt", ".english.srt", ".srt")
+        ]
+        candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.is_file() and not candidate.is_symlink()
+        ]
+    else:
+        candidates = _subtitle_files_in_release(incoming_root, release_dir)
+    candidates = [
+        candidate for candidate in candidates if external_srt_is_usable(candidate)
+    ]
+    if not candidates:
+        return None
+
+    def label_tokens(label: str) -> set[str]:
+        return {
+            token
+            for token in re.split(r"[^a-z0-9]+", label.casefold())
+            if token
+        }
+
+    def tokens(path: Path) -> set[str]:
+        return label_tokens(path.stem)
+
+    english_markers = {"en", "eng", "english"}
+    alternate_markers = {"commentary", "forced"}
+    accessibility_markers = {"cc", "sdh", "hoh", "hearing", "impaired"}
+    extra_markers = {
+        "bonus",
+        "deleted",
+        "extra",
+        "extras",
+        "featurette",
+        "interview",
+        "sample",
+        "trailer",
+    }
+    foreign_markers = {
+        "arabic", "ara",
+        "chinese", "chi", "zho",
+        "czech", "cze", "ces",
+        "danish", "dan",
+        "dutch", "dut", "nld",
+        "finnish", "fin",
+        "french", "fre", "fra",
+        "german", "ger", "deu",
+        "greek", "gre", "ell",
+        "hebrew", "heb",
+        "hindi", "hin",
+        "hungarian", "hun",
+        "indonesian", "ind",
+        "italian", "ita",
+        "japanese", "jpn",
+        "korean", "kor",
+        "norwegian", "nor",
+        "polish", "pol",
+        "portuguese", "por",
+        "romanian", "rum", "ron",
+        "russian", "rus",
+        "spanish", "spa",
+        "swedish", "swe",
+        "thai", "tha",
+        "turkish", "tur",
+        "ukrainian", "ukr",
+        "vietnamese", "vie",
+    }
+    insignificant_title_tokens = {"a", "an", "and", "of", "the", "to"}
+    source_title, source_year, _source_edition = _release_suggestion(source.name)
+    source_identity = (
+        label_tokens(source_title) - insignificant_title_tokens
+    )
+    if not source_identity:
+        return None
+
+    associated: list[Path] = []
+    descriptors_by_path: dict[Path, set[str]] = {}
+    for path in candidates:
+        candidate_tokens = tokens(path)
+        if not source_identity.issubset(candidate_tokens):
+            continue
+        candidate_years = {
+            int(token)
+            for token in candidate_tokens
+            if re.fullmatch(r"(?:18|19|20)\d{2}", token)
+        }
+        if (
+            source_year is not None
+            and candidate_years
+            and source_year not in candidate_years
+        ):
+            continue
+        descriptors = candidate_tokens - source_identity
+        if not (descriptors & english_markers):
+            continue
+        if descriptors & (alternate_markers | extra_markers | foreign_markers):
+            continue
+        associated.append(path)
+        descriptors_by_path[path] = descriptors
+
+    if not associated:
+        return None
+    if len(associated) == 1:
+        return associated[0]
+
+    # Prefer one ordinary full-dialogue track over an accessibility variant.
+    # Multiple ordinary or multiple accessibility tracks remain ambiguous.
+    standard = [
+        path
+        for path in associated
+        if not (descriptors_by_path[path] & accessibility_markers)
+    ]
+    if len(standard) == 1:
+        return standard[0]
+    return None
+
+
+def _copy_file_no_replace(source: Path, destination: Path) -> None:
+    """Copy a small raw sidecar without replacing an existing peer."""
+    destination_created = False
+    try:
+        with source.open("rb") as source_file, destination.open("xb") as target_file:
+            destination_created = True
+            shutil.copyfileobj(source_file, target_file)
+        shutil.copystat(source, destination)
+    except Exception:
+        if destination_created:
+            destination.unlink(missing_ok=True)
+        raise
+
+
 def _move_file_no_replace(source: Path, destination: Path) -> None:
     """Move a same-volume regular file without ever replacing a peer."""
     if os.name == "nt":
@@ -1730,7 +2090,23 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
             else None
         )
         marker = release_dir / _IMPORTED_RELEASE_MARKER if release_dir else None
+        subtitle_source = _select_english_sidecar(
+            incoming_root,
+            source,
+            release_dir,
+        )
+        subtitle_destination = (
+            destination.with_name(destination.stem + ".en.srt")
+            if subtitle_source is not None
+            else None
+        )
+        if subtitle_destination is not None and subtitle_destination.exists():
+            raise HTTPException(
+                status_code=409,
+                detail=f"A subtitle named {subtitle_destination.name!r} already exists",
+            )
         marker_created = False
+        subtitle_copied = False
         if marker is not None:
             try:
                 with marker.open("x", encoding="utf-8") as marker_file:
@@ -1742,8 +2118,13 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
                     detail="Release was already imported",
                 ) from None
         try:
+            if subtitle_source is not None and subtitle_destination is not None:
+                _copy_file_no_replace(subtitle_source, subtitle_destination)
+                subtitle_copied = True
             _move_file_no_replace(source, destination)
         except Exception:
+            if subtitle_copied and subtitle_destination is not None:
+                subtitle_destination.unlink(missing_ok=True)
             if marker_created and marker is not None:
                 marker.unlink(missing_ok=True)
             raise
@@ -1767,6 +2148,9 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
     return {
         "path": str(destination),
         "filename": destination.name,
+        "subtitle_filename": (
+            subtitle_destination.name if subtitle_destination is not None else None
+        ),
         "job": job,
     }
 

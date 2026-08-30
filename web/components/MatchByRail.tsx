@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type DragEvent } from "react";
+import FacetIcon from "./FacetIcon";
 import { formatTime } from "@/lib/format";
 import {
   FACET_LABELS,
@@ -10,26 +11,30 @@ import {
   matchDraftHasClause,
   readFacetSourceDragOrigin,
   readSceneSourceDrag,
-  recipeClauseCount,
   writeFacetSourceDrag,
   type MatchDraft,
   type MatchDrafts,
   type TextMatchFacet,
 } from "@/lib/searchRecipe";
-import type { RecipeMatchFacet } from "@/types/api";
+import type {
+  RecipeMatchFacet,
+  ResolvedSourceEvidence,
+} from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 const FACET_PLACEHOLDERS: Record<TextMatchFacet, string> = {
-  scene: "Describe what happens…",
-  words: "Type dialogue or visible text…",
-  look: "Describe objects, color, or light…",
-  mood: "Describe the feeling…",
+  scene: "People, objects, actions, setting…",
+  words: "Spoken or visible text…",
+  look: "Color, light, texture, style…",
+  mood: "Feeling or energy…",
 };
 
 interface MatchByRailProps {
-  mainText: string;
+  clauseCount: number;
   drafts: MatchDrafts;
+  sourceEvidence?: Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>;
+  debug?: boolean;
   onActivateText?: (facet: TextMatchFacet) => void;
   onTextChange?: (facet: TextMatchFacet, text: string) => void;
   onSubmitText?: (facet: TextMatchFacet, text: string) => void;
@@ -42,6 +47,54 @@ interface MatchByRailProps {
   ) => void;
   onLimit?: () => void;
   targetFacet?: RecipeMatchFacet;
+}
+
+interface SourceInputCopy {
+  text: string;
+  adapter: string;
+  debugDetail?: string;
+}
+
+const SOURCE_TEXT_VIEW_LABELS: Record<string, string> = {
+  caption: "Scene description",
+  dialogue: "Dialogue",
+  ocr: "On-screen text",
+  facets: "Scene detail",
+  mood: "Mood",
+};
+
+function sourceEvidenceMatches(
+  draft: Extract<MatchDraft, { kind: "source" }>,
+  evidence: ResolvedSourceEvidence | undefined,
+): evidence is ResolvedSourceEvidence {
+  if (!evidence || !("unit_id" in evidence.source)) return false;
+  return (
+    evidence.source.unit_id === draft.source.unit_id &&
+    evidence.source.frame_index === draft.source.frame_index
+  );
+}
+
+function sourceInputCopy(
+  evidence: ResolvedSourceEvidence | undefined,
+): SourceInputCopy | null {
+  const text = evidence?.effective_text?.trim();
+  if (!text || !evidence) return null;
+  const adapter =
+    evidence.adapter === "dialogue+ocr"
+      ? "dialogue + visible text"
+      : evidence.adapter === "caption"
+        ? "generated scene description"
+        : evidence.adapter === "mood"
+          ? "mood + energy"
+          : evidence.adapter;
+  const debugDetail = evidence.evidence
+    .filter((item) => item.type === "text")
+    .map(
+      (item) =>
+        `${SOURCE_TEXT_VIEW_LABELS[item.view] ?? item.view}: ${item.text}`,
+    )
+    .join(" · ");
+  return { text, adapter, debugDetail: debugDetail || undefined };
 }
 
 function SourceReferenceIcon() {
@@ -57,9 +110,30 @@ function SourceReferenceIcon() {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <circle cx="9" cy="10" r="1.5" />
-      <path d="m4 17 4.5-4 3.5 3 2.5-2 5.5 4.5" />
+      <rect x="3" y="6" width="13" height="12" rx="2" />
+      <path d="M7 6V4M12 6V4M7 18v2M12 18v2" />
+      <circle cx="18" cy="16" r="3" />
+      <path d="m20.2 18.2 2 2" />
+    </svg>
+  );
+}
+
+function SourceInfoIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v6" />
+      <path d="M12 7h.01" />
     </svg>
   );
 }
@@ -92,8 +166,10 @@ function dragIsOutside(event: DragEvent<HTMLDivElement>): boolean {
 }
 
 export default function MatchByRail({
-  mainText,
+  clauseCount,
   drafts,
+  sourceEvidence = {},
+  debug = false,
   onActivateText,
   onTextChange,
   onSubmitText,
@@ -109,13 +185,19 @@ export default function MatchByRail({
     useState<RecipeMatchFacet | null>(null);
   const [dragSourceFacet, setDragSourceFacet] =
     useState<RecipeMatchFacet | null>(null);
-  const clauseCount = recipeClauseCount(mainText, drafts);
+  const [inspectingFacet, setInspectingFacet] =
+    useState<RecipeMatchFacet | null>(null);
   const overLimit = clauseCount > MAX_RECIPE_CLAUSES;
 
   useEffect(() => {
     if (!editingFacet || drafts[editingFacet]?.kind === "text") return;
     setEditingFacet(null);
   }, [drafts, editingFacet]);
+
+  useEffect(() => {
+    if (!inspectingFacet || drafts[inspectingFacet]?.kind === "source") return;
+    setInspectingFacet(null);
+  }, [drafts, inspectingFacet]);
 
   const canUseFacet = (facet: RecipeMatchFacet) =>
     matchDraftHasClause(drafts[facet]) ||
@@ -131,6 +213,31 @@ export default function MatchByRail({
     setDragOverFacet(null);
     setDragSourceFacet(null);
   };
+
+  useEffect(() => {
+    if (!dragSourceFacet) return;
+    const outsideRail = (target: EventTarget | null) =>
+      !(target instanceof Element && target.closest(".match-rail"));
+    const handleDocumentDragOver = (event: globalThis.DragEvent) => {
+      if (!outsideRail(event.target) || !event.dataTransfer) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    };
+    const handleDocumentDrop = (event: globalThis.DragEvent) => {
+      if (!outsideRail(event.target)) return;
+      event.preventDefault();
+      onRemove?.(dragSourceFacet);
+      setDragOverFacet(null);
+      setDragSourceFacet(null);
+    };
+
+    document.addEventListener("dragover", handleDocumentDragOver);
+    document.addEventListener("drop", handleDocumentDrop);
+    return () => {
+      document.removeEventListener("dragover", handleDocumentDragOver);
+      document.removeEventListener("drop", handleDocumentDrop);
+    };
+  }, [dragSourceFacet, onRemove]);
 
   const activateText = (facet: TextMatchFacet) => {
     if (!canUseFacet(facet)) {
@@ -153,20 +260,12 @@ export default function MatchByRail({
   };
 
   return (
-    <section
-      className={`match-rail${dragSourceFacet ? " is-moving-source" : ""}`}
-      aria-labelledby="match-rail-label"
-    >
+    <section className="match-rail" aria-labelledby="match-rail-label">
       <div className="match-rail-heading">
         <span id="match-rail-label">Match by</span>
-        {clauseCount > 0 && (
-          <span
-            className={overLimit ? "is-over-limit" : undefined}
-            title="The main search counts as one"
-          >
-            {clauseCount}/{MAX_RECIPE_CLAUSES}
-          </span>
-        )}
+        <span className={overLimit ? "is-over-limit" : undefined}>
+          Matches can work together
+        </span>
       </div>
 
       <div className="match-tiles">
@@ -178,7 +277,14 @@ export default function MatchByRail({
           const isDragOver = dragOverFacet === facet;
           const isEditing =
             draft?.kind === "text" && editingFacet === facet;
-          const dropCopy = isDragOver
+          const resolvedSourceEvidence =
+            draft?.kind === "source" &&
+            sourceEvidenceMatches(draft, sourceEvidence[facet])
+              ? sourceEvidence[facet]
+              : undefined;
+          const sourceInput = sourceInputCopy(resolvedSourceEvidence);
+          const sourceEvidenceId = `source-input-${facet}`;
+          const dropCopy = isDragOver && canDrop
             ? draft && hasClause
               ? `Replace ${FACET_LABELS[facet]}`
               : dragSourceFacet
@@ -207,30 +313,39 @@ export default function MatchByRail({
               className={tileClass}
               data-facet={facet}
               onDragEnter={(event) => {
-                if (!containsSceneSource(event.dataTransfer)) return;
+                if (
+                  !containsSceneSource(event.dataTransfer) ||
+                  !canDrop
+                ) {
+                  return;
+                }
                 event.preventDefault();
               }}
               onDragOver={(event) => {
                 if (!containsSceneSource(event.dataTransfer)) return;
-                event.preventDefault();
                 const allowed = canAcceptDrop(facet);
                 event.dataTransfer.dropEffect = allowed
                   ? dragSourceFacet
                     ? "move"
                     : "copy"
                   : "none";
+                if (!allowed) {
+                  setDragOverFacet(null);
+                  return;
+                }
+                event.preventDefault();
                 setDragOverFacet((current) =>
                   current === facet ? current : facet,
                 );
               }}
               onDragLeave={(event) => {
-                if (dragIsOutside(event)) {
-                  setDragOverFacet((current) =>
-                    current === facet ? null : current,
-                  );
-                }
+                if (!dragIsOutside(event)) return;
+                setDragOverFacet((current) =>
+                  current === facet ? null : current,
+                );
               }}
               onDrop={(event) => {
+                if (!containsSceneSource(event.dataTransfer)) return;
                 event.preventDefault();
                 const originFacet =
                   readFacetSourceDragOrigin(event.dataTransfer) ??
@@ -254,7 +369,10 @@ export default function MatchByRail({
               }}
             >
               <div className="match-tile-header">
-                <span>{FACET_LABELS[facet]}</span>
+                <span className="match-tile-label">
+                  <FacetIcon facet={facet} size={14} />
+                  <span>{FACET_LABELS[facet]}</span>
+                </span>
                 <span className="match-tile-actions">
                   <button
                     type="button"
@@ -262,8 +380,8 @@ export default function MatchByRail({
                     disabled={!canUse}
                     data-browse-facet={facet}
                     onClick={() => browse(facet)}
-                    aria-label={`Use a scene for ${FACET_LABELS[facet]}`}
-                    title={`Use a scene for ${FACET_LABELS[facet]}`}
+                    aria-label={`Find a scene for ${FACET_LABELS[facet]}`}
+                    title={`Find a scene for ${FACET_LABELS[facet]}`}
                   >
                     <SourceReferenceIcon />
                   </button>
@@ -339,11 +457,30 @@ export default function MatchByRail({
                   )
                 ) : draft?.kind === "source" ? (
                   <div
-                    className={`match-source-drag${draft.display?.keyframeUrl ? " has-thumbnail" : ""}`}
+                    className={`match-source-drag${
+                      draft.display?.keyframeUrl ? " has-thumbnail" : ""
+                    }`}
                     draggable
                     role="group"
-                    aria-label={`${FACET_LABELS[facet]} scene source: ${sourceLabel(draft)}. Drag to move it to another category.`}
-                    title="Drag to move this scene"
+                    tabIndex={0}
+                    data-source-facet={facet}
+                    aria-label={`${FACET_LABELS[facet]} scene source: ${sourceLabel(draft)}. Drag to move it, or drop it outside the categories to remove it.`}
+                    aria-describedby={sourceInput ? sourceEvidenceId : undefined}
+                    title="Drag to move; drop outside the categories to remove"
+                    onBlur={(event) => {
+                      if (
+                        !event.currentTarget.contains(
+                          event.relatedTarget as Node | null,
+                        )
+                      ) {
+                        setInspectingFacet((current) =>
+                          current === facet ? null : current,
+                        );
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setInspectingFacet(null);
+                    }}
                     onDragStart={(event) => {
                       if (
                         !writeFacetSourceDrag(event.dataTransfer, draft, facet)
@@ -351,6 +488,7 @@ export default function MatchByRail({
                         event.preventDefault();
                         return;
                       }
+                      setInspectingFacet(null);
                       setDragSourceFacet(facet);
                       setDragOverFacet(null);
                     }}
@@ -368,6 +506,49 @@ export default function MatchByRail({
                       <strong>{sourceLabel(draft)}</strong>
                       <small>{sourceDetail(draft)}</small>
                     </span>
+                    {sourceInput && (
+                      <>
+                        <span className="match-source-tools">
+                          <button
+                            type="button"
+                            className="match-source-info"
+                            draggable={false}
+                            aria-label={`Inspect ${FACET_LABELS[facet]} source input`}
+                            aria-describedby={sourceEvidenceId}
+                            title={sourceInput.text}
+                            onClick={() =>
+                              setInspectingFacet((current) =>
+                                current === facet ? null : facet,
+                              )
+                            }
+                            onDragStart={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                          >
+                            <SourceInfoIcon />
+                          </button>
+                        </span>
+                        <span
+                          className={`match-source-input${
+                            inspectingFacet === facet ? " is-open" : ""
+                          }`}
+                          id={sourceEvidenceId}
+                          role="tooltip"
+                          title={sourceInput.text}
+                        >
+                          <span>{sourceInput.text}</span>
+                          {debug && (
+                            <small>Input · {sourceInput.adapter}</small>
+                          )}
+                          {debug && sourceInput.debugDetail && (
+                            <small title={sourceInput.debugDetail}>
+                              {sourceInput.debugDetail}
+                            </small>
+                          )}
+                        </span>
+                      </>
+                    )}
                   </div>
                 ) : facet === "composition" ? (
                   <button

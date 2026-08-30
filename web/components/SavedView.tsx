@@ -14,8 +14,8 @@ interface SavedViewProps {
   error: string | null;
   pendingUnitIds: ReadonlySet<string>;
   onShotClick: (shot: SearchResult) => void;
-  onFindSimilar: (shot: SearchResult) => void;
   onUseInSearch: (shot: SearchResult, facet: RecipeMatchFacet) => void;
+  disabledUseFacets?: ReadonlySet<RecipeMatchFacet>;
   onToggleBookmark: (shot: SearchResult) => void;
   onRemoveBookmark: (bookmark: BookmarkRecord) => void;
 }
@@ -26,8 +26,8 @@ export default function SavedView({
   error,
   pendingUnitIds,
   onShotClick,
-  onFindSimilar,
   onUseInSearch,
+  disabledUseFacets,
   onToggleBookmark,
   onRemoveBookmark,
 }: SavedViewProps) {
@@ -82,8 +82,8 @@ export default function SavedView({
                   showRank={false}
                   debug={false}
                   onClick={onShotClick}
-                  onFindSimilar={onFindSimilar}
                   onUseInSearch={onUseInSearch}
+                  disabledUseFacets={disabledUseFacets}
                   onToggleBookmark={onToggleBookmark}
                   bookmarked
                   bookmarkDisabled={
