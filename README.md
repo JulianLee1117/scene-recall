@@ -79,6 +79,8 @@ Keep active downloads separate from finalized source files:
 
 - `V:/scene-recall/incoming/` — downloading or seeding; never ingest here.
 - `V:/scene-recall/films/` — completed, canonically named, immutable sources.
+- `V:/scene-recall/evidence/` — optional operator-managed archive for intact
+  imported releases; the application does not read or clean this directory.
 
 In Windows Disk Management, reserve `V:` for this drive and confirm it is
 mounted before starting the API or an ingest. Create `incoming` once and set it
@@ -95,16 +97,26 @@ inside that release folder are left in place and are not offered as films.
 When a release contains one usable English-marked SRT clearly associated with
 the selected feature, import also preserves it beside the canonical film as
 `Title (Year) [Edition].en.srt`; the original release copy remains in
-`incoming` as raw evidence. If no SRT is safe to select automatically but one
-or more usable candidates remain—either filename-associated with the feature
-or carrying a generic English label inside its matching release—**Review &
-add** shows a short dialogue preview and requires choosing one as English or
+`incoming` as raw evidence during import. If no SRT is safe to select
+automatically but usable candidates remain—either filename-associated with
+the feature or carrying a generic English label inside its matching
+release—**Review & add** shows a short dialogue preview and requires choosing
+one as English or
 explicitly skipping subtitles before import. Multiple candidates remain
 separate choices; the backend rechecks the selection before moving the film.
 Skipped, malformed, oversized, trivial, promo-only, forced, commentary,
 extra-associated, or
 foreign-marked SRTs stay in the release and are not promoted to canonical
 dialogue evidence.
+
+After the canonical film has published successfully and the torrent is no
+longer active, an operator may move the entire marked release directory intact
+from `incoming` into archival storage such as
+`V:/scene-recall/evidence/imported-releases/`. This is a manual preservation
+step, not application-managed cleanup: keep the `.scene-recall-imported`
+marker and every raw subtitle track together, and do not delete timestamped
+evidence merely to reclaim space. Without an external archive, leave the
+release in `incoming`.
 
 Ingestion is FIFO and runs one film at a time in an isolated, low-priority
 child process. The Films screen polls only while work is active; completed

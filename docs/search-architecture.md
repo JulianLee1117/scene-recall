@@ -73,6 +73,8 @@ future derivations:
 
 - source identity, hash, and path;
 - a selected raw external subtitle sidecar when the release provides one;
+- raw release subtitle copies retained in their imported directory, whether
+  still in staging or moved intact to an operator-managed evidence archive;
 - shot and time boundaries;
 - extracted frames and media recipes;
 - reconstructable clip ranges.
@@ -150,6 +152,14 @@ decision fails before the film or subtitle is moved; the server recomputes the
 eligible set and accepts only an exact member, never an arbitrary
 browser-supplied path. Multiple candidates are not merged or guessed between.
 Skipping leaves every release SRT untouched in `incoming`.
+
+Intake and ingestion never delete or automatically archive a release
+directory. After its canonical film is published and downloading or seeding
+has ended, an operator may move the entire marked release directory intact to
+external archival storage. That archive is preservation material rather than
+a configured runtime input: search and reingestion use the canonical film and
+selected sidecar in `films`, while the archive retains the import marker and
+raw timestamped tracks for provenance and recovery.
 
 A shared, non-destructive content floor rejects malformed, oversized, trivial,
 and promo-only external SRTs both at intake and dialogue resolution; it is not

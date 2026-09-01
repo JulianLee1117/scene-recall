@@ -25,12 +25,28 @@ hands-on use at representative viewport sizes.
 - [ ] Bookmark actions and playback from both result cards and the player.
 - [ ] Desktop and narrow viewport layout, including drag targets and overflow.
 
-### Discovery evaluation baseline (2026-08-31)
+### Expanded-library batch closeout (2026-09-01)
+
+- The library now contains 38 indexed films and 45,980 shots. Pulp Fiction's
+  1,330-shot ingest completed after one title card used an explicitly
+  prompt-versioned no-transcription fallback; its other 1,329 annotations use
+  the normal profile.
+- Eleven completed release folders were moved intact from `incoming` to
+  `V:/scene-recall/evidence/imported-releases/`. No raw release or timestamped
+  subtitle evidence was deleted.
+- The complete Framing cache is active across the 116,962-frame generation;
+  the post-batch reconciliation reused 79,182 descriptors and embedded 37,780.
+- Wild Strawberries now uses a reviewed 941-cue English SRT aligned to its
+  embedded PGS track. A targeted cached reingest replaced the Swedish Whisper
+  text, and an exact Words query returns the repaired dialogue first.
+
+### Pre-expansion discovery evaluation baseline (2026-08-31)
 
 - The bounded discovery rank is active for ordinary unscoped search. On the
-  current 27-film library, `nature` improved from 4 to 7 films in the first 12
-  and from 10 to 13 in the first 48. It is a soft repeat cost, not a one-per-film
-  quota, so multiple genuinely strong scenes from one film remain eligible.
+  then-current 27-film library, `nature` improved from 4 to 7 films in the
+  first 12 and from 10 to 13 in the first 48. It is a soft repeat cost, not a
+  one-per-film quota, so multiple genuinely strong scenes from one film remain
+  eligible.
 - The same bounded repeat rank is active for unscoped modular recipes without
   a mandatory uploaded-image or Framing gate. For Tree of Life beach source
   unit `61ff742b..._1313`, the bounded set already contained 168 eligible
@@ -54,19 +70,29 @@ hands-on use at representative viewport sizes.
 
 ## Ordered next priorities
 
-1. Evaluate representative real-library searches and classify misses as
-   candidate recall, ordering, or missing evidence.
-2. Design one unified result-control surface that subsumes the current movie
-   scope instead of accumulating standalone switches. Use the evaluation to
-   decide which backend-owned controls are justified for relevance versus
-   cross-film discovery, near-duplicate suppression, and film inclusion; keep
-   advanced choices behind one calm surface and preserve a strong default.
+1. Close the expanded-library merge gate: finish the manual interaction
+   checklist, smoke-test playback and search for the newly indexed films,
+   rerun the release checks, and review the final diff.
+2. Human-grade 10-15 representative main-text, Scene, Words, Mood, uploaded
+   Look, and Framing searches on the 38-film library. Classify misses as
+   candidate recall, final ordering, same-moment duplication, or missing
+   evidence, and record cold/warm latency.
 3. Reduce measured retrieval and hydration overhead without changing ranking.
    Start with lightweight candidate/evidence rows, hydrate final scenes once,
    and warm Qwen at API startup; remeasure before considering ANN.
-4. Expand and human-grade the grounded Match Cut shadow experiment before any
-   product activation.
-5. Add a versioned narrative evidence profile only if the evaluation proves
+4. Design one unified result-control surface that subsumes the current movie
+   scope instead of accumulating standalone switches. Use the evaluation to
+   decide which backend-owned controls are justified for relevance versus
+   cross-film discovery, near-duplicate grouping, and film inclusion; keep
+   advanced choices behind one calm surface and preserve a strong default.
+5. Replace the API-memory ingestion queue with a durable standalone worker
+   before the next large batch. Preserve serialized GPU access and resumable,
+   profile-scoped caches; this boundary change requires an ADR, architecture
+   contract update, and matching README commands.
+6. Expand and human-grade the grounded Match Cut shadow experiment before any
+   product activation. Add exact-frame refinement only if its frozen quality
+   and latency gates pass; keep Motion Match separate.
+7. Add a versioned narrative evidence profile only if the evaluation proves
    that contextual evidence is missing.
 
 The Match Cut item is the next material retrieval experiment already admitted
