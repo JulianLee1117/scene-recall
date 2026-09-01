@@ -17,6 +17,22 @@
 Exit gate: automated checks pass and the core interface is confirmed through
 hands-on use at representative viewport sizes.
 
+### Next-session handoff
+
+This manual pass is the first task after restarting the project. Start the API
+and frontend with the README commands, complete every interaction below with
+the user at desktop and narrow widths, and record any concrete failure before
+changing code. If all checks pass, fetch `origin`, confirm
+`prototype/modular-search` is still based directly on `origin/master`, and ask
+the user to approve the recommended fast-forward merge into `master`. Do not
+hold the merge for the later 10–15-query relevance study; that work belongs on
+a fresh branch after this stable baseline lands.
+
+After the manual result is resolved—merged or explicitly deferred—delete this
+file and remove its pointer from `AGENTS.md` in the same cleanup commit. If the
+remaining post-merge priorities are still useful, move them into a newly
+scoped plan before deleting this handoff; do not leave a stale merge checklist.
+
 ### Manual interaction checklist
 
 - [ ] Main and facet text search: submit, edit, blur, Enter, and Escape.
