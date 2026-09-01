@@ -184,9 +184,10 @@ def test_load_config_retrieval(tmp_path):
     assert cfg.retrieval.weights.lex == pytest.approx(0.2)
     assert cfg.retrieval.candidate_limit == 200
     assert cfg.retrieval.result_window == 48
-    assert cfg.retrieval.max_result_limit == 100
+    assert cfg.retrieval.max_result_limit == 200
     assert cfg.retrieval.diversity.page_size == 12
     assert cfg.retrieval.diversity.film_results_per_page_target == 4
+    assert cfg.retrieval.diversity.film_repeat_rank_strength == pytest.approx(32)
 
 
 def test_load_config_migrates_legacy_hard_film_cap(tmp_path):
@@ -205,6 +206,19 @@ def test_load_config_migrates_legacy_hard_film_cap(tmp_path):
 
     assert cfg.retrieval.diversity.page_size == 12
     assert cfg.retrieval.diversity.film_results_per_page_target == 3
+    assert cfg.retrieval.diversity.film_repeat_rank_strength == pytest.approx(32)
+
+
+def test_load_config_rejects_negative_film_repeat_rank_strength(tmp_path):
+    raw = yaml.safe_load(textwrap.dedent(MINIMAL_CONFIG))
+    raw["retrieval"]["diversity"]["film_repeat_rank_strength"] = -1
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    from pipeline.config import load_config
+
+    with pytest.raises(ValueError, match="film_repeat_rank_strength"):
+        load_config(cfg_file)
 
 
 # ---------------------------------------------------------------------------

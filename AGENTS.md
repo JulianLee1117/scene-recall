@@ -4,6 +4,9 @@
 - `docs/search-architecture.md` is the current architecture contract.
 - `docs/decisions/` contains historical rationale, not current specification.
   Read relevant records before changing a boundary.
+- `docs/current-work.md` is the temporary execution plan. It never overrides
+  the README, architecture contract, or ADRs. Remove it and this pointer when
+  the plan is complete.
 - A material architecture change must update the architecture contract and add
   or supersede an accepted ADR in the same work. Update the README only when
   runnable behavior or commands change.

@@ -254,25 +254,33 @@ reingesting films or calling the hosted annotator.
 
 Once more than one film is indexed, use the compact **All movies** control to
 search one movie, several movies, or the whole library. The picker gains title
-search automatically as the library grows. The same compact control row
-switches between **All scenes** and **Best per movie** for the movies already
-represented in the returned window; it does not force an irrelevant result
-from every indexed movie. Search uses bounded ranked candidate and result
-windows, not a minimum-similarity cutoff, so a globally uncompetitive movie
-may be absent; select that movie in **All movies** when complete movie-specific
-recall matters.
-The responsive grid shows at least three complete rows, expands its initial
-window to fill the available viewport, and can reveal more of the 48-result
-production window.
+search automatically as the library grows. Search uses bounded ranked
+candidate and result windows, not a minimum-similarity cutoff, so a globally
+uncompetitive movie may be absent; select that movie in **All movies** when
+you want the ranking scoped entirely to that movie.
+The responsive grid shows at least three complete rows and expands its initial
+display to fill the available viewport. **Show more** first reveals the rest of
+the current backend-ranked prefix, then asks the backend for a deeper prefix
+when more eligible scenes exist. The current progressive window is bounded by
+the configured 200-result ceiling; the control does not expose internal batch
+counts. There is one result stream: the browser does not discard
+returned scenes through a separate Best per movie mode.
 
 An unquoted one-word query in the main bar is treated as a broad concept: its
 visual and semantic matches rank without a separate exact-word vote, so an
 incidental subtitle occurrence cannot promote a weak result. Quote the word
 when its literal occurrence matters; multi-word searches retain full-text
 corroboration. Unscoped broad search also uses a deeper bounded candidate pool
-before its passive film-diversity pass, while selected-movie searches preserve
-strict relevance order. This improves discovery without adding an Explore mode
-or forcing one result from every film.
+and defers nearby scenes from the same film until more of the ranking has been
+considered. This 30-second sequence spread never deletes a result. All-movies
+broad search and modular recipes without an uploaded-image or Framing
+candidate gate also apply a finite diminishing cost to repeated results from
+one film. Multiple strong scenes from that film remain eligible; the policy
+neither forces one result per movie nor excludes the dragged scene's movie.
+A movie selection disables cross-film balancing. Main-text and non-image
+modular searches then preserve strict relevance order; image and Framing
+references keep only their existing same-sequence spread. This improves
+discovery without adding another search mode or control.
 
 The main bar remains a broad scene search. **Match by** combines up to three
 inputs across the main bar and the explicit **Scene**, **Words**, **Look**,
@@ -294,27 +302,26 @@ recipe. Clear its compact mode chip to return unchanged; choosing a scene adds
 that source and reruns the combined recipe. Press Enter in a facet's text editor
 to run the current recipe with that explicit constraint.
 
-The main search bar accepts one JPEG, PNG, or WebP through its image button or
-a direct file drop. The still stays visible as a compact main-bar reference and
-automatically searches broad visual similarity. The backend retrieves by
-global appearance, then applies the existing bounded 6x6 spatial-layout
-reranker; those are correlated stages of one visual input, not two fusion votes.
-That visual shortlist is mandatory. Optional main-bar text or category inputs
-can use the other two recipe slots to refine its order, but cannot introduce a
-visually unrelated result.
+The image button and a file dropped on the open search workspace accept one
+JPEG, PNG, or WebP and place it in **Look** by default. Dropping directly on
+**Look** or **Framing** chooses that meaning immediately. The still appears as
+a source card in its category and can be dragged between those two categories
+or removed like any other clue. **Look** retrieves by global PE appearance;
+**Framing** uses the same global candidates plus the bounded 6x6 spatial-layout
+reranker. Either uploaded-image ranking is mandatory, while up to two optional
+text or indexed-scene clues may rerank it without introducing unrelated shots.
 
-The upload is not forced into an arbitrary category. Category boxes continue
-to accept typed text or indexed library scenes for their explicit meaning;
-removing the compact main-bar reference clears the uploaded-image input. The
-image exists only for the request, is never added to the library, and never
-becomes invented Scene, Words, or Mood text.
+The image exists only for the request, is never added to the library, and never
+becomes invented Scene, Words, or Mood evidence. Supporting images in those
+categories would require an explicit, versioned caption/OCR/mood adapter rather
+than silently pretending that the current visual models provide that meaning.
 
-Look and composition use the existing local frame index; composition adds a
+Look and Framing use the existing local frame index; Framing adds a
 learned 6x6 spatial feature grid. A complete optional Framing cache removes
 candidate-image encoding from the interactive query; missing, stale, or
 partial cache data falls back for the whole query to the established live
 reranker. Neither path calls OpenAI or Gemini or requires re-ingestion. Treat
-composition as coarse framing and position similarity, not exact
+Framing as coarse framing and position similarity, not exact
 subject-relation, skeletal-pose, or motion matching.
 
 Hover a result and use its bookmark action to save that source moment. Saved
@@ -347,8 +354,9 @@ editable. Baseline runs require a clean Git worktree; `--allow-dirty` exists
 only for explicitly non-reproducible diagnostics. Local run snapshots live in
 the ignored `pipeline/eval/runs/` directory; later snapshots record the hash of
 their `--judgments-from` input without treating human grading as a code change.
-Use `--limit 100` for candidate-recall experiments; this deeper evaluation
-window is independent from the 48-result production window and the UI's
+Use `--limit 100` for ordinary candidate-recall experiments, or raise it up to
+the configured 200-result ceiling when deeper recall is the subject of the
+evaluation. This controls the recorded ranking independently of the UI's
 viewport-responsive display batches.
 
 To score a Match Cut matcher after it has written a gate-by-gate ranked-results

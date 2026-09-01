@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ResultGrouping } from "@/components/ResultGrid";
 import type {
   RecipeMatchFacet,
   SearchRecipeRequest,
@@ -38,7 +37,9 @@ export function useFacetSourceSearch(selectedFilmIds: readonly string[]) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
-  const [grouping, setGrouping] = useState<ResultGrouping>("all");
+  const [hasMore, setHasMore] = useState(false);
+  const [nextLimit, setNextLimit] = useState<number | null>(null);
+  const [streamKey, setStreamKey] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 
   const clearRequest = useCallback(() => {
@@ -53,7 +54,8 @@ export function useFacetSourceSearch(selectedFilmIds: readonly string[]) {
     setResults([]);
     setError(null);
     setHasSearched(false);
-    setGrouping("all");
+    setHasMore(false);
+    setNextLimit(null);
   }, [clearRequest]);
 
   const open = useCallback(
@@ -76,6 +78,8 @@ export function useFacetSourceSearch(selectedFilmIds: readonly string[]) {
       setResults([]);
       setError(null);
       setHasSearched(false);
+      setHasMore(false);
+      setNextLimit(null);
     },
     [clearRequest],
   );
@@ -84,17 +88,24 @@ export function useFacetSourceSearch(selectedFilmIds: readonly string[]) {
     async (
       scope: readonly string[] = selectedFilmIds,
       nextQuery: string = query,
+      limit?: number,
     ) => {
       const text = nextQuery.trim();
       if (!text) return;
+      const isDeepening = limit !== undefined;
 
       clearRequest();
       const controller = new AbortController();
       abortRef.current = controller;
       setLoading(true);
       setError(null);
-      setHasSearched(false);
-      setResults([]);
+      if (!isDeepening) {
+        setStreamKey((current) => current + 1);
+        setHasSearched(false);
+        setResults([]);
+        setHasMore(false);
+        setNextLimit(null);
+      }
 
       const request: SearchRecipeRequest = {
         clauses: [
@@ -106,6 +117,7 @@ export function useFacetSourceSearch(selectedFilmIds: readonly string[]) {
           },
         ],
         ...(scope.length ? { film_ids: [...scope] } : {}),
+        ...(limit !== undefined ? { limit } : {}),
       };
 
       try {
@@ -119,12 +131,13 @@ export function useFacetSourceSearch(selectedFilmIds: readonly string[]) {
         const data: SearchRecipeResponse = await response.json();
         if (abortRef.current !== controller) return;
         setResults(data.results);
-        setGrouping("all");
+        setHasMore(data.has_more);
+        setNextLimit(data.next_limit);
         setHasSearched(true);
       } catch (reason) {
         if (controller.signal.aborted) return;
         setError(reason instanceof Error ? reason.message : "Search failed");
-        setResults([]);
+        if (!isDeepening) setResults([]);
         setHasSearched(true);
       } finally {
         if (abortRef.current === controller) {
@@ -138,6 +151,11 @@ export function useFacetSourceSearch(selectedFilmIds: readonly string[]) {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  const loadMore = useCallback(() => {
+    if (loading || nextLimit === null) return;
+    void search(selectedFilmIds, query, nextLimit);
+  }, [loading, nextLimit, query, search, selectedFilmIds]);
+
   return {
     facet,
     query,
@@ -145,11 +163,12 @@ export function useFacetSourceSearch(selectedFilmIds: readonly string[]) {
     loading,
     error,
     hasSearched,
-    grouping,
-    setGrouping,
+    hasMore,
+    streamKey,
     open,
     close,
     setQuery,
     search,
+    loadMore,
   };
 }

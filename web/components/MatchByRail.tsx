@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import FacetIcon from "./FacetIcon";
 import { formatTime } from "@/lib/format";
+import { setNativeDragPreview } from "@/lib/nativeDragPreview";
 import {
   FACET_LABELS,
   MATCH_FACETS,
@@ -14,14 +15,18 @@ import {
   writeFacetSourceDrag,
   type MatchDraft,
   type MatchDrafts,
+  type RecipeImageInput,
   type TextMatchFacet,
 } from "@/lib/searchRecipe";
 import type {
+  RecipeImageFacet,
   RecipeMatchFacet,
   ResolvedSourceEvidence,
 } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const IMAGE_SOURCE_MIME = "application/x-scene-recall-image-source";
+const IMAGE_FACETS: readonly RecipeImageFacet[] = ["look", "composition"];
 
 const FACET_PLACEHOLDERS: Record<TextMatchFacet, string> = {
   scene: "People, objects, actions, setting…",
@@ -33,11 +38,12 @@ const FACET_PLACEHOLDERS: Record<TextMatchFacet, string> = {
 interface MatchByRailProps {
   clauseCount: number;
   drafts: MatchDrafts;
+  image?: RecipeImageInput | null;
   sourceEvidence?: Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>;
   debug?: boolean;
   onActivateText?: (facet: TextMatchFacet) => void;
   onTextChange?: (facet: TextMatchFacet, text: string) => void;
-  onSubmitText?: (facet: TextMatchFacet, text: string) => void;
+  onCommitText?: (facet: TextMatchFacet, text: string) => void;
   onRemove?: (facet: RecipeMatchFacet) => void;
   onBrowse?: (facet: RecipeMatchFacet) => void;
   onSource?: (
@@ -45,6 +51,9 @@ interface MatchByRailProps {
     draft: MatchDraft,
     originFacet?: RecipeMatchFacet,
   ) => void;
+  onImageFile?: (file: File, facet: RecipeImageFacet) => void;
+  onMoveImage?: (facet: RecipeImageFacet) => void;
+  onRemoveImage?: () => void;
   onLimit?: () => void;
   targetFacet?: RecipeMatchFacet;
 }
@@ -155,6 +164,18 @@ function containsSceneSource(transfer: DataTransfer): boolean {
   return transfer.types.includes(SCENE_SOURCE_MIME);
 }
 
+function containsFile(transfer: DataTransfer): boolean {
+  return transfer.types.includes("Files");
+}
+
+function containsImageSource(transfer: DataTransfer): boolean {
+  return transfer.types.includes(IMAGE_SOURCE_MIME);
+}
+
+function isImageFacet(facet: RecipeMatchFacet): facet is RecipeImageFacet {
+  return IMAGE_FACETS.includes(facet as RecipeImageFacet);
+}
+
 function dragIsOutside(event: DragEvent<HTMLDivElement>): boolean {
   const bounds = event.currentTarget.getBoundingClientRect();
   return (
@@ -168,23 +189,32 @@ function dragIsOutside(event: DragEvent<HTMLDivElement>): boolean {
 export default function MatchByRail({
   clauseCount,
   drafts,
+  image,
   sourceEvidence = {},
   debug = false,
   onActivateText,
   onTextChange,
-  onSubmitText,
+  onCommitText,
   onRemove,
   onBrowse,
   onSource,
+  onImageFile,
+  onMoveImage,
+  onRemoveImage,
   onLimit,
   targetFacet,
 }: MatchByRailProps) {
   const [editingFacet, setEditingFacet] =
     useState<TextMatchFacet | null>(null);
+  const editingInitialTextRef = useRef("");
+  const closingFacetRef = useRef<TextMatchFacet | null>(null);
   const [dragOverFacet, setDragOverFacet] =
     useState<RecipeMatchFacet | null>(null);
   const [dragSourceFacet, setDragSourceFacet] =
     useState<RecipeMatchFacet | null>(null);
+  const [dragImageFacet, setDragImageFacet] =
+    useState<RecipeImageFacet | null>(null);
+  const [pageSceneDragActive, setPageSceneDragActive] = useState(false);
   const [inspectingFacet, setInspectingFacet] =
     useState<RecipeMatchFacet | null>(null);
   const overLimit = clauseCount > MAX_RECIPE_CLAUSES;
@@ -200,35 +230,66 @@ export default function MatchByRail({
   }, [drafts, inspectingFacet]);
 
   const canUseFacet = (facet: RecipeMatchFacet) =>
+    image?.facet === facet ||
     matchDraftHasClause(drafts[facet]) ||
     (!overLimit && clauseCount < MAX_RECIPE_CLAUSES);
 
-  const canAcceptDrop = (facet: RecipeMatchFacet) => {
+  const canAcceptSceneDrop = (facet: RecipeMatchFacet) => {
     if (dragSourceFacet === facet) return false;
     if (dragSourceFacet) return true;
     return canUseFacet(facet);
   };
 
+  const canAcceptImageDrop = (facet: RecipeMatchFacet) => {
+    if (targetFacet) return false;
+    if (!isImageFacet(facet)) return false;
+    if (dragImageFacet === facet) return false;
+    if (image || matchDraftHasClause(drafts[facet])) return true;
+    return !overLimit && clauseCount < MAX_RECIPE_CLAUSES;
+  };
+
   const clearDragState = () => {
     setDragOverFacet(null);
     setDragSourceFacet(null);
+    setDragImageFacet(null);
+    setPageSceneDragActive(false);
   };
 
   useEffect(() => {
-    if (!dragSourceFacet) return;
-    const outsideRail = (target: EventTarget | null) =>
-      !(target instanceof Element && target.closest(".match-rail"));
+    const handleDocumentDragStart = (event: globalThis.DragEvent) => {
+      if (event.dataTransfer && containsSceneSource(event.dataTransfer)) {
+        setPageSceneDragActive(true);
+      }
+    };
+    const handleDocumentDragFinish = () => setPageSceneDragActive(false);
+
+    document.addEventListener("dragstart", handleDocumentDragStart);
+    document.addEventListener("dragend", handleDocumentDragFinish);
+    document.addEventListener("drop", handleDocumentDragFinish);
+    return () => {
+      document.removeEventListener("dragstart", handleDocumentDragStart);
+      document.removeEventListener("dragend", handleDocumentDragFinish);
+      document.removeEventListener("drop", handleDocumentDragFinish);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!dragSourceFacet && !dragImageFacet) return;
+    const outsideTiles = (target: EventTarget | null) =>
+      !(target instanceof Element && target.closest(".match-tile"));
     const handleDocumentDragOver = (event: globalThis.DragEvent) => {
-      if (!outsideRail(event.target) || !event.dataTransfer) return;
+      if (!outsideTiles(event.target) || !event.dataTransfer) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
     };
     const handleDocumentDrop = (event: globalThis.DragEvent) => {
-      if (!outsideRail(event.target)) return;
+      if (!outsideTiles(event.target)) return;
       event.preventDefault();
-      onRemove?.(dragSourceFacet);
+      if (dragImageFacet) onRemoveImage?.();
+      else if (dragSourceFacet) onRemove?.(dragSourceFacet);
       setDragOverFacet(null);
       setDragSourceFacet(null);
+      setDragImageFacet(null);
     };
 
     document.addEventListener("dragover", handleDocumentDragOver);
@@ -237,15 +298,39 @@ export default function MatchByRail({
       document.removeEventListener("dragover", handleDocumentDragOver);
       document.removeEventListener("drop", handleDocumentDrop);
     };
-  }, [dragSourceFacet, onRemove]);
+  }, [dragImageFacet, dragSourceFacet, onRemove, onRemoveImage]);
 
   const activateText = (facet: TextMatchFacet) => {
     if (!canUseFacet(facet)) {
       onLimit?.();
       return;
     }
+    const draft = drafts[facet];
+    editingInitialTextRef.current = draft?.kind === "text" ? draft.text : "";
+    closingFacetRef.current = null;
     setEditingFacet(facet);
     onActivateText?.(facet);
+  };
+
+  const finishTextEdit = (
+    facet: TextMatchFacet,
+    text: string,
+    action: "blur" | "commit" | "cancel",
+  ) => {
+    const initialText = editingInitialTextRef.current;
+    closingFacetRef.current = facet;
+    setEditingFacet(null);
+
+    if (action === "cancel") {
+      if (text !== initialText) onCommitText?.(facet, initialText);
+      else if (!initialText.trim()) onRemove?.(facet);
+      return;
+    }
+    if (action === "blur" && text === initialText) {
+      if (!text.trim()) onRemove?.(facet);
+      return;
+    }
+    onCommitText?.(facet, text);
   };
 
   const browse = (facet: RecipeMatchFacet) => {
@@ -259,21 +344,31 @@ export default function MatchByRail({
     onBrowse?.(facet);
   };
 
+  const sceneDragActive = pageSceneDragActive || Boolean(dragSourceFacet);
+  const railDragActive = sceneDragActive || Boolean(dragImageFacet);
+
   return (
-    <section className="match-rail" aria-labelledby="match-rail-label">
+    <section
+      className={`match-rail${railDragActive ? " is-drag-active" : ""}`}
+      aria-labelledby="match-rail-label"
+    >
       <div className="match-rail-heading">
         <span id="match-rail-label">Match by</span>
-        <span className={overLimit ? "is-over-limit" : undefined}>
-          Matches can work together
-        </span>
       </div>
 
       <div className="match-tiles">
         {MATCH_FACETS.map((facet) => {
           const draft = drafts[facet];
-          const hasClause = matchDraftHasClause(draft);
+          const hasImage = image?.facet === facet;
+          const hasClause = hasImage || matchDraftHasClause(draft);
           const canUse = canUseFacet(facet);
-          const canDrop = canAcceptDrop(facet);
+          const canDropScene = canAcceptSceneDrop(facet);
+          const canDropImage = canAcceptImageDrop(facet);
+          const canDropActiveSource = dragImageFacet
+            ? canDropImage
+            : sceneDragActive
+              ? canDropScene
+              : false;
           const isDragOver = dragOverFacet === facet;
           const isEditing =
             draft?.kind === "text" && editingFacet === facet;
@@ -284,10 +379,10 @@ export default function MatchByRail({
               : undefined;
           const sourceInput = sourceInputCopy(resolvedSourceEvidence);
           const sourceEvidenceId = `source-input-${facet}`;
-          const dropCopy = isDragOver && canDrop
-            ? draft && hasClause
+          const dropCopy = isDragOver && (canDropScene || canDropImage)
+            ? hasClause
               ? `Replace ${FACET_LABELS[facet]}`
-              : dragSourceFacet
+              : dragSourceFacet || dragImageFacet
                 ? `Move to ${FACET_LABELS[facet]}`
                 : `Use for ${FACET_LABELS[facet]}`
             : null;
@@ -296,11 +391,21 @@ export default function MatchByRail({
             isEditing ? "is-editing" : "",
             draft?.kind === "text" && !isEditing ? "has-text" : "",
             draft?.kind === "source" ? "has-source" : "",
-            dragSourceFacet && canDrop ? "is-drop-ready" : "",
-            isDragOver && canDrop ? "is-drag-over" : "",
+            hasImage ? "has-image" : "",
+            railDragActive && canDropActiveSource
+              ? "is-drop-ready"
+              : "",
+            isDragOver && (canDropScene || canDropImage)
+              ? "is-drag-over"
+              : "",
             dragSourceFacet === facet ? "is-dragging-source" : "",
+            dragImageFacet === facet ? "is-dragging-source" : "",
             targetFacet === facet ? "is-reference-target" : "",
-            !canUse && !hasClause && !(dragSourceFacet && canDrop)
+            !canUse &&
+            !hasClause &&
+            !(
+              railDragActive && canDropActiveSource
+            )
               ? "is-disabled"
               : "",
           ]
@@ -313,19 +418,25 @@ export default function MatchByRail({
               className={tileClass}
               data-facet={facet}
               onDragEnter={(event) => {
-                if (
-                  !containsSceneSource(event.dataTransfer) ||
-                  !canDrop
-                ) {
-                  return;
-                }
-                event.preventDefault();
+                const acceptsScene =
+                  containsSceneSource(event.dataTransfer) && canDropScene;
+                const acceptsImage =
+                  (containsFile(event.dataTransfer) ||
+                    containsImageSource(event.dataTransfer)) &&
+                  canDropImage;
+                if (acceptsScene || acceptsImage) event.preventDefault();
               }}
               onDragOver={(event) => {
-                if (!containsSceneSource(event.dataTransfer)) return;
-                const allowed = canAcceptDrop(facet);
+                const movingImage = containsImageSource(event.dataTransfer);
+                const droppingFile = containsFile(event.dataTransfer);
+                const droppingScene = containsSceneSource(event.dataTransfer);
+                if (!movingImage && !droppingFile && !droppingScene) return;
+                const allowed =
+                  movingImage || droppingFile
+                    ? canAcceptImageDrop(facet)
+                    : canAcceptSceneDrop(facet);
                 event.dataTransfer.dropEffect = allowed
-                  ? dragSourceFacet
+                  ? dragSourceFacet || movingImage
                     ? "move"
                     : "copy"
                   : "none";
@@ -334,6 +445,7 @@ export default function MatchByRail({
                   return;
                 }
                 event.preventDefault();
+                event.stopPropagation();
                 setDragOverFacet((current) =>
                   current === facet ? current : facet,
                 );
@@ -345,8 +457,31 @@ export default function MatchByRail({
                 );
               }}
               onDrop={(event) => {
+                if (containsFile(event.dataTransfer)) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const allowed = canAcceptImageDrop(facet);
+                  const file = allowed ? event.dataTransfer.files.item(0) : null;
+                  clearDragState();
+                  if (!allowed) {
+                    if (isImageFacet(facet) && !targetFacet) onLimit?.();
+                    return;
+                  }
+                  if (file && isImageFacet(facet)) onImageFile?.(file, facet);
+                  return;
+                }
+                if (containsImageSource(event.dataTransfer)) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const allowed = canAcceptImageDrop(facet);
+                  clearDragState();
+                  if (!allowed) return;
+                  if (isImageFacet(facet)) onMoveImage?.(facet);
+                  return;
+                }
                 if (!containsSceneSource(event.dataTransfer)) return;
                 event.preventDefault();
+                event.stopPropagation();
                 const originFacet =
                   readFacetSourceDragOrigin(event.dataTransfer) ??
                   dragSourceFacet ??
@@ -356,7 +491,7 @@ export default function MatchByRail({
                     ? false
                     : originFacet
                       ? true
-                      : canUseFacet(facet);
+                      : canAcceptSceneDrop(facet);
                 const source = allowed
                   ? readSceneSourceDrag(event.dataTransfer, facet)
                   : null;
@@ -389,7 +524,9 @@ export default function MatchByRail({
                     <button
                       type="button"
                       className="match-inline-remove"
-                      onClick={() => onRemove?.(facet)}
+                      onClick={() =>
+                        hasImage ? onRemoveImage?.() : onRemove?.(facet)
+                      }
                       aria-label={`Remove ${FACET_LABELS[facet]} match`}
                       title="Remove"
                     >
@@ -402,6 +539,51 @@ export default function MatchByRail({
               <div className="match-tile-body">
                 {dropCopy ? (
                   <span className="match-drop-copy">{dropCopy}</span>
+                ) : hasImage && image ? (
+                  <div
+                    className="match-source-drag match-image-source has-thumbnail"
+                    data-source-facet={facet}
+                    title="Drag between Look and Framing; drop outside to remove"
+                  >
+                    <div
+                      className="match-source-drag-handle"
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData(IMAGE_SOURCE_MIME, facet);
+                        setNativeDragPreview(event.dataTransfer, {
+                          eyebrow: FACET_LABELS[facet],
+                          title: image.display.label,
+                          detail:
+                            image.facet === "look"
+                              ? "Appearance reference"
+                              : "Layout reference",
+                          imageUrl: image.display.previewUrl,
+                        });
+                        setInspectingFacet(null);
+                        setDragImageFacet(image.facet);
+                        setDragOverFacet(null);
+                      }}
+                      onDragEnd={clearDragState}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={image.display.previewUrl}
+                        alt=""
+                        draggable={false}
+                      />
+                      <span className="match-source-copy">
+                        <strong title={image.display.label}>
+                          {image.display.label}
+                        </strong>
+                        <small>
+                          {image.facet === "look"
+                            ? "Appearance reference"
+                            : "Layout reference"}
+                        </small>
+                      </span>
+                    </div>
+                  </div>
                 ) : draft?.kind === "text" ? (
                   isEditing ? (
                     <div
@@ -414,8 +596,11 @@ export default function MatchByRail({
                         ) {
                           return;
                         }
-                        setEditingFacet(null);
-                        if (!draft.text.trim()) onRemove?.(facet);
+                        if (closingFacetRef.current === facet) {
+                          closingFacetRef.current = null;
+                          return;
+                        }
+                        finishTextEdit(draft.facet, draft.text, "blur");
                       }}
                     >
                       <input
@@ -431,16 +616,10 @@ export default function MatchByRail({
                         onKeyDown={(event) => {
                           if (event.key === "Escape") {
                             event.preventDefault();
-                            setEditingFacet(null);
-                            if (!draft.text.trim()) onRemove?.(facet);
+                            finishTextEdit(draft.facet, draft.text, "cancel");
                           } else if (event.key === "Enter") {
                             event.preventDefault();
-                            setEditingFacet(null);
-                            if (draft.text.trim()) {
-                              onSubmitText?.(draft.facet, draft.text);
-                            } else {
-                              onRemove?.(facet);
-                            }
+                            finishTextEdit(draft.facet, draft.text, "commit");
                           }
                         }}
                       />
@@ -460,9 +639,7 @@ export default function MatchByRail({
                     className={`match-source-drag${
                       draft.display?.keyframeUrl ? " has-thumbnail" : ""
                     }`}
-                    draggable
                     role="group"
-                    tabIndex={0}
                     data-source-facet={facet}
                     aria-label={`${FACET_LABELS[facet]} scene source: ${sourceLabel(draft)}. Drag to move it, or drop it outside the categories to remove it.`}
                     aria-describedby={sourceInput ? sourceEvidenceId : undefined}
@@ -481,38 +658,56 @@ export default function MatchByRail({
                     onKeyDown={(event) => {
                       if (event.key === "Escape") setInspectingFacet(null);
                     }}
-                    onDragStart={(event) => {
-                      if (
-                        !writeFacetSourceDrag(event.dataTransfer, draft, facet)
-                      ) {
-                        event.preventDefault();
-                        return;
-                      }
-                      setInspectingFacet(null);
-                      setDragSourceFacet(facet);
-                      setDragOverFacet(null);
-                    }}
-                    onDragEnd={clearDragState}
                   >
-                    {draft.display?.keyframeUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`${API_URL}${draft.display.keyframeUrl}`}
-                        alt=""
-                        draggable={false}
-                      />
-                    )}
-                    <span className="match-source-copy">
-                      <strong>{sourceLabel(draft)}</strong>
-                      <small>{sourceDetail(draft)}</small>
-                    </span>
+                    <div
+                      className="match-source-drag-handle"
+                      draggable
+                      onDragStart={(event) => {
+                        if (
+                          !writeFacetSourceDrag(
+                            event.dataTransfer,
+                            draft,
+                            facet,
+                          )
+                        ) {
+                          event.preventDefault();
+                          return;
+                        }
+                        setNativeDragPreview(event.dataTransfer, {
+                          eyebrow: FACET_LABELS[facet],
+                          title: sourceLabel(draft),
+                          detail: sourceDetail(draft),
+                          imageUrl: draft.display?.keyframeUrl
+                            ? `${API_URL}${draft.display.keyframeUrl}`
+                            : undefined,
+                        });
+                        setInspectingFacet(null);
+                        setDragSourceFacet(facet);
+                        setDragOverFacet(null);
+                      }}
+                      onDragEnd={clearDragState}
+                    >
+                      {draft.display?.keyframeUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`${API_URL}${draft.display.keyframeUrl}`}
+                          alt=""
+                          draggable={false}
+                        />
+                      )}
+                      <span className="match-source-copy">
+                        <strong title={sourceLabel(draft)}>
+                          {sourceLabel(draft)}
+                        </strong>
+                        <small>{sourceDetail(draft)}</small>
+                      </span>
+                    </div>
                     {sourceInput && (
                       <>
                         <span className="match-source-tools">
                           <button
                             type="button"
                             className="match-source-info"
-                            draggable={false}
                             aria-label={`Inspect ${FACET_LABELS[facet]} source input`}
                             aria-describedby={sourceEvidenceId}
                             title={sourceInput.text}
@@ -521,10 +716,6 @@ export default function MatchByRail({
                                 current === facet ? null : facet,
                               )
                             }
-                            onDragStart={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }}
                           >
                             <SourceInfoIcon />
                           </button>
@@ -556,9 +747,9 @@ export default function MatchByRail({
                     className="match-source-affordance"
                     disabled={!canUse}
                     onClick={() => browse(facet)}
-                    aria-label="Choose or drop a scene for Framing"
+                    aria-label="Choose a scene or drop an image for Framing"
                   >
-                    Drop a scene here
+                    Drop a scene or image here
                   </button>
                 ) : (
                   <button

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
+import heapq
 from itertools import combinations
 import json
 import logging
@@ -42,7 +43,11 @@ from pipeline.index.text_features import (
     resolve_ready_text_profile,
 )
 from pipeline.index.writer import require_visual_encoder_profile, table_names
-from pipeline.ingest.embed import embed_spatial_images, embed_text
+from pipeline.ingest.embed import (
+    embed_pil_images,
+    embed_spatial_images,
+    embed_text,
+)
 from pipeline.ingest.text_embed import embed_semantic_query
 
 
@@ -69,6 +74,12 @@ _MAX_LEXICAL_QUERY_TERMS = 12
 # explicit film scopes and internal recipe clause rankings retain the
 # configured candidate depth.
 _UNSCOPED_BROAD_CANDIDATE_MULTIPLIER = 3
+# Uploaded visual references need a deeper *metadata-only* frame query before
+# unit hydration. The exact Titanic acceptance case recovered 26 of 27 films
+# at 7,200 frame rows, while 4,800 recovered 22; keep the larger measured
+# depth as a fixed latency/memory bound rather than scaling with library size.
+_UNSCOPED_UPLOAD_FRAME_METADATA_DEPTH = 7_200
+_UNSCOPED_UPLOAD_FILM_RESERVE_LIMIT = 12
 # The default is a ranked search window, not a frontend page size. Callers may
 # request a smaller stable prefix or a deeper evaluation window explicitly.
 SEARCH_RESULT_LIMIT = DEFAULT_SEARCH_RESULT_WINDOW
@@ -81,6 +92,11 @@ _RRF_K = 60
 _TEMPORAL_WINDOW_SECONDS = 30.0
 _TEMPORAL_VISUAL_DUP_COSINE = 0.90
 _VISUAL_DUP_COSINE = 0.92
+# Ordinary unscoped discovery softly spreads distinct results from the same
+# short sequence. Keep this separate from both the hard visual-deduplication
+# window above and the reference-image policy's 90-second gap: each is an
+# independent ranking contract even though two currently use 30 seconds.
+_ORDINARY_RESULT_TEMPORAL_GAP_SECONDS = 30.0
 
 _TOKEN_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
 _LEXICAL_STOP_WORDS = frozenset(
@@ -140,6 +156,16 @@ _TEXT_FEATURE_COLUMNS = [
     "unit_id",
     "view",
     "text",
+    "_distance",
+]
+_FRAME_CANDIDATE_COLUMNS = [
+    "frame_id",
+    "film_id",
+    "unit_id",
+    "shot_id",
+    "frame_index",
+    "timestamp",
+    "path",
     "_distance",
 ]
 
@@ -613,6 +639,19 @@ def _cosine_similarity(left: Any, right: Any) -> float | None:
 
 
 def _temporally_close(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return _temporally_close_within(
+        left,
+        right,
+        gap_seconds=_TEMPORAL_WINDOW_SECONDS,
+    )
+
+
+def _temporally_close_within(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    *,
+    gap_seconds: float,
+) -> bool:
     if str(left.get("film_id")) != str(right.get("film_id")):
         return False
     try:
@@ -620,7 +659,7 @@ def _temporally_close(left: dict[str, Any], right: dict[str, Any]) -> bool:
         right_midpoint = (float(right["t_start"]) + float(right["t_end"])) / 2.0
     except (KeyError, TypeError, ValueError):
         return False
-    return abs(left_midpoint - right_midpoint) <= _TEMPORAL_WINDOW_SECONDS
+    return abs(left_midpoint - right_midpoint) <= gap_seconds
 
 
 def _is_duplicate(
@@ -708,6 +747,11 @@ def _frame_image_ranking(
     for unit_id, frame in best_frame_by_unit.items():
         unit = dict(units_by_id[unit_id])
         unit["_distance"] = float(frame["_distance"])
+        # A metadata-only reserve may skip thousands of global frame hits.
+        # Keep that original rank through unit hydration so Look debug and
+        # recipe fusion do not accidentally treat it as the next adjacent hit.
+        if frame.get("_global_rank") is not None:
+            unit["_global_rank"] = frame["_global_rank"]
         unit["_matched_frame"] = {
             "frame_id": frame.get("frame_id"),
             "frame_index": frame.get("frame_index"),
@@ -723,22 +767,52 @@ def _frame_image_ranking(
     return ranked[:candidate_limit]
 
 
-def _frame_search_rows(
+def _collapse_best_frame_per_unit(
+    frame_rows: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep each unit's strongest frame in deterministic global order."""
+    best: list[dict[str, Any]] = []
+    seen_units: set[str] = set()
+    for row in frame_rows:
+        unit_id = str(row.get("unit_id") or row.get("shot_id") or "")
+        if not unit_id or unit_id in seen_units:
+            continue
+        best.append(dict(row))
+        seen_units.add(unit_id)
+    return best
+
+
+def _global_frame_candidate_rows(
     vector: np.ndarray,
     db: lancedb.DBConnection,
-    unit_table: Any,
     film_ids: tuple[str, ...],
     *,
-    candidate_limit: int = _CANDIDATE_LIMIT,
+    candidate_limit: int,
+    cross_film_reserve_limit: int = 0,
 ) -> list[dict[str, Any]]:
-    """Return shot rows ranked by their best frame, or an empty fallback cue.
+    """Return a bounded global base plus one deep candidate per missing film.
 
-    Frame search is independent from the bounded lexical candidate set. Once
-    the nearest frames are known, fetch only their owning units so a frame hit
-    remains eligible even when lexical retrieval did not select that unit.
+    Uploaded, unscoped visual references use a deep metadata projection so
+    repeated frames from prolific units and films do not consume the entire
+    mandatory gate. Only the strongest ``candidate_limit`` unique units plus a
+    bounded missing-film reserve leave this function; consumers hydrate only
+    that small union. Explicit film scopes and non-uploaded callers retain the
+    established three-frames-per-candidate query depth.
     """
-    if "frames" not in table_names(db):
-        return []
+    base_frame_depth = candidate_limit * 3
+    reserve_limit = (
+        min(
+            max(0, int(cross_film_reserve_limit)),
+            _UNSCOPED_UPLOAD_FILM_RESERVE_LIMIT,
+        )
+        if not film_ids
+        else 0
+    )
+    metadata_depth = (
+        max(base_frame_depth, _UNSCOPED_UPLOAD_FRAME_METADATA_DEPTH)
+        if reserve_limit
+        else base_frame_depth
+    )
 
     frame_query = (
         db.open_table("frames")
@@ -750,10 +824,115 @@ def _frame_search_rows(
         frame_query = frame_query.where(film_filter)
     frame_rows = _stable_vector_ranking(
         _rows_in_film_scope(
-            frame_query.limit(candidate_limit * 3).to_list(),
+            frame_query.select(_FRAME_CANDIDATE_COLUMNS)
+            .limit(metadata_depth)
+            .to_list(),
             film_ids,
         ),
-        candidate_limit=candidate_limit * 3,
+        candidate_limit=metadata_depth,
+    )
+    collapsed = _collapse_best_frame_per_unit(frame_rows)
+    for global_rank, row in enumerate(collapsed, start=1):
+        row["_global_rank"] = global_rank
+    base = list(collapsed[:candidate_limit])
+    if not reserve_limit or len(collapsed) <= candidate_limit:
+        return base
+
+    represented_films = {
+        str(row.get("film_id") or "")
+        for row in base
+        if str(row.get("film_id") or "")
+    }
+    reserved_films: set[str] = set()
+    for row in collapsed[candidate_limit:]:
+        film_id = str(row.get("film_id") or "")
+        if (
+            not film_id
+            or film_id in represented_films
+            or film_id in reserved_films
+        ):
+            continue
+        base.append(row)
+        reserved_films.add(film_id)
+        if len(reserved_films) >= reserve_limit:
+            break
+    return base
+
+
+def _reference_spatial_candidate_order(
+    frame_rows: list[dict[str, Any]],
+    *,
+    base_limit: int,
+    cross_film_limit: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Put a bounded cross-film sample inside the calibrated spatial set."""
+    if not frame_rows or base_limit <= 0:
+        return frame_rows, 0
+    base_count = min(base_limit, len(frame_rows))
+    if cross_film_limit <= 0:
+        return frame_rows, base_count
+    spatial_rows = list(frame_rows[:base_count])
+    represented_films = {
+        str(row.get("film_id") or "")
+        for row in spatial_rows
+        if str(row.get("film_id") or "")
+    }
+    selected_ids = {
+        str(row.get("frame_id") or "")
+        for row in spatial_rows
+        if str(row.get("frame_id") or "")
+    }
+    added_films: set[str] = set()
+    for row in frame_rows[base_count:]:
+        film_id = str(row.get("film_id") or "")
+        if (
+            not film_id
+            or film_id in represented_films
+            or film_id in added_films
+        ):
+            continue
+        spatial_rows.append(row)
+        frame_id = str(row.get("frame_id") or "")
+        if frame_id:
+            selected_ids.add(frame_id)
+        added_films.add(film_id)
+        if len(added_films) >= max(0, cross_film_limit):
+            break
+
+    if not added_films:
+        return frame_rows, base_count
+    remainder = [
+        row
+        for row in frame_rows
+        if str(row.get("frame_id") or "") not in selected_ids
+    ]
+    return [*spatial_rows, *remainder], len(spatial_rows)
+
+
+def _frame_search_rows(
+    vector: np.ndarray,
+    db: lancedb.DBConnection,
+    unit_table: Any,
+    film_ids: tuple[str, ...],
+    *,
+    candidate_limit: int = _CANDIDATE_LIMIT,
+    cross_film_reserve_limit: int = 0,
+) -> list[dict[str, Any]]:
+    """Return shot rows ranked by their best frame, or an empty fallback cue.
+
+    Frame search is independent from the bounded lexical candidate set. Once
+    the nearest frames are known, fetch only their owning units so a frame hit
+    remains eligible even when lexical retrieval did not select that unit.
+    """
+    if "frames" not in table_names(db):
+        return []
+
+    frame_rows = _global_frame_candidate_rows(
+        vector,
+        db,
+        film_ids,
+        candidate_limit=candidate_limit,
+        cross_film_reserve_limit=cross_film_reserve_limit,
     )
     if not frame_rows:
         return []
@@ -779,7 +958,7 @@ def _frame_search_rows(
     return _frame_image_ranking(
         frame_rows,
         unit_rows,
-        candidate_limit=candidate_limit,
+        candidate_limit=len(frame_rows),
     )
 
 
@@ -1083,6 +1262,14 @@ def _validated_search_limits(
     return candidate_limit, result_limit
 
 
+def resolve_result_limit(
+    config: Config,
+    result_limit: int | None = None,
+) -> int:
+    """Resolve one public result-window request against the configured cap."""
+    return _validated_search_limits(config, result_limit)[1]
+
+
 def _broad_channel_candidate_limit(
     candidate_limit: int,
     scoped_film_ids: tuple[str, ...],
@@ -1133,6 +1320,76 @@ def _cross_film_candidate_reserve(
         reserved_films.add(film_id)
         if len(reserved_films) >= reserve_limit:
             break
+    return selected
+
+
+def _bounded_film_repeat_rerank(
+    candidates: list[dict[str, Any]],
+    *,
+    result_limit: int,
+    strength: float,
+) -> list[dict[str, Any]]:
+    """Softly defer film repeats with a bounded, saturating rank penalty.
+
+    At each selection, a film's next result has priority
+    ``original_rank + strength * n / (n + 1)``, where ``n`` is the number of
+    already-selected rows from that film. The penalty approaches ``strength``
+    but never exceeds it, so several excellent matches from one film remain
+    competitive and every candidate survives in the full permutation.
+
+    Only each film queue's head can win next, yielding ``O(N log F)`` work for
+    ``N`` selected candidates and ``F`` represented films. Original rank and
+    stable row identity break ties, making every requested prefix authoritative.
+    """
+    if result_limit <= 0 or not candidates:
+        return []
+    if not math.isfinite(strength) or strength < 0:
+        raise ValueError("film repeat rank strength must be finite and non-negative")
+    if strength == 0:
+        return candidates[:result_limit]
+
+    queues: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for original_rank, candidate in enumerate(candidates, start=1):
+        film_id = str(candidate["row"].get("film_id") or "")
+        # A malformed row without film identity must not penalize every other
+        # malformed row as though they belonged to one real film.
+        queue_key = film_id or f"\x00missing-film:{original_rank}"
+        queues.setdefault(queue_key, []).append((original_rank, candidate))
+
+    heap: list[tuple[float, int, str, str, int]] = []
+    for queue_key, queue in queues.items():
+        original_rank, candidate = queue[0]
+        identity = str(candidate["row"].get("unit_id") or original_rank)
+        heapq.heappush(
+            heap,
+            (float(original_rank), original_rank, identity, queue_key, 0),
+        )
+
+    selected: list[dict[str, Any]] = []
+    selected_per_film: Counter[str] = Counter()
+    while heap and len(selected) < result_limit:
+        _priority, _rank, _identity, queue_key, queue_index = heapq.heappop(heap)
+        _original_rank, candidate = queues[queue_key][queue_index]
+        selected.append(candidate)
+        selected_per_film[queue_key] += 1
+
+        next_index = queue_index + 1
+        if next_index >= len(queues[queue_key]):
+            continue
+        next_rank, next_candidate = queues[queue_key][next_index]
+        repeats = selected_per_film[queue_key]
+        penalty = strength * repeats / (repeats + 1)
+        identity = str(next_candidate["row"].get("unit_id") or next_rank)
+        heapq.heappush(
+            heap,
+            (
+                float(next_rank) + penalty,
+                next_rank,
+                identity,
+                queue_key,
+                next_index,
+            ),
+        )
     return selected
 
 
@@ -1208,6 +1465,40 @@ def _progressive_film_diversity(
     return selected
 
 
+def _soft_temporal_spread(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Defer nearby same-film rows while preserving every candidate.
+
+    Candidates are relevance ordered wrappers with their source row under
+    ``row``. The strongest result in each short sequence stays in place;
+    later neighbors move behind every temporally distinct candidate and then
+    backfill in their original relevance order. Applying the pass to the full
+    bounded ranking before slicing keeps progressively requested prefixes
+    stable.
+    """
+    preferred: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    preferred_rows: list[dict[str, Any]] = []
+
+    for candidate in candidates:
+        row = candidate["row"]
+        if any(
+            _temporally_close_within(
+                row,
+                prior,
+                gap_seconds=_ORDINARY_RESULT_TEMPORAL_GAP_SECONDS,
+            )
+            for prior in preferred_rows
+        ):
+            deferred.append(candidate)
+            continue
+        preferred.append(candidate)
+        preferred_rows.append(row)
+
+    return [*preferred, *deferred]
+
+
 def search(
     query: str,
     db: lancedb.DBConnection,
@@ -1217,13 +1508,15 @@ def search(
     result_limit: int | None = None,
     apply_film_diversity: bool | None = None,
     _defer_result_preferences: bool = False,
+    _apply_ordinary_temporal_spread: bool = True,
 ) -> list[dict]:
     """Return a stable hybrid result prefix.
 
     ``_defer_result_preferences`` is an internal recipe boundary: it preserves
     the bounded channel-fused ranking so product-level filtering can run once
-    after independent clause rankings are fused. Public callers retain the
-    established junk, visual-deduplication, and diversity defaults.
+    after independent clause rankings are fused. The ordinary temporal switch
+    lets reference fusion reserve temporal ordering for its separate 90-second
+    policy. Public callers retain the established result preferences.
     """
     candidate_limit, result_limit = _validated_search_limits(
         config,
@@ -1344,7 +1637,16 @@ def search(
         ranked_rows: Iterable[tuple[dict[str, Any], float, float | None]],
     ) -> None:
         seen: set[str] = set()
-        for rank, (row, score, distance) in enumerate(ranked_rows, start=1):
+        for fallback_rank, (row, score, distance) in enumerate(
+            ranked_rows,
+            start=1,
+        ):
+            try:
+                rank = int(row.get("_global_rank", fallback_rank))
+            except (TypeError, ValueError):
+                rank = fallback_rank
+            if rank < 1:
+                rank = fallback_rank
             unit_id = str(row.get("unit_id") or row.get("shot_id") or "")
             if not unit_id or unit_id in seen:
                 continue
@@ -1430,19 +1732,25 @@ def search(
             dedup_candidates.append(row)
 
     # A selected movie is an explicit relevance constraint, so film balancing
-    # is disabled. Unscoped browsing gets a page-wise soft preference whose
-    # relevance backfill can never reduce the number of available results.
+    # is disabled. Ordinary unscoped browsing gets a bounded diminishing-return
+    # rerank; internal recipe rankings defer their product-level policy until
+    # every independent clause has been fused.
     if _defer_result_preferences:
         apply_film_diversity = False
     elif apply_film_diversity is None:
         apply_film_diversity = not bool(scoped_film_ids)
+    if (
+        not _defer_result_preferences
+        and _apply_ordinary_temporal_spread
+        and not scoped_film_ids
+    ):
+        eligible = _soft_temporal_spread(eligible)
     ranked_candidates = (
-        _progressive_film_diversity(
+        _bounded_film_repeat_rerank(
             eligible,
             result_limit=result_limit,
-            page_size=int(config.retrieval.diversity.page_size),
-            per_film_target=int(
-                config.retrieval.diversity.film_results_per_page_target
+            strength=float(
+                config.retrieval.diversity.film_repeat_rank_strength
             ),
         )
         if apply_film_diversity
@@ -1524,8 +1832,14 @@ def _clause_results_from_rows(
             distance = float(row.get("_distance", 1.0))
         except (TypeError, ValueError):
             distance = 1.0
+        try:
+            source_rank = int(row.get("_global_rank", len(results) + 1))
+        except (TypeError, ValueError):
+            source_rank = len(results) + 1
+        if source_rank < 1:
+            source_rank = len(results) + 1
         channel_evidence = _channel_debug(
-            len(results) + 1,
+            source_rank,
             1.0 - distance,
             distance,
         )
@@ -1547,7 +1861,7 @@ def _clause_results_from_rows(
             "keyframe_url": keyframe_url,
             "keyframe_index": keyframe_index,
             "preview_url": f"/media/preview/{shot_id}",
-            "rank": len(results) + 1,
+            "rank": source_rank,
             "debug": {
                 "mode": mode,
                 "final_score": 1.0 - distance,
@@ -1617,6 +1931,40 @@ def search_semantic_views(
     )
 
 
+def _search_look_by_vector(
+    vector: np.ndarray,
+    db: lancedb.DBConnection,
+    config: Config,
+    *,
+    film_ids: Iterable[str] | None = None,
+    result_limit: int | None = None,
+    cross_film_reserve_limit: int = 0,
+    return_candidate_reserve: bool = False,
+) -> list[dict[str, Any]]:
+    """Run a global frame-vector lookup after caller profile validation."""
+    candidate_limit, resolved_result_limit = _validated_search_limits(
+        config,
+        result_limit,
+    )
+    scoped_film_ids = _normalise_film_ids(film_ids)
+    rows = _frame_search_rows(
+        np.asarray(vector, dtype=np.float32),
+        db,
+        db.open_table("units"),
+        scoped_film_ids,
+        candidate_limit=candidate_limit,
+        cross_film_reserve_limit=cross_film_reserve_limit,
+    )
+    return _clause_results_from_rows(
+        rows,
+        channel="img",
+        mode="global_look",
+        result_limit=(
+            len(rows) if return_candidate_reserve else resolved_result_limit
+        ),
+    )
+
+
 def search_look_by_vector(
     vector: np.ndarray,
     db: lancedb.DBConnection,
@@ -1626,24 +1974,55 @@ def search_look_by_vector(
     result_limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Search global frame appearance without spatial-grid reranking."""
-    candidate_limit, resolved_result_limit = _validated_search_limits(
-        config,
-        result_limit,
-    )
     require_visual_encoder_profile(db, config)
-    scoped_film_ids = _normalise_film_ids(film_ids)
-    rows = _frame_search_rows(
-        np.asarray(vector, dtype=np.float32),
+    return _search_look_by_vector(
+        vector,
         db,
-        db.open_table("units"),
-        scoped_film_ids,
-        candidate_limit=candidate_limit,
+        config,
+        film_ids=film_ids,
+        result_limit=result_limit,
     )
-    return _clause_results_from_rows(
-        rows,
-        channel="img",
-        mode="global_look",
-        result_limit=resolved_result_limit,
+
+
+def search_look_by_image(
+    image: Image.Image,
+    db: lancedb.DBConnection,
+    config: Config,
+    *,
+    film_ids: Iterable[str] | None = None,
+    result_limit: int | None = None,
+    _return_candidate_reserve: bool = False,
+) -> list[dict[str, Any]]:
+    """Search an uploaded still by global appearance only.
+
+    This is the image-source adapter for the product's Look facet. It uses
+    the same PE image tower and stored frame-vector space as indexed Look
+    sources, without invoking the Framing spatial-grid reranker.
+    """
+    require_visual_encoder_profile(db, config)
+    vector = embed_pil_images([image], config)[0]
+    scoped_film_ids = _normalise_film_ids(film_ids)
+    return _search_look_by_vector(
+        vector,
+        db,
+        config,
+        film_ids=scoped_film_ids,
+        result_limit=result_limit,
+        **(
+            {
+                "cross_film_reserve_limit": min(
+                    int(config.retrieval.diversity.page_size),
+                    _UNSCOPED_UPLOAD_FILM_RESERVE_LIMIT,
+                )
+            }
+            if not scoped_film_ids
+            else {}
+        ),
+        **(
+            {"return_candidate_reserve": True}
+            if _return_candidate_reserve
+            else {}
+        ),
     )
 
 
@@ -1657,7 +2036,7 @@ def search_look_by_text(
 ) -> list[dict[str, Any]]:
     """Search frames through the visual encoder's paired text tower only."""
     require_visual_encoder_profile(db, config)
-    return search_look_by_vector(
+    return _search_look_by_vector(
         embed_text([query], config)[0],
         db,
         config,
@@ -1677,7 +2056,7 @@ def apply_recipe_result_preferences(
     apply_reference_temporal_spread: bool = False,
     apply_film_diversity: bool | None = None,
 ) -> list[dict[str, Any]]:
-    """Apply normal junk, visual-dedup, and diversity preferences once."""
+    """Apply final junk, deduplication, temporal, and diversity policy once."""
     _candidate_limit, resolved_result_limit = _validated_search_limits(
         config,
         result_limit,
@@ -1734,20 +2113,25 @@ def apply_recipe_result_preferences(
         )
     if apply_film_diversity is None:
         apply_film_diversity = not bool(scoped_film_ids)
+    wrapped = [{"row": result} for result in eligible]
+    if not scoped_film_ids:
+        wrapped = _soft_temporal_spread(wrapped)
     selected = (
         [
             candidate["row"]
-            for candidate in _progressive_film_diversity(
-                [{"row": result} for result in eligible],
+            for candidate in _bounded_film_repeat_rerank(
+                wrapped,
                 result_limit=resolved_result_limit,
-                page_size=int(config.retrieval.diversity.page_size),
-                per_film_target=int(
-                    config.retrieval.diversity.film_results_per_page_target
+                strength=float(
+                    config.retrieval.diversity.film_repeat_rank_strength
                 ),
             )
         ]
         if apply_film_diversity
-        else eligible[:resolved_result_limit]
+        else [
+            candidate["row"]
+            for candidate in wrapped[:resolved_result_limit]
+        ]
     )
     for rank, result in enumerate(selected, start=1):
         result["rank"] = rank
@@ -1812,6 +2196,7 @@ def _reference_frame_candidates(
     film_ids: tuple[str, ...],
     *,
     candidate_limit: int = _CANDIDATE_LIMIT,
+    cross_film_reserve_limit: int = 0,
 ) -> list[dict[str, Any]]:
     """Retrieve global image neighbors, then compare learned spatial grids."""
     started_at = perf_counter()
@@ -1858,20 +2243,12 @@ def _reference_frame_candidates(
         ):
             framing_profile = None
             cache_reason = "query_grid_incompatible"
-    frame_query = (
-        db.open_table("frames")
-        .search(query_global[0], vector_column_name="visual_vec")
-        .metric("cosine")
-    )
-    film_filter = _film_filter(film_ids)
-    if film_filter is not None:
-        frame_query = frame_query.where(film_filter)
-    frame_rows = _stable_vector_ranking(
-        _rows_in_film_scope(
-            frame_query.limit(candidate_limit * 3).to_list(),
-            film_ids,
-        ),
-        candidate_limit=candidate_limit * 3,
+    frame_rows = _global_frame_candidate_rows(
+        query_global[0],
+        db,
+        film_ids,
+        candidate_limit=candidate_limit,
+        cross_film_reserve_limit=cross_film_reserve_limit,
     )
     if not frame_rows:
         _log_framing_query(
@@ -1890,14 +2267,21 @@ def _reference_frame_candidates(
             framing_profile = None
             cache_reason = "profile_changed"
 
-    spatial_shortlist_limit = min(
-        candidate_limit,
-        _REFERENCE_SPATIAL_CANDIDATE_LIMIT,
+    frame_rows, spatial_shortlist_limit = _reference_spatial_candidate_order(
+        frame_rows,
+        base_limit=min(
+            candidate_limit,
+            _REFERENCE_SPATIAL_CANDIDATE_LIMIT,
+        ),
+        cross_film_limit=min(
+            max(0, int(cross_film_reserve_limit)),
+            _UNSCOPED_UPLOAD_FILM_RESERVE_LIMIT,
+        ),
     )
     valid_rows, candidate_images = _reference_valid_rows(
         frame_rows,
         spatial_shortlist_limit=spatial_shortlist_limit,
-        candidate_limit=candidate_limit,
+        candidate_limit=len(frame_rows),
         load_images=framing_profile is None,
     )
 
@@ -1939,7 +2323,7 @@ def _reference_frame_candidates(
             valid_rows, candidate_images = _reference_valid_rows(
                 frame_rows,
                 spatial_shortlist_limit=spatial_shortlist_limit,
-                candidate_limit=candidate_limit,
+                candidate_limit=len(frame_rows),
                 load_images=True,
             )
         else:
@@ -2003,7 +2387,7 @@ def _reference_frame_candidates(
         )
         row["_reference_score"] = float(final_score)
         row["_semantic_score"] = float(semantic_score)
-        row["_semantic_rank"] = index + 1
+        row["_semantic_rank"] = int(row.get("_global_rank", index + 1))
         row["_spatial_score"] = spatial_score
         row["_spatial_rank"] = spatial_ranks.get(index)
 
@@ -2136,11 +2520,19 @@ def _search_by_image_only(
     elif apply_film_diversity is None:
         apply_film_diversity = not bool(scoped_film_ids)
     frame_rows = _reference_frame_candidates(
-        image.convert("RGB"),
+        image,
         db,
         config,
         scoped_film_ids,
         candidate_limit=candidate_limit,
+        cross_film_reserve_limit=(
+            min(
+                int(config.retrieval.diversity.page_size),
+                _UNSCOPED_UPLOAD_FILM_RESERVE_LIMIT,
+            )
+            if not scoped_film_ids
+            else 0
+        ),
     )
     if not frame_rows:
         return []
@@ -2516,7 +2908,20 @@ def search_by_image(
         **(
             {"_defer_result_preferences": True}
             if _defer_result_preferences
-            else {}
+            else {
+                # The image gate owns final reference paging. Its auxiliary
+                # text retriever must remain strict rather than applying the
+                # ordinary broad repeat-rank policy before fusion.
+                "apply_film_diversity": False,
+                # Uploaded-reference fusion owns its established final
+                # 90-second temporal policy. Do not pre-spread its unscoped
+                # text ranking through the ordinary 30-second pass.
+                **(
+                    {"_apply_ordinary_temporal_spread": False}
+                    if not scoped_film_ids
+                    else {}
+                ),
+            }
         ),
     )
     fused_results = _fuse_reference_and_text_results(

@@ -25,7 +25,6 @@ export type TextMatchFacet = (typeof TEXT_MATCH_FACETS)[number];
 
 export const FACET_LABELS: Record<SearchFacet | RecipeImageFacet, string> = {
   all: "Search",
-  visual: "Image",
   scene: "Scene",
   words: "Words",
   look: "Look",
@@ -46,6 +45,7 @@ export interface RecipeImageDisplay {
 
 export interface RecipeImageInput {
   file: File;
+  facet: RecipeImageFacet;
   display: RecipeImageDisplay;
 }
 
@@ -178,7 +178,10 @@ export function recipeClauseCount(
   return (
     (mainText.trim() ? 1 : 0) +
     (mainImage ? 1 : 0) +
-    MATCH_FACETS.filter((facet) => matchDraftHasClause(drafts[facet])).length
+    MATCH_FACETS.filter(
+      (facet) =>
+        facet !== mainImage?.facet && matchDraftHasClause(drafts[facet]),
+    ).length
   );
 }
 
@@ -193,10 +196,15 @@ export function buildRecipeClauses(
     clauses.push({ id: "main", kind: "text", facet: "all", text: trimmedMain });
   }
   if (mainImage) {
-    clauses.push({ id: "main-image", kind: "image", facet: "visual" });
+    clauses.push({
+      id: `facet-${mainImage.facet}`,
+      kind: "image",
+      facet: mainImage.facet,
+    });
   }
 
   MATCH_FACETS.forEach((facet) => {
+    if (facet === mainImage?.facet) return;
     const draft = drafts[facet];
     if (!draft) return;
     if (draft.kind === "source") {

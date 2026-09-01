@@ -550,6 +550,11 @@ def embed_images(paths: list[Path], config: Config) -> np.ndarray:
     return _l2_normalize(arr)
 
 
+def _as_model_image(image: Image.Image) -> Image.Image:
+    """Return an RGB model input without copying an image already in RGB."""
+    return image if image.mode == "RGB" else image.convert("RGB")
+
+
 def embed_pil_images(
     images: list[Image.Image],
     config: Config,
@@ -562,7 +567,7 @@ def embed_pil_images(
     batches: list[np.ndarray] = []
     for start in range(0, len(images), _BATCH_SIZE):
         batch = [
-            image.convert("RGB")
+            _as_model_image(image)
             for image in images[start : start + _BATCH_SIZE]
         ]
         with _MODEL_LOCK, torch.no_grad():
@@ -604,7 +609,7 @@ def embed_spatial_images(
 
     for start in range(0, len(images), _SPATIAL_BATCH_SIZE):
         batch = [
-            image.convert("RGB")
+            _as_model_image(image)
             for image in images[start : start + _SPATIAL_BATCH_SIZE]
         ]
         with _MODEL_LOCK, torch.no_grad():

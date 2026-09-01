@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useId } from "react";
 import UseInSearchMenu from "./UseInSearchMenu";
 import FacetIcon from "./FacetIcon";
 import { FACET_LABELS, writeSceneSourceDrag } from "@/lib/searchRecipe";
+import { setNativeDragPreview } from "@/lib/nativeDragPreview";
 import type {
   RecipeMatchFacet,
   SearchMatch,
@@ -30,7 +31,7 @@ const CHANNEL_LABELS = {
   img: "img",
   txt: "txt",
   lex: "lex",
-  spatial: "pos",
+  spatial: "framing",
 } as const;
 const TEXT_VIEW_LABELS: Record<string, string> = {
   caption: "Visual description",
@@ -85,6 +86,7 @@ export default function ShotCard({
   onToggleBookmark,
 }: ShotCardProps) {
   const [hovered, setHovered] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const debugDescriptionId = useId();
   const displayedRank = shot.rank ?? position;
@@ -96,6 +98,9 @@ export default function ShotCard({
     new Set((shot.matches ?? []).map((match) => FACET_LABELS[match.facet])),
   );
   const sourceAvailable = Number.isInteger(shot.keyframe_index);
+  const canDragSource = Boolean(
+    !sourceReferenceFacet && onUseInSearch && sourceAvailable,
+  );
 
   const handleMouseEnter = useCallback(() => {
     setHovered(true);
@@ -121,19 +126,7 @@ export default function ShotCard({
 
   return (
     <article
-      className={`result-card${debug ? " result-card-debug" : ""}${sourceReferenceFacet ? " is-source-reference-result" : ""}`}
-      draggable={Boolean(
-        !sourceReferenceFacet && onUseInSearch && sourceAvailable,
-      )}
-      onDragStart={(event) => {
-        if (sourceReferenceFacet) {
-          event.preventDefault();
-          return;
-        }
-        if (!writeSceneSourceDrag(event.dataTransfer, shot)) {
-          event.preventDefault();
-        }
-      }}
+      className={`result-card${debug ? " result-card-debug" : ""}${sourceReferenceFacet ? " is-source-reference-result" : ""}${dragging ? " is-dragging" : ""}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -147,7 +140,25 @@ export default function ShotCard({
         aria-label={`Result ${displayedRank}: ${shot.caption}, ${formatTime(evidenceTime)}`}
         aria-describedby={debug ? debugDescriptionId : undefined}
       >
-        <span className="result-card-media">
+        <span
+          className="result-card-media"
+          draggable={canDragSource}
+          onDragStart={(event) => {
+            if (!writeSceneSourceDrag(event.dataTransfer, shot)) {
+              event.preventDefault();
+              return;
+            }
+            handleMouseLeave();
+            setNativeDragPreview(event.dataTransfer, {
+              eyebrow: "Scene",
+              title: shot.film_title ?? filmLabel(shot.film_id),
+              detail: formatTime(evidenceTime),
+              imageUrl: `${API_URL}${shot.keyframe_url}`,
+            });
+            setDragging(true);
+          }}
+          onDragEnd={() => setDragging(false)}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${API_URL}${shot.keyframe_url}`}

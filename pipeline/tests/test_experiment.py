@@ -363,7 +363,7 @@ def test_run_experiment_rejects_limit_above_production_contract(
             _variants()[:1],
             object(),
             config,
-            limit=101,
+            limit=201,
             search_fn=lambda *_args, **_kwargs: [],
             index_state_fn=_stable_index,
             warmup=False,

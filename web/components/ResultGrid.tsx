@@ -9,11 +9,12 @@ const ROWS_PER_REVEAL = 2;
 const VIEWPORT_BOTTOM_GUTTER = 24;
 const EMPTY_UNIT_IDS: ReadonlySet<string> = new Set();
 
-export type ResultGrouping = "all" | "best-per-movie";
-
 interface ResultGridProps {
   results: SearchResult[];
+  streamKey: number;
   revealDisabled?: boolean;
+  hasMore?: boolean;
+  onRequestMore?: () => void;
   onShotClick: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   disabledUseFacets?: ReadonlySet<RecipeMatchFacet>;
@@ -36,7 +37,10 @@ function resolvedColumnCount(grid: HTMLOListElement): number | null {
 
 export default function ResultGrid({
   results,
+  streamKey,
   revealDisabled = false,
+  hasMore = false,
+  onRequestMore,
   onShotClick,
   onUseInSearch,
   disabledUseFacets,
@@ -54,7 +58,7 @@ export default function ResultGrid({
 
   useLayoutEffect(() => {
     setVisibleItemFloor(0);
-  }, [results]);
+  }, [streamKey]);
 
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -109,21 +113,16 @@ export default function ResultGrid({
   );
   const visibleResults = results.slice(0, visibleCount);
   const remainingCount = results.length - visibleResults.length;
-  const nextVisibleCount = Math.min(
-    results.length,
-    visibleCount + ROWS_PER_REVEAL * columnCount,
-  );
-  const nextBatchCount = nextVisibleCount - visibleResults.length;
-  const movieCount = new Set(results.map((result) => result.film_id)).size;
-  const sceneLabel = results.length === 1 ? "scene" : "scenes";
+  const movieCount = new Set(visibleResults.map((result) => result.film_id)).size;
+  const sceneLabel = visibleResults.length === 1 ? "scene" : "scenes";
   const movieLabel = movieCount === 1 ? "movie" : "movies";
 
   return (
     <section className="search-results" aria-label="Ranked search results">
       <header className="result-toolbar">
         <p className="result-count" role="status" aria-live="polite">
-          {results.length} {sceneLabel} <span aria-hidden="true">&middot;</span>{" "}
-          {movieCount} {movieLabel}
+          Showing {visibleResults.length} {sceneLabel}{" "}
+          <span aria-hidden="true">&middot;</span> {movieCount} {movieLabel}
         </p>
       </header>
       <ol
@@ -150,24 +149,28 @@ export default function ResultGrid({
           </li>
         ))}
       </ol>
-      {remainingCount > 0 && (
+      {(remainingCount > 0 || hasMore) && (
         <div className="result-more">
           <button
             type="button"
             className="result-more-button"
             disabled={revealDisabled}
-            onClick={() =>
+            onClick={() => {
               setVisibleItemFloor(
                 (currentCount) =>
-                  Math.max(currentCount, visibleResults.length) +
-                  ROWS_PER_REVEAL * columnCount,
-              )
-            }
-            aria-label={`Show ${nextBatchCount} more ranked ${nextBatchCount === 1 ? "result" : "results"}`}
+                  Math.max(
+                    currentCount,
+                    visibleResults.length + ROWS_PER_REVEAL * columnCount,
+                  ),
+              );
+              if (remainingCount === 0 && hasMore) onRequestMore?.();
+            }}
+            aria-label="Show more ranked results"
           >
-            Show more
+            {revealDisabled && remainingCount === 0 && hasMore
+              ? "Finding more…"
+              : "Show more"}
           </button>
-          <span>{remainingCount} remaining</span>
         </div>
       )}
     </section>

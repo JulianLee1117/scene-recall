@@ -903,8 +903,54 @@ def test_search_collapses_same_subject_repeats_far_apart(
     assert [result["unit_id"] for result in results] == ["hero", "callback"]
 
 
+def test_bounded_film_repeat_rerank_is_soft_deterministic_and_prefix_stable() -> None:
+    from pipeline.search.retrieve import _bounded_film_repeat_rerank
+
+    candidates = [
+        {"row": {"unit_id": f"a-{index:02d}", "film_id": "film-a"}}
+        for index in range(240)
+    ]
+    candidates[3:3] = [
+        {"row": {"unit_id": "b-00", "film_id": "film-b"}},
+        {"row": {"unit_id": "c-00", "film_id": "film-c"}},
+    ]
+
+    strict = _bounded_film_repeat_rerank(
+        candidates,
+        result_limit=len(candidates),
+        strength=0,
+    )
+    complete = _bounded_film_repeat_rerank(
+        candidates,
+        result_limit=len(candidates),
+        strength=32,
+    )
+
+    assert strict == candidates
+    for limit in (12, 48, 96, 200):
+        assert complete[:limit] == _bounded_film_repeat_rerank(
+            candidates,
+            result_limit=limit,
+            strength=32,
+        )
+    assert complete == _bounded_film_repeat_rerank(
+        candidates,
+        result_limit=len(candidates),
+        strength=32,
+    )
+    assert {item["row"]["unit_id"] for item in complete} == {
+        item["row"]["unit_id"] for item in candidates
+    }
+    # The ceiling is soft: several excellent film-a rows still precede weak
+    # alternatives rather than being hard-capped or grouped away.
+    assert [item["row"]["unit_id"] for item in complete[:5]].count("a-00") == 1
+    assert sum(
+        item["row"]["film_id"] == "film-a" for item in complete[:5]
+    ) >= 3
+
+
 def test_search_soft_film_diversity_backfills_by_relevance(config: Config) -> None:
-    """Film variety reorders a page but never suppresses available results."""
+    """A bounded repeat penalty reorders but never suppresses results."""
     from pipeline.search.retrieve import search
 
     config.retrieval.diversity.page_size = 4
@@ -944,13 +990,57 @@ def test_search_soft_film_diversity_backfills_by_relevance(config: Config) -> No
 
     assert [result["unit_id"] for result in results] == [
         "crowded_0",
-        "crowded_1",
         "other_film",
+        "crowded_1",
         "crowded_2",
         "crowded_3",
         "crowded_4",
     ]
     assert len(results) == 6
+
+
+def test_bounded_repeat_rerank_only_applies_to_unscoped_broad_search(
+    config: Config,
+) -> None:
+    """A selected-movie request remains strict relevance order."""
+    from pipeline.search.retrieve import _bounded_film_repeat_rerank, search
+
+    rows = [
+        _make_unit_row(
+            f"shot-{index}",
+            "film-a" if index < 3 else "film-b",
+            caption=f"Distinct moment {index}",
+            searchable_text="distinct moment",
+            t_start=float(index * 100),
+            t_end=float(index * 100 + 2),
+            img_vec=_basis_vec(index),
+            _distance=0.01 + index / 100,
+        )
+        for index in range(6)
+    ]
+    db = _make_hybrid_mock_db(
+        image_rows=rows,
+        text_rows=rows,
+        lexical_rows=[],
+    )
+
+    with (
+        patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()),
+        patch(
+            "pipeline.search.retrieve._bounded_film_repeat_rerank",
+            wraps=_bounded_film_repeat_rerank,
+        ) as bounded_rerank,
+    ):
+        search("moment", db, config, result_limit=6)
+        search(
+            "moment",
+            db,
+            config,
+            film_ids=("film-a", "film-b"),
+            result_limit=6,
+        )
+
+    assert bounded_rerank.call_count == 1
 
 
 def test_unscoped_broad_search_exposes_deeper_cross_film_candidates(
@@ -993,14 +1083,12 @@ def test_unscoped_broad_search_exposes_deeper_cross_film_candidates(
     )
 
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
-        results = search("quiet moment", db, config, result_limit=24)
+        results = search("quiet moment", db, config, result_limit=200)
 
     unit_ids = [result["unit_id"] for result in results]
-    assert unit_ids[:4] == [f"crowded_{index:03d}" for index in range(4)]
-    assert unit_ids[4] == "deeper_other_film"
-    assert unit_ids[5:] == [
-        f"crowded_{index:03d}" for index in range(4, 23)
-    ]
+    assert unit_ids[0] == "crowded_000"
+    assert "deeper_other_film" in unit_ids
+    assert unit_ids.index("deeper_other_film") > 12
 
 
 def test_cross_film_reserve_is_bounded_and_keeps_one_best_missing_film() -> None:
@@ -1033,6 +1121,171 @@ def test_cross_film_reserve_is_bounded_and_keeps_one_best_missing_film() -> None
         "c1",
         "d1",
     ]
+
+
+def test_uploaded_frame_candidates_use_metadata_depth_and_hydrate_only_union(
+    config: Config,
+) -> None:
+    from pipeline.search.retrieve import (
+        _FRAME_CANDIDATE_COLUMNS,
+        _frame_search_rows,
+    )
+
+    frame_rows = [
+        {
+            "frame_id": frame_id,
+            "unit_id": unit_id,
+            "shot_id": unit_id,
+            "film_id": film_id,
+            "frame_index": 0,
+            "timestamp": float(index),
+            "path": f"/{frame_id}.webp",
+            "_distance": index / 100,
+        }
+        for index, (frame_id, unit_id, film_id) in enumerate(
+            (
+                ("a1-0", "a1", "film-a"),
+                ("a1-1", "a1", "film-a"),
+                ("a2-0", "a2", "film-a"),
+                ("b1-0", "b1", "film-b"),
+                ("c1-0", "c1", "film-c"),
+                ("c2-0", "c2", "film-c"),
+                ("d1-0", "d1", "film-d"),
+            ),
+            start=1,
+        )
+    ]
+    unit_rows = [
+        _make_unit_row(unit_id, film_id)
+        for unit_id, film_id in (
+            ("a1", "film-a"),
+            ("a2", "film-a"),
+            ("b1", "film-b"),
+            ("c1", "film-c"),
+            ("d1", "film-d"),
+        )
+    ]
+    db, units, frames = _make_frame_hybrid_mock_db(
+        frame_rows=frame_rows,
+        fallback_image_rows=[],
+        text_rows=[],
+        lexical_rows=[],
+        frame_unit_rows=unit_rows,
+    )
+    # The helper reserves its first scalar unit query for the lexical branch
+    # used by full hybrid-search tests.
+    units.search()
+
+    rows = _frame_search_rows(
+        np.zeros(VEC_DIM, dtype=np.float32),
+        db,
+        units,
+        (),
+        candidate_limit=3,
+        cross_film_reserve_limit=2,
+    )
+
+    assert [row["unit_id"] for row in rows] == ["a1", "a2", "b1", "c1", "d1"]
+    frames._query_chain.select.assert_called_once_with(_FRAME_CANDIDATE_COLUMNS)
+    frames._query_chain.limit.assert_called_once_with(7_200)
+    units._scalar_query_chains[-1].limit.assert_called_once_with(5)
+
+
+def test_uploaded_frame_candidate_expansion_bypasses_explicit_scope() -> None:
+    from pipeline.search.retrieve import _global_frame_candidate_rows
+
+    frame_rows = [
+        {
+            "frame_id": f"a-{index}",
+            "unit_id": f"a-{index}",
+            "shot_id": f"a-{index}",
+            "film_id": "film-a",
+            "_distance": index / 100,
+        }
+        for index in range(5)
+    ]
+    frames = MagicMock()
+    query = _make_query_chain(frame_rows)
+    frames.search.return_value = query
+    db = MagicMock()
+    db.open_table.return_value = frames
+
+    rows = _global_frame_candidate_rows(
+        np.zeros(VEC_DIM, dtype=np.float32),
+        db,
+        ("film-a",),
+        candidate_limit=3,
+        cross_film_reserve_limit=12,
+    )
+
+    assert [row["unit_id"] for row in rows] == ["a-0", "a-1", "a-2"]
+    query.limit.assert_called_once_with(9)
+
+
+def test_look_reserve_preserves_global_rank_through_hydration() -> None:
+    from pipeline.search.retrieve import (
+        _clause_results_from_rows,
+        _frame_image_ranking,
+    )
+
+    row = _make_unit_row("deep-unit", "film-deep")
+    ranked = _frame_image_ranking(
+        [
+            {
+                "frame_id": "deep-frame",
+                "unit_id": "deep-unit",
+                "frame_index": 0,
+                "timestamp": 10.0,
+                "_distance": 0.9,
+                "_global_rank": 4_321,
+            }
+        ],
+        [row],
+    )
+
+    formatted = _clause_results_from_rows(
+        ranked,
+        channel="img",
+        mode="global_look",
+        result_limit=1,
+    )
+
+    assert ranked[0]["_global_rank"] == 4_321
+    assert formatted[0]["rank"] == 4_321
+    assert formatted[0]["debug"]["channels"]["img"]["rank"] == 4_321
+
+
+def test_reference_pagewise_diversity_has_stable_exact_prefixes() -> None:
+    from pipeline.search.retrieve import _progressive_film_diversity
+
+    candidates = [
+        {
+            "row": {"unit_id": f"base-{index}", "film_id": f"film-{index % 7}"},
+            "frame": {"_spatial_score": 0.8},
+        }
+        for index in range(103)
+    ]
+    candidates.extend(
+        {
+            "row": {"unit_id": f"new-{index}", "film_id": f"new-film-{index}"},
+            "frame": {"_spatial_score": 0.6},
+        }
+        for index in range(12)
+    )
+    full = _progressive_film_diversity(
+        candidates,
+        result_limit=len(candidates),
+        page_size=12,
+        per_film_target=4,
+    )
+    for limit in (12, 48, 96):
+        assert full[:limit] == _progressive_film_diversity(
+            candidates,
+            result_limit=limit,
+            page_size=12,
+            per_film_target=4,
+        )
+    assert len(full) == len(candidates)
 
 
 def test_single_all_recipe_preserves_deep_normal_search_diversity(
@@ -1075,16 +1328,15 @@ def test_single_all_recipe_preserves_deep_normal_search_diversity(
     )
 
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
-        normal_results = search("moment", db, config)
+        normal_results = search("moment", db, config, result_limit=200)
         recipe_results = search_recipe(
             [SearchClause("main", "text", "all", text="moment")],
             db,
             config,
+            result_limit=200,
         )
 
-    assert "deep_other_film" in [
-        result["unit_id"] for result in normal_results[:12]
-    ]
+    assert "deep_other_film" in [result["unit_id"] for result in normal_results]
     assert [result["unit_id"] for result in recipe_results] == [
         result["unit_id"] for result in normal_results
     ]
@@ -1205,7 +1457,7 @@ def test_search_deduplicates_channels_and_near_identical_images(
 def test_search_keeps_temporally_adjacent_visually_distinct_results(
     config: Config,
 ) -> None:
-    """Nearby but visually different shots remain eligible in a one-film index."""
+    """Nearby distinct shots are deferred rather than removed."""
     from pipeline.search.retrieve import search
 
     near_a = _make_unit_row(
@@ -1247,7 +1499,7 @@ def test_search_keeps_temporally_adjacent_visually_distinct_results(
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
         results = search("car", db, config)
 
-    assert [result["unit_id"] for result in results] == ["near_a", "near_b", "far"]
+    assert [result["unit_id"] for result in results] == ["near_a", "far", "near_b"]
 
 
 def test_search_only_temporally_suppresses_visually_similar_results(
@@ -1583,7 +1835,7 @@ def test_search_result_window_has_stable_smaller_prefix(config: Config) -> None:
             img_vec=_basis_vec(index),
             _distance=index / 1000,
         )
-        for index in range(60)
+        for index in range(220)
     ]
     db = _make_hybrid_mock_db(
         image_rows=rows,
@@ -1592,20 +1844,19 @@ def test_search_result_window_has_stable_smaller_prefix(config: Config) -> None:
     )
 
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
-        first_page = search("stable", db, config, result_limit=12)
-        full_window = search("stable", db, config)
-        evaluation_window = search("stable", db, config, result_limit=100)
+        prefixes = {
+            limit: search("stable", db, config, result_limit=limit)
+            for limit in (12, 48, 96, 200)
+        }
 
-    assert len(full_window) == 48
-    assert [row["unit_id"] for row in first_page] == [
-        row["unit_id"] for row in full_window[:12]
-    ]
-    assert [row["unit_id"] for row in full_window] == [
-        row["unit_id"] for row in evaluation_window[:48]
-    ]
+    assert len(prefixes[200]) == 200
+    for limit in (12, 48, 96):
+        assert [row["unit_id"] for row in prefixes[limit]] == [
+            row["unit_id"] for row in prefixes[200][:limit]
+        ]
 
 
-def test_search_supports_bounded_top_100_for_evaluation(config: Config) -> None:
+def test_search_supports_bounded_top_200_for_deepening(config: Config) -> None:
     from pipeline.search.retrieve import search
 
     rows = [
@@ -1615,7 +1866,7 @@ def test_search_supports_bounded_top_100_for_evaluation(config: Config) -> None:
             img_vec=_basis_vec(index),
             _distance=index / 1000,
         )
-        for index in range(110)
+        for index in range(210)
     ]
     db = _make_hybrid_mock_db(
         image_rows=rows,
@@ -1624,7 +1875,7 @@ def test_search_supports_bounded_top_100_for_evaluation(config: Config) -> None:
     )
 
     with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
-        assert len(search("moment", db, config, result_limit=100)) == 100
+        assert len(search("moment", db, config, result_limit=200)) == 200
 
 
 def test_search_rejects_invalid_result_limit_before_work(config: Config) -> None:
@@ -1633,9 +1884,9 @@ def test_search_rejects_invalid_result_limit_before_work(config: Config) -> None
     db = MagicMock()
     with (
         patch("pipeline.search.retrieve.embed_text") as embed,
-        pytest.raises(ValueError, match="between 1 and 100"),
+        pytest.raises(ValueError, match="between 1 and 200"),
     ):
-        search("moment", db, config, result_limit=101)
+        search("moment", db, config, result_limit=201)
 
     db.open_table.assert_not_called()
     embed.assert_not_called()
@@ -1737,7 +1988,7 @@ def test_search_by_image_with_text_runs_both_replaceable_retrievers(
         config,
         film_ids=("film_two",),
         exclude_unit_id="source",
-        result_limit=100,
+        result_limit=200,
         requested_text="neon rain",
         deduplicate_visual=False,
         apply_film_diversity=False,
@@ -1747,8 +1998,40 @@ def test_search_by_image_with_text_runs_both_replaceable_retrievers(
         db,
         config,
         film_ids=("film_two",),
-        result_limit=100,
+        result_limit=200,
+        apply_film_diversity=False,
     )
+
+
+def test_unscoped_image_text_constraint_bypasses_broad_repeat_rerank(
+    config: Config,
+) -> None:
+    from pipeline.search.retrieve import search_by_image
+
+    with (
+        patch("pipeline.search.retrieve.require_visual_encoder_profile"),
+        patch(
+            "pipeline.search.retrieve._search_by_image_only",
+            return_value=[{"unit_id": "both", "debug": {"channels": {}}}],
+        ),
+        patch(
+            "pipeline.search.retrieve.search",
+            return_value=[{"unit_id": "both", "debug": {"channels": {}}}],
+        ) as text_search,
+        patch(
+            "pipeline.search.retrieve._reapply_reference_result_preferences",
+            return_value=[],
+        ),
+    ):
+        search_by_image(
+            Image.new("RGB", (32, 18), "black"),
+            MagicMock(),
+            config,
+            text_query="neon rain",
+        )
+
+    assert text_search.call_args.kwargs["apply_film_diversity"] is False
+    assert text_search.call_args.kwargs["_apply_ordinary_temporal_spread"] is False
 
 
 def test_search_by_image_excludes_source_film_before_unscoped_candidates(
@@ -2049,19 +2332,24 @@ def test_search_by_image_blends_semantics_with_aligned_spatial_cells(
     global_query[0, 0] = 1.0
     global_candidates = np.repeat(global_query, 2, axis=0)
 
-    with patch(
-        "pipeline.search.retrieve.embed_spatial_images",
+    query_image = Image.new("RGBA", (64, 36), "navy")
+    spatial_embed = MagicMock(
         side_effect=[
             (global_query, query_grid),
             (global_candidates, candidate_grids),
-        ],
+        ]
+    )
+    with patch(
+        "pipeline.search.retrieve.embed_spatial_images",
+        spatial_embed,
     ):
         results = search_by_image(
-            Image.new("RGB", (64, 36), "navy"),
+            query_image,
             db,
             config,
         )
 
+    assert spatial_embed.call_args_list[0].args[0][0] is query_image
     assert [result["unit_id"] for result in results] == ["second", "first"]
     assert results[0]["debug"]["mode"] == "reference_image"
     assert results[0]["debug"]["channels"]["spatial"]["rank"] == 1
@@ -2263,6 +2551,110 @@ def test_unreadable_spatial_cache_falls_back_for_whole_shortlist(
         and "candidates=2 spatial_candidates=2" in message
         for message in caplog.messages
     )
+
+
+def test_cross_film_framing_expansion_is_spatially_scored_with_cache_live_parity(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    from pipeline.search.retrieve import _reference_frame_candidates
+
+    paths = [tmp_path / f"candidate-{index}.webp" for index in range(5)]
+    for path in paths:
+        Image.new("RGB", (64, 36), "navy").save(path)
+    frame_rows = [
+        {
+            "frame_id": f"{unit_id}-0",
+            "unit_id": unit_id,
+            "shot_id": unit_id,
+            "film_id": film_id,
+            "frame_index": 0,
+            "timestamp": float(index * 100),
+            "path": str(paths[index]),
+            "_distance": 0.01 + index * 0.01,
+        }
+        for index, (unit_id, film_id) in enumerate(
+            (
+                ("a0", "film-a"),
+                ("a1", "film-a"),
+                ("a2", "film-a"),
+                ("b0", "film-b"),
+                ("c0", "film-c"),
+            )
+        )
+    ]
+    frames = MagicMock()
+    frames.search.return_value = _make_query_chain(frame_rows)
+    db = MagicMock()
+    db.list_tables.return_value.tables = ["frames"]
+    db.open_table.return_value = frames
+
+    profile = MagicMock()
+    profile.grid_size = 6
+    profile.feature_dim = 2
+    profile.model_revision = "a" * 40
+    query_global = np.zeros((1, VEC_DIM), dtype=np.float32)
+    query_grid = np.zeros((1, 6, 6, 2), dtype=np.float32)
+    query_grid[..., 0] = 1.0
+    candidate_grids = np.repeat(query_grid, 4, axis=0)
+
+    with (
+        patch("pipeline.search.retrieve._REFERENCE_SPATIAL_CANDIDATE_LIMIT", 2),
+        patch(
+            "pipeline.search.retrieve.resolve_ready_framing_profile",
+            return_value=profile,
+        ),
+        patch(
+            "pipeline.search.retrieve.load_framing_grids",
+            return_value=candidate_grids,
+        ) as load_cache,
+        patch(
+            "pipeline.search.retrieve.embed_spatial_images",
+            return_value=(query_global, query_grid),
+        ),
+    ):
+        cached = _reference_frame_candidates(
+            Image.new("RGB", (64, 36), "navy"),
+            db,
+            config,
+            (),
+            candidate_limit=3,
+            cross_film_reserve_limit=2,
+        )
+
+    with (
+        patch("pipeline.search.retrieve._REFERENCE_SPATIAL_CANDIDATE_LIMIT", 2),
+        patch(
+            "pipeline.search.retrieve.resolve_ready_framing_profile",
+            return_value=None,
+        ),
+        patch(
+            "pipeline.search.retrieve.embed_spatial_images",
+            side_effect=[
+                (query_global, query_grid),
+                (np.repeat(query_global, 4, axis=0), candidate_grids),
+            ],
+        ),
+    ):
+        live = _reference_frame_candidates(
+            Image.new("RGB", (64, 36), "navy"),
+            db,
+            config,
+            (),
+            candidate_limit=3,
+            cross_film_reserve_limit=2,
+        )
+
+    assert [row["unit_id"] for row in cached] == [
+        row["unit_id"] for row in live
+    ]
+    assert len(cached) == 5
+    by_unit = {row["unit_id"]: row for row in cached}
+    assert by_unit["b0"]["_spatial_score"] is not None
+    assert by_unit["c0"]["_spatial_score"] is not None
+    assert by_unit["b0"]["_semantic_rank"] == 4
+    assert by_unit["c0"]["_semantic_rank"] == 5
+    assert load_cache.call_args.args[2] == ["a0-0", "a1-0", "b0-0", "c0-0"]
 
 
 def test_frames_generation_change_after_candidates_disables_cache(
@@ -2493,9 +2885,7 @@ def test_search_by_image_reranks_unique_shots_not_duplicate_frames(
 
     assert [result["unit_id"] for result in results] == ["first", "second"]
     assert len(spatial_embed.call_args_list[1].args[0]) == 2
-    frame_query.limit.assert_called_once_with(
-        config.retrieval.candidate_limit * 3
-    )
+    frame_query.limit.assert_called_once_with(7_200)
 
 
 def test_search_by_image_excludes_source_unit(
@@ -2667,6 +3057,10 @@ def test_api_search_returns_results_dict(config: Config) -> None:
     data = response.json()
     assert "results" in data
     assert data["display_batch_size"] == 12
+    assert data["limit"] == 48
+    assert data["max_limit"] == 200
+    assert data["has_more"] is False
+    assert data["next_limit"] is None
     assert isinstance(data["results"], list)
     assert len(data["results"]) > 0
     result = data["results"][0]
@@ -2681,6 +3075,171 @@ def test_api_search_returns_results_dict(config: Config) -> None:
         "preview_url",
     ):
         assert key in result, f"API result missing key: {key}"
+
+
+def test_api_search_deepening_returns_stable_authoritative_prefixes(
+    config: Config,
+) -> None:
+    """A larger limit replaces the prior prefix and reports bounded progress."""
+    from fastapi.testclient import TestClient
+
+    import pipeline.api.main as api_mod  # noqa: PLC0415
+
+    ranked = [
+        {"unit_id": f"unit-{index:03d}", "film_id": "film-a"}
+        for index in range(200)
+    ]
+
+    def search_prefix(
+        _query: str,
+        _db: MagicMock,
+        _config: Config,
+        **kwargs: object,
+    ) -> list[dict]:
+        return ranked[: int(kwargs["result_limit"])]
+
+    with (
+        patch.object(api_mod, "load_config", return_value=config),
+        patch.object(api_mod, "open_db", return_value=MagicMock()),
+        patch.object(api_mod, "ensure_search_indexes"),
+        patch.object(
+            api_mod,
+            "_search",
+            side_effect=search_prefix,
+        ) as search_mock,
+        patch.object(
+            api_mod,
+            "_with_film_titles",
+            side_effect=lambda _request, rows: rows,
+        ),
+        TestClient(api_mod.app) as client,
+    ):
+        initial = client.get("/search", params={"q": "rain"}).json()
+        deeper = client.get(
+            "/search",
+            params={"q": "rain", "limit": 96},
+        ).json()
+        expanded = client.get(
+            "/search",
+            params={"q": "rain", "limit": 192},
+        ).json()
+        capped = client.get(
+            "/search",
+            params={"q": "rain", "limit": 200},
+        ).json()
+
+    assert [
+        len(initial["results"]),
+        len(deeper["results"]),
+        len(expanded["results"]),
+    ] == [48, 96, 192]
+    assert deeper["results"][:48] == initial["results"]
+    assert expanded["results"][:96] == deeper["results"]
+    assert (initial["has_more"], initial["next_limit"]) == (True, 96)
+    assert (deeper["has_more"], deeper["next_limit"]) == (True, 192)
+    assert (expanded["has_more"], expanded["next_limit"]) == (True, 200)
+    assert len(capped["results"]) == 200
+    assert (capped["has_more"], capped["next_limit"]) == (False, None)
+    assert [
+        call.kwargs["result_limit"] for call in search_mock.call_args_list
+    ] == [49, 97, 193, 200]
+
+
+def test_api_search_rejects_limit_above_configured_cap(
+    config: Config,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    import pipeline.api.main as api_mod  # noqa: PLC0415
+
+    with (
+        patch.object(api_mod, "load_config", return_value=config),
+        patch.object(api_mod, "open_db", return_value=MagicMock()),
+        patch.object(api_mod, "ensure_search_indexes"),
+        patch.object(api_mod, "_search") as search_mock,
+        TestClient(api_mod.app) as client,
+    ):
+        response = client.get(
+            "/search",
+            params={"q": "rain", "limit": 201},
+        )
+
+    assert response.status_code == 422
+    search_mock.assert_not_called()
+
+
+def test_uploaded_look_embeds_once_and_uses_global_vector_search(
+    config: Config,
+) -> None:
+    from pipeline.search.retrieve import search_look_by_image
+
+    image = Image.new("RGBA", (8, 6), "red")
+    vector = np.asarray([[1.0, 0.0]], dtype=np.float32)
+    db = MagicMock()
+
+    with (
+        patch("pipeline.search.retrieve.require_visual_encoder_profile"),
+        patch(
+            "pipeline.search.retrieve.embed_pil_images",
+            return_value=vector,
+        ) as embed,
+        patch(
+            "pipeline.search.retrieve._search_look_by_vector",
+            return_value=[{"unit_id": "match"}],
+        ) as vector_search,
+    ):
+        results = search_look_by_image(
+            image,
+            db,
+            config,
+            film_ids=("film-a",),
+            result_limit=12,
+        )
+
+    embedded_image = embed.call_args.args[0][0]
+    assert embedded_image is image
+    assert embedded_image.mode == "RGBA"
+    assert embed.call_args.args[1] is config
+    np.testing.assert_array_equal(vector_search.call_args.args[0], vector[0])
+    assert vector_search.call_args.args[1:] == (db, config)
+    assert vector_search.call_args.kwargs == {
+        "film_ids": ("film-a",),
+        "result_limit": 12,
+    }
+    assert results == [{"unit_id": "match"}]
+
+
+def test_uploaded_look_can_return_internal_reserve_without_expanding_public_limit(
+    config: Config,
+) -> None:
+    from pipeline.search.retrieve import _search_look_by_vector
+
+    rows = [
+        _make_unit_row(f"unit-{index:03d}", f"film-{index % 20}")
+        for index in range(212)
+    ]
+    with patch(
+        "pipeline.search.retrieve._frame_search_rows",
+        return_value=rows,
+    ):
+        public = _search_look_by_vector(
+            np.zeros(VEC_DIM, dtype=np.float32),
+            MagicMock(),
+            config,
+            result_limit=200,
+            cross_film_reserve_limit=12,
+        )
+        internal = _search_look_by_vector(
+            np.zeros(VEC_DIM, dtype=np.float32),
+            MagicMock(),
+            config,
+            result_limit=200,
+            cross_film_reserve_limit=12,
+            return_candidate_reserve=True,
+        )
+
+    assert len(public) == 200
+    assert len(internal) == 212
 
 
 def test_api_image_search_accepts_raw_image_and_forwards_scope(
@@ -2712,13 +3271,21 @@ def test_api_image_search_accepts_raw_image_and_forwards_scope(
                     ("exclude_unit_id", "source"),
                     ("exclude_film_id", "source_film"),
                     ("q", "neon rain"),
+                    ("limit", "6"),
                 ],
                 content=buffer.getvalue(),
                 headers={"Content-Type": "image/png"},
             )
 
     assert response.status_code == 200
-    assert response.json() == {"results": [], "display_batch_size": 12}
+    assert response.json() == {
+        "results": [],
+        "display_batch_size": 12,
+        "limit": 6,
+        "max_limit": 200,
+        "has_more": False,
+        "next_limit": None,
+    }
     args = image_search.call_args.args
     assert isinstance(args[0], Image.Image)
     assert args[0].mode == "RGB"
@@ -2728,7 +3295,7 @@ def test_api_image_search_accepts_raw_image_and_forwards_scope(
         "film_ids": ["film_one", "film_two"],
         "exclude_unit_id": "source",
         "exclude_film_id": "source_film",
-        "result_limit": 48,
+        "result_limit": 7,
         "text_query": "neon rain",
     }
 
@@ -2810,6 +3377,29 @@ def test_api_image_search_rejects_text_constraint_over_500_chars(
     image_search.assert_not_called()
 
 
+def test_api_image_search_rejects_limit_above_configured_cap(
+    config: Config,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=MagicMock()),
+        patch("pipeline.api.main._search_by_image") as image_search,
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.post(
+                "/search/image",
+                params={"limit": 201},
+                content=b"not decoded",
+                headers={"Content-Type": "image/png"},
+            )
+
+    assert response.status_code == 422
+    image_search.assert_not_called()
+
+
 def test_api_image_search_stream_cap_does_not_require_content_length(
     config: Config,
 ) -> None:
@@ -2878,6 +3468,7 @@ def test_api_search_forwards_repeated_film_scope(config: Config) -> None:
                     ("q", "rain"),
                     ("film_id", "film_one"),
                     ("film_id", "film_two"),
+                    ("limit", "8"),
                 ],
             )
 
@@ -2887,7 +3478,7 @@ def test_api_search_forwards_repeated_film_scope(config: Config) -> None:
         mock_db,
         config,
         film_ids=["film_one", "film_two"],
-        result_limit=48,
+        result_limit=9,
     )
 
 
@@ -2961,6 +3552,10 @@ def test_api_search_survives_optional_film_title_lookup_failure(
     assert response.json() == {
         "results": [result],
         "display_batch_size": 12,
+        "limit": 48,
+        "max_limit": 200,
+        "has_more": False,
+        "next_limit": None,
     }
 
 

@@ -125,13 +125,18 @@ def test_embed_pil_images_accepts_in_memory_images(config: Config) -> None:
     fake = _fake_loader(embed_dim=1024)
     images = [
         Image.new("RGB", (32, 24), color=(20, 40, 60)),
-        Image.new("RGB", (32, 24), color=(80, 100, 120)),
+        Image.new("L", (32, 24), color=120),
     ]
 
     with patch("pipeline.ingest.embed._load_model", return_value=fake):
         result = embed_pil_images(images, config)
 
     assert result.shape == (2, 1024)
+    model_images = fake.encode_images.call_args.args[0]
+    assert [image.mode for image in model_images] == ["RGB", "RGB"]
+    assert [image.size for image in model_images] == [(32, 24), (32, 24)]
+    assert model_images[0] is images[0]
+    assert model_images[1] is not images[1]
     np.testing.assert_allclose(
         np.linalg.norm(result, axis=1),
         1.0,
@@ -153,8 +158,8 @@ def test_embed_spatial_images_returns_position_grid(config: Config) -> None:
         ),
     )
     images = [
-        Image.new("RGB", (32, 24), color=(20, 40, 60)),
-        Image.new("RGB", (32, 24), color=(80, 100, 120)),
+        Image.new("RGBA", (32, 24), color=(20, 40, 60, 80)),
+        Image.new("L", (32, 24), color=120),
     ]
 
     with patch("pipeline.ingest.embed._load_model", return_value=fake):
@@ -164,6 +169,9 @@ def test_embed_spatial_images_returns_position_grid(config: Config) -> None:
         )
 
     assert global_features.shape == (2, 1024)
+    model_images = fake.encode_spatial_images.call_args.args[0]
+    assert [image.mode for image in model_images] == ["RGB", "RGB"]
+    assert [image.size for image in model_images] == [(32, 24), (32, 24)]
     assert spatial_features is not None
     assert spatial_features.shape == (2, 6, 6, 1024)
     np.testing.assert_allclose(

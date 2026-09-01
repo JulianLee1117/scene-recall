@@ -35,9 +35,9 @@ reference image + text (standalone API compatibility)
 
 typed recipe (product UI; one to three total clauses)
   -> explicit text or indexed-scene evidence adapters
-  -> optional query-bound broad-visual upload adapter
+  -> optional query-bound uploaded Look or Framing adapter
   -> one ranking per independent input and reciprocal-rank fusion
-  -> mandatory uploaded-visual or composition gate when present
+  -> mandatory uploaded-image or composition gate when present
   -> final filtering and diversity
 
 result
@@ -195,28 +195,64 @@ winning view and text are returned as evidence.
 
 Deterministic filtering handles unrequested credits, logos, title cards, blank
 frames, and static artifacts. Visual deduplication suppresses near-identical
-evidence, and unscoped searches apply a soft film-diversity preference. Normal
-unscoped broad search retrieves three times the configured per-channel
+evidence. After that hard suppression, ordinary unscoped text and unconstrained
+typed-recipe streams apply a 30-second defer-only temporal spread: nearby
+results from the same film move behind the first available result from each
+competing sequence, but remain as relevance backfill. Explicit film scopes
+preserve strict relevance order.
+
+Normal unscoped broad search retrieves three times the configured per-channel
 candidate depth before fusion so that a film outside a source-heavy top window
-can become eligible through cross-channel agreement and the first-page
-diversity pass. After fusion, it retains the configured candidate prefix plus
-the best deep candidate from each of at most one page's worth of films absent
-from that prefix. This bounded reserve prevents the deeper pool from expanding
-quadratic visual-deduplication work. Explicit film scopes, internal
-multi-clause rankings, and the bounded Framing shortlist keep their established
-candidate depths. Diversity preserves up to the configured per-film target on
-each page and relevance-backfills every unfilled slot; its cumulative target
-relaxes on later pages and never guarantees a result from every film.
+can become eligible through cross-channel agreement. After fusion, it retains
+the configured candidate prefix plus the best deep candidate from each of at
+most one page's worth of films absent from that prefix. This bounded reserve
+prevents the deeper pool from expanding quadratic visual-deduplication work.
+This ordinary unscoped broad stream then uses the bounded repeat-rank policy:
+a film's next candidate has priority
+`original_rank + strength * repeats / (repeats + 1)`. The configured default
+strength of 32 is a measured prototype value, not a universal optimum. The
+finite penalty is deterministic, preserves every eligible result in its full
+permutation, and keeps deeper 12/48/96/200 prefixes exact. Unscoped typed
+recipes without a mandatory uploaded-image or indexed-Framing candidate gate
+apply the same final repeat-rank policy after clause fusion, filtering, visual
+deduplication, and their ordinary 30-second spread. They keep their established
+internal clause depths and do not inherit broad search's deeper channels or
+cross-film reserve. Explicit scopes on those ordinary streams remain strict.
+Unscoped mandatory visual recipes retain the existing page-wise per-film
+preference, which relevance-backfills each unfilled slot and relaxes its
+cumulative per-film target on later pages; neither policy guarantees
+representation for every film. A movie-scoped mandatory visual recipe skips
+film balancing but retains its separate 90-second reference spread.
 
 ### Reference and Framing retrieval
 
 Reference-image search retrieves PE frame candidates and spatially reranks a
-bounded shortlist using a learned 6x6 feature grid. The query image is encoded
-once. Candidate grids come from a complete compatible Framing cache when one
-is active; otherwise every candidate in the bounded spatial shortlist is
-encoded through the established live path. Cached and live candidate evidence
-are never mixed within one query. This represents composition and subject
-position, not pose or motion.
+bounded shortlist using a learned 6x6 feature grid. An unscoped uploaded image
+first reads a fixed 7,200-row frame metadata projection, collapses it to the
+best frame per unit, and hydrates only the ordinary 200-unit base plus at most
+one unit for each of 12 films absent from that base. The projection is a
+bounded measured prototype, not a library-size-scaled guarantee; explicit
+movie scope keeps the former three-frames-per-candidate depth. The global frame
+rank survives selective hydration so Look evidence and recipe fusion do not
+overstate a deep reserve hit. Framing keeps a bounded spatial work set: it
+scores the normal 96-row spatial base plus at most 12 cross-film additions from
+the post-base pool, including eligible reserve rows, through the same cache or
+whole-query live fallback. Remaining candidates stay semantic backfill, and
+the two evidence paths are never mixed within one query. The query
+image is encoded once. Candidate grids come from a complete compatible Framing
+cache when one is active; otherwise every candidate in the bounded spatial
+shortlist is encoded through the established live path. Cached and live
+candidate evidence are never mixed within one query. This represents
+composition and subject position, not pose or motion.
+
+Spatially added reserve rows are fully scored, while reserve rows left in the
+semantic backfill retain only their global evidence; neither path has a
+calibrated relevance floor. The existing page-wise preference can surface a
+deep reserve row ahead of same-film backfill. Treat this as a prototype
+candidate-recall experiment, not a
+relevance-safe guarantee. Before changing its depth or claiming it improves
+visual discovery, human-grade the deep rows' original global rank, distance,
+relevance, and displaced repeats across roughly 10-15 image references.
 
 The Framing cache is an optional, independently backfillable acceleration of
 the existing scorer, not a candidate vector space or a new retrieval mode. One
@@ -244,10 +280,17 @@ mandatory; text reranks only those candidates and cannot introduce a visually
 unrelated result. The exact matched reference frame is preserved, and matched
 text evidence is attached when available.
 
-Frontend best-per-movie grouping retains the highest-ranked item for each film
-already present in the returned window. It is presentation, not guaranteed
-per-film retrieval, and does not imply that every indexed film is relevant or
-present in the global candidate pool.
+Search responses are authoritative bounded prefixes. Every search surface
+accepts an optional result limit: omission uses the configured 48-result
+default, while an explicit request may deepen the same ranking up to the
+configured maximum of 200. Below that maximum the backend probes one
+additional eligible row and returns `has_more` and `next_limit`; clients never
+infer exhaustion from a full page alone. A deeper request returns the complete
+prefix and replaces the earlier one, preserving one application of ranking,
+deduplication, temporal spread, and film-diversity policy. The frontend may
+reveal a prefix in viewport-sized batches, but it does not regroup that prefix
+into a separate Best per movie result mode. This bounded contract requires no
+cursor or server-side search-session state.
 
 ### Match Cut shadow profile
 
@@ -337,13 +380,16 @@ motion confounders.
 `POST /search/recipe` composes one to three explicit JSON clauses without
 adding a router, query LLM, model, index, or ingestion dependency. The
 multipart `POST /search/recipe/image` variant carries exactly one bounded
-uploaded still as a broad-visual clause, alone or with at most two text or
-indexed-scene refinements. The complete recipe therefore remains bounded to
-one to three total clauses. Clause IDs and typed-refinement facets must be
-unique. Text clauses support broad `all` search plus `scene`, `words`, `look`,
-and `mood`; indexed-scene sources support those same focused facets except
-`all`, and also support `composition`. The uploaded still is request-level
-visual evidence and has no category facet.
+uploaded still assigned to either `look` or `composition`, alone or with at
+most two text or indexed-scene refinements. The complete recipe therefore
+remains bounded to one to three total clauses. Clause IDs and typed-refinement
+facets must be unique. Text clauses support broad `all` search plus `scene`,
+`words`, `look`, and `mood`; indexed-scene sources support those same focused
+facets except `all`, and also support `composition`. Uploaded-image clauses
+support only `look` and `composition`; unsupported image facets fail request
+validation rather than silently changing meaning. Both recipe variants accept
+the same optional bounded result-prefix limit as the standalone search
+surfaces.
 
 The adapters deliberately expose evidence already present in the current
 system:
@@ -355,28 +401,33 @@ system:
 - `composition` uses the indexed source frame and existing spatial reranker;
 - `mood` searches only the dedicated mood-and-energy semantic view.
 
-The broad-visual upload adapter embeds the still once through the existing PE
-image tower. It uses global frame appearance to retrieve a bounded candidate
-set, then applies the existing 6x6 spatial-layout reranker. Global appearance
-and spatial layout are correlated stages of one visual ranking; they never
-enter reciprocal-rank fusion as two independent votes. The resulting visual
+Both uploaded-image adapters embed the still once through the existing PE
+image tower. Uploaded `look` retrieves bounded candidates from the global PE
+frame space. Uploaded `composition` retrieves the same kind of global
+candidates and applies the existing 6x6 spatial-layout reranker. The two modes
+are explicit alternatives, not independent fusion votes. Either uploaded-image
 set is a mandatory recipe gate, so text or indexed-scene refinements may rerank
 it but cannot introduce visually unrelated units. The upload has no source
 film to exclude, so explicit movie scope and the normal unscoped diversity
 preference apply. Uploaded images are query-bound inputs: they are validated
 and decoded for that request, never persisted as library evidence, and
-introduce no new vector space or backfill.
+introduce no new vector space or backfill. Multipart recipes reserve the
+existing bounded image-work capacity before decoding and hold it through the
+serialized model work, so rejected concurrent requests cannot allocate decoded
+image buffers first.
 
-The frontend's sole upload affordance is the main search bar, which also
-accepts a direct file drop. It shows at most one compact query-local reference
-and automatically submits it through the broad-visual adapter; replacing or
-removing that reference replaces or removes the clause. Category boxes accept
-typed text or indexed library scenes. They have no redundant image-upload
-control, and the uploaded still is not forced into or moved between Look and
-Framing. Up to two optional category or main-text refinements remain visible
-beside the compact reference and use only backend-owned recipe ranking. The
-standalone image endpoint remains API-compatible, and the product never
-maintains a separate browser-fused reference result state.
+The frontend accepts at most one uploaded image. Its picker and an image dropped
+on the open workspace assign the upload to Look by default; a direct drop on
+Look or Framing assigns that facet immediately. The image is rendered as a
+source card inside its tile and can be moved between those two categories or
+removed using the same visible modular state. Moving replaces, rather than
+copies, the image clause and any target clue. Up to two optional category or
+main-text refinements remain visible beside it and use only backend-owned
+recipe ranking. Scene, Words, and Mood never pretend to interpret arbitrary
+image content; enabling those destinations requires a separately versioned
+query-time caption, OCR, or mood adapter with explicit privacy, latency, and
+cost boundaries. The standalone image endpoint remains API-compatible, and
+the product never maintains a separate browser-fused reference result state.
 
 Source clauses address an indexed unit and, for `look` or `composition`, an
 exact frame index. The server resolves the corresponding unit, film, vector,
@@ -391,18 +442,25 @@ candidate gate. Its effective result-film scope is resolved before any bounded
 clause retrieval and shared by every clause, so source-film hits cannot consume
 an auxiliary clause's candidate window. Other clauses may rerank composition
 candidates but cannot introduce composition-unrelated results. The uploaded
-broad-visual clause is likewise a mandatory gate; its global retrieval and
-spatial reranking remain internal to that one clause.
+Look or composition clause is likewise a mandatory gate; global retrieval and,
+for composition, spatial reranking remain internal to that one clause.
 
 A recipe containing only one broad `all` text clause delegates to normal text
 search, preserving its complete bounded candidate union and diversity behavior,
 then adds the recipe match evidence. All other facet adapters return bounded
 raw rankings; recipes with multiple clauses combine them using equal
-reciprocal-rank fusion inside any mandatory candidate gate. A broad-visual
-upload contributes one ranking regardless of its global and spatial internal
-scores. Existing junk suppression, visual deduplication,
-reference temporal spread when applicable, and final film diversity are then
-applied once to the resulting ordering. Each returned product result includes
+reciprocal-rank fusion inside any mandatory candidate gate. An uploaded image
+contributes one ranking regardless of its internal stages. Existing
+junk suppression and visual deduplication are applied once. Ordinary unscoped
+recipes then use the 30-second defer-only spread; recipes with an uploaded image
+or indexed composition source instead retain the established 90-second
+reference spread as their sole temporal preference. Final film diversity runs
+afterward: unscoped recipes without either mandatory visual gate use the
+bounded, saturating repeat-rank policy, while mandatory visual recipes retain
+the page-wise, relevance-backfilled preference when unscoped. Explicit movie
+scopes preserve strict relevance order for ordinary non-image-gated recipes;
+scoped mandatory visual recipes retain the 90-second reference spread but skip
+film balancing. Each returned product result includes
 stable `keyframe_index` evidence and a `matches` entry for every clause that
 retrieved it, including the contributing rank and matched text or frame when
 available.
@@ -414,8 +472,8 @@ and mood sources expose the exact effective text used by their adapter. Look and
 composition sources expose a global-visual or spatial-visual frame mode and
 never fabricate an English description for a vector or learned grid. An
 upload produces one source-evidence record explicitly labeled as query-bound
-broad-visual input and names its global-candidate and spatial-reranking stages;
-it likewise never receives generated text.
+image input and reports `pe_global` for Look or `pe_global+spatial_6x6` for
+composition; it likewise never receives generated text.
 
 Focused `scene`, `words`, and `mood` clauses require a complete active
 semantic-text profile. They fail explicitly when it is unavailable instead of

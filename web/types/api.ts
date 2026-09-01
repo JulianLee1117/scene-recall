@@ -8,7 +8,10 @@ export type SearchFacet =
   | "mood";
 export type RecipeMatchFacet = Exclude<SearchFacet, "all">;
 export type RecipeTextFacet = Exclude<SearchFacet, "composition">;
-export type RecipeImageFacet = "visual";
+export type RecipeImageFacet = Extract<
+  RecipeMatchFacet,
+  "look" | "composition"
+>;
 
 export interface RecipeSource {
   unit_id: string;
@@ -37,6 +40,8 @@ export type SearchRecipeClause =
 export interface SearchRecipeRequest {
   clauses: SearchRecipeClause[];
   film_ids?: string[];
+  /** Requested authoritative result prefix. Omit for the backend default. */
+  limit?: number;
 }
 
 export type SourceInputEvidence =
@@ -154,6 +159,14 @@ export interface SearchResponse {
   results: SearchResult[];
   /** Backend-defined diversity/display page size. Older APIs omit it. */
   display_batch_size?: number;
+  /** Size of this authoritative result prefix. */
+  limit: number;
+  /** Largest result prefix this backend will return. */
+  max_limit: number;
+  /** Whether at least one more eligible result exists within max_limit. */
+  has_more: boolean;
+  /** Next prefix size to request, or null once this stream is exhausted. */
+  next_limit: number | null;
 }
 
 export interface SearchRecipeResponse extends SearchResponse {

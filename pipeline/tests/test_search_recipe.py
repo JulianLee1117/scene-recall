@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from io import BytesIO
 from pathlib import Path
@@ -298,6 +299,29 @@ def test_recipe_execution_reuses_one_source_snapshot_for_search_and_evidence(
     assert db.open_table.call_count == 1
 
 
+def test_single_broad_recipe_honors_explicit_result_limit(
+    config: Config,
+) -> None:
+    clause = SearchClause("main", "text", "all", text="night")
+
+    with patch(
+        "pipeline.search.recipe.search",
+        return_value=[_result("match")],
+    ) as broad_search:
+        execution = execute_search_recipe(
+            (clause,),
+            MagicMock(),
+            config,
+            result_limit=12,
+        )
+
+    assert execution.results[0]["unit_id"] == "match"
+    assert broad_search.call_args.kwargs == {
+        "film_ids": (),
+        "result_limit": 12,
+    }
+
+
 def test_semantic_view_retrieval_keeps_only_requested_views() -> None:
     from pipeline.search.retrieve import _semantic_text_search_rows
 
@@ -389,19 +413,20 @@ def test_composition_is_mandatory_and_source_units_are_excluded() -> None:
     ]
 
 
-def test_uploaded_visual_is_a_mandatory_correlated_candidate_gate() -> None:
-    visual = SearchClause(
-        "visual",
+@pytest.mark.parametrize("facet", ["look", "composition"])
+def test_uploaded_image_is_a_mandatory_candidate_gate(facet: str) -> None:
+    image_clause = SearchClause(
+        facet,
         "image",
-        "visual",
+        facet,
         image=Image.new("RGB", (8, 6), "red"),
     )
     scene = SearchClause("scene", "text", "scene", text="running")
-    visual_results = [_result("b"), _result("c")]
-    for result in visual_results:
+    image_results = [_result("b"), _result("c")]
+    for result in image_results:
         result["matched_frame_index"] = 1
     rankings = [
-        _ClauseRanking(visual, visual_results, ""),
+        _ClauseRanking(image_clause, image_results, ""),
         _ClauseRanking(scene, [_result("a"), _result("b")], "running"),
     ]
 
@@ -409,22 +434,31 @@ def test_uploaded_visual_is_a_mandatory_correlated_candidate_gate() -> None:
 
     assert [result["unit_id"] for result in fused] == ["b", "c"]
     assert [match["facet"] for match in fused[0]["matches"]] == [
-        "visual",
+        facet,
         "scene",
     ]
 
 
-def test_internal_visual_facet_requires_an_uploaded_image(
-    config: Config,
-) -> None:
-    clause = SearchClause("visual", "text", "visual", text="red room")
+def test_indexed_look_remains_an_independent_fusion_signal() -> None:
+    look = SearchClause(
+        "look",
+        "source",
+        "look",
+        source=SourceReference("source", 1),
+    )
+    scene = SearchClause("scene", "text", "scene", text="running")
+    rankings = [
+        _ClauseRanking(look, [_result("b")], ""),
+        _ClauseRanking(scene, [_result("a"), _result("b")], "running"),
+    ]
 
-    with pytest.raises(ValueError, match="requires an uploaded image"):
-        execute_search_recipe([clause], MagicMock(), config)
+    fused = _fuse_rankings(rankings, {"source"})
+
+    assert [result["unit_id"] for result in fused] == ["b", "a"]
 
 
-@pytest.mark.parametrize("facet", ["look", "composition"])
-def test_internal_uploaded_image_requires_visual_facet(
+@pytest.mark.parametrize("facet", ["scene", "words", "mood", "all"])
+def test_internal_uploaded_image_rejects_unsupported_facet(
     facet: str,
     config: Config,
 ) -> None:
@@ -435,7 +469,7 @@ def test_internal_uploaded_image_requires_visual_facet(
         image=Image.new("RGB", (8, 6), "red"),
     )
 
-    with pytest.raises(ValueError, match="require the visual facet"):
+    with pytest.raises(ValueError, match="only look or composition"):
         execute_search_recipe([clause], MagicMock(), config)
 
 
@@ -561,13 +595,15 @@ def test_composition_scope_applies_to_every_bounded_clause(
     assert final_preferences.call_args.kwargs["apply_film_diversity"] is True
 
 
-def test_uploaded_visual_applies_temporal_spread_after_recipe_fusion(
+@pytest.mark.parametrize("facet", ["look", "composition"])
+def test_uploaded_image_applies_temporal_spread_after_recipe_fusion(
+    facet: str,
     config: Config,
 ) -> None:
-    visual = SearchClause(
-        "visual",
+    image_clause = SearchClause(
+        facet,
         "image",
-        "visual",
+        facet,
         image=Image.new("RGB", (8, 6), "red"),
     )
     scene = SearchClause("scene", "text", "scene", text="running")
@@ -586,7 +622,7 @@ def test_uploaded_visual_applies_temporal_spread_after_recipe_fusion(
             return_value=[],
         ) as final_preferences,
     ):
-        execute_search_recipe([visual, scene], MagicMock(), config)
+        execute_search_recipe([image_clause, scene], MagicMock(), config)
 
     assert (
         final_preferences.call_args.kwargs[
@@ -673,16 +709,16 @@ def test_look_source_uses_stored_frame_vector(
     assert ranking.results[0]["unit_id"] == "match"
 
 
-def test_uploaded_visual_uses_one_global_spatial_reference_ranking(
+def test_uploaded_look_uses_global_image_ranking(
     config: Config,
 ) -> None:
     image = Image.new("RGB", (8, 6), "red")
-    clause = SearchClause("visual", "image", "visual", image=image)
+    clause = SearchClause("look", "image", "look", image=image)
 
     with patch(
-        "pipeline.search.recipe.search_by_image",
+        "pipeline.search.recipe.search_look_by_image",
         return_value=[_result("match")],
-    ) as visual_search:
+    ) as look_search:
         ranking = _run_clause(
             clause,
             MagicMock(),
@@ -692,8 +728,72 @@ def test_uploaded_visual_uses_one_global_spatial_reference_ranking(
             {},
         )
 
-    assert visual_search.call_args.args[0] is image
-    assert visual_search.call_args.kwargs == {
+    assert look_search.call_args.args[0] is image
+    assert look_search.call_args.kwargs == {
+        "film_ids": ("film-a",),
+        "result_limit": 100,
+        "_return_candidate_reserve": True,
+    }
+    assert ranking.results[0]["unit_id"] == "match"
+
+
+def test_uploaded_look_keeps_internal_reserve_until_final_preferences(
+    config: Config,
+) -> None:
+    """The public 200-result cap must not truncate the private film reserve."""
+    clause = SearchClause(
+        "look",
+        "image",
+        "look",
+        image=Image.new("RGB", (8, 6), "red"),
+    )
+    reserve = [
+        {**_result(f"unit-{index:03d}"), "rank": index + 1}
+        for index in range(212)
+    ]
+
+    with (
+        patch(
+            "pipeline.search.recipe.search_look_by_image",
+            return_value=reserve,
+        ),
+        patch(
+            "pipeline.search.recipe.apply_recipe_result_preferences",
+            return_value=[],
+        ) as final_preferences,
+    ):
+        execute_search_recipe([clause], MagicMock(), config, result_limit=200)
+
+    assert len(final_preferences.call_args.args[0]) == 212
+    assert final_preferences.call_args.kwargs["result_limit"] == 200
+
+
+def test_uploaded_composition_uses_global_spatial_reference_ranking(
+    config: Config,
+) -> None:
+    image = Image.new("RGB", (8, 6), "red")
+    clause = SearchClause(
+        "composition",
+        "image",
+        "composition",
+        image=image,
+    )
+
+    with patch(
+        "pipeline.search.recipe.search_by_image",
+        return_value=[_result("match")],
+    ) as composition_search:
+        ranking = _run_clause(
+            clause,
+            MagicMock(),
+            config,
+            ("film-a",),
+            100,
+            {},
+        )
+
+    assert composition_search.call_args.args[0] is image
+    assert composition_search.call_args.kwargs == {
         "film_ids": ("film-a",),
         "result_limit": 100,
         "_defer_result_preferences": True,
@@ -701,12 +801,27 @@ def test_uploaded_visual_uses_one_global_spatial_reference_ranking(
     assert ranking.results[0]["unit_id"] == "match"
 
 
-def test_uploaded_image_source_evidence_is_explicit() -> None:
+@pytest.mark.parametrize(
+    ("facet", "adapter", "mode"),
+    [
+        ("look", "pe_global", "global_visual"),
+        (
+            "composition",
+            "pe_global+spatial_6x6",
+            "global_spatial_visual",
+        ),
+    ],
+)
+def test_uploaded_image_source_evidence_is_category_native(
+    facet: str,
+    adapter: str,
+    mode: str,
+) -> None:
     clauses = [
         SearchClause(
-            "visual",
+            facet,
             "image",
-            "visual",
+            facet,
             image=Image.new("RGB", (4, 4), "green"),
         ),
     ]
@@ -715,13 +830,11 @@ def test_uploaded_image_source_evidence_is_explicit() -> None:
 
     assert evidence == [
         {
-            "clause_id": "visual",
-            "facet": "visual",
+            "clause_id": facet,
+            "facet": facet,
             "source": {"kind": "uploaded_image"},
-            "adapter": "pe_global+spatial_6x6",
-            "evidence": [
-                {"type": "image", "mode": "global_spatial_visual"}
-            ],
+            "adapter": adapter,
+            "evidence": [{"type": "image", "mode": mode}],
         },
     ]
 
@@ -1023,6 +1136,136 @@ def test_recipe_api_reports_semantic_profile_failure_as_503(
     assert response.json()["detail"] == "profile unavailable"
 
 
+@pytest.mark.parametrize("limit", [0, 201, True, "many"])
+def test_recipe_api_rejects_invalid_result_limit_before_search(
+    limit: object,
+    config: Config,
+) -> None:
+    import pipeline.api.main as api_mod
+
+    with (
+        patch.object(api_mod, "load_config", return_value=config),
+        patch.object(api_mod, "open_db", return_value=MagicMock()),
+        patch.object(api_mod, "ensure_search_indexes"),
+        patch.object(api_mod, "_execute_search_recipe") as recipe_search,
+        TestClient(api_mod.app) as client,
+    ):
+        response = client.post(
+            "/search/recipe",
+            json={
+                "clauses": [
+                    {
+                        "id": "main",
+                        "kind": "text",
+                        "facet": "all",
+                        "text": "night",
+                    }
+                ],
+                "limit": limit,
+            },
+        )
+
+    assert response.status_code == 422
+    recipe_search.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "uploaded_image",
+    [False, True],
+    ids=["json", "uploaded-image"],
+)
+def test_recipe_api_deepening_preserves_authoritative_prefix(
+    uploaded_image: bool,
+    config: Config,
+) -> None:
+    """Both recipe transports probe once and return stable complete prefixes."""
+    import pipeline.api.main as api_mod
+
+    ranked = [_result(f"unit-{index:03d}") for index in range(50)]
+
+    def recipe_prefix(
+        _clauses: object,
+        _db: object,
+        _config: Config,
+        **kwargs: object,
+    ) -> SearchRecipeExecution:
+        limit = int(kwargs["result_limit"])
+        return SearchRecipeExecution(list(ranked[:limit]), [])
+
+    with (
+        patch.object(api_mod, "load_config", return_value=config),
+        patch.object(api_mod, "open_db", return_value=MagicMock()),
+        patch.object(api_mod, "ensure_search_indexes"),
+        patch.object(
+            api_mod,
+            "_with_film_titles",
+            side_effect=lambda _request, rows: rows,
+        ),
+        patch.object(
+            api_mod,
+            "_execute_search_recipe",
+            side_effect=recipe_prefix,
+        ) as recipe_search,
+        TestClient(api_mod.app) as client,
+    ):
+        responses = []
+        for limit in (12, 24):
+            if uploaded_image:
+                responses.append(
+                    client.post(
+                        "/search/recipe/image",
+                        data={
+                            "recipe": json.dumps(
+                                {
+                                    "clauses": [
+                                        {
+                                            "id": "look",
+                                            "kind": "image",
+                                            "facet": "look",
+                                        }
+                                    ],
+                                    "limit": limit,
+                                }
+                            )
+                        },
+                        files={
+                            "image": (
+                                "frame.png",
+                                _png_bytes(),
+                                "image/png",
+                            )
+                        },
+                    )
+                )
+            else:
+                responses.append(
+                    client.post(
+                        "/search/recipe",
+                        json={
+                            "clauses": [
+                                {
+                                    "id": "main",
+                                    "kind": "text",
+                                    "facet": "all",
+                                    "text": "night",
+                                }
+                            ],
+                            "limit": limit,
+                        },
+                    )
+                )
+
+    initial, deeper = (response.json() for response in responses)
+    assert [response.status_code for response in responses] == [200, 200]
+    assert [len(initial["results"]), len(deeper["results"])] == [12, 24]
+    assert deeper["results"][:12] == initial["results"]
+    assert (initial["has_more"], initial["next_limit"]) == (True, 24)
+    assert (deeper["has_more"], deeper["next_limit"]) == (True, 48)
+    assert [
+        call.kwargs["result_limit"] for call in recipe_search.call_args_list
+    ] == [13, 25]
+
+
 @pytest.mark.parametrize(
     ("failure", "status_code"),
     [
@@ -1125,6 +1368,7 @@ def test_recipe_api_forwards_typed_clauses_and_returns_matches(
                     },
                 ],
                 "film_ids": ["film-a", "film-a", "film-b"],
+                "limit": 12,
             },
         )
         available_slots = client.app.state.image_search_slots.qsize()
@@ -1138,24 +1382,43 @@ def test_recipe_api_forwards_typed_clauses_and_returns_matches(
     clauses = recipe_search.call_args.args[0]
     assert clauses[0].text == "lonely night"
     assert clauses[1].source == SourceReference("unit-a", 1)
-    assert recipe_search.call_args.kwargs == {"film_ids": ["film-a", "film-b"]}
+    assert response.json()["limit"] == 12
+    assert response.json()["max_limit"] == 200
+    assert response.json()["has_more"] is False
+    assert response.json()["next_limit"] is None
+    assert recipe_search.call_args.kwargs == {
+        "film_ids": ["film-a", "film-b"],
+        "result_limit": 13,
+    }
     assert available_slots == 2
 
 
-def test_uploaded_visual_recipe_api_decodes_and_forwards_one_image_clause(
+@pytest.mark.parametrize(
+    ("facet", "adapter", "mode"),
+    [
+        ("look", "pe_global", "global_visual"),
+        (
+            "composition",
+            "pe_global+spatial_6x6",
+            "global_spatial_visual",
+        ),
+    ],
+)
+def test_uploaded_image_recipe_api_decodes_and_forwards_native_clause(
+    facet: str,
+    adapter: str,
+    mode: str,
     config: Config,
 ) -> None:
     import pipeline.api.main as api_mod
 
     source_evidence = [
         {
-            "clause_id": "visual",
-            "facet": "visual",
+            "clause_id": facet,
+            "facet": facet,
             "source": {"kind": "uploaded_image"},
-            "adapter": "pe_global+spatial_6x6",
-            "evidence": [
-                {"type": "image", "mode": "global_spatial_visual"}
-            ],
+            "adapter": adapter,
+            "evidence": [{"type": "image", "mode": mode}],
         }
     ]
     with (
@@ -1190,12 +1453,13 @@ def test_uploaded_visual_recipe_api_decodes_and_forwards_one_image_clause(
                                 "text": "  rainy night  ",
                             },
                             {
-                                "id": "visual",
+                                "id": facet,
                                 "kind": "image",
-                                "facet": "visual",
+                                "facet": facet,
                             },
                         ],
                         "film_ids": ["film-a", "film-a", "film-b"],
+                        "limit": 24,
                     }
                 )
             },
@@ -1208,13 +1472,114 @@ def test_uploaded_visual_recipe_api_decodes_and_forwards_one_image_clause(
     clauses = recipe_search.call_args.args[0]
     assert clauses[0].text == "rainy night"
     assert clauses[1].kind == "image"
-    assert clauses[1].facet == "visual"
+    assert clauses[1].facet == facet
     assert isinstance(clauses[1].image, Image.Image)
     assert clauses[1].image.mode == "RGB"
+    assert response.json()["limit"] == 24
     assert recipe_search.call_args.kwargs == {
-        "film_ids": ["film-a", "film-b"]
+        "film_ids": ["film-a", "film-b"],
+        "result_limit": 25,
     }
     assert available_slots == 2
+
+
+def test_uploaded_image_recipe_reserves_slot_before_decode_without_reacquiring(
+    config: Config,
+) -> None:
+    import pipeline.api.main as api_mod
+
+    slots_during_decode: list[int] = []
+
+    async def read_uploaded_reference(_upload: object) -> Image.Image:
+        slots_during_decode.append(
+            client.app.state.image_search_slots.qsize()
+        )
+        return Image.new("RGB", (8, 6), "red")
+
+    with (
+        patch.object(api_mod, "load_config", return_value=config),
+        patch.object(api_mod, "open_db", return_value=MagicMock()),
+        patch.object(api_mod, "ensure_search_indexes"),
+        patch.object(
+            api_mod,
+            "_read_uploaded_reference",
+            new=read_uploaded_reference,
+        ),
+        patch.object(
+            api_mod,
+            "_execute_search_recipe",
+            return_value=SearchRecipeExecution([], []),
+        ),
+        TestClient(api_mod.app) as client,
+    ):
+        # One slot makes an accidental second acquisition fail immediately.
+        slots: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        slots.put_nowait(None)
+        client.app.state.image_search_slots = slots
+        response = client.post(
+            "/search/recipe/image",
+            data={
+                "recipe": json.dumps(
+                    {
+                        "clauses": [
+                            {
+                                "id": "look",
+                                "kind": "image",
+                                "facet": "look",
+                            }
+                        ]
+                    }
+                )
+            },
+            files={"image": ("frame.png", _png_bytes(), "image/png")},
+        )
+        available_slots = slots.qsize()
+
+    assert response.status_code == 200
+    assert slots_during_decode == [0]
+    assert available_slots == 1
+
+
+def test_uploaded_image_recipe_rejects_busy_work_before_decode(
+    config: Config,
+) -> None:
+    import pipeline.api.main as api_mod
+
+    with (
+        patch.object(api_mod, "load_config", return_value=config),
+        patch.object(api_mod, "open_db", return_value=MagicMock()),
+        patch.object(api_mod, "ensure_search_indexes"),
+        patch.object(api_mod, "_read_uploaded_reference") as image_read,
+        patch.object(api_mod, "_execute_search_recipe") as recipe_search,
+        TestClient(api_mod.app) as client,
+    ):
+        slots = client.app.state.image_search_slots
+        slots.get_nowait()
+        slots.get_nowait()
+        response = client.post(
+            "/search/recipe/image",
+            data={
+                "recipe": json.dumps(
+                    {
+                        "clauses": [
+                            {
+                                "id": "look",
+                                "kind": "image",
+                                "facet": "look",
+                            }
+                        ]
+                    }
+                )
+            },
+            files={"image": ("frame.png", _png_bytes(), "image/png")},
+        )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == (
+        "Reference search is busy; try again in a moment"
+    )
+    image_read.assert_not_called()
+    recipe_search.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -1222,23 +1587,18 @@ def test_uploaded_visual_recipe_api_decodes_and_forwards_one_image_clause(
     [
         [{"id": "main", "kind": "text", "facet": "all", "text": "x"}],
         [
-            {"id": "visual-a", "kind": "image", "facet": "visual"},
-            {
-                "id": "visual-b",
-                "kind": "image",
-                "facet": "visual",
-            },
-        ],
-        [{"id": "look", "kind": "image", "facet": "look"}],
-        [
+            {"id": "look", "kind": "image", "facet": "look"},
             {
                 "id": "framing",
                 "kind": "image",
                 "facet": "composition",
-            }
+            },
         ],
         [{"id": "scene", "kind": "image", "facet": "scene"}],
-        [{"id": "visual", "kind": "text", "facet": "visual", "text": "x"}],
+        [{"id": "words", "kind": "image", "facet": "words"}],
+        [{"id": "mood", "kind": "image", "facet": "mood"}],
+        [{"id": "all", "kind": "image", "facet": "all"}],
+        [{"id": "visual", "kind": "image", "facet": "visual"}],
     ],
 )
 def test_uploaded_image_recipe_api_requires_one_supported_image_clause(
@@ -1264,6 +1624,41 @@ def test_uploaded_image_recipe_api_requires_one_supported_image_clause(
     recipe_search.assert_not_called()
 
 
+def test_uploaded_image_recipe_rejects_limit_above_configured_cap(
+    config: Config,
+) -> None:
+    import pipeline.api.main as api_mod
+
+    with (
+        patch.object(api_mod, "load_config", return_value=config),
+        patch.object(api_mod, "open_db", return_value=MagicMock()),
+        patch.object(api_mod, "ensure_search_indexes"),
+        patch.object(api_mod, "_execute_search_recipe") as recipe_search,
+        TestClient(api_mod.app) as client,
+    ):
+        response = client.post(
+            "/search/recipe/image",
+            data={
+                "recipe": json.dumps(
+                    {
+                        "clauses": [
+                            {
+                                "id": "look",
+                                "kind": "image",
+                                "facet": "look",
+                            }
+                        ],
+                        "limit": 201,
+                    }
+                )
+            },
+            files={"image": ("frame.png", _png_bytes(), "image/png")},
+        )
+
+    assert response.status_code == 422
+    recipe_search.assert_not_called()
+
+
 def test_uploaded_image_recipe_api_reuses_reference_media_validation(
     config: Config,
 ) -> None:
@@ -1272,7 +1667,7 @@ def test_uploaded_image_recipe_api_reuses_reference_media_validation(
     recipe = json.dumps(
         {
             "clauses": [
-                {"id": "visual", "kind": "image", "facet": "visual"}
+                {"id": "look", "kind": "image", "facet": "look"}
             ]
         }
     )
@@ -1288,9 +1683,51 @@ def test_uploaded_image_recipe_api_reuses_reference_media_validation(
             data={"recipe": recipe},
             files={"image": ("frame.txt", b"not an image", "text/plain")},
         )
+        available_slots = client.app.state.image_search_slots.qsize()
 
     assert response.status_code == 415
     assert response.json()["detail"] == (
         "Use a JPEG, PNG, or WebP reference image"
     )
     recipe_search.assert_not_called()
+    assert available_slots == 2
+
+
+def test_uploaded_image_recipe_releases_slot_after_search_error(
+    config: Config,
+) -> None:
+    import pipeline.api.main as api_mod
+
+    with (
+        patch.object(api_mod, "load_config", return_value=config),
+        patch.object(api_mod, "open_db", return_value=MagicMock()),
+        patch.object(api_mod, "ensure_search_indexes"),
+        patch.object(
+            api_mod,
+            "_execute_search_recipe",
+            side_effect=RecipeSourceUnavailable("source unavailable"),
+        ),
+        TestClient(api_mod.app) as client,
+    ):
+        response = client.post(
+            "/search/recipe/image",
+            data={
+                "recipe": json.dumps(
+                    {
+                        "clauses": [
+                            {
+                                "id": "composition",
+                                "kind": "image",
+                                "facet": "composition",
+                            }
+                        ]
+                    }
+                )
+            },
+            files={"image": ("frame.png", _png_bytes(), "image/png")},
+        )
+        available_slots = client.app.state.image_search_slots.qsize()
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "source unavailable"
+    assert available_slots == 2

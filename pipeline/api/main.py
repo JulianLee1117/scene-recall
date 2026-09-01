@@ -4,7 +4,7 @@ Endpoints
 ---------
 GET /search?q=...                   Dense semantic search; {"results": [...]}
 POST /search/recipe                 Typed modular scene-search clauses
-POST /search/recipe/image           Recipe with one uploaded visual clause
+POST /search/recipe/image           Recipe with one uploaded Look/Framing clause
 POST /search/image?q=...            Reference composition + optional text
 GET /bookmarks                      List durable saved scenes
 PUT /bookmarks/{unit_id}            Save one indexed scene
@@ -84,6 +84,7 @@ from pipeline.index.writer import (
 )
 from pipeline.ingest.subtitles import external_srt_is_usable
 from pipeline.search.retrieve import (
+    resolve_result_limit,
     search as _search,
     search_by_image as _search_by_image,
 )
@@ -137,6 +138,46 @@ def _require_search_ready(request: Request) -> None:
             status_code=503,
             detail="Search engine is warming up — try again in a few seconds",
         )
+
+
+def _resolve_api_result_limit(
+    config: Config,
+    requested_limit: int | None,
+) -> int:
+    """Resolve a public search window and report config-bound errors as 422."""
+    try:
+        return resolve_result_limit(config, requested_limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+def _result_probe_limit(config: Config, result_limit: int) -> int:
+    """Request one extra eligible row so ``has_more`` is authoritative."""
+    return min(
+        result_limit + 1,
+        int(config.retrieval.max_result_limit),
+    )
+
+
+def _search_response(
+    results: Sequence[dict[str, Any]],
+    config: Config,
+    result_limit: int,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Return one complete stable prefix plus bounded deepening metadata."""
+    max_limit = int(config.retrieval.max_result_limit)
+    has_more = result_limit < max_limit and len(results) > result_limit
+    next_limit = min(max_limit, result_limit * 2) if has_more else None
+    return {
+        "results": list(results[:result_limit]),
+        **extra,
+        "display_batch_size": config.retrieval.diversity.page_size,
+        "limit": result_limit,
+        "max_limit": max_limit,
+        "has_more": has_more,
+        "next_limit": next_limit,
+    }
 
 
 def _require_writable_runtime_directory(
@@ -825,7 +866,7 @@ class SearchImageClause(BaseModel):
         pattern=_RECIPE_CLAUSE_ID_PATTERN,
     )
     kind: Literal["image"]
-    facet: Literal["visual"]
+    facet: Literal["look", "composition"]
 
 
 SearchRecipeClause = Annotated[
@@ -844,6 +885,7 @@ class SearchRecipeRequest(BaseModel):
 
     clauses: list[SearchRecipeClause] = Field(min_length=1, max_length=3)
     film_ids: list[str] = Field(default_factory=list, max_length=1_000)
+    limit: int | None = Field(default=None, ge=1, strict=True)
 
     @field_validator("film_ids")
     @classmethod
@@ -868,12 +910,13 @@ class SearchRecipeRequest(BaseModel):
 
 
 class SearchImageRecipeRequest(BaseModel):
-    """Multipart recipe metadata for exactly one uploaded visual clause."""
+    """Multipart recipe metadata for one uploaded Look/Framing clause."""
 
     model_config = ConfigDict(extra="forbid")
 
     clauses: list[SearchImageRecipeClause] = Field(min_length=1, max_length=3)
     film_ids: list[str] = Field(default_factory=list, max_length=1_000)
+    limit: int | None = Field(default=None, ge=1, strict=True)
 
     @field_validator("film_ids")
     @classmethod
@@ -958,10 +1001,29 @@ async def _read_uploaded_reference(upload: UploadFile) -> Image.Image:
     return _decode_reference_image(bytes(payload_buffer))
 
 
+def _acquire_image_search_slot(request: Request) -> None:
+    """Reserve one bounded reference-image work slot without waiting."""
+    try:
+        request.app.state.image_search_slots.get_nowait()
+    except asyncio.QueueEmpty:
+        raise HTTPException(
+            status_code=429,
+            detail="Reference search is busy; try again in a moment",
+        ) from None
+
+
+def _release_image_search_slot(request: Request) -> None:
+    """Return one previously reserved reference-image work slot."""
+    request.app.state.image_search_slots.put_nowait(None)
+
+
 async def _run_recipe_execution(
     request: Request,
     clauses: list[InternalSearchClause],
     film_ids: list[str],
+    result_limit: int,
+    *,
+    image_slot_already_acquired: bool = False,
 ) -> Any:
     """Execute one validated recipe under the required GPU guard."""
     config: Config = request.app.state.config
@@ -970,16 +1032,10 @@ async def _run_recipe_execution(
         clause.kind == "image" or clause.facet == "composition"
         for clause in clauses
     )
-    acquired_slot = False
-    if uses_serialized_image_work:
-        try:
-            request.app.state.image_search_slots.get_nowait()
-            acquired_slot = True
-        except asyncio.QueueEmpty:
-            raise HTTPException(
-                status_code=429,
-                detail="Reference search is busy; try again in a moment",
-            ) from None
+    acquired_slot_here = False
+    if uses_serialized_image_work and not image_slot_already_acquired:
+        _acquire_image_search_slot(request)
+        acquired_slot_here = True
 
     try:
         return await (
@@ -990,6 +1046,7 @@ async def _run_recipe_execution(
                 db,
                 config,
                 film_ids=film_ids,
+                result_limit=result_limit,
             )
             if uses_serialized_image_work
             else asyncio.to_thread(
@@ -998,6 +1055,7 @@ async def _run_recipe_execution(
                 db,
                 config,
                 film_ids=film_ids,
+                result_limit=result_limit,
             )
         )
     except RecipeSourceNotFound as exc:
@@ -1007,8 +1065,8 @@ async def _run_recipe_execution(
     except SemanticTextProfileUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
     finally:
-        if acquired_slot:
-            request.app.state.image_search_slots.put_nowait(None)
+        if acquired_slot_here:
+            _release_image_search_slot(request)
 
 
 # ---------------------------------------------------------------------------
@@ -1021,11 +1079,14 @@ def search_endpoint(
     request: Request,
     q: str = Query(min_length=1, max_length=500),
     film_id: list[str] | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1),
 ) -> dict:
     """Run hybrid search in FastAPI's worker threadpool."""
     _require_search_ready(request)
     config: Config = request.app.state.config
     db = request.app.state.db
+    result_limit = _resolve_api_result_limit(config, limit)
+    probe_limit = _result_probe_limit(config, result_limit)
     results = _with_film_titles(
         request,
         _search(
@@ -1033,13 +1094,10 @@ def search_endpoint(
             db,
             config,
             film_ids=film_id,
-            result_limit=config.retrieval.result_window,
+            result_limit=probe_limit,
         ),
     )
-    return {
-        "results": results,
-        "display_batch_size": config.retrieval.diversity.page_size,
-    }
+    return _search_response(results, config, result_limit)
 
 
 @app.post("/search/recipe")
@@ -1050,14 +1108,22 @@ async def search_recipe_endpoint(
     """Search one to three explicit, independently evidenced clauses."""
     _require_search_ready(request)
     config: Config = request.app.state.config
+    result_limit = _resolve_api_result_limit(config, payload.limit)
+    probe_limit = _result_probe_limit(config, result_limit)
     clauses = _internal_recipe_clauses(payload.clauses)
-    execution = await _run_recipe_execution(request, clauses, payload.film_ids)
+    execution = await _run_recipe_execution(
+        request,
+        clauses,
+        payload.film_ids,
+        probe_limit,
+    )
 
-    return {
-        "results": _with_film_titles(request, execution.results),
-        "source_evidence": execution.source_evidence,
-        "display_batch_size": config.retrieval.diversity.page_size,
-    }
+    return _search_response(
+        _with_film_titles(request, execution.results),
+        config,
+        result_limit,
+        source_evidence=execution.source_evidence,
+    )
 
 
 @app.post("/search/recipe/image")
@@ -1068,11 +1134,17 @@ async def image_recipe_endpoint(
 ) -> dict:
     """Search a multipart recipe containing one transient uploaded still."""
     _require_search_ready(request)
+    acquired_slot = False
     try:
         try:
             payload = SearchImageRecipeRequest.model_validate_json(recipe)
         except ValidationError as exc:
             raise RequestValidationError(exc.errors(), body=recipe) from exc
+        config: Config = request.app.state.config
+        result_limit = _resolve_api_result_limit(config, payload.limit)
+        probe_limit = _result_probe_limit(config, result_limit)
+        _acquire_image_search_slot(request)
+        acquired_slot = True
         decoded_image = await _read_uploaded_reference(image)
         clauses = _internal_recipe_clauses(
             payload.clauses,
@@ -1082,16 +1154,22 @@ async def image_recipe_endpoint(
             request,
             clauses,
             payload.film_ids,
+            probe_limit,
+            image_slot_already_acquired=True,
         )
     finally:
-        await image.close()
+        try:
+            await image.close()
+        finally:
+            if acquired_slot:
+                _release_image_search_slot(request)
 
-    config: Config = request.app.state.config
-    return {
-        "results": _with_film_titles(request, execution.results),
-        "source_evidence": execution.source_evidence,
-        "display_batch_size": config.retrieval.diversity.page_size,
-    }
+    return _search_response(
+        _with_film_titles(request, execution.results),
+        config,
+        result_limit,
+        source_evidence=execution.source_evidence,
+    )
 
 
 @app.post("/search/image")
@@ -1101,9 +1179,13 @@ async def image_search_endpoint(
     exclude_unit_id: str | None = Query(default=None),
     exclude_film_id: str | None = Query(default=None),
     q: str | None = Query(default=None, max_length=500),
+    limit: int | None = Query(default=None, ge=1),
 ) -> dict:
     """Find similar framing, optionally constrained by a text query."""
     _require_search_ready(request)
+    config: Config = request.app.state.config
+    result_limit = _resolve_api_result_limit(config, limit)
+    probe_limit = _result_probe_limit(config, result_limit)
     content_type = request.headers.get("content-type", "")
     media_type = content_type.partition(";")[0].strip().lower()
     if media_type not in _REFERENCE_IMAGE_TYPES:
@@ -1126,13 +1208,7 @@ async def image_search_endpoint(
                 detail="Invalid Content-Length header",
             ) from None
 
-    try:
-        request.app.state.image_search_slots.get_nowait()
-    except asyncio.QueueEmpty:
-        raise HTTPException(
-            status_code=429,
-            detail="Reference search is busy; try again in a moment",
-        ) from None
+    _acquire_image_search_slot(request)
 
     try:
         payload_buffer = bytearray()
@@ -1151,7 +1227,6 @@ async def image_search_endpoint(
             )
 
         image = _decode_reference_image(payload)
-        config: Config = request.app.state.config
         db = request.app.state.db
         results = await _run_serialized_image_work(
             request,
@@ -1162,15 +1237,16 @@ async def image_search_endpoint(
             film_ids=film_id,
             exclude_unit_id=exclude_unit_id,
             exclude_film_id=exclude_film_id,
-            result_limit=config.retrieval.result_window,
+            result_limit=probe_limit,
             text_query=q,
         )
-        return {
-            "results": _with_film_titles(request, results),
-            "display_batch_size": config.retrieval.diversity.page_size,
-        }
+        return _search_response(
+            _with_film_titles(request, results),
+            config,
+            result_limit,
+        )
     finally:
-        request.app.state.image_search_slots.put_nowait(None)
+        _release_image_search_slot(request)
 
 
 @app.get("/bookmarks")

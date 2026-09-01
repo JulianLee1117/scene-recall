@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-29
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-0020 (ordinary unscoped result-diversity clause only)
 
 ## Context
 

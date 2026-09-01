@@ -70,8 +70,13 @@ The accepted boundary or behavior.
 | [0009](0009-complete-framing-spatial-cache.md) | Accepted | Cache production Framing grids only under complete profile activation |
 | [0010](0010-dedicated-mood-semantic-view.md) | Accepted | Isolate Mood to stored feeling and energy evidence |
 | [0011](0011-expose-resolved-source-inputs.md) | Accepted | Explain exact dragged-source inputs without inventing visual text |
-| [0012](0012-query-bound-uploaded-image-recipes.md) | Accepted | Use one uploaded still as a bounded broad-visual recipe signal |
+| [0012](0012-query-bound-uploaded-image-recipes.md) | Superseded | Use one uploaded still as a bounded broad-visual recipe signal |
 | [0013](0013-broad-query-evidence-and-candidate-breadth.md) | Accepted | Match broad-query lexical intent and expose passive cross-film candidates |
 | [0014](0014-preserve-external-subtitle-evidence.md) | Accepted | Preserve selected external subtitle evidence before dialogue derivation |
 | [0015](0015-fail-closed-on-degenerate-whisper-output.md) | Accepted | Discard structurally degenerate Whisper rows while preserving visual search |
 | [0016](0016-trust-explicit-english-primary-audio-tags.md) | Accepted | Prevent foreign-language cold opens from overriding explicit English audio metadata |
+| [0017](0017-progressive-authoritative-result-windows.md) | Accepted | Deepen one bounded backend-ranked result stream on demand |
+| [0018](0018-category-bound-uploaded-image-facets.md) | Accepted | Bind uploaded stills to honest Look or Framing retrieval |
+| [0019](0019-soft-temporal-result-spread.md) | Accepted | Defer nearby ordinary results without deleting them |
+| [0020](0020-bounded-discovery-rank-and-visual-reserve.md) | Accepted | Use bounded broad-search repeat rank and selective visual reserve |
+| [0021](0021-unified-open-discovery-repeat-rank.md) | Accepted | Use one bounded repeat rank for open non-image-gated discovery |

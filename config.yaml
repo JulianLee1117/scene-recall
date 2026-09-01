@@ -24,8 +24,9 @@ ingest:
 retrieval:
   weights: {img: 0.4, txt: 0.4, lex: 0.2}
   candidate_limit: 200       # base per-channel depth; unscoped broad search uses 3x
-  result_window: 48          # stable ranked window returned by production search
-  max_result_limit: 100      # bounded deeper window available to evaluations
+  result_window: 48          # initial stable ranked prefix returned by search
+  max_result_limit: 200      # bounded deepest interactive result window
   diversity:
     page_size: 12
     film_results_per_page_target: 4  # soft preference; every page relevance-backfills
+    film_repeat_rank_strength: 32    # bounded open-discovery repeat penalty; 0 keeps relevance order

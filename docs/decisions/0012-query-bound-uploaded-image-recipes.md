@@ -1,9 +1,9 @@
 # ADR-0012: Query-bound uploaded-image recipe signal
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-29
 - Supersedes: None
-- Superseded by: None
+- Superseded by: [ADR-0018](0018-category-bound-uploaded-image-facets.md)
 
 ## Context
 

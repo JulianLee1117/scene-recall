@@ -22,8 +22,10 @@ from pipeline.index.text_features import build_mood_view_text
 from pipeline.search.retrieve import (
     SemanticTextProfileUnavailable,
     apply_recipe_result_preferences,
+    resolve_result_limit,
     search,
     search_by_image,
+    search_look_by_image,
     search_look_by_text,
     search_look_by_vector,
     search_semantic_views,
@@ -36,13 +38,11 @@ SearchFacet = Literal[
     "scene",
     "words",
     "look",
-    "visual",
     "composition",
     "mood",
 ]
 ClauseKind = Literal["text", "source", "image"]
 _RRF_K = 60
-_CORRELATED_VISUAL_FACETS = frozenset({"visual", "composition"})
 
 
 class RecipeSourceNotFound(LookupError):
@@ -67,6 +67,17 @@ class SearchClause:
     text: str | None = None
     source: SourceReference | None = None
     image: Image.Image | None = None
+
+
+def _is_mandatory_visual_clause(clause: SearchClause) -> bool:
+    """Return whether a clause defines the recipe's candidate set.
+
+    Uploaded images are authoritative visual references whether interpreted
+    as Look or Framing. Indexed composition sources retain the same gate.
+    Ordinary Look text and indexed-frame clauses remain independent fusion
+    signals instead of becoming mandatory merely because they share a facet.
+    """
+    return clause.kind == "image" or clause.facet == "composition"
 
 
 @dataclass(frozen=True)
@@ -315,18 +326,27 @@ def _recipe_source_evidence(
                 raise RecipeSourceUnavailable(
                     "uploaded image source is unavailable"
                 )
-            if clause.facet != "visual":
-                raise ValueError("uploaded images require the visual facet")
+            if clause.facet not in {"look", "composition"}:
+                raise ValueError(
+                    "uploaded images support only look or composition"
+                )
+            spatial = clause.facet == "composition"
             described.append(
                 {
                     "clause_id": clause.clause_id,
                     "facet": clause.facet,
                     "source": {"kind": "uploaded_image"},
-                    "adapter": "pe_global+spatial_6x6",
+                    "adapter": (
+                        "pe_global+spatial_6x6" if spatial else "pe_global"
+                    ),
                     "evidence": [
                         {
                             "type": "image",
-                            "mode": "global_spatial_visual",
+                            "mode": (
+                                "global_spatial_visual"
+                                if spatial
+                                else "global_visual"
+                            ),
                         }
                     ],
                 }
@@ -527,8 +547,23 @@ def _run_clause(
     if clause.kind == "image":
         if clause.image is None:
             raise RecipeSourceUnavailable("uploaded image source is unavailable")
-        if clause.facet != "visual":
-            raise ValueError("uploaded images require the visual facet")
+        if clause.facet == "look":
+            return _ClauseRanking(
+                clause,
+                search_look_by_image(
+                    clause.image,
+                    db,
+                    config,
+                    film_ids=film_ids,
+                    result_limit=result_limit,
+                    _return_candidate_reserve=True,
+                ),
+                "",
+            )
+        if clause.facet != "composition":
+            raise ValueError(
+                "uploaded images support only look or composition"
+            )
         return _ClauseRanking(
             clause,
             search_by_image(
@@ -610,7 +645,7 @@ def _match_evidence(
         "facet": clause.facet,
         "rank": rank,
     }
-    if clause.facet in {"look", "visual", "composition"}:
+    if clause.facet in {"look", "composition"}:
         try:
             frame_index = int(
                 result.get("matched_frame_index", result["keyframe_index"])
@@ -654,10 +689,16 @@ def _fuse_rankings(
     for ranking in rankings:
         seen: set[str] = set()
         hits: dict[str, tuple[int, dict[str, Any]]] = {}
-        for rank, result in enumerate(ranking.results, start=1):
+        for fallback_rank, result in enumerate(ranking.results, start=1):
             unit_id = str(result.get("unit_id") or "")
             if not unit_id or unit_id in seen or unit_id in source_unit_ids:
                 continue
+            try:
+                rank = int(result.get("rank", fallback_rank))
+            except (TypeError, ValueError):
+                rank = fallback_rank
+            if rank < 1:
+                rank = fallback_rank
             seen.add(unit_id)
             hits[unit_id] = (rank, result)
         by_clause[ranking.clause.clause_id] = hits
@@ -665,7 +706,7 @@ def _fuse_rankings(
     mandatory_visual_rankings = [
         ranking
         for ranking in rankings
-        if ranking.clause.facet in _CORRELATED_VISUAL_FACETS
+        if _is_mandatory_visual_clause(ranking.clause)
     ]
     if mandatory_visual_rankings:
         eligible = set.intersection(
@@ -703,7 +744,7 @@ def _fuse_rankings(
             clause_index, ranking, rank, _result = contributor
             facet_priority = (
                 0
-                if ranking.clause.facet in _CORRELATED_VISUAL_FACETS
+                if _is_mandatory_visual_clause(ranking.clause)
                 else 1
                 if ranking.clause.facet == "look"
                 else 2
@@ -765,25 +806,24 @@ def execute_search_recipe(
     config: Config,
     *,
     film_ids: Sequence[str] = (),
+    result_limit: int | None = None,
 ) -> SearchRecipeExecution:
     """Run a recipe and return results with its resolved source snapshot."""
+    resolved_result_limit = resolve_result_limit(config, result_limit)
     if not 1 <= len(clauses) <= 3:
         raise ValueError("a search recipe requires one to three clauses")
     if len({clause.clause_id for clause in clauses}) != len(clauses):
         raise ValueError("search recipe clause IDs must be unique")
     if len({clause.facet for clause in clauses}) != len(clauses):
         raise ValueError("search recipe facets must be unique")
-    if any(
-        clause.facet == "visual" and clause.kind != "image"
-        for clause in clauses
-    ):
-        raise ValueError("the visual facet requires an uploaded image")
     image_clauses = [clause for clause in clauses if clause.kind == "image"]
     if len(image_clauses) > 1:
         raise ValueError("a search recipe accepts at most one uploaded image")
     for clause in image_clauses:
-        if clause.facet != "visual":
-            raise ValueError("uploaded images require the visual facet")
+        if clause.facet not in {"look", "composition"}:
+            raise ValueError(
+                "uploaded images support only look or composition"
+            )
         if clause.image is None:
             raise RecipeSourceUnavailable("uploaded image source is unavailable")
 
@@ -805,7 +845,7 @@ def execute_search_recipe(
             db,
             config,
             film_ids=normalized_film_ids,
-            result_limit=int(config.retrieval.result_window),
+            result_limit=resolved_result_limit,
         )
         return SearchRecipeExecution(
             results=_annotate_single_clause_results(only_clause, normal_results),
@@ -816,17 +856,20 @@ def execute_search_recipe(
     source_evidence = _recipe_source_evidence(clauses, resolved_sources)
     result_film_ids = normalized_film_ids
     apply_film_diversity: bool | None = None
-    composition_clause = next(
-        (clause for clause in clauses if clause.facet == "composition"),
+    composition_source_clause = next(
+        (
+            clause
+            for clause in clauses
+            if clause.facet == "composition" and clause.kind == "source"
+        ),
         None,
     )
-    if composition_clause is not None:
-        if (
-            composition_clause.kind != "source"
-            or composition_clause.source is None
-        ):
-            raise ValueError("composition clause requires a source scene")
-        composition_unit = resolved_sources[composition_clause.clause_id].unit
+    if composition_source_clause is not None:
+        if composition_source_clause.source is None:
+            raise ValueError("composition source requires a source scene")
+        composition_unit = resolved_sources[
+            composition_source_clause.clause_id
+        ].unit
         scope = resolve_reference_result_scope(
             db,
             normalized_film_ids,
@@ -866,9 +909,9 @@ def execute_search_recipe(
             config,
             film_ids=result_film_ids,
             requested_text=requested_text,
-            result_limit=int(config.retrieval.result_window),
+            result_limit=resolved_result_limit,
             apply_reference_temporal_spread=any(
-                clause.facet in _CORRELATED_VISUAL_FACETS
+                _is_mandatory_visual_clause(clause)
                 for clause in clauses
             ),
             apply_film_diversity=apply_film_diversity,
@@ -883,6 +926,7 @@ def search_recipe(
     config: Config,
     *,
     film_ids: Sequence[str] = (),
+    result_limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Run one to three typed clauses and return one final ranked window."""
     return execute_search_recipe(
@@ -890,6 +934,7 @@ def search_recipe(
         db,
         config,
         film_ids=film_ids,
+        result_limit=result_limit,
     ).results
 
 

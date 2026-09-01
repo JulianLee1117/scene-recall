@@ -12,6 +12,7 @@ Resolution order (no explicit path given):
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,15 +26,17 @@ VIDEO_EXTENSIONS: frozenset[str] = frozenset({
 })
 
 # Retrieval has three deliberately separate depths.  Candidate generation is
-# broad enough to survive fusion/filtering, the production window is what an
-# interactive search returns, and the hard ceiling bounds explicit evaluation
-# requests.  Keeping these defaults here also lets older config files upgrade
+# broad enough to survive fusion/filtering, and the production window is what
+# an interactive search returns initially. The hard ceiling bounds progressive
+# deepening and explicit evaluation requests. Keeping these defaults here also
+# lets older config files upgrade
 # without silently retaining the former twelve-result retrieval ceiling.
 DEFAULT_SEARCH_CANDIDATE_LIMIT = 200
 DEFAULT_SEARCH_RESULT_WINDOW = 48
-DEFAULT_SEARCH_MAX_RESULT_LIMIT = 100
+DEFAULT_SEARCH_MAX_RESULT_LIMIT = 200
 DEFAULT_SEARCH_PAGE_SIZE = 12
 DEFAULT_FILM_RESULTS_PER_PAGE_TARGET = 4
+DEFAULT_FILM_REPEAT_RANK_STRENGTH = 32.0
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +81,7 @@ class RetrievalWeights:
 class DiversityConfig:
     page_size: int
     film_results_per_page_target: int
+    film_repeat_rank_strength: float
 
 
 @dataclass
@@ -241,9 +245,21 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         raise ValueError(
             "retrieval.diversity.film_results_per_page_target cannot be negative"
         )
+    film_repeat_rank_strength = float(
+        diversity_raw.get(
+            "film_repeat_rank_strength",
+            DEFAULT_FILM_REPEAT_RANK_STRENGTH,
+        )
+    )
+    if not math.isfinite(film_repeat_rank_strength) or film_repeat_rank_strength < 0:
+        raise ValueError(
+            "retrieval.diversity.film_repeat_rank_strength must be a finite "
+            "non-negative number"
+        )
     diversity = DiversityConfig(
         page_size=page_size,
         film_results_per_page_target=film_results_per_page_target,
+        film_repeat_rank_strength=film_repeat_rank_strength,
     )
 
     candidate_limit = int(
