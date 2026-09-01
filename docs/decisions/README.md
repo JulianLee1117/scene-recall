@@ -80,3 +80,4 @@ The accepted boundary or behavior.
 | [0019](0019-soft-temporal-result-spread.md) | Accepted | Defer nearby ordinary results without deleting them |
 | [0020](0020-bounded-discovery-rank-and-visual-reserve.md) | Accepted | Use bounded broad-search repeat rank and selective visual reserve |
 | [0021](0021-unified-open-discovery-repeat-rank.md) | Accepted | Use one bounded repeat rank for open non-image-gated discovery |
+| [0022](0022-explicit-external-subtitle-review.md) | Accepted | Require explicit review before using an uncertain external subtitle |

@@ -15,6 +15,7 @@ import type {
   IngestJob,
   IngestResponse,
   LibraryFilm,
+  SubtitleImportDecision,
 } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -124,6 +125,8 @@ export default function LibraryView() {
   const [year, setYear] = useState("");
   const [edition, setEdition] = useState("");
   const [confirmedFinished, setConfirmedFinished] = useState(false);
+  const [subtitleDecision, setSubtitleDecision] =
+    useState<SubtitleImportDecision | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
@@ -132,6 +135,7 @@ export default function LibraryView() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const yearInputRef = useRef<HTMLInputElement>(null);
   const confirmationRef = useRef<HTMLInputElement>(null);
+  const firstSubtitleRef = useRef<HTMLInputElement>(null);
 
   const fetchLibrary = useCallback(async () => {
     const data = await getJson<LibraryFilm[]>(
@@ -300,6 +304,7 @@ export default function LibraryView() {
     setYear(candidate.suggested_year?.toString() ?? "");
     setEdition(candidate.suggested_edition ?? "");
     setConfirmedFinished(false);
+    setSubtitleDecision(null);
     setImportError(null);
   }, []);
 
@@ -342,6 +347,22 @@ export default function LibraryView() {
         return;
       }
 
+      if (selectedCandidate.subtitle_review_candidates === undefined) {
+        setImportError(
+          "Film intake is finishing an update. Try again shortly.",
+        );
+        return;
+      }
+
+      if (
+        selectedCandidate.subtitle_review_candidates.length > 0 &&
+        subtitleDecision === null
+      ) {
+        setImportError("Choose an English subtitle, or choose none.");
+        firstSubtitleRef.current?.focus();
+        return;
+      }
+
       if (!confirmedFinished) {
         setImportError(
           "Confirm that torrenting and seeding are finished before moving this item.",
@@ -357,6 +378,7 @@ export default function LibraryView() {
         edition: edition.trim() || null,
         ingest,
         confirm_finished: true,
+        subtitle_decision: subtitleDecision,
       };
 
       setImporting(true);
@@ -421,6 +443,7 @@ export default function LibraryView() {
       mergeJob,
       refreshCatalog,
       selectedCandidate,
+      subtitleDecision,
       title,
       year,
     ],
@@ -491,6 +514,8 @@ export default function LibraryView() {
   const preview = selectedCandidate
     ? destinationFilename(selectedCandidate, title, year, edition)
     : "";
+  const subtitleReviewCandidates =
+    selectedCandidate?.subtitle_review_candidates ?? [];
 
   return (
     <div className="films-page">
@@ -785,6 +810,56 @@ export default function LibraryView() {
                 Main movie selected · {selectedCandidate.extra_video_count} other video
                 {selectedCandidate.extra_video_count === 1 ? "" : "s"} ignored
               </p>
+            )}
+
+            {subtitleReviewCandidates.length > 0 && (
+              <fieldset className="film-review-subtitles">
+                <legend>Subtitles</legend>
+                <p>Which track is English?</p>
+                <div className="film-review-subtitle-options">
+                  {subtitleReviewCandidates.map(
+                    (candidate, index) => (
+                      <label
+                        className="film-review-subtitle-option"
+                        key={candidate.relative_path}
+                      >
+                        <input
+                          ref={index === 0 ? firstSubtitleRef : undefined}
+                          type="radio"
+                          name="subtitle-decision"
+                          checked={
+                            subtitleDecision?.action === "use_as_english" &&
+                            subtitleDecision.relative_path === candidate.relative_path
+                          }
+                          onChange={() =>
+                            setSubtitleDecision({
+                              action: "use_as_english",
+                              relative_path: candidate.relative_path,
+                            })
+                          }
+                          disabled={importing}
+                        />
+                        <span>
+                          <strong>{candidate.filename}</strong>
+                          <small>{candidate.excerpt}</small>
+                        </span>
+                      </label>
+                    ),
+                  )}
+                  <label className="film-review-subtitle-option film-review-subtitle-option--skip">
+                    <input
+                      type="radio"
+                      name="subtitle-decision"
+                      checked={subtitleDecision?.action === "skip"}
+                      onChange={() => setSubtitleDecision({ action: "skip" })}
+                      disabled={importing}
+                    />
+                    <span>
+                      <strong>None of these</strong>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
             )}
 
             <label className="film-review-confirmation">

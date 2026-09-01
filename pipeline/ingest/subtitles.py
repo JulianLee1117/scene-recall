@@ -11,6 +11,8 @@ from pathlib import Path
 _MAX_EXTERNAL_SRT_BYTES = 16 * 1024 * 1024
 _MIN_EXTERNAL_DIALOGUE_CUES = 8
 _MIN_EXTERNAL_DIALOGUE_WORDS = 24
+_MAX_EXTERNAL_SRT_EXCERPT_CUES = 3
+_MAX_EXTERNAL_SRT_EXCERPT_CHARS = 240
 _TIMECODE_RE = re.compile(
     r"(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})"
 )
@@ -31,6 +33,15 @@ class SrtCue:
     start: float
     end: float
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalSrtInspection:
+    """A safe, ephemeral summary of a usable external subtitle."""
+
+    cue_count: int
+    word_count: int
+    excerpt: str
 
 
 def read_srt_text(path: Path) -> str:
@@ -102,8 +113,8 @@ def parse_srt_timestamp(timestamp: str) -> float:
     )
 
 
-def external_srt_is_usable(path: Path) -> bool:
-    """Return whether an external SRT contains minimally useful dialogue.
+def inspect_external_srt(path: Path) -> ExternalSrtInspection | None:
+    """Inspect a usable external SRT without mutating or persisting it.
 
     This is deliberately a very low content floor, not a completeness or
     language classifier. It rejects malformed, oversized, promo-only, and
@@ -113,17 +124,34 @@ def external_srt_is_usable(path: Path) -> bool:
     """
     try:
         if path.is_symlink() or not path.is_file():
-            return False
+            return None
         size = path.stat().st_size
         if size <= 0 or size > _MAX_EXTERNAL_SRT_BYTES:
-            return False
+            return None
         dialogue_cues = parse_external_dialogue_srt(read_srt_text(path))
     except (OSError, UnicodeError, ValueError):
-        return False
+        return None
 
     if len(dialogue_cues) < _MIN_EXTERNAL_DIALOGUE_CUES:
-        return False
+        return None
     word_count = sum(
         len(_SUBTITLE_WORD_RE.findall(cue.text)) for cue in dialogue_cues
     )
-    return word_count >= _MIN_EXTERNAL_DIALOGUE_WORDS
+    if word_count < _MIN_EXTERNAL_DIALOGUE_WORDS:
+        return None
+
+    excerpt = " · ".join(
+        cue.text for cue in dialogue_cues[:_MAX_EXTERNAL_SRT_EXCERPT_CUES]
+    )
+    if len(excerpt) > _MAX_EXTERNAL_SRT_EXCERPT_CHARS:
+        excerpt = excerpt[: _MAX_EXTERNAL_SRT_EXCERPT_CHARS - 1].rstrip() + "…"
+    return ExternalSrtInspection(
+        cue_count=len(dialogue_cues),
+        word_count=word_count,
+        excerpt=excerpt,
+    )
+
+
+def external_srt_is_usable(path: Path) -> bool:
+    """Return whether an external SRT contains minimally useful dialogue."""
+    return inspect_external_srt(path) is not None

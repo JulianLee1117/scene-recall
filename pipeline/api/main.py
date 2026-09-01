@@ -40,6 +40,7 @@ import time
 import uuid
 from collections import deque
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -82,7 +83,7 @@ from pipeline.index.writer import (
     published_film_ids,
     table_names,
 )
-from pipeline.ingest.subtitles import external_srt_is_usable
+from pipeline.ingest.subtitles import inspect_external_srt
 from pipeline.search.retrieve import (
     resolve_result_limit,
     search as _search,
@@ -781,6 +782,25 @@ class IngestRequest(BaseModel):
     path: str
 
 
+class SubtitleUseDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["use_as_english"]
+    relative_path: str = Field(min_length=1, max_length=1024)
+
+
+class SubtitleSkipDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["skip"]
+
+
+SubtitleImportDecision = Annotated[
+    SubtitleUseDecision | SubtitleSkipDecision,
+    Field(discriminator="action"),
+]
+
+
 class FilmImportRequest(BaseModel):
     relative_path: str
     title: str
@@ -788,6 +808,7 @@ class FilmImportRequest(BaseModel):
     edition: str | None = None
     ingest: bool = True
     confirm_finished: bool
+    subtitle_decision: SubtitleImportDecision | None = None
 
 
 class BookmarkRequest(BaseModel):
@@ -1803,12 +1824,18 @@ def _subtitle_files_in_release(root: Path, release: Path) -> list[Path]:
     return subtitles
 
 
-def _select_english_sidecar(
+@dataclass(frozen=True, slots=True)
+class _SubtitleReviewCandidate:
+    path: Path
+    excerpt: str
+
+
+def _resolve_external_sidecars(
     incoming_root: Path,
     source: Path,
     release_dir: Path | None,
-) -> Path | None:
-    """Choose one source-associated English SRT, failing closed on ambiguity."""
+) -> tuple[Path | None, list[_SubtitleReviewCandidate]]:
+    """Resolve an automatic English sidecar or safe candidates for review."""
     if release_dir is None:
         candidates = [
             source.with_name(source.stem + suffix)
@@ -1821,11 +1848,6 @@ def _select_english_sidecar(
         ]
     else:
         candidates = _subtitle_files_in_release(incoming_root, release_dir)
-    candidates = [
-        candidate for candidate in candidates if external_srt_is_usable(candidate)
-    ]
-    if not candidates:
-        return None
 
     def label_tokens(label: str) -> set[str]:
         return {
@@ -1885,11 +1907,11 @@ def _select_english_sidecar(
         label_tokens(source_title) - insignificant_title_tokens
     )
     if not source_identity:
-        return None
+        return None, []
 
-    associated: list[Path] = []
+    review_candidates: list[_SubtitleReviewCandidate] = []
     descriptors_by_path: dict[Path, set[str]] = {}
-    for path in candidates:
+    for path in sorted(set(candidates), key=lambda item: str(item).casefold()):
         candidate_tokens = tokens(path)
         if not source_identity.issubset(candidate_tokens):
             continue
@@ -1905,28 +1927,52 @@ def _select_english_sidecar(
         ):
             continue
         descriptors = candidate_tokens - source_identity
-        if not (descriptors & english_markers):
-            continue
         if descriptors & (alternate_markers | extra_markers | foreign_markers):
             continue
-        associated.append(path)
+        inspection = inspect_external_srt(path)
+        if inspection is None:
+            continue
+        review_candidates.append(
+            _SubtitleReviewCandidate(path=path, excerpt=inspection.excerpt)
+        )
         descriptors_by_path[path] = descriptors
 
-    if not associated:
-        return None
-    if len(associated) == 1:
-        return associated[0]
-
-    # Prefer one ordinary full-dialogue track over an accessibility variant.
-    # Multiple ordinary or multiple accessibility tracks remain ambiguous.
-    standard = [
-        path
-        for path in associated
-        if not (descriptors_by_path[path] & accessibility_markers)
+    english_candidates = [
+        candidate
+        for candidate in review_candidates
+        if descriptors_by_path[candidate.path] & english_markers
     ]
-    if len(standard) == 1:
-        return standard[0]
-    return None
+    automatic: Path | None = None
+    if len(english_candidates) == 1:
+        automatic = english_candidates[0].path
+    elif len(english_candidates) > 1:
+        # Prefer one ordinary full-dialogue track over accessibility variants.
+        # Multiple ordinary or multiple accessibility tracks remain ambiguous.
+        standard = [
+            candidate.path
+            for candidate in english_candidates
+            if not (descriptors_by_path[candidate.path] & accessibility_markers)
+        ]
+        if len(standard) == 1:
+            automatic = standard[0]
+
+    if automatic is not None:
+        return automatic, []
+    return None, review_candidates
+
+
+def _select_english_sidecar(
+    incoming_root: Path,
+    source: Path,
+    release_dir: Path | None,
+) -> Path | None:
+    """Choose one source-associated English SRT, failing closed on ambiguity."""
+    automatic, _review_candidates = _resolve_external_sidecars(
+        incoming_root,
+        source,
+        release_dir,
+    )
+    return automatic
 
 
 def _copy_file_no_replace(source: Path, destination: Path) -> None:
@@ -1982,6 +2028,12 @@ def _incoming_candidate(
         )
     except ValueError:
         suggested_filename = primary.name
+    release_dir = release_entry if release_entry.is_dir() else None
+    _automatic_subtitle, subtitle_review_candidates = _resolve_external_sidecars(
+        root,
+        primary,
+        release_dir,
+    )
     return {
         "relative_path": primary.relative_to(root).as_posix(),
         "filename": primary.name,
@@ -1991,6 +2043,14 @@ def _incoming_candidate(
         "suggested_edition": edition,
         "suggested_filename": suggested_filename,
         "extra_video_count": len(videos) - 1,
+        "subtitle_review_candidates": [
+            {
+                "relative_path": candidate.path.relative_to(root).as_posix(),
+                "filename": candidate.path.name,
+                "excerpt": candidate.excerpt,
+            }
+            for candidate in subtitle_review_candidates
+        ],
     }
 
 
@@ -2141,6 +2201,55 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
     try:
+        incoming_root = config.paths.incoming_dir.resolve()
+        relative_source = source.relative_to(incoming_root)
+        release_dir = (
+            incoming_root / relative_source.parts[0]
+            if len(relative_source.parts) > 1
+            else None
+        )
+        automatic_subtitle, subtitle_review_candidates = (
+            _resolve_external_sidecars(incoming_root, source, release_dir)
+        )
+        if automatic_subtitle is not None:
+            if body.subtitle_decision is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subtitle choices changed; review this film again",
+                )
+            subtitle_source = automatic_subtitle
+        elif subtitle_review_candidates:
+            if body.subtitle_decision is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Choose an English subtitle or explicitly skip subtitles",
+                )
+            if isinstance(body.subtitle_decision, SubtitleSkipDecision):
+                subtitle_source = None
+            else:
+                selected = next(
+                    (
+                        candidate.path
+                        for candidate in subtitle_review_candidates
+                        if candidate.path.relative_to(incoming_root).as_posix()
+                        == body.subtitle_decision.relative_path
+                    ),
+                    None,
+                )
+                if selected is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subtitle choices changed; review this film again",
+                    )
+                subtitle_source = selected
+        else:
+            if body.subtitle_decision is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subtitle choices changed; review this film again",
+                )
+            subtitle_source = None
+
         films_root = config.paths.films_dir.resolve()
         films_root.mkdir(parents=True, exist_ok=True)
         films_root = films_root.resolve()
@@ -2158,19 +2267,7 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
                 status_code=400,
                 detail="Incoming and films directories must be on the same drive",
             )
-        incoming_root = config.paths.incoming_dir.resolve()
-        relative_source = source.relative_to(incoming_root)
-        release_dir = (
-            incoming_root / relative_source.parts[0]
-            if len(relative_source.parts) > 1
-            else None
-        )
         marker = release_dir / _IMPORTED_RELEASE_MARKER if release_dir else None
-        subtitle_source = _select_english_sidecar(
-            incoming_root,
-            source,
-            release_dir,
-        )
         subtitle_destination = (
             destination.with_name(destination.stem + ".en.srt")
             if subtitle_source is not None

@@ -403,6 +403,49 @@ def test_external_sidecar_filters_promos_from_derived_dialogue_only(
     assert not dialogue_cache_is_current(film, config)
 
 
+def test_external_srt_inspection_excerpt_filters_promos_and_caps_cues(
+    tmp_path: Path,
+) -> None:
+    from pipeline.ingest.subtitles import inspect_external_srt
+
+    sidecar = tmp_path / "film.srt"
+    raw_sidecar = _promo_only_srt() + _usable_external_srt("Spoken dialogue")
+    sidecar.write_text(raw_sidecar, encoding="utf-8")
+
+    inspection = inspect_external_srt(sidecar)
+
+    assert inspection is not None
+    assert inspection.cue_count == 8
+    assert inspection.excerpt == (
+        "Spoken dialogue line 1 has several spoken words. · "
+        "Spoken dialogue line 2 has several spoken words. · "
+        "Spoken dialogue line 3 has several spoken words."
+    )
+    assert "YIFY" not in inspection.excerpt
+    assert "OpenSubtitles" not in inspection.excerpt
+    assert "line 4" not in inspection.excerpt
+    assert sidecar.read_text(encoding="utf-8") == raw_sidecar
+
+
+def test_external_srt_inspection_excerpt_has_hard_character_bound(
+    tmp_path: Path,
+) -> None:
+    from pipeline.ingest.subtitles import inspect_external_srt
+
+    sidecar = tmp_path / "film.srt"
+    raw_sidecar = _usable_external_srt(
+        "Very long dialogue " + "descriptive-word-" * 30
+    )
+    sidecar.write_text(raw_sidecar, encoding="utf-8")
+
+    inspection = inspect_external_srt(sidecar)
+
+    assert inspection is not None
+    assert len(inspection.excerpt) <= 240
+    assert inspection.excerpt.endswith("…")
+    assert sidecar.read_text(encoding="utf-8") == raw_sidecar
+
+
 def test_trivial_promo_sidecar_is_ignored_and_invalidates_cached_dialogue(
     config: Config,
     tmp_path: Path,

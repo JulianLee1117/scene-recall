@@ -140,14 +140,25 @@ overwriting prior generations.
 
 Film intake copies one usable English-marked SRT with minimally useful dialogue
 that is filename-associated with the selected feature beside the canonical
-film as `<film-stem>.en.srt` while retaining the release copy. A shared,
-non-destructive content floor rejects malformed, oversized, trivial, and
-promo-only external SRTs both at intake and dialogue resolution; it is not a
-language or completeness classifier. Dialogue derivation records a
-contract-versioned manifest containing the selected sidecar content hash,
-embedded stream identity, or Whisper model and transcription profile. The
-sidecar derivation profile removes known promotional cues from parsed dialogue
-without changing the raw file. The Whisper fallback uses VAD and
+film as `<film-stem>.en.srt` while retaining the release copy. When no sidecar
+is safe to select automatically but usable, feature-associated candidates
+remain, intake exposes only those candidates with bounded, non-persisted text
+previews and requires an explicit choice to use one as English or skip
+subtitles. An omitted or stale decision fails before the film or subtitle is
+moved; the server recomputes the eligible set and accepts only an exact member,
+never an arbitrary browser-supplied path. Multiple candidates are not merged or
+guessed between. Skipping leaves every release SRT untouched in `incoming`.
+
+A shared, non-destructive content floor rejects malformed, oversized, trivial,
+and promo-only external SRTs both at intake and dialogue resolution; it is not
+a language or completeness classifier. Forced, commentary, extra-associated,
+known foreign-marked, and unassociated sidecars are neither selected nor
+offered for review. A preview is transient interface data, not durable evidence
+or a derived dialogue source. Dialogue derivation records a contract-versioned
+manifest containing the selected sidecar content hash, embedded stream
+identity, or Whisper model and transcription profile. The sidecar derivation
+profile removes known promotional cues from parsed dialogue without changing
+the raw file. The Whisper fallback uses VAD and
 source-language transcription. A canonical `en` or `eng` tag on the primary
 audio stream supplies an English language hint; missing, `und`, and all other
 tags retain automatic majority voting over up to five voiced 30-second

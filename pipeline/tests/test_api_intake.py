@@ -94,6 +94,7 @@ def test_incoming_groups_release_folder_and_selects_largest_video(
         "suggested_edition": None,
         "suggested_filename": "The Lighthouse (2019).mkv",
         "extra_video_count": 2,
+        "subtitle_review_candidates": [],
     }
     assert by_title["Marty Supreme"]["suggested_filename"] == (
         "Marty Supreme (2025).mp4"
@@ -215,6 +216,175 @@ def test_import_preserves_best_english_srt_as_canonical_sidecar(
     imported = config.paths.films_dir / response.json()["subtitle_filename"]
     assert imported.read_text(encoding="utf-8") == english_content
     assert english.exists(), "the incoming subtitle remains as raw release evidence"
+
+
+def test_unmarked_sidecar_requires_explicit_review_before_import(
+    config: Config,
+) -> None:
+    release = config.paths.incoming_dir / "The.Master.2012.1080p"
+    release.mkdir(parents=True)
+    source = release / "The.Master.2012.mp4"
+    source.write_bytes(b"feature")
+    subtitle = release / "The.Master.2012.YIFY.srt"
+    subtitle_content = _usable_external_srt("English dialogue")
+    subtitle.write_text(subtitle_content, encoding="utf-8")
+    relative_source = "The.Master.2012.1080p/The.Master.2012.mp4"
+    relative_subtitle = "The.Master.2012.1080p/The.Master.2012.YIFY.srt"
+
+    with _api_client(config) as client:
+        listing = client.get("/incoming")
+        response = client.post(
+            "/films/import",
+            json={
+                "relative_path": relative_source,
+                "title": "The Master",
+                "year": 2012,
+                "ingest": False,
+                "confirm_finished": True,
+            },
+        )
+
+    assert listing.status_code == 200
+    assert listing.json()[0]["subtitle_review_candidates"] == [
+        {
+            "relative_path": relative_subtitle,
+            "filename": subtitle.name,
+            "excerpt": (
+                "English dialogue line 1 has several spoken words. · "
+                "English dialogue line 2 has several spoken words. · "
+                "English dialogue line 3 has several spoken words."
+            ),
+        }
+    ]
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Choose an English subtitle or explicitly skip subtitles"
+    )
+    assert source.read_bytes() == b"feature"
+    assert subtitle.read_text(encoding="utf-8") == subtitle_content
+    assert not (release / ".scene-recall-imported").exists()
+    assert not (config.paths.films_dir / "The Master (2012).mp4").exists()
+    assert not (config.paths.films_dir / "The Master (2012).en.srt").exists()
+
+
+def test_import_uses_explicitly_confirmed_unmarked_sidecar(
+    config: Config,
+) -> None:
+    release = config.paths.incoming_dir / "The.Master.2012.1080p"
+    release.mkdir(parents=True)
+    source = release / "The.Master.2012.mp4"
+    source.write_bytes(b"feature")
+    subtitle = release / "The.Master.2012.YIFY.srt"
+    subtitle.write_text(_usable_external_srt("English dialogue"), encoding="utf-8")
+    relative_subtitle = "The.Master.2012.1080p/The.Master.2012.YIFY.srt"
+
+    with _api_client(config) as client:
+        response = client.post(
+            "/films/import",
+            json={
+                "relative_path": "The.Master.2012.1080p/The.Master.2012.mp4",
+                "title": "The Master",
+                "year": 2012,
+                "ingest": False,
+                "confirm_finished": True,
+                "subtitle_decision": {
+                    "action": "use_as_english",
+                    "relative_path": relative_subtitle,
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["subtitle_filename"] == "The Master (2012).en.srt"
+    imported_film = config.paths.films_dir / "The Master (2012).mp4"
+    imported_subtitle = config.paths.films_dir / "The Master (2012).en.srt"
+    assert imported_film.read_bytes() == b"feature"
+    assert not source.exists()
+    assert imported_subtitle.read_bytes() == subtitle.read_bytes()
+    assert subtitle.exists(), "the selected release subtitle remains raw evidence"
+
+
+def test_import_can_explicitly_skip_reviewable_sidecar(config: Config) -> None:
+    release = config.paths.incoming_dir / "Film.2020"
+    release.mkdir(parents=True)
+    source = release / "Film.2020.mkv"
+    source.write_bytes(b"feature")
+    subtitle = release / "Film.2020.srt"
+    subtitle_content = _usable_external_srt()
+    subtitle.write_text(subtitle_content, encoding="utf-8")
+
+    with _api_client(config) as client:
+        response = client.post(
+            "/films/import",
+            json={
+                "relative_path": "Film.2020/Film.2020.mkv",
+                "title": "Film",
+                "year": 2020,
+                "ingest": False,
+                "confirm_finished": True,
+                "subtitle_decision": {"action": "skip"},
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["subtitle_filename"] is None
+    assert (config.paths.films_dir / "Film (2020).mkv").read_bytes() == b"feature"
+    assert not (config.paths.films_dir / "Film (2020).en.srt").exists()
+    assert subtitle.read_text(encoding="utf-8") == subtitle_content
+
+
+def test_import_recomputes_and_exactly_validates_subtitle_selection(
+    config: Config,
+) -> None:
+    incoming = config.paths.incoming_dir
+    release = incoming / "Film.2020"
+    release.mkdir(parents=True)
+    source = release / "Film.2020.mkv"
+    source.write_bytes(b"feature")
+    subtitle = release / "Film.2020.srt"
+    subtitle.write_text(_usable_external_srt(), encoding="utf-8")
+    other_release = incoming / "Other.2021"
+    other_release.mkdir()
+    other_subtitle = other_release / "Other.2021.srt"
+    other_subtitle.write_text(_usable_external_srt(), encoding="utf-8")
+
+    request = {
+        "relative_path": "Film.2020/Film.2020.mkv",
+        "title": "Film",
+        "year": 2020,
+        "ingest": False,
+        "confirm_finished": True,
+    }
+    with _api_client(config) as client:
+        wrong_release = client.post(
+            "/films/import",
+            json={
+                **request,
+                "subtitle_decision": {
+                    "action": "use_as_english",
+                    "relative_path": "Other.2021/Other.2021.srt",
+                },
+            },
+        )
+        subtitle.write_text(_promo_only_srt(), encoding="utf-8")
+        stale_selection = client.post(
+            "/films/import",
+            json={
+                **request,
+                "subtitle_decision": {
+                    "action": "use_as_english",
+                    "relative_path": "Film.2020/Film.2020.srt",
+                },
+            },
+        )
+
+    assert wrong_release.status_code == 409
+    assert stale_selection.status_code == 409
+    assert source.read_bytes() == b"feature"
+    assert other_subtitle.exists()
+    assert not (release / ".scene-recall-imported").exists()
+    assert not (config.paths.films_dir / "Film (2020).mkv").exists()
+    assert not (config.paths.films_dir / "Film (2020).en.srt").exists()
 
 
 def test_sidecar_selection_declines_forced_or_ambiguous_english_tracks(

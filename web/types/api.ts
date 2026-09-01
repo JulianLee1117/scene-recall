@@ -218,7 +218,21 @@ export interface IncomingFilm {
   suggested_filename: string;
   /** Other video files in the torrent folder that will not be imported. */
   extra_video_count: number;
+  /** Usable associated SRTs that need an explicit English-language decision. */
+  subtitle_review_candidates: SubtitleReviewCandidate[];
 }
+
+export interface SubtitleReviewCandidate {
+  /** Path relative to the configured incoming directory. */
+  relative_path: string;
+  filename: string;
+  /** Short non-promotional preview; never persisted as metadata. */
+  excerpt: string;
+}
+
+export type SubtitleImportDecision =
+  | { action: "use_as_english"; relative_path: string }
+  | { action: "skip" };
 
 export interface IngestJob {
   job_id: string;
@@ -245,6 +259,7 @@ export interface ImportFilmRequest {
   edition: string | null;
   ingest: boolean;
   confirm_finished: true;
+  subtitle_decision: SubtitleImportDecision | null;
 }
 
 export interface ImportFilmResponse {

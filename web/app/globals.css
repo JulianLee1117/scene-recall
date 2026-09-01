@@ -286,6 +286,7 @@ input {
 .films-button:focus-visible,
 .film-review-close:focus-visible,
 .film-review-field input:focus-visible,
+.film-review-subtitle-option input:focus-visible,
 .film-review-confirmation input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -484,6 +485,94 @@ input {
   color: #6f6659;
   font-size: 0.66rem;
   line-height: 1.4;
+}
+
+.film-review-subtitles {
+  min-width: 0;
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.film-review-subtitles legend {
+  padding: 0;
+  color: #8a8a8a;
+  font-size: 0.67rem;
+  font-weight: 500;
+}
+
+.film-review-subtitles > p {
+  margin: 3px 0 8px;
+  color: #606060;
+  font-size: 0.66rem;
+}
+
+.film-review-subtitle-options {
+  display: grid;
+  gap: 4px;
+}
+
+.film-review-subtitle-option {
+  display: flex;
+  min-width: 0;
+  padding: 9px 10px;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #292929;
+  border-radius: 6px;
+  background: #0c0c0c;
+  color: #aaa;
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease;
+}
+
+.film-review-subtitle-option:hover {
+  border-color: #3b352d;
+  background: #0f0e0c;
+}
+
+.film-review-subtitle-option:has(input:checked) {
+  border-color: #725b3b;
+  background: #14110d;
+}
+
+.film-review-subtitle-option input {
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.film-review-subtitle-option > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.film-review-subtitle-option strong {
+  overflow-wrap: anywhere;
+  color: #bdbdbd;
+  font-size: 0.69rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.film-review-subtitle-option small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #686868;
+  font-size: 0.65rem;
+  font-weight: 400;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.film-review-subtitle-option--skip {
+  padding-block: 8px;
 }
 
 .film-review-confirmation {

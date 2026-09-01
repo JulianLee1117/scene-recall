@@ -261,7 +261,10 @@ export default function MatchByRail({
         setPageSceneDragActive(true);
       }
     };
-    const handleDocumentDragFinish = () => setPageSceneDragActive(false);
+    const handleDocumentDragFinish = () => {
+      setPageSceneDragActive(false);
+      setDragOverFacet(null);
+    };
 
     document.addEventListener("dragstart", handleDocumentDragStart);
     document.addEventListener("dragend", handleDocumentDragFinish);
@@ -274,19 +277,29 @@ export default function MatchByRail({
   }, []);
 
   useEffect(() => {
-    if (!dragSourceFacet && !dragImageFacet) return;
     const outsideTiles = (target: EventTarget | null) =>
       !(target instanceof Element && target.closest(".match-tile"));
     const handleDocumentDragOver = (event: globalThis.DragEvent) => {
       if (!outsideTiles(event.target) || !event.dataTransfer) return;
+      const movingScene = containsSceneSource(event.dataTransfer);
+      const movingImage = containsImageSource(event.dataTransfer);
+      if (!movingScene && !movingImage) return;
       event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
+      event.dataTransfer.dropEffect =
+        event.dataTransfer.effectAllowed === "move" ? "move" : "copy";
     };
     const handleDocumentDrop = (event: globalThis.DragEvent) => {
-      if (!outsideTiles(event.target)) return;
+      if (!outsideTiles(event.target) || !event.dataTransfer) return;
+      const movingScene = containsSceneSource(event.dataTransfer);
+      const movingImage = containsImageSource(event.dataTransfer);
+      if (!movingScene && !movingImage) return;
       event.preventDefault();
-      if (dragImageFacet) onRemoveImage?.();
-      else if (dragSourceFacet) onRemove?.(dragSourceFacet);
+      if (movingImage) {
+        onRemoveImage?.();
+      } else {
+        const originFacet = readFacetSourceDragOrigin(event.dataTransfer);
+        if (originFacet) onRemove?.(originFacet);
+      }
       setDragOverFacet(null);
       setDragSourceFacet(null);
       setDragImageFacet(null);
@@ -298,7 +311,7 @@ export default function MatchByRail({
       document.removeEventListener("dragover", handleDocumentDragOver);
       document.removeEventListener("drop", handleDocumentDrop);
     };
-  }, [dragImageFacet, dragSourceFacet, onRemove, onRemoveImage]);
+  }, [onRemove, onRemoveImage]);
 
   const activateText = (facet: TextMatchFacet) => {
     if (!canUseFacet(facet)) {
