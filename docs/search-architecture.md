@@ -141,13 +141,15 @@ overwriting prior generations.
 Film intake copies one usable English-marked SRT with minimally useful dialogue
 that is filename-associated with the selected feature beside the canonical
 film as `<film-stem>.en.srt` while retaining the release copy. When no sidecar
-is safe to select automatically but usable, feature-associated candidates
-remain, intake exposes only those candidates with bounded, non-persisted text
-previews and requires an explicit choice to use one as English or skip
-subtitles. An omitted or stale decision fails before the film or subtitle is
-moved; the server recomputes the eligible set and accepts only an exact member,
-never an arbitrary browser-supplied path. Multiple candidates are not merged or
-guessed between. Skipping leaves every release SRT untouched in `incoming`.
+is safe to select automatically but usable candidates remain, intake exposes
+only filename-associated tracks or generic English-labeled tracks scoped by a
+matching release folder. Generic release-scoped labels are review-only, never
+automatic. Intake supplies bounded, non-persisted text previews and requires
+an explicit choice to use one as English or skip subtitles. An omitted or stale
+decision fails before the film or subtitle is moved; the server recomputes the
+eligible set and accepts only an exact member, never an arbitrary
+browser-supplied path. Multiple candidates are not merged or guessed between.
+Skipping leaves every release SRT untouched in `incoming`.
 
 A shared, non-destructive content floor rejects malformed, oversized, trivial,
 and promo-only external SRTs both at intake and dialogue resolution; it is not

@@ -267,6 +267,39 @@ def test_unmarked_sidecar_requires_explicit_review_before_import(
     assert not (config.paths.films_dir / "The Master (2012).en.srt").exists()
 
 
+def test_generic_english_label_in_matching_release_is_review_only(
+    config: Config,
+) -> None:
+    release = config.paths.incoming_dir / "Hiroshima.Mon.Amour.1959.1080p"
+    subtitles = release / "Subs"
+    featurettes = release / "Featurettes"
+    subtitles.mkdir(parents=True)
+    featurettes.mkdir()
+    source = release / "Hiroshima.Mon.Amour.1959.mkv"
+    source.write_bytes(b"feature")
+    english = subtitles / "ENG.srt"
+    english.write_text(_usable_external_srt("English dialogue"), encoding="utf-8")
+    (subtitles / "DUT.srt").write_text(
+        _usable_external_srt("Dutch dialogue"), encoding="utf-8"
+    )
+    (subtitles / "Different.Movie.English.srt").write_text(
+        _usable_external_srt("Other movie"), encoding="utf-8"
+    )
+    (featurettes / "ENG.srt").write_text(
+        _usable_external_srt("Bonus dialogue"), encoding="utf-8"
+    )
+
+    with _api_client(config) as client:
+        listing = client.get("/incoming")
+
+    assert listing.status_code == 200
+    candidates = listing.json()[0]["subtitle_review_candidates"]
+    assert [candidate["relative_path"] for candidate in candidates] == [
+        "Hiroshima.Mon.Amour.1959.1080p/Subs/ENG.srt"
+    ]
+    assert candidates[0]["filename"] == english.name
+
+
 def test_import_uses_explicitly_confirmed_unmarked_sidecar(
     config: Config,
 ) -> None:

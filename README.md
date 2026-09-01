@@ -96,11 +96,13 @@ When a release contains one usable English-marked SRT clearly associated with
 the selected feature, import also preserves it beside the canonical film as
 `Title (Year) [Edition].en.srt`; the original release copy remains in
 `incoming` as raw evidence. If no SRT is safe to select automatically but one
-or more usable, feature-associated candidates remain, **Review & add** shows a
-short dialogue preview and requires choosing one as English or explicitly
-skipping subtitles before import. Multiple candidates remain separate choices;
-the backend rechecks the selection before moving the film. Skipped, malformed,
-oversized, trivial, promo-only, forced, commentary, extra-associated, or
+or more usable candidates remain—either filename-associated with the feature
+or carrying a generic English label inside its matching release—**Review &
+add** shows a short dialogue preview and requires choosing one as English or
+explicitly skipping subtitles before import. Multiple candidates remain
+separate choices; the backend rechecks the selection before moving the film.
+Skipped, malformed, oversized, trivial, promo-only, forced, commentary,
+extra-associated, or
 foreign-marked SRTs stay in the release and are not promoted to canonical
 dialogue evidence.
 

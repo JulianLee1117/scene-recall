@@ -1856,9 +1856,6 @@ def _resolve_external_sidecars(
             if token
         }
 
-    def tokens(path: Path) -> set[str]:
-        return label_tokens(path.stem)
-
     english_markers = {"en", "eng", "english"}
     alternate_markers = {"commentary", "forced"}
     accessibility_markers = {"cc", "sdh", "hoh", "hearing", "impaired"}
@@ -1868,6 +1865,7 @@ def _resolve_external_sidecars(
         "extra",
         "extras",
         "featurette",
+        "featurettes",
         "interview",
         "sample",
         "trailer",
@@ -1892,7 +1890,7 @@ def _resolve_external_sidecars(
         "norwegian", "nor",
         "polish", "pol",
         "portuguese", "por",
-        "romanian", "rum", "ron",
+        "romanian", "rom", "rum", "ron",
         "russian", "rus",
         "spanish", "spa",
         "swedish", "swe",
@@ -1908,16 +1906,44 @@ def _resolve_external_sidecars(
     )
     if not source_identity:
         return None, []
+    release_matches_source = False
+    if release_dir is not None:
+        release_title, _release_year, _release_edition = _release_suggestion(
+            release_dir.name
+        )
+        release_identity = (
+            label_tokens(release_title) - insignificant_title_tokens
+        )
+        release_matches_source = release_identity == source_identity
+
+    generic_track_tokens = english_markers | accessibility_markers | {
+        "default",
+        "full",
+        "sub",
+        "subs",
+        "subtitle",
+        "subtitles",
+    }
 
     review_candidates: list[_SubtitleReviewCandidate] = []
     descriptors_by_path: dict[Path, set[str]] = {}
+    automatic_paths: set[Path] = set()
     for path in sorted(set(candidates), key=lambda item: str(item).casefold()):
-        candidate_tokens = tokens(path)
-        if not source_identity.issubset(candidate_tokens):
+        filename_tokens = label_tokens(path.stem)
+        filename_associated = source_identity.issubset(filename_tokens)
+        generic_label_tokens = {
+            token for token in filename_tokens if not token.isdigit()
+        }
+        generic_english_label = bool(generic_label_tokens & english_markers) and (
+            generic_label_tokens <= generic_track_tokens
+        )
+        if not filename_associated and not (
+            release_matches_source and generic_english_label
+        ):
             continue
         candidate_years = {
             int(token)
-            for token in candidate_tokens
+            for token in filename_tokens
             if re.fullmatch(r"(?:18|19|20)\d{2}", token)
         }
         if (
@@ -1926,7 +1952,12 @@ def _resolve_external_sidecars(
             and source_year not in candidate_years
         ):
             continue
-        descriptors = candidate_tokens - source_identity
+        if release_dir is None:
+            context_tokens = filename_tokens
+        else:
+            relative_label = " ".join(path.relative_to(release_dir).parts)
+            context_tokens = label_tokens(relative_label)
+        descriptors = context_tokens - source_identity
         if descriptors & (alternate_markers | extra_markers | foreign_markers):
             continue
         inspection = inspect_external_srt(path)
@@ -1936,11 +1967,14 @@ def _resolve_external_sidecars(
             _SubtitleReviewCandidate(path=path, excerpt=inspection.excerpt)
         )
         descriptors_by_path[path] = descriptors
+        if filename_associated:
+            automatic_paths.add(path)
 
     english_candidates = [
         candidate
         for candidate in review_candidates
-        if descriptors_by_path[candidate.path] & english_markers
+        if candidate.path in automatic_paths
+        and descriptors_by_path[candidate.path] & english_markers
     ]
     automatic: Path | None = None
     if len(english_candidates) == 1:
