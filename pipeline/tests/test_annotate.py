@@ -437,6 +437,11 @@ def _openai_response(
     *,
     caption: str = "Two figures cross a rain-soaked street under neon light.",
     mood: list[str] | None = None,
+    status: str = "completed",
+    incomplete_reason: str | None = None,
+    output_text: str | None = None,
+    output: list[object] | None = None,
+    error: object | None = None,
     **facets: object,
 ) -> SimpleNamespace:
     from pipeline.ingest.annotate import _ShotAnnotation
@@ -455,11 +460,19 @@ def _openai_response(
         on_screen_text=facets.get("on_screen_text", ""),
     )
     return SimpleNamespace(
-        status="completed",
-        output=[],
-        output_parsed=annotation,
-        incomplete_details=None,
-        error=None,
+        status=status,
+        output=[] if output is None else output,
+        output_text=(
+            annotation.model_dump_json()
+            if output_text is None
+            else output_text
+        ),
+        incomplete_details=(
+            SimpleNamespace(reason=incomplete_reason)
+            if incomplete_reason is not None
+            else None
+        ),
+        error=error,
     )
 
 
@@ -481,7 +494,7 @@ def test_openai_annotation_cache_avoids_second_responses_call(
     shot = _make_shot()
     keyframe = _make_jpeg(tmp_path)
     mock_client = MagicMock()
-    mock_client.responses.parse.return_value = _openai_response()
+    mock_client.responses.create.return_value = _openai_response()
 
     with patch(
         "pipeline.ingest.annotate._get_openai_client",
@@ -502,7 +515,7 @@ def test_openai_annotation_cache_avoids_second_responses_call(
             cache_dir=tmp_path / "annotations",
         )
 
-    mock_client.responses.parse.assert_called_once()
+    mock_client.responses.create.assert_called_once()
 
 
 def test_openai_annotation_uses_responses_structured_output(
@@ -515,7 +528,7 @@ def test_openai_annotation_uses_responses_structured_output(
     _select_openai(config)
     keyframes = [_make_jpeg(tmp_path, f"kf{i}.jpg") for i in range(4)]
     mock_client = MagicMock()
-    mock_client.responses.parse.return_value = _openai_response()
+    mock_client.responses.create.return_value = _openai_response()
 
     with patch(
         "pipeline.ingest.annotate._get_openai_client",
@@ -523,12 +536,16 @@ def test_openai_annotation_uses_responses_structured_output(
     ):
         result = annotate_shot(_make_shot(), keyframes, [], config)
 
-    kwargs = mock_client.responses.parse.call_args.kwargs
+    kwargs = mock_client.responses.create.call_args.kwargs
     assert kwargs["model"] == "gpt-5.6-luna"
     assert kwargs["reasoning"] == {"effort": "none"}
     assert kwargs["store"] is False
     assert kwargs["max_output_tokens"] == 800
-    assert kwargs["text_format"] is _ShotAnnotation
+    response_format = kwargs["text"]["format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["name"] == "shot_annotation"
+    assert response_format["strict"] is True
+    assert response_format["schema"] == _ShotAnnotation.model_json_schema()
 
     content = kwargs["input"][0]["content"]
     images = [part for part in content if part["type"] == "input_image"]
@@ -557,7 +574,7 @@ def test_openai_annotation_appends_overlapping_dialogue(
         DialogueLine(start=30.0, end=31.0, text="Outside the shot."),
     ]
     mock_client = MagicMock()
-    mock_client.responses.parse.return_value = _openai_response()
+    mock_client.responses.create.return_value = _openai_response()
 
     with patch(
         "pipeline.ingest.annotate._get_openai_client",
@@ -577,10 +594,13 @@ def test_openai_unusable_output_is_retried_once_then_succeeds(
     from pipeline.ingest.annotate import annotate_shot
 
     _select_openai(config)
-    bad = _openai_response()
-    bad.output_parsed = None
+    bad = _openai_response(
+        status="incomplete",
+        incomplete_reason="max_output_tokens",
+        output_text='{"caption":"truncated',
+    )
     mock_client = MagicMock()
-    mock_client.responses.parse.side_effect = [bad, _openai_response()]
+    mock_client.responses.create.side_effect = [bad, _openai_response()]
 
     with patch(
         "pipeline.ingest.annotate._get_openai_client",
@@ -588,48 +608,185 @@ def test_openai_unusable_output_is_retried_once_then_succeeds(
     ):
         result = annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
 
-    assert mock_client.responses.parse.call_count == 2
+    assert mock_client.responses.create.call_count == 2
     assert result["caption"].startswith("Two figures")
-    first, second = mock_client.responses.parse.call_args_list
+    first, second = mock_client.responses.create.call_args_list
     assert first.kwargs["max_output_tokens"] == 800
     # Text-dense shots (credit rolls) truncate at the normal budget; the
     # retry must escalate or it deterministically fails the same way.
     assert second.kwargs["max_output_tokens"] == 3000
+    assert (
+        first.kwargs["input"][0]["content"][0]["text"]
+        == second.kwargs["input"][0]["content"][0]["text"]
+    )
 
 
-def test_openai_refusal_is_not_retried(
+def test_openai_content_filter_retries_once_without_ocr(
     tmp_path: Path,
     config: Config,
 ) -> None:
-    """Refusals are deterministic; a retry would only double the spend."""
+    """A filtered OCR response gets one bounded no-transcription fallback."""
+    from pipeline.ingest.annotate import _PROMPT, annotate_shot
+
+    _select_openai(config)
+    keyframes = [_make_jpeg(tmp_path, f"kf{i}.jpg") for i in range(3)]
+    filtered = _openai_response(
+        status="incomplete",
+        incomplete_reason="content_filter",
+        output_text='{"caption":"partial',
+    )
+    fallback = _openai_response(
+        caption="A static title card presents a dictionary-style definition.",
+        on_screen_text="",
+    )
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [filtered, fallback]
+
+    with patch(
+        "pipeline.ingest.annotate._get_openai_client",
+        return_value=mock_client,
+    ):
+        result = annotate_shot(_make_shot(), keyframes, [], config)
+
+    assert mock_client.responses.create.call_count == 2
+    first, second = mock_client.responses.create.call_args_list
+    assert first.kwargs["max_output_tokens"] == 800
+    assert second.kwargs["max_output_tokens"] == 800
+
+    first_content = first.kwargs["input"][0]["content"]
+    second_content = second.kwargs["input"][0]["content"]
+    assert first_content[0]["text"] == _PROMPT
+    fallback_prompt = second_content[0]["text"]
+    assert fallback_prompt.startswith(_PROMPT)
+    assert "do not quote" in fallback_prompt.lower()
+    assert "on_screen_text" in fallback_prompt
+    assert "empty" in fallback_prompt.lower()
+    assert first_content[1:] == second_content[1:]
+    assert result["caption"].startswith("A static title card")
+    assert result["on_screen_text"] == ""
+
+
+def test_openai_content_filter_twice_stops_after_two_calls(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A filtered fallback fails explicitly without starting a third request."""
     from pipeline.ingest.annotate import AnnotationError, annotate_shot
 
     _select_openai(config)
-    response = _openai_response()
-    response.output = [
-        SimpleNamespace(
-            type="message",
-            content=[
-                SimpleNamespace(type="refusal", refusal="Cannot process image.")
-            ],
-        )
-    ]
+    filtered = _openai_response(
+        status="incomplete",
+        incomplete_reason="content_filter",
+        output_text='{"caption":"partial',
+    )
     mock_client = MagicMock()
-    mock_client.responses.parse.return_value = response
+    mock_client.responses.create.side_effect = [filtered, filtered]
 
     with (
         patch(
             "pipeline.ingest.annotate._get_openai_client",
             return_value=mock_client,
         ),
-        pytest.raises(AnnotationError, match="refused"),
+        pytest.raises(AnnotationError, match=r"content[_ -]filter"),
     ):
         annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
 
-    mock_client.responses.parse.assert_called_once()
+    assert mock_client.responses.create.call_count == 2
 
 
-def test_openai_annotation_rejects_missing_parsed_output(
+def test_openai_content_filter_fallback_rejects_transcribed_text(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A no-OCR fallback cannot cache text it was instructed not to reproduce."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    _select_openai(config)
+    filtered = _openai_response(
+        status="incomplete",
+        incomplete_reason="content_filter",
+        output_text='{"caption":"partial',
+    )
+    unsafe_fallback = _openai_response(on_screen_text="Filtered title text")
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [filtered, unsafe_fallback]
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="no-transcription"),
+    ):
+        annotate_shot(
+            _make_shot(),
+            [_make_jpeg(tmp_path)],
+            [],
+            config,
+            cache_dir=tmp_path / "annotations",
+        )
+
+    assert mock_client.responses.create.call_count == 2
+    assert not list((tmp_path / "annotations").glob("**/*.json"))
+
+
+def test_openai_content_filter_fallback_uses_distinct_durable_cache(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """The no-OCR result is prompt-scoped and reused without another API call."""
+    from pipeline.ingest.annotate import (
+        _PROMPT_SHA256,
+        _annotation_cache_identity,
+        _annotation_profile_id,
+        annotate_shot,
+    )
+
+    _select_openai(config)
+    shot = _make_shot()
+    keyframes = [_make_jpeg(tmp_path)]
+    cache_dir = tmp_path / "annotations"
+    filtered = _openai_response(
+        status="incomplete",
+        incomplete_reason="content_filter",
+        output_text='{"caption":"partial',
+    )
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [filtered, _openai_response()]
+
+    with patch(
+        "pipeline.ingest.annotate._get_openai_client",
+        return_value=mock_client,
+    ):
+        first = annotate_shot(
+            shot,
+            keyframes,
+            [],
+            config,
+            cache_dir=cache_dir,
+        )
+        cached = annotate_shot(
+            shot,
+            keyframes,
+            [],
+            config,
+            cache_dir=cache_dir,
+        )
+
+    assert first == cached
+    assert mock_client.responses.create.call_count == 2
+    cache_paths = list(cache_dir.glob(f"*/{shot.shot_id}.json"))
+    assert len(cache_paths) == 1
+    payload = json.loads(cache_paths[0].read_text(encoding="utf-8"))
+    identity = payload["identity"]
+    assert identity["request_variant"] == "content_filter_no_ocr_v1"
+    assert identity["prompt_sha256"] != _PROMPT_SHA256
+
+    primary_identity = _annotation_cache_identity(keyframes, config, "openai")
+    assert cache_paths[0].parent.name != _annotation_profile_id(primary_identity)
+
+
+def test_openai_annotation_rejects_missing_output_text(
     tmp_path: Path,
     config: Config,
 ) -> None:
@@ -637,17 +794,16 @@ def test_openai_annotation_rejects_missing_parsed_output(
     from pipeline.ingest.annotate import AnnotationError, annotate_shot
 
     _select_openai(config)
-    response = _openai_response()
-    response.output_parsed = None
+    response = _openai_response(output_text="")
     mock_client = MagicMock()
-    mock_client.responses.parse.return_value = response
+    mock_client.responses.create.return_value = response
 
     with (
         patch(
             "pipeline.ingest.annotate._get_openai_client",
             return_value=mock_client,
         ),
-        pytest.raises(AnnotationError, match="without parsed"),
+        pytest.raises(AnnotationError),
     ):
         annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
 
@@ -670,7 +826,7 @@ def test_openai_annotation_surfaces_refusal(
         )
     ]
     mock_client = MagicMock()
-    mock_client.responses.parse.return_value = response
+    mock_client.responses.create.return_value = response
 
     with (
         patch(
@@ -680,6 +836,8 @@ def test_openai_annotation_surfaces_refusal(
         pytest.raises(AnnotationError, match="refused"),
     ):
         annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+    mock_client.responses.create.assert_called_once()
 
 
 def test_openai_annotation_surfaces_quota_error_code(
@@ -701,7 +859,7 @@ def test_openai_annotation_surfaces_quota_error_code(
         body={"type": "insufficient_quota", "code": "insufficient_quota"},
     )
     mock_client = MagicMock()
-    mock_client.responses.parse.side_effect = error
+    mock_client.responses.create.side_effect = error
 
     with (
         patch(
@@ -711,6 +869,8 @@ def test_openai_annotation_surfaces_quota_error_code(
         pytest.raises(AnnotationError, match="insufficient_quota"),
     ):
         annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+    mock_client.responses.create.assert_called_once()
 
 
 def test_gemini_annotation_failure_is_not_silenced(
@@ -755,7 +915,7 @@ def test_annotation_rejects_invalid_mood_count(
 
     _select_openai(config)
     mock_client = MagicMock()
-    mock_client.responses.parse.return_value = _openai_response(mood=["lonely"])
+    mock_client.responses.create.return_value = _openai_response(mood=["lonely"])
 
     with (
         patch(

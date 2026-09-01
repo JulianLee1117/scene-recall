@@ -81,6 +81,18 @@ _PROMPT = (
 
 _PROMPT_SHA256 = hashlib.sha256(_PROMPT.encode("utf-8")).hexdigest()
 
+_OPENAI_CONTENT_FILTER_VARIANT = "content_filter_no_ocr_v1"
+_OPENAI_NO_OCR_PROMPT = (
+    _PROMPT
+    + "\nFor this fallback request, do not quote, transcribe, spell out, or "
+    "reproduce any on-screen text. Set on_screen_text to an empty string. "
+    "If text is visually present, describe only its generic role (for "
+    "example, title card or sign) in caption without stating its content."
+)
+_OPENAI_NO_OCR_PROMPT_SHA256 = hashlib.sha256(
+    _OPENAI_NO_OCR_PROMPT.encode("utf-8")
+).hexdigest()
+
 _ANNOTATION_CACHE_SCHEMA_VERSION = 2
 
 # MIME type mapping for common image extensions
@@ -100,7 +112,8 @@ class AnnotationError(RuntimeError):
     faults, unusable output), unlike auth/quota/refusal errors.  ``escalate``
     additionally marks output that was truncated or schema-invalid, where the
     retry should raise the output-token budget; a plain network retry keeps
-    the normal budget.
+    the normal budget. ``content_filtered`` identifies the one incomplete
+    status eligible for the bounded no-transcription fallback.
     """
 
     def __init__(
@@ -109,10 +122,12 @@ class AnnotationError(RuntimeError):
         *,
         retryable: bool = False,
         escalate: bool = False,
+        content_filtered: bool = False,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.escalate = escalate
+        self.content_filtered = content_filtered
 
 
 class _ShotAnnotation(BaseModel):
@@ -230,6 +245,10 @@ def annotate_shot(
         )
 
     annotation: dict | None = None
+    cache_identity: dict | None = None
+    cache_path: Path | None = None
+    fallback_cache_identity: dict | None = None
+    fallback_cache_path: Path | None = None
     if cache_dir is not None:
         cache_identity = _annotation_cache_identity(keyframes, config, provider)
         profile_id = _annotation_profile_id(cache_identity)
@@ -252,14 +271,51 @@ def annotate_shot(
                     annotation=annotation,
                 )
 
+        if annotation is None and provider == "openai":
+            fallback_cache_identity = _annotation_cache_identity(
+                keyframes,
+                config,
+                provider,
+                prompt_sha256=_OPENAI_NO_OCR_PROMPT_SHA256,
+                request_variant=_OPENAI_CONTENT_FILTER_VARIANT,
+            )
+            fallback_profile_id = _annotation_profile_id(fallback_cache_identity)
+            fallback_cache_path = _annotation_cache_path(
+                cache_dir,
+                shot.shot_id,
+                profile_id=fallback_profile_id,
+            )
+            annotation = _read_annotation_cache(
+                fallback_cache_path,
+                fallback_cache_identity,
+            )
+
     if annotation is None:
+        request_variant: str | None = None
         if provider == "openai":
-            raw = _annotate_openai(keyframes, config)
+            raw, request_variant = _annotate_openai(keyframes, config)
         else:
             raw = _annotate_gemini(keyframes, config)
 
         annotation = _validate_annotation(raw, provider)
         if cache_dir is not None:
+            if request_variant == _OPENAI_CONTENT_FILTER_VARIANT:
+                if fallback_cache_identity is None or fallback_cache_path is None:
+                    fallback_cache_identity = _annotation_cache_identity(
+                        keyframes,
+                        config,
+                        provider,
+                        prompt_sha256=_OPENAI_NO_OCR_PROMPT_SHA256,
+                        request_variant=_OPENAI_CONTENT_FILTER_VARIANT,
+                    )
+                    fallback_cache_path = _annotation_cache_path(
+                        cache_dir,
+                        shot.shot_id,
+                        profile_id=_annotation_profile_id(fallback_cache_identity),
+                    )
+                cache_identity = fallback_cache_identity
+                cache_path = fallback_cache_path
+            assert cache_identity is not None and cache_path is not None
             _write_annotation_cache(
                 cache_path,
                 shot_id=shot.shot_id,
@@ -368,6 +424,9 @@ def _annotation_cache_identity(
     keyframes: list[Path],
     config: Config,
     provider: str,
+    *,
+    prompt_sha256: str = _PROMPT_SHA256,
+    request_variant: str | None = None,
 ) -> dict:
     """Describe every input that can change the hosted visual annotation."""
     settings: dict[str, str] = {}
@@ -386,14 +445,17 @@ def _annotation_cache_identity(
             }
         )
 
-    return {
+    identity = {
         "provider": provider,
         "model": config.models.annotator,
-        "prompt_sha256": _PROMPT_SHA256,
+        "prompt_sha256": prompt_sha256,
         "response_schema_sha256": _response_schema_sha256(),
         "settings": settings,
         "keyframes": frames,
     }
+    if request_variant is not None:
+        identity["request_variant"] = request_variant
+    return identity
 
 
 def _read_annotation_cache(
@@ -522,11 +584,25 @@ _OPENAI_RETRY_MAX_OUTPUT_TOKENS = 3000
 def _annotate_openai(
     keyframes: list[Path],
     config: Config,
-) -> dict:
+) -> tuple[dict, str | None]:
     """Return one structured annotation dict, retrying one unusable response."""
     try:
-        return _annotate_openai_once(keyframes, config)
+        return _annotate_openai_once(keyframes, config), None
     except AnnotationError as exc:
+        if exc.content_filtered:
+            fallback = _annotate_openai_once(
+                keyframes,
+                config,
+                prompt=_OPENAI_NO_OCR_PROMPT,
+            )
+            if fallback["on_screen_text"].strip():
+                raise AnnotationError(
+                    "OpenAI no-transcription fallback returned on-screen text."
+                )
+            return (
+                fallback,
+                _OPENAI_CONTENT_FILTER_VARIANT,
+            )
         if not exc.retryable:
             raise
         retry_budget = (
@@ -534,10 +610,13 @@ def _annotate_openai(
             if exc.escalate
             else _OPENAI_MAX_OUTPUT_TOKENS
         )
-        return _annotate_openai_once(
-            keyframes,
-            config,
-            max_output_tokens=retry_budget,
+        return (
+            _annotate_openai_once(
+                keyframes,
+                config,
+                max_output_tokens=retry_budget,
+            ),
+            None,
         )
 
 
@@ -546,13 +625,14 @@ def _annotate_openai_once(
     config: Config,
     *,
     max_output_tokens: int = _OPENAI_MAX_OUTPUT_TOKENS,
+    prompt: str = _PROMPT,
 ) -> dict:
     """Return one raw structured annotation dict from the OpenAI Responses API."""
     if not keyframes:
         raise AnnotationError("OpenAI annotation requires at least one keyframe.")
 
     content: list[dict] = [
-        {"type": "input_text", "text": _PROMPT},
+        {"type": "input_text", "text": prompt},
     ]
 
     for kf_path in keyframes[:3]:
@@ -572,13 +652,20 @@ def _annotate_openai_once(
         )
 
     try:
-        response = _get_openai_client().responses.parse(
+        response = _get_openai_client().responses.create(
             model=config.models.annotator,
             input=[{"role": "user", "content": content}],
             reasoning={"effort": config.models.annotator_reasoning_effort},
             max_output_tokens=max_output_tokens,
             store=False,
-            text_format=_ShotAnnotation,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "shot_annotation",
+                    "strict": True,
+                    "schema": _ShotAnnotation.model_json_schema(),
+                }
+            },
         )
     except openai.APIStatusError as exc:
         body = exc.body if isinstance(exc.body, dict) else {}
@@ -592,12 +679,6 @@ def _annotate_openai_once(
         raise AnnotationError(
             "OpenAI connection or timeout failure.",
             retryable=True,
-        ) from exc
-    except ValidationError as exc:
-        raise AnnotationError(
-            "OpenAI returned invalid structured annotation output.",
-            retryable=True,
-            escalate=True,
         ) from exc
     except Exception as exc:
         raise AnnotationError(f"OpenAI annotation failed: {exc}") from exc
@@ -613,28 +694,43 @@ def _annotate_openai_once(
         raise AnnotationError(f"OpenAI refused the annotation: {refusals[0]}")
 
     if response.status != "completed":
-        reason = (
-            response.incomplete_details.reason
-            if response.incomplete_details is not None
-            else None
-        )
+        reason = None
+        if response.incomplete_details is not None:
+            reason = response.incomplete_details.reason
         if response.error is not None:
             reason = f"{response.error.code}: {response.error.message}"
+        content_filtered = reason == "content_filter" and response.error is None
         raise AnnotationError(
             f"OpenAI response status {response.status}: {reason}",
             # Truncation (max_output_tokens) and other incomplete responses
             # are worth one retry at a raised budget; provider-reported
             # errors are not.
-            retryable=response.error is None,
-            escalate=response.error is None,
+            retryable=response.error is None and not content_filtered,
+            escalate=response.error is None and not content_filtered,
+            content_filtered=content_filtered,
         )
 
-    parsed = response.output_parsed
-    if parsed is None:
+    raw_text = response.output_text
+    if not isinstance(raw_text, str) or not raw_text.strip():
         raise AnnotationError(
-            "OpenAI completed without parsed annotation output.",
+            "OpenAI completed without annotation output.",
             retryable=True,
             escalate=True,
         )
+
+    try:
+        parsed = _ShotAnnotation.model_validate_json(raw_text)
+    except ValidationError as exc:
+        details = ", ".join(
+            f"{error['type']} at "
+            f"{'.'.join(str(part) for part in error.get('loc', ())) or 'response'}"
+            for error in exc.errors(include_url=False, include_input=False)
+        )
+        raise AnnotationError(
+            "OpenAI returned invalid structured annotation output"
+            f" ({details or 'validation failed'}).",
+            retryable=True,
+            escalate=True,
+        ) from exc
 
     return parsed.model_dump()
