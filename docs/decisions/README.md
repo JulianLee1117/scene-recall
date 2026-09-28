@@ -153,3 +153,4 @@ The accepted boundary or behavior.
 | [0092](0092-bounded-framing-representation-pilot.md) | Accepted for evaluation | Hold the optional bulk batch and compare frozen framing representations independently of Jev |
 | [0093](0093-evidence-v2.md) | Accepted | Versioned per-film evidence artifacts, open metadata with world knowledge, measured-over-guessed facts and compiled search tables |
 | [0094](0094-search-v2.md) | Accepted | Search v2: evidence views fused by rank, quote channel, bounded priors and presets, scene cards, resident vectors, cross-encoder rerank; retire the intent experiments |
+| [0095](0095-serve-last-complete-generation.md) | Accepted | Compile from the newest available profile while a new one backfills; API search keeps its last complete snapshot during publication |

@@ -45,7 +45,7 @@ def film_popularity(documents: dict[str, dict[str, Any]]) -> dict[str, float]:
 def compile_film_meta(config: Any, db: Any, films: list[FilmRef], progress: Callable[[str], None] = print) -> int:
     documents: dict[str, dict[str, Any]] = {}
     for film in films:
-        artifact = store.read_artifact(config.paths.assets_dir, film.film_id, metadata.PRODUCER)
+        artifact = store.serving_artifact(config.paths.assets_dir, film.film_id, metadata.PRODUCER)
         if artifact is not None:
             documents[film.film_id] = artifact["data"]
     popularity = film_popularity(documents)
@@ -223,7 +223,7 @@ def compile_film_evidence(config: Any, db: Any, film: FilmRef) -> dict[str, int]
 
     assets = config.paths.assets_dir
     units = film_units(db, film.film_id, columns=["unit_id", "t_start", "t_end"])
-    docs = {kind: store.read_artifact(assets, film.film_id, producer) for kind, producer in (
+    docs = {kind: store.serving_artifact(assets, film.film_id, producer) for kind, producer in (
         ("understanding", understanding.producer()), ("measure", measure.PRODUCER),
         ("synthesis", synthesis.PRODUCER), ("hero", hero.PRODUCER))}
     sources = {kind: doc["profile_id"] for kind, doc in docs.items() if doc}
@@ -236,7 +236,7 @@ def compile_film_evidence(config: Any, db: Any, film: FilmRef) -> dict[str, int]
     content = measure_data.get("content_box")
     scene_rows, scenes = _scene_rows(film, story_data, priors, sources.get("understanding"))
     iconic_notes = {row["unit_id"]: row["description"] for row in story_data.get("iconic") or []}
-    hero_root = hero.directory(config, film.film_id).relative_to(assets).as_posix()
+    hero_root = hero.directory(config, film.film_id, sources.get("hero")).relative_to(assets).as_posix()
 
     shot_rows = []
     for unit in units if sources else []:

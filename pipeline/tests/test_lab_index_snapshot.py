@@ -107,3 +107,42 @@ def test_library_without_a_semantic_manifest_preserves_existing_capability_behav
     snapshot = acquire_editor_snapshot(config, open_db(config), lambda _: None, lambda: False)
     assert snapshot.open_table("units").count_rows() == 1
     assert resolve_ready_text_profile(config, snapshot) is None
+
+
+@pytest.fixture
+def search_snapshots(monkeypatch):
+    from collections import OrderedDict
+    from pipeline.index import snapshot
+    monkeypatch.setattr(snapshot, "_RECENT_SEARCH", OrderedDict())
+    return snapshot
+
+
+def test_search_keeps_the_last_complete_library_until_semantic_text_catches_up(config, tmp_path, search_snapshots):
+    db = _ready(config, tmp_path)
+    first = search_snapshots.acquire_search_snapshot(config, db)
+    _write_unit(config, tmp_path, "film_b")            # units published; their text features are not yet
+    assert search_snapshots.acquire_search_snapshot(config, db) is first
+    with patch("pipeline.index.backfill_text.embed_semantic_documents", side_effect=_fake_embeddings):
+        backfill_text_features(config)
+    current = search_snapshots.acquire_search_snapshot(config, db)
+    assert current is not first and current.open_table("units").count_rows() == 2
+    assert resolve_ready_text_profile(config, current) is not None
+
+
+def test_fresh_search_process_serves_an_incomplete_library_without_retaining_it(config, tmp_path, search_snapshots):
+    db = _ready(config, tmp_path)
+    _write_unit(config, tmp_path, "film_b")
+    partial = search_snapshots.acquire_search_snapshot(config, db)
+    assert partial.open_table("units").count_rows() == 2
+    assert resolve_ready_text_profile(config, partial) is None
+    assert not search_snapshots._RECENT_SEARCH
+
+
+def test_search_with_a_complete_view_never_waits_on_a_writer(config, tmp_path, search_snapshots):
+    db = _ready(config, tmp_path)
+    first = search_snapshots.acquire_search_snapshot(config, db)
+    with _database_write_lock(db):
+        assert search_snapshots.acquire_search_snapshot(config, db) is first
+    search_snapshots._RECENT_SEARCH.clear()
+    with _database_write_lock(db), pytest.raises(search_snapshots.SearchLibraryUnavailable):
+        search_snapshots.acquire_search_snapshot(config, db)

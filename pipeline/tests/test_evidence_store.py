@@ -95,3 +95,21 @@ def test_prune_removes_only_superseded_profiles_when_current_exists(tmp_path, mo
     assert not (synthesis / "priors-v1-cccccccccc.json").exists()
     assert (synthesis / "priors-v2-aaaaaaaaaa.json").exists()
     assert (understanding / "gemini-shots-v1-dddddddddd.json").exists()           # protected: no current profile yet
+
+
+def test_serving_artifact_falls_back_to_the_newest_earlier_profile_of_the_same_producer(tmp_path):
+    import os
+    film = "f" * 64
+    old = store.Producer("understanding", "gemini-shots", 1, {"proxy_height": 360})
+    older = store.Producer("understanding", "gemini-shots", 1, {"proxy_height": 480})
+    other = store.Producer("understanding", "other-model", 1)
+    current = store.Producer("understanding", "gemini-shots", 1, {"proxy_height": 240})
+    for age, producer in enumerate((old, older, other)):
+        path = store.write_artifact(tmp_path, film, producer, {"from": producer.profile_id}, inputs={})
+        os.utime(path, (1_000_000 - age * 100, 1_000_000 - age * 100))
+    assert store.read_artifact(tmp_path, film, current) is None
+    served = store.serving_artifact(tmp_path, film, current)
+    assert served["profile_id"] == old.profile_id               # newest of the same producer name
+    store.write_artifact(tmp_path, film, current, {"from": "current"}, inputs={})
+    assert store.serving_artifact(tmp_path, film, current)["data"] == {"from": "current"}
+    assert store.serving_artifact(tmp_path, film, store.Producer("understanding", "absent", 1)) is None

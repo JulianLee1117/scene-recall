@@ -93,11 +93,11 @@ def publication_read(db, *, timeout=600):
         _PUBLICATION_LOCK.release()
 
 
-def capture_snapshot(config, db, *, require_semantic_ready=False):
+def capture_snapshot(config, db, *, require_semantic_ready=False, lock_timeout=.1):
     from pipeline.index import framing_features, text_features
     from pipeline.index.writer import table_names
 
-    with publication_read(db, timeout=.1):
+    with publication_read(db, timeout=lock_timeout):
         tables = {}
         for name in table_names(db):
             table = db.open_table(name)
@@ -126,23 +126,46 @@ def capture_snapshot(config, db, *, require_semantic_ready=False):
         # Never replace a complete semantic library with a half-published one.
         # Libraries that have never built this optional index keep their normal
         # capability behavior; no semantic evidence or fallback is invented.
-        if require_semantic_ready and text_path.exists() and text_features.resolve_ready_text_profile(config, snapshot) is None:
+        if require_semantic_ready and not semantic_ready(config, snapshot):
             return None
         return snapshot
 
 
+def semantic_ready(config, snapshot):
+    """True when the snapshot's semantic text index covers it exactly, or none was ever built."""
+    from pipeline.index import text_features
+    if not text_features.manifest_path(config, text_features.configured_text_profile(config)).exists():
+        return True
+    try:
+        return text_features.resolve_ready_text_profile(config, snapshot) is not None
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        return False
+
+
 def acquire_search_snapshot(config, db):
-    """Pin one request; retain a prior view only while a writer holds the lock."""
+    """Pin one request to the latest complete library generation.
+
+    Publication makes the latest versions incomplete twice: while a writer
+    holds the lock, and after units are published but before their semantic
+    text features are. In both cases a request reuses the process's last
+    complete snapshot, so search keeps every channel during ingestion instead
+    of silently losing semantic text. Without one, a locked library is
+    retryably unavailable and an incomplete one is served as published; an
+    incomplete capture is never retained.
+    """
     from filelock import Timeout
     key = (str(db.uri), config.models.visual_encoder, config.models.text_encoder)
+    with _SEARCH_LOCK:
+        prior = _RECENT_SEARCH.get(key)
     try:
-        snapshot = capture_snapshot(config, db)
+        # With a complete view in hand, never wait on a writer.
+        snapshot = capture_snapshot(config, db, lock_timeout=0 if prior is not None else .1)
     except Timeout as exc:
-        with _SEARCH_LOCK:
-            prior = _RECENT_SEARCH.get(key)
         if prior is not None:
             return prior
         raise SearchLibraryUnavailable("The film library is being published; retry in a moment") from exc
+    if not semantic_ready(config, snapshot):
+        return prior if prior is not None else snapshot
     with _SEARCH_LOCK:
         _RECENT_SEARCH[key] = snapshot
         _RECENT_SEARCH.move_to_end(key)

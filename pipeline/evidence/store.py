@@ -190,6 +190,27 @@ def read_artifact(
     return document
 
 
+def serving_artifact(assets_dir: Path, film_id: str, producer: Producer) -> dict[str, Any] | None:
+    """The producer's current artifact, else the newest earlier profile of the same producer.
+
+    Search-facing compilation reads through this, so changing a producer's
+    settings never blanks evidence that stays useful while the new profile is
+    backfilled. The document's ``profile_id`` says which profile served, and
+    compiled rows record it. Producers read their inputs with ``read_artifact``
+    (current profile only), so they still recompute once the new profile exists.
+    """
+    document = read_artifact(assets_dir, film_id, producer)
+    if document is not None:
+        return document
+    for path in list_artifacts(assets_dir, film_id, producer.kind):
+        candidate = read_json(path)
+        if (isinstance(candidate, dict) and candidate.get("schema_version") == SCHEMA_VERSION
+                and candidate.get("film_id") == film_id and candidate.get("kind") == producer.kind
+                and (candidate.get("producer") or {}).get("name") == producer.name):
+            return candidate
+    return None
+
+
 def list_artifacts(assets_dir: Path, film_id: str, kind: str) -> list[Path]:
     """List every stored profile for one evidence kind (newest first)."""
     directory = _film_dir(assets_dir, film_id) / kind

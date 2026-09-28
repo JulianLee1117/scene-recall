@@ -52,8 +52,8 @@ def pick(record: dict[str, Any], t_start: float, t_end: float, peak: float | Non
     return {"time": round(float(best), 3), "score": round(best_score, 3), "basis": "peak" if peak is not None else "quality"}
 
 
-def directory(config: Any, film_id: str) -> Path:
-    return Path(config.paths.assets_dir) / film_id / "evidence" / "hero" / PRODUCER.profile_id
+def directory(config: Any, film_id: str, profile_id: str | None = None) -> Path:
+    return Path(config.paths.assets_dir) / film_id / "evidence" / "hero" / (profile_id or PRODUCER.profile_id)
 
 
 def extract(film: FilmRef, targets: dict[str, float], output: Path) -> dict[str, str]:
