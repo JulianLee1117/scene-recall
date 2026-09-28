@@ -242,6 +242,7 @@ export default function Home() {
         }
         const browseParams = new URLSearchParams(scope.map((id) => ["film_id", id]));
         if (limit !== undefined) browseParams.set("limit", String(limit));
+        if (presetRef.current !== "balanced") browseParams.set("preset", presetRef.current);
         const browsingFilm = clauses.length === 0;
         const response = await fetch(
           `${API_URL}${browsingFilm ? `/library/scenes?${browseParams}` : image ? "/search/recipe/image" : "/search/recipe"}`,
@@ -295,11 +296,11 @@ export default function Home() {
     (next: RankingPreset) => {
       presetRef.current = next;
       setPreset(next);
-      if (recipeClauseCount(query, matchDrafts, mainImageRef.current) > 0) {
+      if (recipeClauseCount(query, matchDrafts, mainImageRef.current) > 0 || selectedFilmIds.length > 0) {
         void runRecipe(query, matchDrafts);
       }
     },
-    [matchDrafts, query, runRecipe],
+    [matchDrafts, query, runRecipe, selectedFilmIds.length],
   );
 
   const handleRecipeLimit = useCallback(() => {
@@ -1354,9 +1355,13 @@ export default function Home() {
           <div>
             {hasCompletedSearch && clauseCount === 0 && selectedFilmIds.length > 0 && results.length > 0 && (
               <p className="search-browse-note">
-                {results.length === resultWindow.maxLimit
-                  ? `Showing the first ${results.length} scenes in source order. `
-                  : "Scenes in source order. "}
+                {preset === "famous"
+                  ? "Best-known moments, one per scene. "
+                  : preset === "gems"
+                    ? "Hidden gems: well-made shots people rarely see, one per scene. "
+                    : results.length === resultWindow.maxLimit
+                      ? `Showing the first ${results.length} scenes in source order. `
+                      : "Scenes in source order. "}
                 Add a description to search throughout the selected movies.
               </p>
             )}
@@ -1393,7 +1398,7 @@ export default function Home() {
             )}
             <ResultGrid
               results={results}
-              order={hasCompletedSearch && clauseCount === 0 && selectedFilmIds.length > 0 ? "chronological" : "ranked"}
+              order={hasCompletedSearch && clauseCount === 0 && selectedFilmIds.length > 0 && preset === "balanced" ? "chronological" : "ranked"}
               streamKey={`${resultStreamKey}`}
               revealDisabled={loading}
               hasMore={resultWindow.hasMore}

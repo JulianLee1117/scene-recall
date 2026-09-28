@@ -115,7 +115,7 @@ from pipeline.search.retrieve import (
     search as _search,
     search_by_image as _search_by_image,
 )
-from pipeline.search.browse import browse_scenes as _browse_scenes
+from pipeline.search.browse import browse_highlights as _browse_highlights, browse_scenes as _browse_scenes
 from pipeline.search.recipe import (
     RecipeSourceNotFound,
     RecipeSourceUnavailable,
@@ -1690,15 +1690,22 @@ def library_scenes_endpoint(
     request: Request,
     film_id: Annotated[list[str], Query(min_length=1, max_length=1_000)],
     limit: int | None = None,
+    preset: Literal["balanced", "famous", "gems"] = Query(default="balanced"),
 ) -> dict[str, Any]:
-    """Browse explicit movie scopes without waiting for or loading encoders."""
+    """Browse explicit movie scopes: source order, or the films' highlights / hidden gems."""
     config: Config = request.app.state.config
     result_limit = _resolve_api_result_limit(config, limit)
     try:
-        results = _browse_scenes(
-            request.app.state.db, config, film_ids=film_id,
-            result_limit=_result_probe_limit(config, result_limit),
-        )
+        if preset == "balanced":
+            results = _browse_scenes(
+                request.app.state.db, config, film_ids=film_id,
+                result_limit=_result_probe_limit(config, result_limit),
+            )
+        else:
+            results = _browse_highlights(
+                request.app.state.db, config, film_ids=film_id, preset=preset,
+                result_limit=_result_probe_limit(config, result_limit),
+            )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _search_response(_with_film_titles(request, results), config, result_limit)

@@ -178,3 +178,66 @@ def browse_scenes(
         # This is source order, not a semantic relevance estimate.
         result["debug"] = {"mode": "browse", "final_score": 0.0, "channels": {}}
     return results
+
+
+def browse_highlights(
+    db: Any,
+    config: Config,
+    *,
+    film_ids: Iterable[str] | None,
+    preset: str,
+    result_limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """A film's best-known moments (``famous``) or its hidden gems (``gems``), one per dramatic scene.
+
+    Films without evidence keep chronological browsing. Order comes from the
+    synthesized priors (pipeline.evidence.synthesis), not from similarity.
+    """
+    from pipeline.evidence.tables import SHOT_EVIDENCE
+    from pipeline.search import priors
+
+    scope = _scope(film_ids)
+    limit = resolve_result_limit(config, result_limit)
+    snapshot = db if getattr(db, "is_index_snapshot", False) is True else acquire_search_snapshot(config, db)
+    if SHOT_EVIDENCE not in table_names(snapshot):
+        return browse_scenes(snapshot, config, film_ids=scope, result_limit=limit)
+    rows = filtered_rows(
+        snapshot.open_table(SHOT_EVIDENCE), where=_film_filter(scope),
+        columns=["unit_id", "film_id", "scene_id", "fame_library", "craft", "distinctiveness", "iconic", "gem"],
+        limit=200_000,
+    )
+    if not rows:
+        return browse_scenes(snapshot, config, film_ids=scope, result_limit=limit)
+
+    def famous(row: dict[str, Any]) -> float:
+        return (1.0 if row.get("iconic") else 0.0) + float(row.get("fame_library") or 0) + 0.3 * float(row.get("craft") or 0)
+
+    def gem(row: dict[str, Any]) -> float:
+        craft, fame = float(row.get("craft") or 0), float(row.get("fame_library") or 0)
+        return (1.0 if row.get("gem") else 0.0) + craft * (1 - fame) * (0.5 + 0.5 * float(row.get("distinctiveness") or 0))
+
+    ranked = sorted(rows, key=famous if preset == "famous" else gem, reverse=True)
+    if preset == "gems":
+        ranked = [row for row in ranked if not row.get("iconic")]
+    picked, scenes = [], set()
+    for row in ranked:
+        scene = row.get("scene_id") or row["unit_id"]
+        if scene in scenes:
+            continue
+        scenes.add(scene)
+        picked.append(row["unit_id"])
+        if len(picked) >= limit:
+            break
+    units = {row["unit_id"]: row for row in filtered_rows(
+        snapshot.open_table("units"), where=_unit_filter(tuple(picked)), columns=_UNIT_COLUMNS, limit=len(picked))}
+    ordered = [units[unit_id] for unit_id in picked if unit_id in units and not _is_unrequested_junk(units[unit_id], "", set())]
+    results = _clause_results_from_rows(ordered, channel="browse", mode=f"browse-{preset}", result_limit=limit)
+    evidence = priors.load_evidence(snapshot, (result["unit_id"] for result in results))
+    scene_rows = priors.load_scenes(snapshot, (row.get("scene_id") for row in evidence.values()))
+    for rank, result in enumerate(results, start=1):
+        result["rank"] = rank
+        result["debug"] = {"mode": f"browse-{preset}", "final_score": 0.0, "channels": {}}
+        shot = evidence.get(result["unit_id"])
+        if shot:
+            priors.decorate(result, shot, scene_rows.get(shot.get("scene_id") or ""))
+    return results
