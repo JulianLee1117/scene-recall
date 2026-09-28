@@ -30,6 +30,7 @@ from PIL import Image
 
 from pipeline.search.candidates import frame_neighbors
 from pipeline.search import priors as _priors
+from pipeline.search import rerank as _rerank
 from pipeline.search import resident as _resident
 from pipeline.search.quotes import STRONG_SCORE as _STRONG_QUOTE, find_lines as _find_lines, quote_strength
 from pipeline.search.request import search_execution, search_stage, reuse_vector
@@ -1586,7 +1587,6 @@ def search(
     _defer_result_preferences: bool = False,
     _apply_ordinary_temporal_spread: bool = True,
     _preserve_visual_alternatives: bool = False,
-    _return_candidate_pool: bool = False,
 ) -> list[dict]:
     """Return a stable hybrid result prefix.
 
@@ -1600,14 +1600,7 @@ def search(
     after independent clause rankings are fused. The ordinary temporal switch
     lets reference fusion reserve temporal ordering for its separate 90-second
     policy. Public callers retain the established result preferences.
-
-    ``_return_candidate_pool`` is an internal comparison boundary. It returns
-    the complete bounded ordinary pool, including the existing unscoped film
-    reserve, before result preferences. This preserves ordinary recall while
-    allowing one final preference pass after optional evidence-route fusion.
     """
-    if _return_candidate_pool:
-        _defer_result_preferences = True
     preset = _priors.validate_preset(preset)
     candidate_limit, result_limit = _validated_search_limits(
         config,
@@ -1632,7 +1625,7 @@ def search(
         scoped_film_ids,
         apply_film_diversity=apply_film_diversity,
         defer_result_preferences=(
-            _defer_result_preferences and not _return_candidate_pool
+            _defer_result_preferences
         ),
     )
     use_lexical_vote = _broad_query_uses_lexical_vote(query, enabled)
@@ -1730,7 +1723,9 @@ def search(
         line_hits = _find_lines(db, query, film_ids=scoped_film_ids, limit=channel_candidate_limit)
     strength = quote_strength(line_hits)
     weights["quote"] = 1.2 if strength >= _STRONG_QUOTE else 0.3 * strength
-    specificity = 1.0 if strength >= _STRONG_QUOTE else 0.0
+    # A quote-like query keeps half-strength priors: exact lines lead, and fame
+    # decides between films that share the line (the original over its homages).
+    specificity = 0.5 if strength >= _STRONG_QUOTE else 0.0
     quote_rows: list[tuple[dict[str, Any], float, None]] = []
     if line_hits and weights["quote"] > 0:
         hit_by_unit = {hit.unit_id: hit for hit in line_hits}
@@ -1834,6 +1829,9 @@ def search(
             candidate_limit=candidate_limit,
             reserve_limit=int(config.retrieval.diversity.page_size),
         )
+    shortlist = int(getattr(config.retrieval, "rerank_shortlist", 0) or 0)
+    if shortlist and ordered and not _defer_result_preferences:
+        ordered = _reranked(query, db, ordered, shortlist)
 
     if _defer_result_preferences:
         eligible = ordered
@@ -1874,7 +1872,7 @@ def search(
         and not scoped_film_ids
     ):
         eligible = _soft_temporal_spread(eligible)
-    ranked_candidates = eligible if _return_candidate_pool else (
+    ranked_candidates = (
         _bounded_film_repeat_rerank(
             eligible,
             result_limit=result_limit,
@@ -1942,6 +1940,34 @@ def search(
         selected.append(result)
 
     return selected
+
+
+def _reranked(query: str, db: lancedb.DBConnection, ordered: list[dict[str, Any]], shortlist: int) -> list[dict[str, Any]]:
+    """Cross-encoder pass over the fused shortlist (see :mod:`pipeline.search.rerank`)."""
+    head = ordered[:shortlist]
+    with search_stage("rerank"):
+        evidence = _priors.load_evidence(db, (_candidate_unit_id(candidate) for candidate in head))
+        scenes = _priors.load_scenes(db, (row.get("scene_id") for row in evidence.values()))
+        titles = _film_titles(db)
+        documents = [
+            _rerank.document(candidate["row"], evidence.get(_candidate_unit_id(candidate)),
+                             scenes.get((evidence.get(_candidate_unit_id(candidate)) or {}).get("scene_id") or ""),
+                             titles.get(str(candidate["row"].get("film_id") or "")))
+            for candidate in head
+        ]
+        relevance = _rerank.score(query, documents)
+    if relevance is None:
+        return ordered
+    for candidate, value in zip(head, relevance):
+        candidate["channels"]["rerank"] = {"score": round(float(value), 4)}
+    return _rerank.blend(head, relevance) + ordered[shortlist:]
+
+
+def _film_titles(db: lancedb.DBConnection) -> dict[str, str]:
+    if "films" not in table_names(db):
+        return {}
+    rows = db.open_table("films").search().select(["film_id", "title"]).limit(None).to_list()
+    return {str(row["film_id"]): str(row.get("title") or "") for row in rows}
 
 
 def _candidate_unit_id(candidate: dict[str, Any]) -> str:

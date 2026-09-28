@@ -144,11 +144,12 @@ The accepted boundary or behavior.
 | [0083](0083-complete-filter-before-scalar-read-limit.md) | Accepted | Apply the complete scalar filter before bounded reads, retaining indexed and unindexed matches |
 | [0084](0084-confirmed-movie-scope-in-search.md) | Accepted | Suggest explicit movie scope in the search input and browse selected films without a fabricated query |
 | [0085](0085-inline-confirmed-movie-mentions.md) | Accepted | Keep confirmed movie identity inline using native text and validated ranges |
-| [0086](0086-frozen-search-intent-comparison.md) | Experiment only | Compare bounded hosted intent and evidence judgments on frozen search candidates |
+| [0086](0086-frozen-search-intent-comparison.md) | Superseded by 0094 | Compare bounded hosted intent and evidence judgments on frozen search candidates |
 | [0087](0087-conservative-whole-frame-blank-filter.md) | Accepted | Require whole-frame blank evidence rather than suppressing meaningful dark screens or imagery |
-| [0088](0088-bounded-jev-follow-up-probes.md) | Experiment only | Separate frozen-evidence constraint judgments from query-only category interpretation with bounded hosted receipts |
+| [0088](0088-bounded-jev-follow-up-probes.md) | Superseded by 0094 | Separate frozen-evidence constraint judgments from query-only category interpretation with bounded hosted receipts |
 | [0089](0089-personal-search-assistance-trial.md) | Superseded by 0090 | Historical personal category-assistance trial |
 | [0090](0090-retire-personal-search-trial.md) | Accepted | Remove the interactive trial and distinguish candidate coverage from ranking before another search experiment |
-| [0091](0091-intent-guided-retrieval-comparison.md) | Experiment only | Compare ordinary, fixed expansion and Jev-guided evidence retrieval with frozen playable result lists |
+| [0091](0091-intent-guided-retrieval-comparison.md) | Superseded by 0094 | Compare ordinary, fixed expansion and Jev-guided evidence retrieval with frozen playable result lists |
 | [0092](0092-bounded-framing-representation-pilot.md) | Accepted for evaluation | Hold the optional bulk batch and compare frozen framing representations independently of Jev |
 | [0093](0093-evidence-v2.md) | Accepted | Versioned per-film evidence artifacts, open metadata with world knowledge, measured-over-guessed facts and compiled search tables |
+| [0094](0094-search-v2.md) | Accepted | Search v2: evidence views fused by rank, quote channel, bounded priors and presets, scene cards, resident vectors, cross-encoder rerank; retire the intent experiments |

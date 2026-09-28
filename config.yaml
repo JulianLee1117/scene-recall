@@ -37,6 +37,7 @@ retrieval:
   candidate_limit: 200       # base per-channel depth; unscoped broad search uses 3x
   result_window: 48          # initial stable ranked prefix returned by search
   max_result_limit: 200      # bounded deepest interactive result window
+  rerank_shortlist: 40       # cross-encoder rerank of the fused shortlist (0 disables); ~+0.25 s
   diversity:
     page_size: 12
     film_results_per_page_target: 4  # soft preference; every page relevance-backfills

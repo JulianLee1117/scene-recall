@@ -17,7 +17,6 @@ import MovieScopeFilter from "@/components/MovieScopeFilter";
 import MovieSearchInput from "@/components/MovieSearchInput";
 import SearchOptions from "@/components/SearchOptions";
 import RankingPresetControl from "@/components/RankingPresetControl";
-import SearchComparison from "@/components/SearchComparison";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { useFacetSourceSearch } from "@/hooks/useFacetSourceSearch";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
@@ -137,12 +136,6 @@ export default function Home() {
     setMovieDraft(next);
   }, []);
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [comparisonResults, setComparisonResults] = useState<SearchResult[] | null>(null);
-  const [comparisonRevision, setComparisonRevision] = useState(0);
-  const handleComparisonResults = useCallback((rows: SearchResult[] | null) => {
-    setComparisonResults(rows);
-    setComparisonRevision((revision) => revision + 1);
-  }, []);
   const [resultStreamKey, setResultStreamKey] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -199,7 +192,6 @@ export default function Home() {
       limit?: number,
     ) => {
       const clauses = buildRecipeClauses(mainText, drafts, image);
-      setComparisonResults(null);
       const isDeepening = limit !== undefined;
       if (clauses.length === 0 && scope.length === 0) {
         // Clearing the draft leaves the current scenes and layout in place.
@@ -1360,15 +1352,6 @@ export default function Home() {
 
           {/* The reference picker and main query own independent result streams. */}
           <div>
-            {hasCompletedSearch && !loading && query.trim() && !mainImage &&
-              !Object.values(matchDrafts).some(matchDraftHasClause) && !sourceReferenceFacet && (
-                <SearchComparison
-                  key={`${resultStreamKey}:${query}:${selectedFilmIds.join(",")}`}
-                  query={query}
-                  filmIds={selectedFilmIds}
-                  onResultsChange={handleComparisonResults}
-                />
-              )}
             {hasCompletedSearch && clauseCount === 0 && selectedFilmIds.length > 0 && results.length > 0 && (
               <p className="search-browse-note">
                 {results.length === resultWindow.maxLimit
@@ -1409,11 +1392,11 @@ export default function Home() {
               </section>
             )}
             <ResultGrid
-              results={hasCompletedSearch ? comparisonResults ?? results : results}
+              results={results}
               order={hasCompletedSearch && clauseCount === 0 && selectedFilmIds.length > 0 ? "chronological" : "ranked"}
-              streamKey={`${resultStreamKey}:${comparisonRevision}`}
+              streamKey={`${resultStreamKey}`}
               revealDisabled={loading}
-              hasMore={comparisonResults === null && resultWindow.hasMore}
+              hasMore={resultWindow.hasMore}
               onRequestMore={handleLoadMoreResults}
               onShotClick={setActiveShot}
               onUseInSearch={handleUseInSearch}

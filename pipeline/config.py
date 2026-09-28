@@ -96,11 +96,14 @@ class RetrievalConfig:
     max_result_limit: int
     optional_storage_gib: int = 64
     composition_profile: str | None = None
+    rerank_shortlist: int = 0          # cross-encoder shortlist size; 0 keeps the fused order
 
 
 @dataclass
 class IngestConfig:
     annotation_concurrency: int = 8
+    evidence: bool = True              # run the evidence passes after publication
+    evidence_hosted: bool = True       # include hosted passes (metadata, subtitles, understanding)
 
 
 @dataclass
@@ -311,6 +314,9 @@ def load_config(path: Optional[Path | str] = None) -> Config:
     if composition_profile is not None and (not isinstance(composition_profile, str)
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", composition_profile) is None):
         raise ValueError("retrieval.composition_profile must be null or a simple profile identifier")
+    rerank_shortlist = r.get("rerank_shortlist", 0)
+    if type(rerank_shortlist) is not int or not 0 <= rerank_shortlist <= 200:
+        raise ValueError("retrieval.rerank_shortlist must be an integer between 0 and 200")
     retrieval = RetrievalConfig(
         weights=weights,
         diversity=diversity,
@@ -319,6 +325,7 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         max_result_limit=max_result_limit,
         optional_storage_gib=optional_storage_gib,
         composition_profile=composition_profile,
+        rerank_shortlist=rerank_shortlist,
     )
 
     # --- ingest (optional section) ---
@@ -326,7 +333,12 @@ def load_config(path: Optional[Path | str] = None) -> Config:
     annotation_concurrency = int(ingest_raw.get("annotation_concurrency", 8))
     if annotation_concurrency < 1:
         raise ValueError("ingest.annotation_concurrency must be at least 1")
-    ingest = IngestConfig(annotation_concurrency=annotation_concurrency)
+    evidence = ingest_raw.get("evidence", True)
+    evidence_hosted = ingest_raw.get("evidence_hosted", True)
+    if not isinstance(evidence, bool) or not isinstance(evidence_hosted, bool):
+        raise ValueError("ingest.evidence and ingest.evidence_hosted must be booleans")
+    ingest = IngestConfig(annotation_concurrency=annotation_concurrency, evidence=evidence,
+                          evidence_hosted=evidence_hosted)
 
     lab_raw = raw.get("lab") or {}
     footage_inspection = lab_raw.get("footage_inspection", False)

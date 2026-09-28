@@ -105,7 +105,6 @@ from pipeline.matching.api import router as matching_router
 from pipeline.transitions.api import router as transitions_router
 from pipeline.acquisition.api import router as acquisition_router
 from pipeline.project_info import router as project_info_router
-from pipeline.api.search_intent import router as search_intent_router
 from pipeline.acquisition.service import AcquisitionService
 from pipeline.lab.jobs import DurableIngestQueue as _IngestQueue
 from pipeline.lab.store import DuplicateJob as _DuplicateIngestError, LabStore
@@ -323,7 +322,6 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="scene-recall", version="0.1.0", lifespan=lifespan)
-app.include_router(search_intent_router)
 
 
 @app.exception_handler(SearchLibraryUnavailable)

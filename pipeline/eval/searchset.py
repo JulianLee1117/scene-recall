@@ -56,17 +56,19 @@ def _hit(result: dict[str, Any], film_id: str, at: float, tolerance: float) -> b
     return float(result["t_start"]) - tolerance <= at <= float(result["t_end"]) + tolerance
 
 
-def run(preset: str, films: list[str] | None, out: Path | None) -> dict[str, Any]:
+def run(preset: str, films: list[str] | None, out: Path | None, rerank: int | None = None) -> dict[str, Any]:
     from pipeline.config import load_config
     from pipeline.evidence.library import resolve_films
     from pipeline.index.writer import open_db
     from pipeline.search.retrieve import search
 
     config = load_config()
+    if rerank is not None:
+        config.retrieval.rerank_shortlist = rerank
     db = open_db(config)
     spec = yaml.safe_load(SET_PATH.read_text(encoding="utf-8"))
     titles = {film.film_id: film.title for film in resolve_films(db, None)}
-    report: dict[str, Any] = {"preset": preset, "created": datetime.now().isoformat(timespec="seconds"), "queries": []}
+    report: dict[str, Any] = {"preset": preset, "rerank": config.retrieval.rerank_shortlist, "created": datetime.now().isoformat(timespec="seconds"), "queries": []}
     ranks: list[int | None] = []
     for item in spec["queries"]:
         target_film = item.get("film")
@@ -133,8 +135,9 @@ def main() -> None:
     parser.add_argument("--preset", default="balanced", choices=["balanced", "famous", "gems"])
     parser.add_argument("--film", action="append", help="only known-item queries for these films (discovery always runs)")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--rerank", type=int, default=None, help="override retrieval.rerank_shortlist (0 disables)")
     args = parser.parse_args()
-    report = run(args.preset, args.film, args.out)
+    report = run(args.preset, args.film, args.out, args.rerank)
     for entry in report["queries"]:
         rank = entry.get("rank", "-") if entry["kind"] != "discovery" else " "
         print(f"{str(rank or 'MISS'):>5}  {entry['query'][:60]:60s} {entry.get('seconds', '')}s")

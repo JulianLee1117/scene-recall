@@ -1,6 +1,6 @@
 # ADR-0091: Compare query intent routing over independent evidence candidates
 
-- Status: Accepted for experiment only
+- Status: Superseded by [ADR-0094](0094-search-v2.md) (retired 2026-09-28)
 - Date: 2026-09-21
 - Extends: ADR-0086/0088; follows the next decision gate in ADR-0090
 

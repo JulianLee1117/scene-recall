@@ -54,6 +54,10 @@ def cmd_understand(args) -> int:
         summary = understanding.collect_batches(config, db)
         print(f"[understanding:batch] {summary}")
         return 0 if summary["failed"] == 0 else 1
+    if args.batch == "run":
+        summary = understanding.run_batches(config, db, films, model=args.model, max_usd=args.max_usd)
+        print(f"[understanding:batch] {summary}")
+        return 0 if summary["failed"] == 0 else 1
     if args.batch == "status":
         for job in understanding.batch_status(config):
             print(f"{job['created']}  {job['state']:26s} {job['chunks']:4d} chunks  {job['name']}")
@@ -115,6 +119,53 @@ def cmd_compile(args) -> int:
     return 0 if result.activated else 1
 
 
+def cmd_refresh_dialogue(args) -> int:
+    """Re-ingest films with an accepted synced subtitle that their published dialogue does not use yet."""
+    import json
+    from pathlib import Path
+
+    from pipeline.evidence import compile as compiler
+    from pipeline.evidence.subtitles import accepted_download
+    from pipeline.ingest.pipeline import run_pipeline
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+
+    def adopted(film) -> bool:
+        download = accepted_download(config, film.film_id)
+        if download is None:
+            return True
+        path = Path(config.paths.assets_dir) / film.film_id / "dialogue.manifest.json"
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return manifest.get("kind") == "downloaded_srt" and manifest.get("sha256") == download["synced_sha256"]
+
+    stale = [film for film in films if not adopted(film)]
+    print(f"[dialogue] {len(stale)} of {len(films)} films have an accepted synced subtitle to adopt")
+    failed = 0
+    for number, film in enumerate(stale, start=1):
+        try:
+            # Shots, keyframes and captions are cached; dialogue, embeddings and text views refresh.
+            run_pipeline(film.path, config)
+            print(f"[dialogue] {number}/{len(stale)} {film.title}: re-ingested", flush=True)
+        except Exception as exc:  # noqa: BLE001 - one film must not stop the batch
+            failed += 1
+            print(f"[dialogue] {number}/{len(stale)} {film.title}: failed ({str(exc)[:300]})", flush=True)
+    if stale:
+        compiler.compile_films(config, db, stale)
+    return 0 if failed == 0 else 1
+
+
+def cmd_refresh(args) -> int:
+    from pipeline.evidence.pipeline import refresh_films
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+    summary = refresh_films(config, db, films, hosted=not args.local_only, measure_pass=not args.skip_measure)
+    print(f"[evidence] {summary}")
+    return 0 if not any(isinstance(result, dict) and "error" in result for result in summary.values()) else 1
+
+
 def cmd_status(args) -> int:
     from pipeline.evidence import metadata, speech, store, subtitles
     config = _config(args.config)
@@ -155,8 +206,8 @@ def main(argv: list[str] | None = None) -> int:
     und.add_argument("--max-usd", type=float, default=5.0, help="spend ceiling for this run (standard pricing)")
     und.add_argument("--concurrency", type=int, default=6)
     und.add_argument("--force", action="store_true")
-    und.add_argument("--batch", choices=["submit", "collect", "status"],
-                     help="half-price batch transport: submit pending chunks, collect finished jobs, or list jobs")
+    und.add_argument("--batch", choices=["run", "submit", "collect", "status"],
+                     help="half-price batch transport: run (submit, poll and collect until done), or one step")
     und.add_argument("--max-chunks", type=int, default=None, help="with --batch submit: cap chunks this run")
     mea = add("measure", cmd_measure, "local GPU pass: camera motion, hidden cuts, subjects, look and hero frames")
     mea.add_argument("--force", action="store_true")
@@ -165,6 +216,11 @@ def main(argv: list[str] | None = None) -> int:
     add("compile", cmd_compile, "rebuild search tables (film_meta, shot_evidence, scenes, dialogue_lines) and text views")         .add_argument("--no-text", action="store_true", help="skip the semantic text-view refresh")
     parsers["compile"].add_argument("--rebuild", action="store_true",
                                     help="drop compiled tables and recompile every film (after a schema change)")
+    add("refresh-dialogue", cmd_refresh_dialogue,
+        "re-ingest films with an accepted synced subtitle their dialogue does not use yet")
+    ref = add("refresh", cmd_refresh, "run every evidence pass for the selected films (cached passes skip)")
+    ref.add_argument("--local-only", action="store_true", help="skip hosted passes (metadata, subtitles, understanding)")
+    ref.add_argument("--skip-measure", action="store_true", help="skip the GPU measurement pass")
     add("status", cmd_status, "show evidence coverage")
     args = parser.parse_args(argv)
     return int(args.handler(args) or 0)

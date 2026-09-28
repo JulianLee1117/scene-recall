@@ -1,6 +1,6 @@
 # ADR-0086: Evaluate hosted search decisions against frozen candidates
 
-- Status: Accepted for experiment only
+- Status: Superseded by [ADR-0094](0094-search-v2.md) (retired 2026-09-28)
 - Date: 2026-09-20
 
 ## Context

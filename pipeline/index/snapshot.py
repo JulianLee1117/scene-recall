@@ -50,30 +50,6 @@ class _ReadTable:
         """Stream this pinned version as Arrow batches (bounded memory for resident loads)."""
         return self.__table.to_lance().to_batches(columns=list(columns), filter=filter, batch_size=batch_size)
 
-    def scan_vector_rows(self, vector, *, column, columns, where, limit):
-        """Read exact neighbors without scattered scalar-index vector gathers.
-
-        Broad semantic-view filters match many interleaved rows. Gathering
-        their vectors through bitmap indexes is much slower than a sequential
-        scan. The optional native scanner retains this table's pinned version,
-        cosine distances and prefilter. Leave any vector-index policy to the
-        regular query path, and retain that path when pylance is not installed.
-        """
-        if any(column in index.columns for index in self.__table.list_indices()):
-            return None
-        try:
-            dataset = self.__table.to_lance()
-        except ImportError:
-            return None
-        return dataset.scanner(
-            columns=columns,
-            filter=where.to_sql(),
-            nearest={"column": column, "q": vector, "k": limit,
-                     "metric": "cosine", "use_index": False},
-            prefilter=True,
-            use_scalar_index=False,
-        ).to_table().to_pylist()
-
 
 class IndexSnapshot:
     is_index_snapshot = True

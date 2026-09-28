@@ -33,7 +33,11 @@ from pipeline.evidence.library import FilmRef, film_units
 
 
 PROMPT_VERSION = "shot-keyed-understanding-v1"
-PROXY_FPS = 4          # >= 2x the highest sampling rate; frames Gemini samples are unchanged, uploads 3x smaller
+
+def proxy_fps(chunk: "Chunk") -> float:
+    """Proxy frame rate: twice the sampling rate, so every sampled frame exists (uploads stay small)."""
+    return 2 * chunk.fps
+
 CAMERA_HINTS = ["static", "pan", "tilt", "push_in", "pull_out", "tracking", "handheld", "crane", "orbit", "zoom", "unclear"]
 # USD per 1M tokens (standard tier; batch is half). Checked 2026-09-27; Flash
 # prices are introductory until 2026-12-31.
@@ -49,7 +53,8 @@ DEFAULTS = {
     "fast_median_shot_s": 3.0,
     "fps_fast": 2.0,
     "fps_normal": 1.0,
-    "proxy_height": 360,
+    "proxy_height": 240,       # at low media resolution frames are reduced to ~64 tokens; 240p loses nothing
+    "proxy_audio_kbps": 32,    # mono; the model resamples audio to 16 kHz
     "thinking": "low",
     "media_resolution": "low",
     "plot_chars": 3500,
@@ -133,9 +138,9 @@ def render_proxy(film: FilmRef, chunk: Chunk, directory: Path) -> Path:
     video_filter = (f"scale=w='max(2,trunc(iw*sar/2)*2)':h=ih,setsar=1,scale=-2:{DEFAULTS['proxy_height']},"
                     f"subtitles='{escaped}':force_style='{style}'")
     command = ["ffmpeg", "-y", "-nostdin", "-v", "error", "-ss", f"{chunk.start:.3f}", "-to", f"{chunk.end:.3f}",
-               "-i", str(film.path), "-map", "0:v:0", "-map", "0:a:0?", "-vf", video_filter, "-r", str(PROXY_FPS),
+               "-i", str(film.path), "-map", "0:v:0", "-map", "0:a:0?", "-vf", video_filter, "-r", str(proxy_fps(chunk)),
                "-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "32", "-b:v", "0",
-               "-c:a", "aac", "-b:a", "64k", "-ac", "1", str(output)]
+               "-c:a", "aac", "-b:a", f"{DEFAULTS['proxy_audio_kbps']}k", "-ac", "1", str(output)]
     completed = subprocess.run(command, capture_output=True, check=False)
     if completed.returncode != 0:
         # Fall back to CPU encoding when NVENC sessions are exhausted or unavailable.
@@ -355,13 +360,32 @@ def _client():
     return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=900_000))
 
 
-def _generation_config() -> Any:
+def _openapi_schema(node: dict[str, Any]) -> Any:
+    """The same JSON schema as a ``types.Schema`` (the batch backend enforces only this form)."""
     from google.genai import types
+    fields: dict[str, Any] = {"type": node["type"].upper()}
+    if "properties" in node:
+        fields["properties"] = {name: _openapi_schema(child) for name, child in node["properties"].items()}
+        fields["property_ordering"] = list(node["properties"])
+        fields["required"] = node.get("required")
+    if "items" in node:
+        fields["items"] = _openapi_schema(node["items"])
+    if "enum" in node:
+        fields.update(enum=node["enum"], format="enum")
+    for bound in ("minimum", "maximum"):
+        if bound in node:
+            fields[bound] = node[bound]
+    return types.Schema(**fields)
+
+
+def _generation_config(*, batch: bool = False) -> Any:
+    from google.genai import types
+    schema = {"response_schema": _openapi_schema(response_schema())} if batch else {"response_json_schema": response_schema()}
     return types.GenerateContentConfig(
         media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
         response_mime_type="application/json",
-        response_json_schema=response_schema(),
         thinking_config=types.ThinkingConfig(thinking_level=DEFAULTS["thinking"]),
+        **schema,
     )
 
 
@@ -596,7 +620,7 @@ def run(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFAULTS["mo
         variant = "full"
         with tempfile.TemporaryDirectory(prefix="sr-und-", dir=_temp_root(config)) as temporary:
             proxy = render_proxy(plan.film, chunk, Path(temporary))
-            proxy_info = {"fps": PROXY_FPS, "bytes": proxy.stat().st_size}
+            proxy_info = {"fps": proxy_fps(chunk), "bytes": proxy.stat().st_size}
             try:
                 response = _call_with_retry(client, model, proxy, chunk.fps, plan.prompt(chunk, "full"))
             except Blocked:
@@ -724,7 +748,7 @@ def submit_batches(config: Any, db: Any, films: list[FilmRef], *, model: str = D
         for (plan, chunk), request in zip(group, requests):
             video = types.File(name=request["file"], uri=request["file_uri"], mime_type="video/mp4")
             inline.append(types.InlinedRequest(contents=_contents(video, chunk.fps, plan.prompt(chunk, "full")),
-                                               config=_generation_config(), metadata={"key": request["key"]}))
+                                               config=_generation_config(batch=True), metadata={"key": request["key"]}))
         try:
             job = client.batches.create(model=model, src=inline,
                                         config={"display_name": f"scene-recall-understanding-{int(time.time())}"})
@@ -790,7 +814,7 @@ def collect_batches(config: Any, db: Any, *, progress: Callable[[str], None] = p
                 if payload is not None and payload["text"]:
                     receipt = write_receipt(config, plan, prod, chunk, payload, model=job_record["model"],
                                             variant=request["variant"], transport="batch",
-                                            proxy={"fps": PROXY_FPS, "bytes": request["bytes"]})
+                                            proxy={"fps": proxy_fps(chunk), "bytes": request["bytes"]})
                     counts["receipts"] += 1
                     counts["usd"] = round(counts["usd"] + receipt["cost_usd"], 4)
                 elif payload is not None and payload["block_reason"] and plan.contexts[0] != plan.contexts[1]:
@@ -799,7 +823,7 @@ def collect_batches(config: Any, db: Any, *, progress: Callable[[str], None] = p
                     retry = _call_with_retry(client, job_record["model"], video, chunk.fps, plan.prompt(chunk, "no_plot"))
                     receipt = write_receipt(config, plan, prod, chunk, retry, model=job_record["model"],
                                             variant="no_plot", transport="standard",
-                                            proxy={"fps": PROXY_FPS, "bytes": request["bytes"]})
+                                            proxy={"fps": proxy_fps(chunk), "bytes": request["bytes"]})
                     counts["retried"] += 1
                     counts["usd"] = round(counts["usd"] + receipt["cost_usd"], 4)
                 else:
@@ -829,3 +853,43 @@ def collect_batches(config: Any, db: Any, *, progress: Callable[[str], None] = p
 def batch_status(config: Any) -> list[dict[str, Any]]:
     return [{"name": job["name"], "state": job["state"], "created": job["created"], "chunks": len(job["requests"])}
             for job in _read_ledger(config)["jobs"]]
+
+
+def run_batches(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFAULTS["model"], max_usd: float = 120.0,
+                wave_chunks: int = 300, poll_seconds: int = 300,
+                progress: Callable[[str], None] = print) -> dict[str, Any]:
+    """Drive the batch transport unattended: submit waves, poll, collect, until every chunk has a receipt.
+
+    At most ``wave_chunks`` chunks are in flight at once (Files API storage and
+    enqueued-token limits); ``max_usd`` bounds the estimated batch spend of all
+    submissions made by this call.
+    """
+    prod = producer(model)
+    spent = 0.0
+    totals: dict[str, Any] = {"receipts": 0, "failed": 0, "usd": 0.0}
+    while True:
+        collected = collect_batches(config, db, progress=progress)
+        for key in ("receipts", "failed"):
+            totals[key] += collected.get(key, 0)
+        totals["usd"] = round(totals["usd"] + collected.get("usd", 0.0), 4)
+        ledger = _read_ledger(config)
+        in_flight = sum(len(job["requests"]) for job in ledger["jobs"] if job["state"] in _ACTIVE_STATES)
+        plans, _cached = plan_films(config, db, films, prod, force=False)
+        pending = sum(len(pending_chunks(config, plan, prod)) for plan in plans)
+        waiting = pending - in_flight
+        progress(f"[understanding:batch] {in_flight} chunks in flight, {max(0, waiting)} to submit, "
+                 f"{totals['receipts']} collected (${totals['usd']:.2f})")
+        if pending == 0:
+            return totals
+        room = wave_chunks - in_flight
+        if waiting > 0 and room >= min(waiting, BATCH_REQUESTS_PER_JOB) and spent < max_usd:
+            submitted = submit_batches(config, db, films, model=model, max_usd=max_usd - spent,
+                                       max_chunks=room, progress=progress)
+            spent += submitted["estimated_usd"]
+            if submitted["submitted"] == 0 and in_flight == 0:
+                progress("[understanding:batch] nothing could be submitted and nothing is in flight; stopping")
+                return totals
+        elif in_flight == 0:
+            progress("[understanding:batch] budget reached or nothing left to submit; stopping")
+            return totals
+        time.sleep(poll_seconds)

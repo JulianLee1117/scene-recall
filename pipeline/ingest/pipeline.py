@@ -296,13 +296,23 @@ def _run_pipeline_locked(
     print(
         f"\nSummary: {len(shots)} shots | {total_time:.1f}s total | {row_count} DB rows"
     )
+    # Framing-representation preparation is frozen (docs/current-work.md):
+    # evidence v2's measured subject layout replaces embedding grids, so new
+    # films no longer queue held preparation jobs.
 
-    try:
-        from pipeline.index.search_features import queue_published_film
-        job = queue_published_film(config, db, film.film_id)
-        print(f"[search-features] queued optional preparation {job['id']}", flush=True)
-    except Exception as exc:
-        print(f"[search-features] optional preparation deferred: {exc}", flush=True)
+    # Evidence v2 (pipeline/evidence): like the text views above, a derived
+    # layer after publication. Cached passes skip; failures never undo ingest.
+    if config.ingest.evidence:
+        try:
+            from pipeline.evidence.library import resolve_films
+            from pipeline.evidence.pipeline import refresh_films
+
+            summary = refresh_films(config, db, resolve_films(db, [film.film_id]),
+                                    hosted=config.ingest.evidence_hosted, holding_ingest_lock=True)
+            failed = [name for name, result in summary.items() if isinstance(result, dict) and "error" in result]
+            print(f"[evidence] refreshed{' (failed: ' + ', '.join(failed) + ')' if failed else ''}", flush=True)
+        except Exception as exc:
+            print(f"[evidence] deferred: {exc}", flush=True)
     return film
 
 

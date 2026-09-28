@@ -1,0 +1,120 @@
+"""Cross-encoder rerank of the fused shortlist, reading each shot's text evidence.
+
+Retrieval channels vote by rank, so a shot that one precise document describes
+exactly (a story line such as "a face slowly rises from the dark basement
+stairs") can lose to shots that several loose channels half-match. A
+cross-encoder reads the query and each candidate's evidence together and judges
+relevance directly. It runs only on the fused shortlist and its judgement is
+blended with the fused rank, never substituted for it, so visual matches that
+text cannot describe keep their place.
+
+Model: Qwen3-Reranker-0.6B (Apache-2.0), scored as p("yes") following the
+model card. Enabled by ``retrieval.rerank_shortlist`` (0 disables it).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import threading
+from typing import Any
+
+_LOGGER = logging.getLogger("uvicorn.error")
+MODEL_ID = "Qwen/Qwen3-Reranker-0.6B"
+INSTRUCTION = ("Given a description, quote or memory of a film moment, judge whether this film shot shows "
+               "that moment or matches that description.")
+_PREFIX = ("<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the "
+           "Instruct provided. Note that the answer can only be \"yes\" or \"no\".<|im_end|>\n<|im_start|>user\n")
+_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+_MAX_TOKENS = 384
+_BLEND = 0.6                 # weight of the cross-encoder vs the fused rank inside the shortlist
+_LOCK = threading.Lock()
+_MODEL: dict[str, Any] = {}
+
+
+def _load() -> dict[str, Any] | None:
+    with _LOCK:
+        if "model" in _MODEL or "failed" in _MODEL:
+            return _MODEL if "model" in _MODEL else None
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, padding_side="left")
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_ID, dtype=torch.float16 if device == "cuda" else torch.float32).to(device).eval()
+            _MODEL.update(model=model, tokenizer=tokenizer, device=device, torch=torch,
+                          yes=tokenizer.convert_tokens_to_ids("yes"), no=tokenizer.convert_tokens_to_ids("no"),
+                          prefix=tokenizer.encode(_PREFIX, add_special_tokens=False),
+                          suffix=tokenizer.encode(_SUFFIX, add_special_tokens=False))
+            return _MODEL
+        except Exception as exc:  # noqa: BLE001 - optional: search continues without it
+            _MODEL["failed"] = True
+            _LOGGER.warning("reranker unavailable; keeping fused order: %s", exc)
+            return None
+
+
+def score(query: str, documents: list[str], *, batch_size: int = 16) -> list[float] | None:
+    """p(relevant) for each document, or None when the model is unavailable."""
+    state = _load()
+    if state is None or not documents:
+        return None
+    torch, tokenizer, model = state["torch"], state["tokenizer"], state["model"]
+    scores: list[float] = []
+    budget = _MAX_TOKENS - len(state["prefix"]) - len(state["suffix"])
+    with torch.inference_mode():
+        for start in range(0, len(documents), batch_size):
+            texts = [f"<Instruct>: {INSTRUCTION}\n<Query>: {query}\n<Document>: {document}"
+                     for document in documents[start:start + batch_size]]
+            encoded = tokenizer(texts, padding=False, truncation="longest_first", max_length=budget,
+                                return_attention_mask=False, add_special_tokens=False)
+            ids = [state["prefix"] + item + state["suffix"] for item in encoded["input_ids"]]
+            batch = tokenizer.pad({"input_ids": ids}, padding=True, return_tensors="pt").to(state["device"])
+            logits = model(**batch).logits[:, -1, :]
+            pair = torch.stack([logits[:, state["no"]], logits[:, state["yes"]]], dim=1).float()
+            scores.extend(torch.softmax(pair, dim=1)[:, 1].tolist())
+    return scores
+
+
+def document(row: dict[str, Any], evidence: dict[str, Any] | None, scene: dict[str, Any] | None,
+             film_title: str | None) -> str:
+    """One shot's evidence as the reranker reads it: film, scene, story, look and words."""
+    parts = []
+    if film_title:
+        parts.append(f"Film: {film_title}.")
+    if scene and scene.get("title"):
+        parts.append(f"Scene: {scene['title']}. {scene.get('summary') or ''}".strip())
+    if evidence and evidence.get("action"):
+        characters = ""
+        try:
+            names = json.loads(evidence.get("characters") or "[]")
+            characters = f" ({', '.join(names)})" if names else ""
+        except (TypeError, ValueError):
+            pass
+        parts.append(f"Action: {evidence['action']}{characters}")
+    if evidence and evidence.get("iconic_note"):
+        parts.append(f"Known moment: {evidence['iconic_note']}")
+    if row.get("caption"):
+        parts.append(f"Visual: {row['caption']}")
+    line = (row.get("_matched_line") or {}).get("text")
+    if not line:
+        try:
+            lines = json.loads(row.get("dialogue") or "[]")
+            line = " ".join(lines)[:240] if isinstance(lines, list) else ""
+        except (TypeError, ValueError):
+            line = ""
+    if line:
+        parts.append(f'Dialogue: "{line}"')
+    return "\n".join(parts)
+
+
+def blend(order: list[Any], relevance: list[float]) -> list[Any]:
+    """Reorder a shortlist by the cross-encoder, tempered by the fused rank."""
+    count = len(order)
+    scored = []
+    for position, (item, value) in enumerate(zip(order, relevance)):
+        fused = 1.0 - position / max(1, count)
+        scored.append((-(_BLEND * value + (1 - _BLEND) * fused), position, item))
+    scored.sort(key=lambda entry: (entry[0], entry[1]))
+    return [item for _score, _position, item in scored]

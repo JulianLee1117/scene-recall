@@ -217,7 +217,7 @@ def test_combined_recipe_uses_real_clause_dispatch_fusion_and_film_scope(config,
     bound = search_plan.bind_generated_direction(_direction([_text("scene", "a train platform"), _text("mood", "uneasy anticipation")]), [], caps)
     resolved = search_plan.resolve_search(bound, [], caps, 3)
     rows = search_plan.execute_search(resolved, {"film_ids": ["chosen-film"]}, config, object())
-    assert [call[1] for call in calls] == [("caption",), ("mood",)]
+    assert [call[1] for call in calls] == [("caption", "story", "scene"), ("mood",)]
     assert all(call[2]["film_ids"] == ("chosen-film",) for call in calls)
     assert [item["facet"] for item in rows[0]["matches"]] == ["scene", "mood"]
 

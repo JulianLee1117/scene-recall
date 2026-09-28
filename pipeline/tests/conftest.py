@@ -73,6 +73,9 @@ def config(tmp_path: Path) -> Config:
           diversity:
             page_size: 12
             film_results_per_page_target: 4
+
+        ingest:
+          evidence: false   # tests never run hosted or GPU evidence passes
     """)
 
     cfg_file = tmp_path / "config.yaml"

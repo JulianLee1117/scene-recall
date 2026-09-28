@@ -706,8 +706,9 @@ def measure_film(config: Any, db: Any, film: FilmRef, models: Models, progress: 
             "elapsed_s": round(time.perf_counter() - started, 1)}
 
 
-def run(config: Any, db: Any, films: list[FilmRef], *, force: bool = False,
+def run(config: Any, db: Any, films: list[FilmRef], *, force: bool = False, lock_films: bool = True,
         progress: Callable[[str], None] = print) -> dict[str, int]:
+    """Measure films (skipping current artifacts). ``lock_films=False`` when the caller holds the film lock."""
     from pipeline.evidence.understanding import shots_digest
     from pipeline.ingest.locks import film_operation_lock
     models = Models(config.paths.assets_dir)
@@ -719,7 +720,10 @@ def run(config: Any, db: Any, films: list[FilmRef], *, force: bool = False,
             counts["cached"] += 1
             continue
         try:
-            with film_operation_lock(Path(config.paths.assets_dir) / film.film_id):
+            if lock_films:
+                with film_operation_lock(Path(config.paths.assets_dir) / film.film_id):
+                    data = measure_film(config, db, film, models, progress)
+            else:
                 data = measure_film(config, db, film, models, progress)
         except Exception as exc:  # noqa: BLE001 - one film must not stop a library run
             counts["failed"] += 1
