@@ -25,7 +25,7 @@ uv run python -m pipeline.evidence status                      # coverage per pa
 uv run python -m pipeline.evidence metadata                    # Wikidata, Wikipedia, Wikiquote, IMDb votes, pageviews
 uv run python -m pipeline.evidence subtitles --max-downloads 20  # OpenSubtitles daily quota; synced and validated
 uv run python -m pipeline.evidence refresh-dialogue            # re-ingest films whose accepted subtitles are not adopted yet
-uv run python -m pipeline.evidence understand --batch run --max-usd 110   # half-price Gemini batch, unattended
+uv run python -m pipeline.evidence understand --batch run --max-usd 110 [--wave-chunks 300]   # half-price Gemini batch, unattended
 uv run python -m pipeline.evidence understand --retry-refused  # recover filter-refused clips in smaller pieces
 uv run python -m pipeline.evidence measure                     # local GPU pass (~3-4 min per film)
 uv run python -m pipeline.evidence hero
