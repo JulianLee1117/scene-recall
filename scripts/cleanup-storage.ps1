@@ -32,27 +32,24 @@ $ErrorActionPreference = 'Stop'
 # Reuse the launcher's repository/python helpers; dot-sourcing starts nothing.
 . (Join-Path $PSScriptRoot 'start-scene-recall.ps1')
 
-function Get-SizeBytes([string]$Path) {
-    if (Test-Path -LiteralPath $Path -PathType Leaf) { return (Get-Item -LiteralPath $Path).Length }
-    $sum = (Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue |
-            Measure-Object Length -Sum).Sum
-    if ($sum) { return [int64]$sum } else { return [int64]0 }
-}
-
-function Get-LastTouched([string]$Path) {
+function Get-EntryStats([string]$Path) {
+    # One walk per entry: total bytes and the latest write time anywhere inside it.
     $item = Get-Item -LiteralPath $Path -Force
-    $latest = $item.LastWriteTime
-    if ($item.PSIsContainer) {
-        $newest = Get-ChildItem -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue |
-                  Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($newest -and $newest.LastWriteTime -gt $latest) { $latest = $newest.LastWriteTime }
+    if (-not $item.PSIsContainer) { return [pscustomobject]@{ Bytes = [int64]$item.Length; Touched = $item.LastWriteTime } }
+    $files = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)
+    $bytes = if ($files.Count) { [int64](($files | Measure-Object Length -Sum).Sum) } else { [int64]0 }
+    $touched = $item.LastWriteTime
+    if ($files.Count) {
+        $newest = ($files | Measure-Object LastWriteTime -Maximum).Maximum
+        if ($newest -gt $touched) { $touched = $newest }
     }
-    return $latest
+    return [pscustomobject]@{ Bytes = $bytes; Touched = $touched }
 }
 
 $script:Plan = New-Object 'System.Collections.Generic.List[object]'
-function Add-Removal([string]$Group, [string]$Path) {
-    $script:Plan.Add([pscustomobject]@{ Group = $Group; Path = $Path; Bytes = (Get-SizeBytes $Path) })
+function Add-Removal([string]$Group, [string]$Path, $Stats = $null) {
+    if ($null -eq $Stats) { $Stats = Get-EntryStats $Path }
+    $script:Plan.Add([pscustomobject]@{ Group = $Group; Path = $Path; Bytes = $Stats.Bytes })
 }
 
 Push-Location $script:Repository
@@ -68,12 +65,18 @@ print(json.dumps({"assets": str(load_config().paths.assets_dir)}))
     # 1. Repository scratch.
     $scratch = Join-Path $script:Repository '.tmp'
     if (Test-Path -LiteralPath $scratch) {
-        foreach ($entry in Get-ChildItem -LiteralPath $scratch -Force) {
+        $entries = @(Get-ChildItem -LiteralPath $scratch -Force)
+        Write-Host "Scanning $($entries.Count) entries in .tmp (this can take a few minutes)..."
+        $seen = 0
+        foreach ($entry in $entries) {
+            $seen++
+            if ($seen % 50 -eq 0) { Write-Host "  scanned $seen of $($entries.Count)" }
             $name = $entry.Name
             if ($name -eq 'services' -or $name -like 'framing-*' -or $name -like 'match-*') { continue }
             $pytest = $entry.PSIsContainer -and ($name -match '^pt\d*$' -or $name -like 'pytest-*')
-            if ($pytest -or ($now - (Get-LastTouched $entry.FullName)).TotalHours -ge 12) {
-                Add-Removal 'repository scratch (.tmp)' $entry.FullName
+            $stats = Get-EntryStats $entry.FullName
+            if ($pytest -or ($now - $stats.Touched).TotalHours -ge 12) {
+                Add-Removal 'repository scratch (.tmp)' $entry.FullName $stats
             }
         }
     }
@@ -94,8 +97,9 @@ print(json.dumps({"assets": str(load_config().paths.assets_dir)}))
     $proxies = Join-Path $assets '.tmp\understanding'
     if (Test-Path -LiteralPath $proxies) {
         foreach ($entry in Get-ChildItem -LiteralPath $proxies -Directory -Force) {
-            if (($now - (Get-LastTouched $entry.FullName)).TotalHours -ge 6) {
-                Add-Removal 'stale understanding proxies' $entry.FullName
+            $stats = Get-EntryStats $entry.FullName
+            if (($now - $stats.Touched).TotalHours -ge 6) {
+                Add-Removal 'stale understanding proxies' $entry.FullName $stats
             }
         }
     }
@@ -111,10 +115,14 @@ print(json.dumps({"assets": str(load_config().paths.assets_dir)}))
 
     if ($Apply) {
         $failed = 0
+        $done = 0
         foreach ($item in $script:Plan) {
             try { Remove-Item -LiteralPath $item.Path -Recurse -Force -ErrorAction Stop }
             catch { $failed++; Write-Warning "Could not remove $($item.Path): $($_.Exception.Message)" }
+            $done++
+            if ($done % 50 -eq 0) { Write-Host "  removed $done of $($script:Plan.Count)" }
         }
+        Write-Host "Removed $($done - $failed) of $($script:Plan.Count) item(s)."
         if ($failed) { Write-Warning "$failed item(s) could not be removed (in use?); rerun later." }
     }
 
