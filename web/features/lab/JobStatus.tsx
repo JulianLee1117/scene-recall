@@ -81,6 +81,7 @@ export default function JobStatus({
             {jobCounts(job).map(({ label, count }) => <div key={label}><dt>{label}</dt><dd>{count}</dd></div>)}
             {job.result?.timing_mode === "source-aware" && <div><dt>Timing</dt><dd>Planned with the available footage</dd></div>}
             {job.result?.timing_mode === "fixed" && <div><dt>Timing</dt><dd>Existing cuts preserved</dd></div>}
+            {job.result?.timing_mode === "measured-assembly" && <div><dt>Timing</dt><dd>Cut to measured beats and accents</dd></div>}
           </dl>
           {queueSummary?.includes("offline") && <p className={styles.outcome}>Start both workers with <code>uv run python -m pipeline.lab.worker --reload</code>.</p>}
           {!active && <p className={failure ? styles.error : styles.outcome}>{summary}</p>}
