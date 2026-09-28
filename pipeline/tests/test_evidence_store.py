@@ -113,3 +113,22 @@ def test_serving_artifact_falls_back_to_the_newest_earlier_profile_of_the_same_p
     store.write_artifact(tmp_path, film, current, {"from": "current"}, inputs={})
     assert store.serving_artifact(tmp_path, film, current)["data"] == {"from": "current"}
     assert store.serving_artifact(tmp_path, film, store.Producer("understanding", "absent", 1)) is None
+
+
+def test_compiled_tables_add_new_nullable_columns_in_place(tmp_path):
+    import lancedb
+    import pyarrow as pa
+
+    from pipeline.evidence import tables
+
+    db = lancedb.connect(tmp_path / "db")
+    old = pa.schema([pa.field("unit_id", pa.string()), pa.field("film_id", pa.string()), pa.field("a", pa.float32())])
+    db.create_table("t", data=pa.Table.from_pylist([{"unit_id": "u1", "film_id": "f", "a": 1.0}], schema=old))
+    new = pa.schema([pa.field("unit_id", pa.string()), pa.field("film_id", pa.string()), pa.field("dark", pa.string()),
+                     pa.field("a", pa.float32())])
+    tables.replace_film(db, "t", new, "unit_id", "g", [{"unit_id": "u2", "film_id": "g", "dark": "[]", "a": 2.0}])
+    rows = sorted(db.open_table("t").to_arrow().to_pylist(), key=lambda row: row["unit_id"])
+    assert rows == [{"unit_id": "u1", "film_id": "f", "a": 1.0, "dark": None},
+                    {"unit_id": "u2", "film_id": "g", "a": 2.0, "dark": "[]"}]
+    with pytest.raises(RuntimeError, match="compile --rebuild"):       # a removed column still needs a rebuild
+        tables.ensure_table(db, "t", pa.schema([pa.field("unit_id", pa.string()), pa.field("film_id", pa.string())]))

@@ -44,17 +44,28 @@ def film_meta_schema() -> pa.Schema:
 
 
 def ensure_table(db: Any, name: str, schema: pa.Schema) -> None:
-    """Create *name* when absent; recreate an empty table whose schema drifted.
+    """Create *name* when absent; add new nullable columns in place; rebuild other drift.
 
-    Compiled tables hold no primary data, so an incompatible table is rebuilt
-    rather than migrated. Non-empty drifted tables must be dropped explicitly.
+    A schema that only adds nullable columns migrates in place: existing rows
+    read null until their film is compiled again, so ordinary per-film
+    compiles keep working. Compiled tables hold no primary data, so any other
+    drift (a removed or retyped column) recreates an empty table, and a
+    non-empty one must be rebuilt explicitly.
     """
     with _PUBLICATION_LOCK, _database_write_lock(db):
         if name in table_names(db):
-            existing = db.open_table(name).schema
-            if existing.names == schema.names and all(existing.field(n).type == schema.field(n).type for n in schema.names):
-                return
-            if db.open_table(name).count_rows() == 0:
+            table = db.open_table(name)
+            existing = table.schema
+            common = [n for n in schema.names if n in existing.names]
+            if set(existing.names) <= set(schema.names) and all(existing.field(n).type == schema.field(n).type
+                                                                  for n in common):
+                missing = [schema.field(n) for n in schema.names if n not in existing.names]
+                if not missing:
+                    return
+                if all(field.nullable for field in missing):
+                    table.add_columns(pa.schema(missing))
+                    return
+            if table.count_rows() == 0:
                 db.drop_table(name)
             else:
                 raise RuntimeError(f"compiled table {name!r} has an outdated schema; run "

@@ -136,6 +136,8 @@ hints only. World knowledge is allowed and labelled by its producer. Search
 reads compiled tables — `film_meta`, `shot_evidence`, `scenes`, `dialogue_lines`
 (quote index: positions, no stemming, stop words kept) — which hold no primary
 data and are rebuilt by `python -m pipeline.evidence compile [--rebuild]`.
+A schema that only adds nullable columns migrates in place (existing rows read
+null until recompiled); removed or retyped columns need `--rebuild`.
 Compilation serves each kind's current profile, else the newest earlier profile
 of the same producer, so a settings change never blanks evidence while its new
 profile is backfilled; each row's `sources` names the profiles that served it.

@@ -39,8 +39,9 @@ Every command accepts `--film` (repeatable: film ID, 8+ character ID prefix or
 title substring). Hosted passes need `GEMINI_API_KEY` (understanding) and
 `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD`
 (subtitles) in `.env`. `understand --batch status` lists submitted batch jobs;
-`--batch collect` writes their results once finished. `compile --rebuild` drops
-and recompiles the search tables after a schema change.
+`--batch collect` writes their results once finished. New nullable columns in
+the compiled tables migrate in place; `compile --rebuild` drops and recompiles
+them after an incompatible schema change.
 
 Search ranks by relevance first, then applies a preset: **Balanced** (default)
 lets iconic and well-made shots rise a little, **Famous** favours iconic

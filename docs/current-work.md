@@ -65,9 +65,10 @@ Running (started 2026-09-28):
 - the library understanding batch (`understand --batch run`, about $100);
 - library measurement.
 
-`.tmp/finish-library-v2.sh` waits for them, then runs `highlights`, `hero`,
-`synthesize`, `compile --rebuild` (new `dark_spans` column) and
-`pipeline.eval.searchset` (log: `.tmp/finish-library.log`).
+`.tmp/finish-library-v4.sh` waits for them, then runs `understand --retry-refused`,
+`highlights`, `synthesize`, `compile` (the new `dark_spans` column migrates in
+place), `pipeline.eval.searchset`, then `hero` and a final `compile --no-text`
+(log: `.tmp/finish-library.log`).
 
 Afterwards:
 
