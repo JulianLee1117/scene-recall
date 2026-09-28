@@ -25,10 +25,21 @@ Landed (ADR-0093, ADR-0094):
 - **Cleanup**: Jev/intent experiments and the exact scanner removed; ingest no
   longer queues frozen framing preparation.
 
-Running: the library understanding batch, library measurement, and dialogue
-refresh for films with accepted subtitles. After them, run
-`python -m pipeline.evidence hero`, `synthesize` and `compile`, then re-run
-`pipeline.eval.searchset`.
+Running (started 2026-09-28): the library understanding batch
+(`understand --batch run`, about $100), library measurement, and the
+dialogue-only refresh for films with accepted subtitles. `.tmp/finish-library.sh`
+waits for them, then runs `highlights`, `hero`, `synthesize`, `compile` and
+`pipeline.eval.searchset` (log: `.tmp/finish-library.log`).
+
+Afterwards:
+
+- Restart the API and ingest worker so they run the new code. The API then
+  holds resident vectors (about 3 GB, GPU when free) and the reranker.
+- Run `python -m pipeline.evidence prune --apply` to drop superseded
+  profiles, such as the 360p pilot understanding.
+- Read the library eval and discovery report.
+- Keep subtitle downloads going daily (`subtitles --max-downloads 20`, then
+  `refresh-dialogue`) until no film is left.
 
 Next:
 
