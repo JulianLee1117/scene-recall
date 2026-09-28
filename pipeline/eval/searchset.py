@@ -65,6 +65,10 @@ def run(preset: str, films: list[str] | None, out: Path | None, rerank: int | No
     config = load_config()
     if rerank is not None:
         config.retrieval.rerank_shortlist = rerank
+    # This measures ranking quality: the reranker's serving time budget (which yields to a busy
+    # GPU or CPU) would make results depend on whatever else the machine is doing.
+    from pipeline.search import rerank as reranker
+    reranker.set_budget(None)
     db = open_db(config)
     spec = yaml.safe_load(SET_PATH.read_text(encoding="utf-8"))
     titles = {film.film_id: film.title for film in resolve_films(db, None)}

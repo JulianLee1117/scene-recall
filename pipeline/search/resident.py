@@ -29,7 +29,7 @@ _LOADING: dict[tuple[str, ...], threading.Lock] = {}
 _MATRICES: dict[tuple[str, ...], "VectorMatrix"] = {}
 _ROWS: dict[tuple[str, ...], "RowTable"] = {}
 _BATCH_ROWS = 65_536
-_GPU_HEADROOM_BYTES = 2 * 1024 ** 3
+_GPU_HEADROOM_BYTES = 3584 * 1024 ** 2   # also room for models that load after the matrices (reranker ~1.5 GB with activations)
 _DISABLED = False
 
 
@@ -141,12 +141,17 @@ def _load(table: Any, name: str, *, vector_column: str, key_column: str, group_c
     if cursor != total:
         vectors = vectors[:cursor]
         row_unit, row_group, row_keys = row_unit[:cursor], row_group[:cursor], row_keys[:cursor]
-    return VectorMatrix(
+    matrix = VectorMatrix(
         name=name, version=int(table.version), device=device, vectors=vectors,
         row_unit=torch.from_numpy(row_unit).to(device), row_group=torch.from_numpy(row_group).to(device),
         groups=list(groups), unit_ids=list(units), unit_film=torch.tensor(unit_film, dtype=torch.int64, device=device),
         films=list(films), row_keys=row_keys,
         row_extra={column: np.asarray(values, dtype=object) for column, values in row_extra.items()})
+    if device.type == "cuda":
+        # Loading streams batches through temporary device tensors; hand those cached blocks back
+        # so free-memory checks (the reranker's, other processes') see what is really available.
+        torch.cuda.empty_cache()
+    return matrix
 
 
 def matrix(db: Any, name: str, *, vector_column: str, key_column: str, group_column: str | None = None,

@@ -12,7 +12,8 @@ from pipeline.search import rerank
 
 @pytest.fixture(autouse=True)
 def awake(monkeypatch):
-    monkeypatch.setattr(rerank, "_RESTING", {"until": 0.0})
+    monkeypatch.setattr(rerank, "_RESTING", {"until": 0.0, "overruns": 0})
+    monkeypatch.setattr(rerank, "_BUDGET_S", 1.0)
 
 
 def test_blend_lets_a_confident_judgement_overtake_the_fused_rank_within_the_shortlist():
@@ -29,21 +30,34 @@ def test_document_reads_scene_action_caption_and_the_matched_line():
                                  'Dialogue: "You talking to me?"']
 
 
-def test_rerank_rests_when_the_gpu_is_full_or_a_rerank_overruns(monkeypatch):
+def test_rerank_rests_when_the_gpu_is_full_or_repeatedly_overruns(monkeypatch):
     monkeypatch.setattr(rerank, "_load", lambda: {"device": "cuda"})
     monkeypatch.setattr(rerank, "_free_bytes", lambda _state: 0)
     assert rerank.score("q", ["doc"]) is None
-    assert rerank._RESTING["until"] > time.monotonic()
+    assert rerank._RESTING["until"] > time.monotonic()                               # a full GPU rests at once
 
-    monkeypatch.setattr(rerank, "_RESTING", {"until": 0.0})
+    monkeypatch.setattr(rerank, "_RESTING", {"until": 0.0, "overruns": 0})
     monkeypatch.setattr(rerank, "_free_bytes", lambda _state: 8 << 30)
-    monkeypatch.setattr(rerank, "_score", lambda *_args, **_kwargs: None)          # abandoned: over budget
-    assert rerank.score("q", ["doc"]) is None
+    outcomes = iter([None, [0.5], None, None])                                        # slow, fine, slow, slow
+    monkeypatch.setattr(rerank, "_score", lambda *_args, **_kwargs: next(outcomes))
+    assert rerank.score("q", ["doc"]) is None and rerank._RESTING["until"] == 0.0      # one blip: no rest
+    assert rerank.score("q", ["doc"]) == [0.5] and rerank._RESTING["overruns"] == 0
+    assert rerank.score("q", ["doc"]) is None and rerank._RESTING["until"] == 0.0
+    assert rerank.score("q", ["doc"]) is None and rerank._RESTING["until"] > time.monotonic()  # two in a row
     calls = []
     monkeypatch.setattr(rerank, "_score", lambda *_args, **_kwargs: calls.append(1) or [0.5])
     assert rerank.score("q", ["doc"]) is None and not calls                          # resting: no inference
-    monkeypatch.setattr(rerank, "_RESTING", {"until": 0.0})
-    assert rerank.score("q", ["doc"]) == [0.5]
+
+
+def test_quality_evaluations_can_disable_the_budget(monkeypatch):
+    monkeypatch.setattr(rerank, "_load", lambda: {"device": "cpu"})
+    deadlines = []
+    monkeypatch.setattr(rerank, "_score", lambda *_args, deadline, **_kwargs: deadlines.append(deadline) or [0.5])
+    rerank.set_budget(None)
+    try:
+        assert rerank.score("q", ["doc"]) == [0.5] and deadlines[-1] == float("inf")
+    finally:
+        rerank.set_budget(1.0)
 
 
 def test_rerank_abandons_the_rest_of_the_shortlist_after_its_deadline():

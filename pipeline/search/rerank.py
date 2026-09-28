@@ -41,7 +41,8 @@ _REST_S = 60.0               # after an overrun or a full GPU, skip reranking th
 _MIN_FREE_BYTES = 768 << 20  # below this much free VRAM, kernels risk paging
 _LOCK = threading.Lock()
 _MODEL: dict[str, Any] = {}
-_RESTING = {"until": 0.0}
+_RESTING = {"until": 0.0, "overruns": 0}
+_OVERRUNS_TO_REST = 2       # one slow query is a blip; consecutive ones mean the GPU is busy
 
 
 def _load() -> dict[str, Any] | None:
@@ -56,10 +57,14 @@ def _load() -> dict[str, Any] | None:
             tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, padding_side="left")
             model = AutoModelForCausalLM.from_pretrained(
                 MODEL_ID, dtype=torch.float16 if device == "cuda" else torch.float32).to(device).eval()
-            _MODEL.update(model=model, tokenizer=tokenizer, device=device, torch=torch,
-                          yes=tokenizer.convert_tokens_to_ids("yes"), no=tokenizer.convert_tokens_to_ids("no"),
-                          prefix=tokenizer.encode(_PREFIX, add_special_tokens=False),
-                          suffix=tokenizer.encode(_SUFFIX, add_special_tokens=False))
+            state = dict(model=model, tokenizer=tokenizer, device=device, torch=torch,
+                         yes=tokenizer.convert_tokens_to_ids("yes"), no=tokenizer.convert_tokens_to_ids("no"),
+                         prefix=tokenizer.encode(_PREFIX, add_special_tokens=False),
+                         suffix=tokenizer.encode(_SUFFIX, add_special_tokens=False))
+            # The first inference pays one-time CUDA setup (seconds). Pay it here, so the time
+            # budget only ever measures real queries; otherwise a cold start rests the reranker.
+            _score(state, "warm up", ["warm up"] * 2, 2, deadline=float("inf"))
+            _MODEL.update(state)
             return _MODEL
         except Exception as exc:  # noqa: BLE001 - optional: search continues without it
             _MODEL["failed"] = True
@@ -78,7 +83,8 @@ def score(query: str, documents: list[str], *, batch_size: int = 16) -> list[flo
         _rest("GPU memory is nearly full")
         return None
     try:
-        scores = _score(state, query, documents, batch_size, deadline=time.monotonic() + _BUDGET_S)
+        budget = _BUDGET_S if _BUDGET_S is not None else float("inf")
+        scores = _score(state, query, documents, batch_size, deadline=time.monotonic() + budget)
     except Exception as exc:  # noqa: BLE001 - e.g. CUDA out of memory: keep the fused order
         _LOGGER.warning("rerank skipped for this query: %s", str(exc)[:200])
         try:
@@ -87,18 +93,31 @@ def score(query: str, documents: list[str], *, batch_size: int = 16) -> list[flo
             pass
         return None
     if scores is None:
-        _rest(f"over its {_BUDGET_S:.1f} s budget")
+        _RESTING["overruns"] += 1
+        if _RESTING["overruns"] >= _OVERRUNS_TO_REST:
+            _rest(f"{_RESTING['overruns']} queries in a row over its {_BUDGET_S:.1f} s budget")
+    else:
+        _RESTING["overruns"] = 0
     return scores
 
 
 def _free_bytes(state: dict[str, Any]) -> int:
+    """Device memory this process can still use: free on the device plus its own reusable cache."""
     try:
-        return int(state["torch"].cuda.mem_get_info()[0])
+        cuda = state["torch"].cuda
+        return int(cuda.mem_get_info()[0]) + int(cuda.memory_reserved() - cuda.memory_allocated())
     except Exception:  # noqa: BLE001 - unknown: assume there is room
         return _MIN_FREE_BYTES
 
 
+def set_budget(seconds: float | None) -> None:
+    """Change the per-query time budget; None disables it (quality evaluations, not serving)."""
+    global _BUDGET_S
+    _BUDGET_S = seconds
+
+
 def _rest(reason: str) -> None:
+    _RESTING["overruns"] = 0
     _RESTING["until"] = time.monotonic() + _REST_S
     _LOGGER.warning("rerank resting for %.0f s (%s); keeping the fused order", _REST_S, reason)
 
