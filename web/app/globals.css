@@ -2519,3 +2519,87 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   line-height: 1;
   pointer-events: none;
 }
+
+/* Result modal: story and scene evidence (search v2) */
+.modal-story-header {
+  display: flex;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal-story-header > strong {
+  color: #e8d2b0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.modal-scene-summary,
+.modal-story-action {
+  margin: 2px 0 6px;
+  color: #c9c9c9;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.modal-story-action > span {
+  color: #8d8d8d;
+}
+
+.modal-famous-line {
+  margin: 2px 0 8px;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.modal-scene-alternatives {
+  display: flex;
+  margin: 6px 0 10px;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.modal-scene-alternatives > span {
+  color: #8d8d8d;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.modal-scene-alternatives > div {
+  display: flex;
+  overflow-x: auto;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.modal-scene-alternatives button {
+  display: flex;
+  flex: 0 0 auto;
+  width: 112px;
+  padding: 0;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid #262626;
+  border-radius: 6px;
+  background: #0c0c0c;
+  color: #9c9c9c;
+  cursor: pointer;
+  font-size: 0.62rem;
+  overflow: hidden;
+}
+
+.modal-scene-alternatives button:hover,
+.modal-scene-alternatives button:focus-visible {
+  border-color: var(--accent);
+  color: #e0e0e0;
+}
+
+.modal-scene-alternatives img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}

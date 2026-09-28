@@ -24,7 +24,10 @@ const TEXT_VIEW_LABELS: Record<string, string> = {
   ocr: "On-screen text",
   facets: "Scene detail",
   mood: "Mood",
+  story: "Story",
+  scene: "Scene",
 };
+const BADGE_LABELS = { iconic: "Iconic", gem: "Hidden gem" } as const;
 
 export default function VideoModal({
   shot,
@@ -51,7 +54,8 @@ export default function VideoModal({
   const currentPlayback = playback?.filmId === shot.film_id && playback.attempt === playbackAttempt ? playback : null;
   const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
   const [playheadTime, setPlayheadTime] = useState(evidenceTime);
-  const seekTarget = Math.max(0, evidenceTime - 1);
+  // A matched subtitle line is the most precise moment to start from.
+  const seekTarget = Math.max(0, (shot.matched_line?.t_start ?? evidenceTime) - 1);
   const matchedTextLabel = shot.matched_text_view
     ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
     : null;
@@ -255,7 +259,50 @@ export default function VideoModal({
           {(onUseInSearch || onToggleBookmark) && (
             <p className="modal-anchor-note">Save and Find related use the retrieved scene and reference frame at {formatTime(evidenceTime)}. Scrubbing changes playback.</p>
           )}
-          {matchedTextLabel && shot.matched_text && (
+          {(shot.scene?.title || (shot.badges?.length ?? 0) > 0) && (
+            <div className="modal-story-header">
+              {shot.scene?.title && <strong>{shot.scene.title}</strong>}
+              {shot.badges?.map((badge) => (
+                <span key={badge} className={`result-badge result-badge-${badge}`}>{BADGE_LABELS[badge]}</span>
+              ))}
+            </div>
+          )}
+          {shot.scene?.summary && <p className="modal-scene-summary">{shot.scene.summary}</p>}
+          {shot.action && (
+            <p className="modal-story-action">
+              {shot.action}
+              {(shot.characters?.length ?? 0) > 0 && <span> — {shot.characters?.join(", ")}</span>}
+            </p>
+          )}
+          {shot.famous_line && <p className="modal-famous-line">“{shot.famous_line}”</p>}
+          {shot.matched_line && (
+            <div className="modal-match-evidence">
+              <span>Line at {formatTime(shot.matched_line.t_start)}</span>
+              <span>{shot.matched_line.text}</span>
+            </div>
+          )}
+          {(shot.scene_alternatives?.length ?? 0) > 0 && (
+            <div className="modal-scene-alternatives" aria-label="More matching shots in this scene">
+              <span>More in this scene</span>
+              <div>
+                {shot.scene_alternatives?.map((alternative) => (
+                  <button
+                    key={alternative.unit_id}
+                    type="button"
+                    title={`Play from ${formatTime(alternative.t_start)}`}
+                    onClick={() => {
+                      if (videoRef.current) videoRef.current.currentTime = alternative.t_start;
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`${apiUrl}${alternative.thumbnail_url ?? alternative.keyframe_url}`} alt="" loading="lazy" />
+                    <span>{formatTime(alternative.t_start)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {matchedTextLabel && shot.matched_text && !shot.matched_line && (
             <div className="modal-match-evidence">
               <span>{matchedTextLabel} match</span>
               <span>{shot.matched_text}</span>
