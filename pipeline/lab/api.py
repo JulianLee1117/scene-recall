@@ -81,6 +81,23 @@ def get_project(project_id: str, request: Request):
     return _call(_store(request).get_project, project_id)
 
 
+@router.get("/projects/{project_id}/timeline.otio")
+def export_project_timeline(project_id: str, request: Request):
+    """The saved edit as an OpenTimelineIO timeline on the original media (for DaVinci Resolve)."""
+    import json
+    import re
+
+    from fastapi.responses import Response
+
+    from pipeline.lab.otio_export import export_timeline
+
+    project = _call(_store(request).get_project, project_id)
+    timeline = _call(export_timeline, project["document"], request.app.state.db, _store(request), name=project["name"])
+    filename = (re.sub(r"[^A-Za-z0-9._-]+", "-", project["name"]).strip("-") or "scene-recall-edit") + ".otio"
+    return Response(json.dumps(timeline, indent=1), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @router.delete("/projects/{project_id}")
 def delete_project(project_id: str, request: Request, base_revision: int = Query(..., ge=1)):
     return _call(_store(request).delete_project, project_id, base_revision)

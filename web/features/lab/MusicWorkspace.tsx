@@ -578,9 +578,15 @@ export default function MusicWorkspace() {
             ))}
           </div>}
         </EditorPopover>}
-      </>} trailingTools={document.track && <button className={styles.exportButton}
-        disabled={working || !slots.length || empty > 0}
-        onClick={() => { requestedExport.current = true; void state.startJob("render", { mode: "export" }); }}>Export video</button>} />
+      </>} trailingTools={document.track && <>
+        {!state.isDraft && slots.length > 0 && <a className={styles.exportButton} aria-disabled={state.dirty || undefined}
+          href={state.dirty ? undefined : `${LAB_API}/lab/projects/${state.project.id}/timeline.otio`} download
+          title={state.dirty ? "Save first: the timeline exports the saved revision"
+            : "OpenTimelineIO timeline on the original films, for finishing in DaVinci Resolve"}>Resolve timeline</a>}
+        <button className={styles.exportButton}
+          disabled={working || !slots.length || empty > 0}
+          onClick={() => { requestedExport.current = true; void state.startJob("render", { mode: "export" }); }}>Export video</button>
+      </>} />
       <div className={styles.viewTabs} role="tablist" aria-label="Music video workspace"
         onKeyDown={(event) => {
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
