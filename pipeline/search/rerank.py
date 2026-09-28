@@ -56,10 +56,22 @@ def _load() -> dict[str, Any] | None:
 
 
 def score(query: str, documents: list[str], *, batch_size: int = 16) -> list[float] | None:
-    """p(relevant) for each document, or None when the model is unavailable."""
+    """p(relevant) for each document, or None when the model is unavailable or inference fails."""
     state = _load()
     if state is None or not documents:
         return None
+    try:
+        return _score(state, query, documents, batch_size)
+    except Exception as exc:  # noqa: BLE001 - e.g. CUDA out of memory: keep the fused order
+        _LOGGER.warning("rerank skipped for this query: %s", str(exc)[:200])
+        try:
+            state["torch"].cuda.empty_cache()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+
+def _score(state: dict[str, Any], query: str, documents: list[str], batch_size: int) -> list[float]:
     torch, tokenizer, model = state["torch"], state["tokenizer"], state["model"]
     scores: list[float] = []
     budget = _MAX_TOKENS - len(state["prefix"]) - len(state["suffix"])
