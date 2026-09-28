@@ -151,3 +151,4 @@ The accepted boundary or behavior.
 | [0090](0090-retire-personal-search-trial.md) | Accepted | Remove the interactive trial and distinguish candidate coverage from ranking before another search experiment |
 | [0091](0091-intent-guided-retrieval-comparison.md) | Experiment only | Compare ordinary, fixed expansion and Jev-guided evidence retrieval with frozen playable result lists |
 | [0092](0092-bounded-framing-representation-pilot.md) | Accepted for evaluation | Hold the optional bulk batch and compare frozen framing representations independently of Jev |
+| [0093](0093-evidence-v2.md) | Accepted | Versioned per-film evidence artifacts, open metadata with world knowledge, measured-over-guessed facts and compiled search tables |
