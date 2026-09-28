@@ -130,6 +130,23 @@ The launcher does not retry failed ingestions automatically. Their retained
 sources and job details remain available in **Films** for an explicit retry
 after the cause is addressed. Nothing is installed to run at Windows sign-in.
 
+To load new code or configuration, restart the API and both Lab workers.
+Running jobs finish first and queued jobs are kept. The web server, downloads
+and `pipeline.evidence` runs are left alone:
+
+```powershell
+.\scripts\restart-scene-recall.ps1 -DryRun          # show what would happen
+.\scripts\restart-scene-recall.ps1 -WaitForJobs     # restart once running jobs finish
+.\scripts\restart-scene-recall.ps1 -WaitForJobs -MaintainDatabase   # also drop index rollback history
+```
+
+`-MaintainDatabase` runs the index maintenance below while everything is
+stopped, and skips it while a `pipeline.evidence` run is active. To free disk
+space held by regenerable scratch, run `.\scripts\cleanup-storage.ps1`
+(a report) or add `-Apply`. It clears old `.tmp` test runs, evaluation
+renders, interrupted proxies, superseded evidence profiles and orphaned Lab
+job files. Films, previews, keyframes and current evidence are never touched.
+
 New workers use fixed code for ordinary use. During backend development, pass
 `-ReloadWorkers` to enable between-job source reload for newly started workers.
 This option does not restart or change already-running workers. Configuration
