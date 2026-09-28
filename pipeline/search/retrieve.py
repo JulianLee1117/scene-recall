@@ -693,6 +693,62 @@ def _temporally_close_within(
     return abs(left_midpoint - right_midpoint) <= gap_seconds
 
 
+def _duplicate_flags(rows: list[dict[str, Any]]) -> list[bool]:
+    """Vectorized ``_is_duplicate(row, kept_so_far)`` over rows in order.
+
+    Same rules: cosine >= ``_VISUAL_DUP_COSINE`` against any kept row, or >=
+    ``_TEMPORAL_VISUAL_DUP_COSINE`` against a kept row of the same film within
+    the temporal window; rows without a usable vector are never duplicates.
+    One matrix product replaces a Python loop of pairwise dot products.
+    """
+    count = len(rows)
+    if count == 0:
+        return []
+    vectors: list[np.ndarray | None] = []
+    dimension = None
+    for row in rows:
+        vector = _as_float_vec(row.get("img_vec"))
+        if vector is not None and dimension is None:
+            dimension = vector.shape[0]
+        vectors.append(vector)
+    if dimension is None:
+        return [False] * count
+    matrix = np.zeros((count, dimension), dtype=np.float32)
+    valid = np.zeros(count, dtype=bool)
+    for index, vector in enumerate(vectors):
+        if vector is None or vector.shape[0] != dimension:
+            continue
+        norm = float(np.linalg.norm(vector))
+        if norm > 0.0:
+            matrix[index] = vector / norm
+            valid[index] = True
+    similarity = matrix @ matrix.T
+    films = np.array([str(row.get("film_id")) for row in rows], dtype=object)
+    midpoints = np.full(count, np.nan)
+    for index, row in enumerate(rows):
+        try:
+            midpoints[index] = (float(row["t_start"]) + float(row["t_end"])) / 2.0
+        except (KeyError, TypeError, ValueError):
+            pass
+    flags: list[bool] = []
+    kept: list[int] = []
+    for index in range(count):
+        if valid[index] and kept:
+            prior = np.asarray(kept)
+            scores = similarity[index, prior]
+            usable = valid[prior]
+            if np.any(usable & (scores >= _VISUAL_DUP_COSINE)):
+                flags.append(True)
+                continue
+            close = (films[prior] == films[index]) & (np.abs(midpoints[prior] - midpoints[index]) <= _TEMPORAL_WINDOW_SECONDS)
+            if np.any(usable & (scores >= _TEMPORAL_VISUAL_DUP_COSINE) & close):
+                flags.append(True)
+                continue
+        flags.append(False)
+        kept.append(index)
+    return flags
+
+
 def _is_duplicate(
     candidate: dict[str, Any],
     selected: Iterable[dict[str, Any]],
@@ -1871,17 +1927,13 @@ def search(
     if _defer_result_preferences:
         eligible = ordered
     else:
-        eligible = []
-        dedup_candidates: list[dict[str, Any]] = []
         requested_junk = _requested_junk_categories(query)
-        for candidate in ordered:
-            row = candidate["row"]
-            if _is_unrequested_junk(row, query, requested_junk):
-                continue
-            if not _preserve_visual_alternatives and _is_duplicate(row, dedup_candidates):
-                continue
-            eligible.append(candidate)
-            dedup_candidates.append(row)
+        eligible = [candidate for candidate in ordered
+                    if not _is_unrequested_junk(candidate["row"], query, requested_junk)]
+        if not _preserve_visual_alternatives:
+            with search_stage("deduplication"):
+                duplicates = _duplicate_flags([candidate["row"] for candidate in eligible])
+            eligible = [candidate for candidate, duplicate in zip(eligible, duplicates) if not duplicate]
 
     # Priors reorder inside the relevant pool; one card per dramatic scene.
     evidence: dict[str, dict[str, Any]] = {}
@@ -2399,21 +2451,14 @@ def apply_recipe_result_preferences(
         if _row_id(row)
     }
     requested_junk = _requested_junk_categories(requested_text)
-    dedup_rows: list[dict[str, Any]] = []
-    eligible: list[dict[str, Any]] = []
+    candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for result in ordered:
-        unit_id = str(result.get("unit_id") or "")
-        row = units_by_id.get(unit_id)
-        if row is None or _is_unrequested_junk(
-            row,
-            requested_text,
-            requested_junk,
-        ):
-            continue
-        if not _preserve_visual_alternatives and _is_duplicate(row, dedup_rows):
-            continue
-        dedup_rows.append(row)
-        eligible.append(result)
+        row = units_by_id.get(str(result.get("unit_id") or ""))
+        if row is not None and not _is_unrequested_junk(row, requested_text, requested_junk):
+            candidates.append((result, row))
+    duplicates = ([False] * len(candidates) if _preserve_visual_alternatives
+                  else _duplicate_flags([row for _result, row in candidates]))
+    eligible = [result for (result, _row), duplicate in zip(candidates, duplicates) if not duplicate]
 
     evidence = _priors.load_evidence(db, (str(result.get("unit_id") or "") for result in eligible))
     if evidence:
