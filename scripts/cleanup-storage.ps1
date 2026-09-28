@@ -59,15 +59,16 @@ function Remove-Entry([string]$Path) {
     try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop; return 'removed' } catch { }
     $long = '\\?\' + $Path                         # beyond the 260-character path limit
     $isDirectory = Test-Path -LiteralPath $Path -PathType Container
-    if ($isDirectory) { cmd.exe /d /c "rd /s /q `"$long`"" 2>$null | Out-Null }
-    else { cmd.exe /d /c "del /f /q `"$long`"" 2>$null | Out-Null }
+    # Native errors stay inside cmd (2>nul): Windows PowerShell turns redirected native
+    # stderr into terminating errors, which stopped the whole run at the first stubborn folder.
+    $remove = if ($isDirectory) { "rd /s /q `"$long`" >nul 2>nul" } else { "del /f /q `"$long`" >nul 2>nul" }
+    cmd.exe /d /c $remove
     if (-not (Test-Path -LiteralPath $Path)) { return 'removed' }
     if (-not $script:Elevated) { return 'locked' }
     # Elevated: take ownership of just this entry, reset it to inherited permissions, then remove it.
-    takeown.exe /F $long /R /D Y 2>$null | Out-Null
-    icacls.exe $long /reset /T /C /Q 2>$null | Out-Null
-    if ($isDirectory) { cmd.exe /d /c "rd /s /q `"$long`"" 2>$null | Out-Null }
-    else { cmd.exe /d /c "del /f /q `"$long`"" 2>$null | Out-Null }
+    cmd.exe /d /c "takeown /F `"$long`" /R /D Y >nul 2>nul"
+    cmd.exe /d /c "icacls `"$long`" /reset /T /C /Q >nul 2>nul"
+    cmd.exe /d /c $remove
     if (Test-Path -LiteralPath $Path) { return 'locked' } else { return 'removed' }
 }
 
@@ -142,7 +143,9 @@ print(json.dumps({"assets": str(load_config().paths.assets_dir)}))
         $locked = New-Object 'System.Collections.Generic.List[string]'
         $done = 0
         foreach ($item in $script:Plan) {
-            if ((Remove-Entry $item.Path) -eq 'locked') { $locked.Add($item.Path) }
+            $outcome = 'locked'
+            try { $outcome = Remove-Entry $item.Path } catch { }     # one stubborn item never stops the run
+            if ($outcome -eq 'locked') { $locked.Add($item.Path) }
             $done++
             if ($done % 50 -eq 0) { Write-Host "  processed $done of $($script:Plan.Count)" }
         }
