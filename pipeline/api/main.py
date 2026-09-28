@@ -108,6 +108,7 @@ from pipeline.project_info import router as project_info_router
 from pipeline.acquisition.service import AcquisitionService
 from pipeline.lab.jobs import DurableIngestQueue as _IngestQueue
 from pipeline.lab.store import DuplicateJob as _DuplicateIngestError, LabStore
+from pipeline.interactions import InteractionLog
 from pipeline.library_storage import LibraryStorageStats, scan_library_storage
 from pipeline.index.maintenance import api_database_read_lease
 from pipeline.search.retrieve import (
@@ -281,6 +282,8 @@ async def _runtime_lifespan(app: FastAPI, config: Config):
         ).start()
     app.state.bookmarks = BookmarkStore(config.paths.state_dir)
     app.state.bookmarks.initialize()
+    app.state.interactions = InteractionLog(config.paths.state_dir)
+    app.state.interactions.initialize()
     app.state.ready_units_version = None
     app.state.ready_film_ids = frozenset()
     app.state.film_titles_version = None
@@ -1197,6 +1200,8 @@ def search_endpoint(
             preset=preset,
         ),
     )
+    _log_interaction(request, "search", query=q, preset=preset,
+                     context={"route": "search", "films": len(film_id or []), "results": len(results)})
     return _search_response(results, config, result_limit)
 
 
@@ -1218,6 +1223,10 @@ async def search_recipe_endpoint(
         probe_limit,
         preset=payload.preset,
     )
+    _log_interaction(request, "search", query=" | ".join(str(getattr(c, "text", "") or "") for c in payload.clauses if getattr(c, "text", None)),
+                     preset=payload.preset,
+                     context={"route": "recipe", "facets": [c.facet for c in payload.clauses],
+                              "films": len(payload.film_ids), "results": len(execution.results)})
 
     return _search_response(
         _with_film_titles(request, execution.results),
@@ -1406,6 +1415,7 @@ def save_bookmark_endpoint(
         frame_index=payload.frame_index,
         film_title_snapshot=titles.get(film_id, film_id),
     )
+    _log_interaction(request, "save", film_id=film_id, unit_id=unit_id, t=evidence_timestamp)
     return _bookmark_response(request, bookmark)
 
 
@@ -1417,7 +1427,41 @@ def delete_bookmark_endpoint(
     """Remove one saved moment without touching source or index data."""
     if not request.app.state.bookmarks.delete(bookmark_id):
         raise HTTPException(status_code=404, detail="Bookmark not found")
+    _log_interaction(request, "unsave", context={"bookmark_id": bookmark_id})
     return Response(status_code=204)
+
+
+class InteractionEvent(BaseModel):
+    """A client-side interaction (plays today; editor placements later)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["play", "place", "replace"]
+    film_id: str | None = Field(default=None, max_length=128)
+    unit_id: str | None = Field(default=None, max_length=256)
+    t: float | None = None
+    query: str | None = Field(default=None, max_length=500)
+    preset: Literal["balanced", "famous", "gems"] | None = None
+    rank: int | None = Field(default=None, ge=1, le=1_000)
+
+
+@app.post("/events", status_code=204)
+def interaction_event_endpoint(event: InteractionEvent, request: Request) -> Response:
+    """Record one interaction in the local taste log (never used for ranking yet)."""
+    _log_interaction(request, event.kind, film_id=event.film_id, unit_id=event.unit_id, t=event.t,
+                     query=event.query, preset=event.preset, rank=event.rank)
+    return Response(status_code=204)
+
+
+def _log_interaction(request: Request, kind: str, **fields: Any) -> None:
+    """Best effort: the taste log must never fail a user request."""
+    log = getattr(request.app.state, "interactions", None)
+    if log is None:
+        return
+    try:
+        log.record(kind, **fields)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[interactions] not recorded: {exc}", flush=True)
 
 
 @app.get("/unit/{unit_id}")

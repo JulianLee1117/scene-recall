@@ -303,6 +303,27 @@ export default function Home() {
     [matchDrafts, query, runRecipe, selectedFilmIds.length],
   );
 
+  // Plays feed the local taste log (pipeline/interactions.py); never blocks playback.
+  const handleShotOpen = useCallback(
+    (shot: SearchResult) => {
+      setActiveShot(shot);
+      void fetch(`${API_URL}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "play",
+          film_id: shot.film_id,
+          unit_id: shot.unit_id,
+          t: shot.t_start,
+          ...(query.trim() ? { query: query.trim().slice(0, 500) } : {}),
+          preset: presetRef.current,
+          ...(typeof shot.rank === "number" && shot.rank >= 1 ? { rank: Math.min(shot.rank, 1000) } : {}),
+        }),
+      }).catch(() => {});
+    },
+    [query],
+  );
+
   const handleRecipeLimit = useCallback(() => {
     setRecipeNotice("Use up to three matches at once.");
   }, []);
@@ -933,7 +954,7 @@ export default function Home() {
           loading={bookmarksLoading}
           error={bookmarkError}
           pendingUnitIds={pendingBookmarkUnitIds}
-          onShotClick={setActiveShot}
+          onShotClick={handleShotOpen}
           onUseInSearch={handleUseInSearch}
           disabledUseFacets={disabledUseFacets}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
@@ -1403,7 +1424,7 @@ export default function Home() {
               revealDisabled={loading}
               hasMore={resultWindow.hasMore}
               onRequestMore={handleLoadMoreResults}
-              onShotClick={setActiveShot}
+              onShotClick={handleShotOpen}
               onUseInSearch={handleUseInSearch}
               disabledUseFacets={disabledUseFacets}
               onToggleBookmark={(shot) => void toggleBookmark(shot)}
