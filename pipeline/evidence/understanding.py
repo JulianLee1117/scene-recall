@@ -731,7 +731,7 @@ def _upload(client: Any, path: Path, display_name: str) -> Any:
 
 
 def submit_batches(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFAULTS["model"], max_usd: float = 60.0,
-                   max_chunks: int | None = None, uploads: int = 4,
+                   max_chunks: int | None = None, uploads: int = 6,
                    progress: Callable[[str], None] = print) -> dict[str, Any]:
     """Upload pending chunks and submit them as batch jobs; returns counts and the estimated spend."""
     from google.genai import types
