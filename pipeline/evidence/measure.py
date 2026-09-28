@@ -45,8 +45,15 @@ DETECT_EVERY = 3                      # every 3rd analysis frame -> 2 fps
 RAFT_ITERATIONS = 12
 DETECT_THRESHOLD = 0.45
 GROUP_PAIRS = 96                      # flow pairs per GPU group
+QUEUE_FRAMES = 480                    # decoded frames buffered ahead of the GPU (~80 s of film, ~250 MB)
 MOVE, ZOOM, ROLL, SHAKE = 0.02, 0.03, 0.05, 0.012
+# Camera labels are re-derived from the stored flow series at compile time
+# (camera_from_series), so these labeling constants are versioned there rather
+# than in the producer identity: improving labels never needs a new GPU pass.
+CAMERA_LABELS_VERSION = 2
+DRIFT_MOVE, DRIFT_ZOOM = 0.15, 0.12      # accumulated over a shot: 15% of the frame, 12% scale change
 MAX_BOXES = 6                         # largest detections kept per sample
+LOOK_KEYS = ("brightness", "contrast", "saturation", "colorfulness", "warmth")
 RAFT_CHECKPOINT = "matching/models/raft-small-ctv2/raft-small-ctv2.pth"
 
 PRODUCER = store.Producer(
@@ -56,12 +63,12 @@ PRODUCER = store.Producer(
     settings={
         "analysis": {"fps": ANALYSIS_FPS, "width": ANALYSIS_WIDTH},
         "flow": {"model": "raft-small-c_t_v2", "width": FLOW_WIDTH, "iterations": RAFT_ITERATIONS,
-                 "fit": "seeded-affine-ransac-64-2px-v1"},
+                 "fit": "seeded-affine-ransac-64-2px-gpu-v1", "support": "flow-warp-0.1-gpu-v1"},
         "camera": {"move": MOVE, "zoom": ZOOM, "roll": ROLL, "shake": SHAKE, "min_run_s": 0.5},
         "detect": {"model": "rf-detr-small-1.11-fp16", "every": DETECT_EVERY, "threshold": DETECT_THRESHOLD,
                    "boxes_per_sample": MAX_BOXES},
         "series": "flow[t,vx,vy,div,curl,residual,ok]+frames[t,sharpness,brightness,boxes]-v1",
-        "look": "content-box-cropped-v1",
+        "look": "content-box-weighted-gpu-v1",
     },
 )
 
@@ -89,7 +96,7 @@ def stream_frames(path: Path, *, fps: float = ANALYSIS_FPS, width: int = ANALYSI
     command = ["ffmpeg", "-nostdin", "-v", "error", "-hwaccel", "cuda", "-i", str(path), "-map", "0:v:0", "-an", "-sn",
                "-vf", video_filter, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=frame_bytes * 4)
-    frames: queue.Queue = queue.Queue(maxsize=64)
+    frames: queue.Queue = queue.Queue(maxsize=QUEUE_FRAMES)
 
     def reader() -> None:
         index = 0
@@ -160,8 +167,12 @@ class Models:
         _ = self.detector
         return self._classes or {}
 
-    def flow(self, first: np.ndarray, second: np.ndarray) -> np.ndarray:
-        """Batched optical flow; inputs N×H×W×3 uint8, output N×h×w×2 in flow-resolution pixels."""
+    def pairs(self, first: np.ndarray, second: np.ndarray, seconds: np.ndarray) -> dict[str, np.ndarray]:
+        """Flow plus its camera/residual/support summary for N frame pairs, entirely on the GPU.
+
+        Inputs are N×H×W×3 uint8 frames and N pair durations; outputs are
+        per-pair arrays (see :func:`summarize_pairs`).
+        """
         torch = self.torch
         a = torch.from_numpy(first).to(self.device).permute(0, 3, 1, 2).float()
         b = torch.from_numpy(second).to(self.device).permute(0, 3, 1, 2).float()
@@ -170,18 +181,25 @@ class Models:
         a = torch.nn.functional.interpolate(a, size=size, mode="bilinear", align_corners=False) / 127.5 - 1
         b = torch.nn.functional.interpolate(b, size=size, mode="bilinear", align_corners=False) / 127.5 - 1
         with torch.inference_mode():
-            flow = self.raft(a, b, num_flow_updates=RAFT_ITERATIONS)[-1]
-        return flow.permute(0, 2, 3, 1).float().cpu().numpy()
+            flow = self.raft(a, b, num_flow_updates=RAFT_ITERATIONS)[-1].permute(0, 2, 3, 1).float()
+            summary = summarize_pairs(flow, (a + 1) / 2, (b + 1) / 2, torch.as_tensor(seconds, device=self.device))
+        return {key: value.cpu().numpy() for key, value in summary.items()}
 
-    def detect(self, frames: list[np.ndarray]) -> list[list[tuple[str, float, tuple[float, float, float, float]]]]:
-        if not frames:
+    def upload(self, frames: list[np.ndarray]) -> Any:
+        """One host-to-device copy of N×H×W×3 uint8 frames."""
+        return self.torch.from_numpy(np.stack(frames)).to(self.device, non_blocking=True)
+
+    def detect(self, frames: Any) -> list[list[tuple[str, float, tuple[float, float, float, float]]]]:
+        """Detections for uploaded N×H×W×3 uint8 frames (boxes as frame fractions)."""
+        if len(frames) == 0:
             return []
-        results = self.detector.predict(frames, threshold=DETECT_THRESHOLD, include_source_image=False)
+        images = [frame.permute(2, 0, 1).float().div_(255) for frame in frames]
+        results = self.detector.predict(images, threshold=DETECT_THRESHOLD, include_source_image=False)
         if not isinstance(results, list):
             results = [results]
         out = []
-        for image, detections in zip(frames, results):
-            height, width = image.shape[:2]
+        height, width = frames.shape[1:3]
+        for detections in results:
             rows = []
             for box, cls, conf in zip(detections.xyxy, detections.class_id, detections.confidence):
                 x0, y0, x1, y1 = (float(box[0]) / width, float(box[1]) / height, float(box[2]) / width, float(box[3]) / height)
@@ -190,19 +208,143 @@ class Models:
             out.append(rows)
         return out
 
-    def sharpness(self, frames: np.ndarray) -> np.ndarray:
-        """Variance of the Laplacian per frame (N×H×W×3 uint8)."""
+    def frame_stats(self, frames: Any) -> dict[str, np.ndarray]:
+        """Content box, look statistics and sharpness for uploaded N×H×W×3 uint8 frames.
+
+        Statistics are weighted to the content box (letterbox/pillarbox bars
+        excluded, see :func:`content_box`); sharpness is the Laplacian
+        variance inside it, two pixels clear of the bar edge.
+        """
         torch = self.torch
-        gray = torch.from_numpy(frames).to(self.device).float().mean(dim=3, keepdim=True).permute(0, 3, 1, 2)
-        kernel = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=torch.float32, device=self.device).view(1, 1, 3, 3)
         with torch.inference_mode():
-            lap = torch.nn.functional.conv2d(gray, kernel)
-        return lap.flatten(1).var(dim=1).cpu().numpy()
+            brightest = frames[:, ::2, ::2].amax(dim=3) > 12
+            rows_any = brightest.any(dim=2).cpu().numpy()
+            cols_any = brightest.any(dim=1).cpu().numpy()
+            count, height, width = frames.shape[:3]
+            boxes = np.array([_content_span(rows, height) + _content_span(cols, width)
+                              for rows, cols in zip(rows_any, cols_any)])
+            ys = torch.arange(height, device=self.device).view(1, -1)
+            xs = torch.arange(width, device=self.device).view(1, -1)
+            box = torch.from_numpy(boxes).to(self.device)
+
+            def weights(inset: int) -> Any:
+                row = (ys >= box[:, 0:1] + inset) & (ys < box[:, 1:2] - inset)
+                col = (xs >= box[:, 2:3] + inset) & (xs < box[:, 3:4] - inset)
+                return (row.unsqueeze(2) & col.unsqueeze(1)).float()          # N×H×W
+
+            def mean(values: Any, weight: Any) -> Any:
+                return (values * weight).sum(dim=(1, 2)) / weight.sum(dim=(1, 2)).clamp(min=1)
+
+            rgb = frames.float() / 255
+            r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+            w = weights(0)
+            luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            brightness = mean(luma, w)
+            contrast = (mean(luma ** 2, w) - brightness ** 2).clamp(min=0).sqrt()
+            high, low = rgb.amax(dim=3), rgb.amin(dim=3)
+            saturation = mean(torch.where(high > 1e-6, (high - low) / high.clamp(min=1e-6), torch.zeros_like(high)), w)
+            rg, yb = r - g, 0.5 * (r + g) - b
+            rg_mean, yb_mean = mean(rg, w), mean(yb, w)
+            rg_std = (mean(rg ** 2, w) - rg_mean ** 2).clamp(min=0).sqrt()
+            yb_std = (mean(yb ** 2, w) - yb_mean ** 2).clamp(min=0).sqrt()
+            colorfulness = (rg_std ** 2 + yb_std ** 2).sqrt() + 0.3 * (rg_mean ** 2 + yb_mean ** 2).sqrt()
+            warmth = mean(r - b, w)
+            gray = (rgb.mean(dim=3) * 255).unsqueeze(1)
+            kernel = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=torch.float32, device=self.device).view(1, 1, 3, 3)
+            laplacian = torch.nn.functional.conv2d(gray, kernel, padding=1).squeeze(1)
+            sharp_weight = weights(2)
+            lap_mean = mean(laplacian, sharp_weight)
+            sharpness = (mean(laplacian ** 2, sharp_weight) - lap_mean ** 2).clamp(min=0)
+        values = {"brightness": brightness, "contrast": contrast, "saturation": saturation,
+                  "colorfulness": colorfulness, "warmth": warmth, "sharpness": sharpness}
+        out = {key: value.cpu().numpy() for key, value in values.items()}
+        out["content_box"] = boxes
+        return out
 
 
 # ---------------------------------------------------------------------------
 # Pure measurement helpers
 # ---------------------------------------------------------------------------
+
+
+_HYPOTHESES: dict[int, np.ndarray] = {}
+
+
+def _ransac_hypotheses(count: int) -> np.ndarray:
+    """The 64 seeded point triples of ``pipeline.matching.motion.summarize`` for *count* grid points."""
+    if count not in _HYPOTHESES:
+        rng = np.random.default_rng(817)
+        _HYPOTHESES[count] = np.stack([rng.choice(count, 3, replace=False) for _ in range(64)])
+    return _HYPOTHESES[count]
+
+
+def summarize_pairs(flow: Any, first: Any, second: Any, seconds: Any) -> dict[str, Any]:
+    """Batched dominant-affine camera fit, residual subject motion and photometric support.
+
+    A tensor port of ``pipeline.matching.motion.summarize`` (same 8-px grid,
+    seeded hypotheses, 2-px inlier tolerance, 55% support rule and
+    least-squares refit), plus the flow-warp support check.
+
+    ``flow`` is B×h×w×2 in pixels; ``first``/``second`` are B×3×h×w in [0, 1];
+    ``seconds`` is B. Returns tensors: ``camera`` B×4 [vx, vy, div, curl] per
+    second (frame fractions), ``confidence``, ``reliable``, ``residual`` (mean
+    absolute 6×6 median residual, per second) and ``support`` (share of
+    active pixels the flow explains).
+    """
+    import torch
+
+    batch, height, width, _ = flow.shape
+    device = flow.device
+    scale = torch.tensor([width, height], dtype=torch.float64, device=device)
+    ys = torch.arange(4, height, 8, device=device)
+    xs = torch.arange(4, width, 8, device=device)
+    grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")
+    position = torch.stack([grid_x.flatten() / width, grid_y.flatten() / height,
+                            torch.ones(grid_x.numel(), device=device)], dim=1).double()        # N×3
+    vectors = flow[:, grid_y.flatten(), grid_x.flatten(), :].double() / scale                   # B×N×2
+    hypotheses = torch.from_numpy(_ransac_hypotheses(position.shape[0])).to(device)            # 64×3
+    estimates = torch.linalg.pinv(position[hypotheses]).unsqueeze(0) @ vectors[:, hypotheses]  # B×64×3×2
+    predicted = position.unsqueeze(0).unsqueeze(0) @ estimates                                 # B×64×N×2
+    tolerance = 2 / min(width, height)
+    inliers = torch.linalg.norm(predicted - vectors.unsqueeze(1), dim=-1) < tolerance          # B×64×N
+    best = inliers[torch.arange(batch, device=device), inliers.sum(dim=-1).argmax(dim=1)]      # first maximum wins
+    confidence = best.double().mean(dim=1)
+    reliable = confidence >= 0.55
+    weights = best.double().unsqueeze(-1)
+    normal = position.T.unsqueeze(0) @ (weights * position.unsqueeze(0))                      # B×3×3
+    target = position.T.unsqueeze(0) @ (weights * vectors)                                     # B×3×2
+    ridge = 1e-9 * torch.eye(3, dtype=torch.float64, device=device)
+    affine = torch.linalg.solve(normal + ridge, target) * reliable.view(-1, 1, 1)              # B×3×2
+    per_second = seconds.double().view(-1, 1)
+    center = torch.tensor([0.5, 0.5, 1.0], dtype=torch.float64, device=device)
+    camera = torch.cat([
+        (center @ affine) / per_second,
+        (affine[:, 0, 0] + affine[:, 1, 1]).unsqueeze(1) / per_second,
+        (affine[:, 0, 1] - affine[:, 1, 0]).unsqueeze(1) / per_second,
+    ], dim=1)
+
+    full_y, full_x = torch.meshgrid(torch.arange(height, device=device), torch.arange(width, device=device), indexing="ij")
+    coordinates = torch.stack([full_x / width, full_y / height, torch.ones_like(full_x, dtype=torch.float32)],
+                              dim=-1).double()                                                  # h×w×3
+    residual = flow.double() / scale - coordinates.unsqueeze(0) @ affine.unsqueeze(1)          # B×h×w×2
+    cells = []
+    for gy in range(6):
+        for gx in range(6):
+            patch = residual[:, gy * height // 6:(gy + 1) * height // 6, gx * width // 6:(gx + 1) * width // 6]
+            cells.append(patch.reshape(batch, -1, 2).median(dim=1).values)
+    residual_energy = (torch.stack(cells, dim=1).abs() / per_second.unsqueeze(1)).mean(dim=(1, 2))
+
+    sample_x = torch.clamp(torch.round(full_x.unsqueeze(0) + flow[..., 0]).long(), 0, width - 1)
+    sample_y = torch.clamp(torch.round(full_y.unsqueeze(0) + flow[..., 1]).long(), 0, height - 1)
+    index = (sample_y * width + sample_x).view(batch, 1, -1).expand(-1, 3, -1)
+    warped = second.reshape(batch, 3, -1).gather(2, index).view(batch, 3, height, width)
+    active = (first.amax(dim=1) > 0.04) | (warped.amax(dim=1) > 0.04)                         # B×h×w
+    explained = ((first - warped).abs().mean(dim=1) < 0.1) & active
+    active_share = active.float().mean(dim=(1, 2))
+    support = explained.float().sum(dim=(1, 2)) / active.float().sum(dim=(1, 2)).clamp(min=1)
+    support = torch.where(active_share < 0.2, torch.ones_like(support), support)             # mostly black: no evidence
+    return {"camera": camera.float(), "confidence": confidence.float(), "reliable": reliable,
+            "residual": residual_energy.float(), "support": support}
 
 
 def color_histogram(image: np.ndarray) -> np.ndarray:
@@ -227,33 +369,21 @@ def content_box(image: np.ndarray, threshold: int = 12) -> tuple[int, int, int, 
     """
     brightest = image[::2, ::2].max(axis=2)
     height, width = image.shape[:2]
-
-    def span(mask: np.ndarray, size: int) -> tuple[int, int]:
-        inside = np.flatnonzero(mask)
-        if inside.size == 0:
-            return 0, size
-        first, last = int(inside[0]) * 2, min(size, (int(inside[-1]) + 1) * 2)
-        before, after = first, size - last
-        if max(before, after) > 0.25 * size or abs(before - after) > 0.08 * size + 4:
-            return 0, size
-        return first, last
-
-    y0, y1 = span(brightest.max(axis=1) > threshold, height)
-    x0, x1 = span(brightest.max(axis=0) > threshold, width)
+    y0, y1 = _content_span(brightest.max(axis=1) > threshold, height)
+    x0, x1 = _content_span(brightest.max(axis=0) > threshold, width)
     return y0, y1, x0, x1
 
 
-def look_stats(image: np.ndarray) -> dict[str, float]:
-    y0, y1, x0, x1 = content_box(image)
-    rgb = image[y0:y1:4, x0:x1:4].astype(np.float32) / 255.0
-    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    high, low = rgb.max(axis=2), rgb.min(axis=2)
-    saturation = np.where(high > 1e-6, (high - low) / np.maximum(high, 1e-6), 0.0)
-    rg, yb = r - g, 0.5 * (r + g) - b
-    colorfulness = math.sqrt(float(rg.std()) ** 2 + float(yb.std()) ** 2) + 0.3 * math.sqrt(float(rg.mean()) ** 2 + float(yb.mean()) ** 2)
-    return {"brightness": float(luma.mean()), "contrast": float(luma.std()), "saturation": float(saturation.mean()),
-            "colorfulness": colorfulness, "warmth": float((r - b).mean())}
+def _content_span(mask: np.ndarray, size: int) -> tuple[int, int]:
+    """Span of non-black lines (sampled every 2 px) unless the bars look one-sided or oversized."""
+    inside = np.flatnonzero(mask)
+    if inside.size == 0:
+        return 0, size
+    first, last = int(inside[0]) * 2, min(size, (int(inside[-1]) + 1) * 2)
+    before, after = first, size - last
+    if max(before, after) > 0.25 * size or abs(before - after) > 0.08 * size + 4:
+        return 0, size
+    return first, last
 
 
 def palette(image: np.ndarray, colors: int = 4, iterations: int = 8) -> list[list[float]]:
@@ -284,14 +414,19 @@ def pair_label(camera: np.ndarray, reliable: bool) -> str:
     if abs(div) >= ZOOM and abs(div) >= 0.7 * speed:
         return "push_in" if div > 0 else "pull_out"
     if speed >= MOVE:
-        if abs(vx) >= 1.5 * abs(vy):
-            return "pan_right" if vx < 0 else "pan_left"      # image content moves opposite to the camera
-        if abs(vy) >= 1.5 * abs(vx):
-            return "tilt_up" if vy > 0 else "tilt_down"
-        return "diagonal"
+        return _direction(vx, vy)
     if abs(curl) >= ROLL:
         return "roll"
     return "static"
+
+
+def _direction(vx: float, vy: float) -> str:
+    """Camera direction from image motion, which moves opposite to the camera."""
+    if abs(vx) >= 1.5 * abs(vy):
+        return "pan_right" if vx < 0 else "pan_left"
+    if abs(vy) >= 1.5 * abs(vx):
+        return "tilt_up" if vy > 0 else "tilt_down"
+    return "diagonal"
 
 
 def camera_segments(times: list[float], cameras: list[np.ndarray], reliable: list[bool], dt: float) -> dict[str, Any]:
@@ -327,9 +462,34 @@ def camera_segments(times: list[float], cameras: list[np.ndarray], reliable: lis
     dominant = max(known, key=known.get) if known and sum(known.values()) / total >= 0.5 else "unknown"
     moving = sum(seconds for label, seconds in known.items() if label not in {"static"}) / total
     mean = np.mean(np.array(ok_cameras), axis=0) if ok_cameras else np.zeros(4)
+    drift = mean * dt * len(labels)                   # accumulated [dx, dy, dscale, droll] over the shot
+    slow = False
+    if dominant == "static" and len(ok_cameras) >= 6:
+        # Sustained slow moves (a creeping push-in, a slow pan) stay under the
+        # per-pair thresholds but add up; require most pairs to agree on sign.
+        values = np.array(ok_cameras)
+
+        def agrees(column: int) -> bool:
+            return float(np.mean(np.sign(values[:, column]) == np.sign(drift[column]))) >= 0.7
+
+        if abs(drift[2]) >= DRIFT_ZOOM and agrees(2):
+            dominant, slow = ("push_in" if drift[2] > 0 else "pull_out"), True
+        elif math.hypot(drift[0], drift[1]) >= DRIFT_MOVE:
+            axis = 0 if abs(drift[0]) >= abs(drift[1]) else 1
+            if agrees(axis):
+                dominant, slow = _direction(float(mean[0]), float(mean[1])), True
+        if slow:
+            moving = max(moving, 0.5)
     return {"segments": [[round(s, 2), round(e, 2), label] for s, e, label in merged], "dominant": dominant,
-            "moving": round(moving, 3), "reliability": round(sum(reliable) / len(reliable), 3), "shake": round(shake, 4),
-            "mean": [round(float(value), 4) for value in mean]}
+            "slow": slow, "moving": round(moving, 3), "reliability": round(sum(reliable) / len(reliable), 3),
+            "shake": round(shake, 4), "mean": [round(float(value), 4) for value in mean],
+            "drift": [round(float(value), 4) for value in drift]}
+
+
+def camera_from_series(series: list[list[float]]) -> dict[str, Any]:
+    """Camera labels re-derived from a stored flow series ``[t, vx, vy, div, curl, residual, ok]``."""
+    return camera_segments([row[0] for row in series], [np.array(row[1:5], dtype=np.float64) for row in series],
+                           [bool(row[6]) for row in series], 1.0 / ANALYSIS_FPS)
 
 
 def track_main_subject(detections: list[list[tuple[str, float, tuple[float, float, float, float]]]]) -> dict[str, Any] | None:
@@ -394,31 +554,33 @@ def _shot_window(unit: dict[str, Any]) -> tuple[float, float]:
 
 def measure_group(models: Models, shots: list[ShotState]) -> dict[str, dict[str, Any]]:
     """Measure a group of consecutive shots with batched GPU work."""
-    from pipeline.matching.motion import summarize
-
     pairs = [(shot_index, k) for shot_index, shot in enumerate(shots) for k in range(len(shot.frames) - 1)]
-    flows: dict[tuple[int, int], np.ndarray] = {}
+    motion: dict[tuple[int, int], dict[str, Any]] = {}
     for start in range(0, len(pairs), 48):
         batch = pairs[start:start + 48]
         first = np.stack([shots[s].frames[k][1] for s, k in batch])
         second = np.stack([shots[s].frames[k + 1][1] for s, k in batch])
-        for key, flow in zip(batch, models.flow(first, second)):
-            flows[key] = flow
+        seconds = np.array([shots[s].frames[k + 1][0] - shots[s].frames[k][0] for s, k in batch], dtype=np.float64)
+        summary = models.pairs(first, second, seconds)
+        for position, key in enumerate(batch):
+            motion[key] = {name: values[position] for name, values in summary.items()}
     detect_refs = []
     for shot_index, shot in enumerate(shots):
         chosen = list(range(0, len(shot.frames), DETECT_EVERY)) or []
         if shot.frames and not chosen:
             chosen = [len(shot.frames) // 2]
         detect_refs.extend((shot_index, k) for k in chosen)
-    detect_images = [shots[s].frames[k][1] for s, k in detect_refs]
     detections: dict[tuple[int, int], list] = {}
-    for start in range(0, len(detect_images), 16):
-        for ref, rows in zip(detect_refs[start:start + 16], models.detect(detect_images[start:start + 16])):
+    stats: dict[tuple[int, int], dict[str, Any]] = {}
+    for start in range(0, len(detect_refs), 32):
+        refs_batch = detect_refs[start:start + 32]
+        uploaded = models.upload([shots[s].frames[k][1] for s, k in refs_batch])
+        for ref, rows in zip(refs_batch, models.detect(uploaded)):
             detections[ref] = rows
-    sharp: dict[tuple[int, int], float] = {}
-    if detect_images:
-        values = models.sharpness(np.stack(detect_images))
-        sharp = {ref: float(value) for ref, value in zip(detect_refs, values)}
+        batch_stats = models.frame_stats(uploaded)
+        for position, ref in enumerate(refs_batch):
+            stats[ref] = {name: values[position] for name, values in batch_stats.items()}
+    sharp = {ref: float(values["sharpness"]) for ref, values in stats.items()}
 
     results: dict[str, dict[str, Any]] = {}
     for shot_index, shot in enumerate(shots):
@@ -428,13 +590,13 @@ def measure_group(models: Models, shots: list[ShotState]) -> dict[str, dict[str,
             for k in range(len(shot.frames) - 1):
                 t0, a = shot.frames[k]
                 t1, b = shot.frames[k + 1]
-                summary = summarize(flows[(shot_index, k)], t1 - t0)
-                support = _photometric_support(a, b, flows[(shot_index, k)])
+                summary = motion[(shot_index, k)]
+                support = float(summary["support"])
                 reliable_pair = bool(summary["reliable"]) and support >= 0.45
                 times.append(t0)
                 cameras.append(summary["camera"])
                 reliable.append(reliable_pair)
-                pair_residual = float(np.abs(summary["residual"]).mean())
+                pair_residual = float(summary["residual"])
                 if reliable_pair:
                     residual.append(pair_residual)
                 series.append([round(t0, 3), *(round(float(v), 4) for v in summary["camera"]),
@@ -463,10 +625,10 @@ def measure_group(models: Models, shots: list[ShotState]) -> dict[str, dict[str,
                               "people_max": int(max(people)) if people else 0,
                               "objects": dict(sorted(classes.items(), key=lambda kv: -kv[1])[:8]),
                               "main": track_main_subject(frame_detections)}
-        looks = [look_stats(shots[s].frames[k][1]) for s, k in refs]
-        record["_boxes"] = [content_box(shots[s].frames[k][1]) + shots[s].frames[k][1].shape[:2]
-                            for (s, k), look in zip(refs, looks) if look["brightness"] > 0.08]
-        record["look"] = {key: round(float(np.mean([look[key] for look in looks])), 4) for key in looks[0]} if looks else {}
+        looks = [{key: float(stats[ref][key]) for key in LOOK_KEYS} for ref in refs]
+        record["_boxes"] = [tuple(int(v) for v in stats[ref]["content_box"]) + shots[ref[0]].frames[ref[1]][1].shape[:2]
+                            for ref, look in zip(refs, looks) if look["brightness"] > 0.08]
+        record["look"] = {key: round(float(np.mean([look[key] for look in looks])), 4) for key in LOOK_KEYS} if looks else {}
         if refs:
             sharp_values = [sharp.get(ref, 0.0) for ref in refs]
             record["sharpness"] = round(float(np.median(sharp_values)), 2)
@@ -482,24 +644,6 @@ def measure_group(models: Models, shots: list[ShotState]) -> dict[str, dict[str,
 
 def _box_area(box: tuple[float, float, float, float]) -> float:
     return max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
-
-
-def _photometric_support(first: np.ndarray, second: np.ndarray, flow: np.ndarray) -> float:
-    """Share of pixels explained by the flow (letterbox-safe), in [0, 1]."""
-    height, width = flow.shape[:2]
-    step_y = first.shape[0] / height
-    step_x = first.shape[1] / width
-    a = first[(np.arange(height) * step_y).astype(int)][:, (np.arange(width) * step_x).astype(int)].astype(np.float32) / 255
-    b = second[(np.arange(height) * step_y).astype(int)][:, (np.arange(width) * step_x).astype(int)].astype(np.float32) / 255
-    y, x = np.mgrid[:height, :width]
-    sx = np.clip(np.rint(x + flow[..., 0]).astype(int), 0, width - 1)
-    sy = np.clip(np.rint(y + flow[..., 1]).astype(int), 0, height - 1)
-    warped = b[sy, sx]
-    active = (a.max(axis=2) > 0.04) | (warped.max(axis=2) > 0.04)
-    if active.mean() < 0.2:
-        return 1.0  # mostly black: no evidence either way
-    error = np.abs(a - warped).mean(axis=2)[active]
-    return float((error < 0.1).mean())
 
 
 # ---------------------------------------------------------------------------

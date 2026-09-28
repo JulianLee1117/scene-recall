@@ -120,7 +120,8 @@ def test_align_quotes_finds_famous_lines_across_subtitle_cues():
         {"start": 52.2, "end": 54.0, "text": "he can't refuse."},
         {"start": 70.0, "end": 72.0, "text": "Nice weather today."},
     ]
-    hits = synthesis.align_quotes(["I'm gonna make him an offer he can't refuse.", "Here's looking at you, kid."], dialogue)
+    hits = synthesis.align_quotes(["I'm gonna make him an offer he can't refuse.", "Here's looking at you, kid."], dialogue,
+                                  min_score=0.72)
     assert len(hits) == 1 and hits[0]["start"] == 50.0 and hits[0]["end"] == 54.0
 
 
@@ -138,7 +139,23 @@ def test_content_box_crops_symmetric_letterbox_bars_only():
     frame[-40:] = 0
     y0, y1, x0, x1 = measure.content_box(frame)
     assert (y0, y1, x0, x1) == (40, 320, 0, 640)
-    assert measure.look_stats(frame)["brightness"] == pytest.approx(120 / 255, abs=0.01)
+    stats = measure.Models(".", device="cpu").frame_stats(__import__("torch").from_numpy(frame[None]))
+    assert stats["brightness"][0] == pytest.approx(120 / 255, abs=0.01)   # bars excluded
+    assert stats["sharpness"][0] == pytest.approx(0.0, abs=1e-3)           # the bar edge is not detail
     night = np.full((360, 640, 3), 120, dtype=np.uint8)
     night[:120] = 0                                   # dark sky: one-sided, not a letterbox
     assert measure.content_box(night) == (0, 360, 0, 640)
+
+
+def test_slow_sustained_moves_accumulate_into_a_label():
+    times = [i / 6 for i in range(120)]                       # a 20 s shot
+    creeping = [np.array([0.0, 0.0, 0.012, 0.0])] * 120       # 1.2%/s zoom: under the per-pair threshold
+    result = measure.camera_segments(times, creeping, [True] * 120, 1 / 6)
+    assert result["dominant"] == "push_in" and result["slow"] is True
+    drifting = [np.array([-0.009, 0.0, 0.0, 0.0])] * 120       # image drifts left: the camera pans right
+    assert measure.camera_segments(times, drifting, [True] * 120, 1 / 6)["dominant"] == "pan_right"
+    rng = np.random.default_rng(2)
+    noise = [np.array([0.0, 0.0, value, 0.0]) for value in rng.normal(0, 0.004, 120)]
+    assert measure.camera_segments(times, noise, [True] * 120, 1 / 6)["dominant"] == "static"
+    series = [[t, *camera, 0.01, 1] for t, camera in zip(times, creeping)]
+    assert measure.camera_from_series(series)["dominant"] == "push_in"

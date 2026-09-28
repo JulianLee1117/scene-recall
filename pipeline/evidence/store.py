@@ -68,7 +68,9 @@ class Producer:
 
     @property
     def descriptor(self) -> dict[str, Any]:
-        return {"kind": self.kind, "name": self.name, "version": self.version, "settings": self.settings}
+        """The descriptor as it reads back from JSON (tuples become lists), so stored copies compare equal."""
+        return json.loads(canonical_json({"kind": self.kind, "name": self.name, "version": self.version,
+                                          "settings": self.settings}))
 
     @property
     def profile_id(self) -> str:

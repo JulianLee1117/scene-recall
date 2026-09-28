@@ -3626,6 +3626,7 @@ def test_api_search_forwards_repeated_film_scope(config: Config) -> None:
         config,
         film_ids=["film_one", "film_two"],
         result_limit=9,
+        preset="balanced",
     )
 
 

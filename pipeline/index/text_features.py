@@ -39,10 +39,21 @@ _TABLE_PREFIX = "unit_text"
 _MANIFEST_SCHEMA_VERSION = 2
 # Version 1 projected caption, dialogue, OCR, and one broad facets document.
 # Version 2 adds a narrow mood-and-energy document without changing the Qwen
-# vector space.  The manifest records this contract separately from the table
-# identity so compatible existing view vectors can be reused during backfill.
-TEXT_VIEW_CONTRACT_VERSION = 2
-TEXT_VIEWS = ("caption", "dialogue", "ocr", "facets", "mood")
+# vector space.  Version 3 adds evidence-v2 story and scene documents, takes
+# mood from the understanding pass where it exists, and replaces stills-guessed
+# camera movement in facets with measured movement.  The manifest records this
+# contract separately from the table identity so compatible existing view
+# vectors can be reused during backfill.
+TEXT_VIEW_CONTRACT_VERSION = 3
+TEXT_VIEWS = ("caption", "dialogue", "ocr", "facets", "mood", "story", "scene")
+# Measured camera labels (pipeline.evidence.measure) as facet words; "unknown"
+# and low-reliability measurements are omitted rather than guessed.
+_CAMERA_WORDS = {
+    "static": "static camera", "pan_left": "pan left", "pan_right": "pan right", "tilt_up": "tilt up",
+    "tilt_down": "tilt down", "push_in": "push in", "pull_out": "pull out", "roll": "camera roll",
+    "diagonal": "diagonal camera move", "handheld": "handheld camera",
+}
+_CAMERA_MIN_RELIABILITY = 0.5
 # Query instructions never generated the stored document vectors. These exact
 # pairs identify known producer provenance, not the serving query policy. An
 # older worker can publish compatible documents while a newer API uses v2;
@@ -247,11 +258,14 @@ def build_text_feature_sources(row: dict[str, Any]) -> list[TextFeatureSource]:
         ("setting", "setting"),
         ("time_of_day", "time of day"),
         ("energy", "energy"),
-        ("camera_motion", "camera movement"),
     ):
         value = str(row.get(name) or "").strip()
         if value and value.lower() != "unknown":
             facet_parts.append(f"{label}: {value}")
+    camera = _CAMERA_WORDS.get(str(row.get("measured_camera") or ""))
+    if camera and float(row.get("measured_camera_reliability") or 0.0) >= _CAMERA_MIN_RELIABILITY:
+        slow = "slow " if row.get("measured_camera_slow") else ""
+        facet_parts.append(f"camera movement: {slow}{camera}")
     for name, label in (
         ("mood", "mood"),
         ("palette", "palette"),
@@ -263,9 +277,16 @@ def build_text_feature_sources(row: dict[str, Any]) -> list[TextFeatureSource]:
     if facet_parts:
         views["facets"] = "; ".join(facet_parts)
 
-    mood_text = build_mood_view_text(row)
+    mood_text = str(row.get("mood_text") or "").strip() or build_mood_view_text(row)
     if mood_text:
         views["mood"] = mood_text
+
+    # Evidence-v2 documents from the compiled shot_evidence table (joined by
+    # the backfill); absent until a film has an understanding pass.
+    for view, name in (("story", "story_text"), ("scene", "scene_text")):
+        text = str(row.get(name) or "").strip()
+        if text:
+            views[view] = text
 
     representative = bool(row.get("is_representative", True))
     return [

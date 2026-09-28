@@ -41,7 +41,10 @@ const TEXT_VIEW_LABELS: Record<string, string> = {
   ocr: "On-screen text",
   facets: "Scene detail",
   mood: "Mood",
+  story: "Story",
+  scene: "Scene",
 };
+const BADGE_LABELS = { iconic: "Iconic", gem: "Hidden gem" } as const;
 
 function unitSuffix(unitId: string): string {
   const separator = unitId.lastIndexOf("_");
@@ -94,7 +97,9 @@ export default function ShotCard({
   const suppressClickRef = useRef(false);
   const debugDescriptionId = useId();
   const displayedRank = shot.rank ?? position;
-  const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
+  const evidenceTime =
+    shot.matched_line?.t_start ?? shot.matched_frame_timestamp ?? shot.t_start;
+  const sceneMore = shot.scene_alternatives?.length ?? 0;
   const matchedTextLabel = shot.matched_text_view
     ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
     : null;
@@ -172,7 +177,7 @@ export default function ShotCard({
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={`${API_URL}${shot.keyframe_url}`}
+            src={`${API_URL}${shot.thumbnail_url ?? shot.keyframe_url}`}
             alt=""
             loading="lazy"
             draggable={false}
@@ -201,18 +206,47 @@ export default function ShotCard({
             </span>
           )}
 
+          {(shot.badges?.length ?? 0) > 0 && (
+            <span className="result-badges">
+              {shot.badges?.map((badge) => (
+                <span key={badge} className={`result-badge result-badge-${badge}`}>
+                  {BADGE_LABELS[badge]}
+                </span>
+              ))}
+            </span>
+          )}
+
+          {sceneMore > 0 && (
+            <span
+              className="scene-more"
+              title={`${sceneMore} more matching shot${sceneMore === 1 ? "" : "s"} in this scene`}
+            >
+              +{sceneMore}
+            </span>
+          )}
+
           <span
             className="result-card-overlay"
             style={{
               opacity: hovered ? 1 : 0,
             }}
           >
-            {matchedTextLabel && shot.matched_text && (
+            {shot.matched_line ? (
+              <span className="result-match-evidence">
+                <span>Line</span>
+                <span>{shot.matched_line.text}</span>
+              </span>
+            ) : matchedTextLabel && shot.matched_text ? (
               <span className="result-match-evidence">
                 <span>{matchedTextLabel} match</span>
                 <span>{shot.matched_text}</span>
               </span>
-            )}
+            ) : shot.action ? (
+              <span className="result-match-evidence">
+                <span>{shot.scene?.title || "Story"}</span>
+                <span>{shot.action}</span>
+              </span>
+            ) : null}
             {matchedFacetLabels.length > 0 && (
               <span
                 className="result-match-facets"

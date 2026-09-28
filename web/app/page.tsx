@@ -16,6 +16,7 @@ import MatchByRail from "@/components/MatchByRail";
 import MovieScopeFilter from "@/components/MovieScopeFilter";
 import MovieSearchInput from "@/components/MovieSearchInput";
 import SearchOptions from "@/components/SearchOptions";
+import RankingPresetControl from "@/components/RankingPresetControl";
 import SearchComparison from "@/components/SearchComparison";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { useFacetSourceSearch } from "@/hooks/useFacetSourceSearch";
@@ -40,6 +41,7 @@ import type {
   RecipeImageFacet,
   RecipeMatchFacet,
   ResolvedSourceEvidence,
+  RankingPreset,
   SearchRecipeRequest,
   SearchRecipeResponse,
   SearchResult,
@@ -156,6 +158,8 @@ export default function Home() {
   >({});
   const [activeShot, setActiveShot] = useState<SearchResult | null>(null);
   const [debug, setDebug] = useState(false);
+  const [preset, setPreset] = useState<RankingPreset>("balanced");
+  const presetRef = useRef<RankingPreset>("balanced");
   const [resultWindow, setResultWindow] = useState<{
     hasMore: boolean;
     nextLimit: number | null;
@@ -235,6 +239,7 @@ export default function Home() {
         clauses,
         ...(scope.length ? { film_ids: [...scope] } : {}),
         ...(limit !== undefined ? { limit } : {}),
+        ...(presetRef.current !== "balanced" ? { preset: presetRef.current } : {}),
       };
 
       try {
@@ -292,6 +297,17 @@ export default function Home() {
       }
     },
     [cancelPendingScopeSearch, selectedFilmIds],
+  );
+
+  const handlePresetChange = useCallback(
+    (next: RankingPreset) => {
+      presetRef.current = next;
+      setPreset(next);
+      if (recipeClauseCount(query, matchDrafts, mainImageRef.current) > 0) {
+        void runRecipe(query, matchDrafts);
+      }
+    },
+    [matchDrafts, query, runRecipe],
   );
 
   const handleRecipeLimit = useCallback(() => {
@@ -1173,6 +1189,10 @@ export default function Home() {
                       selectedFilmIds={selectedFilmIds}
                       onChange={handleMoviePickerChange}
                       films={films}
+                    />
+                    <RankingPresetControl
+                      value={preset}
+                      onChange={handlePresetChange}
                     />
                     <SearchOptions
                       showRankingDetails={debug}

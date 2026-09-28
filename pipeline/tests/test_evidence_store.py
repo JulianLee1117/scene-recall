@@ -62,3 +62,9 @@ def test_invalid_film_id_is_rejected(tmp_path):
 )
 def test_parse_title(title, expected):
     assert parse_title(title) == expected
+
+
+def test_producer_settings_round_trip_through_json(tmp_path):
+    producer = store.Producer("synthesis", "priors", 1, {"levels": (0.0, 0.5), "nested": {"pair": (1, 2)}})
+    store.write_artifact(tmp_path, "a" * 64, producer, {"ok": True}, inputs={})
+    assert store.read_artifact(tmp_path, "a" * 64, producer)["data"] == {"ok": True}

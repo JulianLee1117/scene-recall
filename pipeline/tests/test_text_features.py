@@ -137,7 +137,34 @@ def test_build_text_sources_keeps_views_independent() -> None:
     assert "framing" not in by_view["mood"]
     assert "palette" not in by_view["mood"]
     assert "Who is there?" not in by_view["caption"]
+    assert "camera movement" not in by_view["facets"]      # stills-guessed movement is not evidence
     assert len({source.source_sha256 for source in sources}) == 5
+
+
+def test_evidence_v2_adds_story_and_scene_views_and_measured_camera() -> None:
+    from pipeline.index.text_features import build_text_feature_sources
+
+    row = {
+        "unit_id": "film_1_0002",
+        "film_id": "film_1",
+        "caption": "A man leans back on a rooftop.",
+        "camera_motion": "tracking",
+        "mood": json.dumps(["tense"]),
+        "story_text": "Neo bends backwards dodging bullets. Characters: Neo, Agent Jones.",
+        "scene_text": "Rooftop Shootout. Neo and Trinity take the rooftop.",
+        "mood_text": "emotion: defiant; scene tone: explosive",
+        "measured_camera": "push_in",
+        "measured_camera_reliability": 0.8,
+    }
+    by_view = {source.view: source.text for source in build_text_feature_sources(row)}
+    assert by_view["story"].startswith("Neo bends backwards")
+    assert by_view["scene"].startswith("Rooftop Shootout")
+    assert by_view["mood"] == "emotion: defiant; scene tone: explosive"
+    assert "camera movement: push in" in by_view["facets"] and "tracking" not in by_view["facets"]
+
+    unreliable = {**row, "measured_camera_reliability": 0.2}
+    by_view = {source.view: source.text for source in build_text_feature_sources(unreliable)}
+    assert "camera movement" not in by_view["facets"]
 
 
 def test_mood_view_uses_known_energy_when_mood_labels_are_empty() -> None:

@@ -26,6 +26,7 @@ from pipeline.search.retrieve import (
     resolve_result_limit,
     search,
     search_by_image,
+    search_dialogue,
     search_look_by_image,
     search_look_by_text,
     search_look_by_vector,
@@ -487,16 +488,15 @@ def _run_text_clause(
     if clause.facet == "scene":
         return search_semantic_views(
             query,
-            ("caption",),
+            ("caption", "story", "scene"),
             db,
             config,
             film_ids=film_ids,
             result_limit=result_limit,
         )
     if clause.facet == "words":
-        return search_semantic_views(
+        return search_dialogue(
             query,
-            ("dialogue", "ocr"),
             db,
             config,
             film_ids=film_ids,
@@ -815,6 +815,7 @@ def execute_search_recipe(
     *,
     film_ids: Sequence[str] = (),
     result_limit: int | None = None,
+    preset: str = "balanced",
     _preserve_visual_alternatives: bool = False,
 ) -> SearchRecipeExecution:
     """Run a recipe and return results with its resolved source snapshot."""
@@ -855,6 +856,7 @@ def execute_search_recipe(
             config,
             film_ids=normalized_film_ids,
             result_limit=resolved_result_limit,
+            preset=preset,
             **({"_preserve_visual_alternatives": True} if _preserve_visual_alternatives else {}),
         )
         return SearchRecipeExecution(
@@ -925,6 +927,7 @@ def execute_search_recipe(
                 for clause in clauses
             ),
             apply_film_diversity=apply_film_diversity,
+            preset=preset,
             _preserve_visual_alternatives=_preserve_visual_alternatives,
         ),
         source_evidence=source_evidence,
@@ -938,6 +941,7 @@ def search_recipe(
     *,
     film_ids: Sequence[str] = (),
     result_limit: int | None = None,
+    preset: str = "balanced",
     _preserve_visual_alternatives: bool = False,
 ) -> list[dict[str, Any]]:
     """Run one to three typed clauses and return one final ranked window."""
@@ -947,6 +951,7 @@ def search_recipe(
         config,
         film_ids=film_ids,
         result_limit=result_limit,
+        preset=preset,
         _preserve_visual_alternatives=_preserve_visual_alternatives,
     ).results
 

@@ -160,8 +160,14 @@ def _warm_search_models(config: Config, app: FastAPI) -> None:
         if resolve_ready_text_profile(config, app.state.db) is not None:
             embed_semantic_query("warmup", config)
             print("[startup] semantic text encoder ready", flush=True)
+        # Load the resident vector matrices (text views, frames) with one real
+        # query, so the first user search does not pay the load.
+        from pipeline.search.retrieve import search
+
+        search("warmup", app.state.db, config, result_limit=1)
+        print(f"[startup] search ready in {time.perf_counter() - started:.1f}s", flush=True)
     except Exception as exc:
-        print(f"[startup] visual encoder warmup failed: {exc}", flush=True)
+        print(f"[startup] search warmup failed: {exc}", flush=True)
     finally:
         app.state.encoder_ready = True
 
@@ -975,6 +981,7 @@ class SearchRecipeRequest(BaseModel):
     clauses: list[SearchRecipeClause] = Field(min_length=1, max_length=3)
     film_ids: list[str] = Field(default_factory=list, max_length=1_000)
     limit: int | None = Field(default=None, ge=1, strict=True)
+    preset: Literal["balanced", "famous", "gems"] = "balanced"
 
     @field_validator("film_ids")
     @classmethod
@@ -1006,6 +1013,7 @@ class SearchImageRecipeRequest(BaseModel):
     clauses: list[SearchImageRecipeClause] = Field(min_length=1, max_length=3)
     film_ids: list[str] = Field(default_factory=list, max_length=1_000)
     limit: int | None = Field(default=None, ge=1, strict=True)
+    preset: Literal["balanced", "famous", "gems"] = "balanced"
 
     @field_validator("film_ids")
     @classmethod
@@ -1112,6 +1120,7 @@ async def _run_recipe_execution(
     film_ids: list[str],
     result_limit: int,
     *,
+    preset: str = "balanced",
     image_slot_already_acquired: bool = False,
 ) -> Any:
     """Execute one validated recipe under the required GPU guard."""
@@ -1136,6 +1145,7 @@ async def _run_recipe_execution(
                 config,
                 film_ids=film_ids,
                 result_limit=result_limit,
+                preset=preset,
             )
             if uses_serialized_image_work
             else asyncio.to_thread(
@@ -1145,6 +1155,7 @@ async def _run_recipe_execution(
                 config,
                 film_ids=film_ids,
                 result_limit=result_limit,
+                preset=preset,
             )
         )
     except RecipeSourceNotFound as exc:
@@ -1169,6 +1180,7 @@ def search_endpoint(
     q: str = Query(min_length=1, max_length=500),
     film_id: list[str] | None = Query(default=None),
     limit: int | None = Query(default=None, ge=1),
+    preset: Literal["balanced", "famous", "gems"] = Query(default="balanced"),
 ) -> dict:
     """Run hybrid search in FastAPI's worker threadpool."""
     _require_search_ready(request)
@@ -1184,6 +1196,7 @@ def search_endpoint(
             config,
             film_ids=film_id,
             result_limit=probe_limit,
+            preset=preset,
         ),
     )
     return _search_response(results, config, result_limit)
@@ -1205,6 +1218,7 @@ async def search_recipe_endpoint(
         clauses,
         payload.film_ids,
         probe_limit,
+        preset=payload.preset,
     )
 
     return _search_response(
@@ -1244,6 +1258,7 @@ async def image_recipe_endpoint(
             clauses,
             payload.film_ids,
             probe_limit,
+            preset=payload.preset,
             image_slot_already_acquired=True,
         )
     finally:
@@ -1467,6 +1482,32 @@ def keyframe_endpoint(shot_id: str, n: int, request: Request) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Keyframe not found: {shot_id}_{n}.webp")
     return FileResponse(str(path), media_type="image/webp")
+
+
+@app.get("/media/hero/{unit_id}")
+def hero_endpoint(unit_id: str, request: Request) -> FileResponse:
+    """Serve the shot's hero frame (evidence v2): the best still near its peak moment."""
+    from pipeline.evidence.tables import SHOT_EVIDENCE
+    from pipeline.index.writer import table_names
+
+    db = request.app.state.db
+    if SHOT_EVIDENCE not in table_names(db) or re.fullmatch(r"[0-9a-f]{64}_[0-9A-Za-z_.-]+", unit_id) is None:
+        raise HTTPException(status_code=404, detail="Hero frame not found")
+    rows = (db.open_table(SHOT_EVIDENCE).search().select(["film_id", "hero_path"])
+            .where(f"unit_id = '{unit_id}'").limit(1).to_list())
+    stored = rows[0].get("hero_path") if rows else None
+    if not stored:
+        raise HTTPException(status_code=404, detail="Hero frame not found")
+    config: Config = request.app.state.config
+    film_id = str(rows[0]["film_id"])
+    relative = Path(stored)
+    if relative.name != f"{unit_id}.webp" or relative.parts[:3] != (film_id, "evidence", "hero"):
+        raise HTTPException(status_code=404, detail="Hero frame not found")
+    path = _safe_media_path(config.paths.assets_dir, film_id, relative.parent.relative_to(film_id).as_posix(),
+                            relative.name)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Hero frame not found")
+    return FileResponse(str(path), media_type="image/webp", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/media/preview/{shot_id}")

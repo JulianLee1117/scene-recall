@@ -29,6 +29,9 @@ from lancedb.query import BooleanQuery, FullTextOperator, MatchQuery, Occur
 from PIL import Image
 
 from pipeline.search.candidates import frame_neighbors
+from pipeline.search import priors as _priors
+from pipeline.search import resident as _resident
+from pipeline.search.quotes import STRONG_SCORE as _STRONG_QUOTE, find_lines as _find_lines, quote_strength
 from pipeline.search.request import search_execution, search_stage, reuse_vector
 
 from pipeline.config import (
@@ -834,6 +837,21 @@ def _global_frame_candidate_rows(
         else base_frame_depth
     )
 
+    if not reserve_limit:
+        resident = _resident.matrix(db, "frames", vector_column="visual_vec", key_column="frame_id",
+                                    extra_columns=("frame_index", "timestamp"))
+        if resident is not None:
+            with search_stage("frame_retrieval"):
+                units = _resident.top_units(resident, vector, film_ids=film_ids, limit=candidate_limit)
+            return [
+                {"frame_id": resident.row_keys[row], "unit_id": unit_id, "shot_id": unit_id,
+                 "film_id": resident.films[int(resident.unit_film[resident.row_unit[row]])],
+                 "frame_index": resident.row_extra["frame_index"][row],
+                 "timestamp": resident.row_extra["timestamp"][row],
+                 "_distance": 1.0 - similarity, "_global_rank": rank}
+                for rank, (unit_id, similarity, row) in enumerate(units, start=1)
+            ]
+
     frame_rows = _stable_vector_ranking(
         _rows_in_film_scope(
             frame_neighbors(db, vector, columns=_FRAME_CANDIDATE_COLUMNS,
@@ -997,87 +1015,120 @@ def _semantic_text_search_rows(
     candidate_limit: int = _CANDIDATE_LIMIT,
     allowed_views: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Rank independent text views, then collapse them to one vote per unit."""
+    """Rank each text view independently, then fuse the per-view ranks per unit.
+
+    Distances are not comparable across document styles: long visual captions
+    sit closer to almost any query than a terse story line that says exactly
+    what was asked. Each view therefore votes by rank (weighted reciprocal
+    rank), and a shot matched by several views gains from their agreement.
+    """
     requested_views = _validated_semantic_views(allowed_views)
+    with search_stage("semantic_retrieval"):
+        per_view = _semantic_view_rankings(vector, db, profile, film_ids, requested_views,
+                                           candidate_limit=candidate_limit)
+    scores: dict[str, float] = {}
+    best: dict[str, tuple[tuple[int, float], dict[str, Any]]] = {}
+    for view, rows in per_view.items():
+        weight = _VIEW_WEIGHTS.get(view, 0.5)
+        seen: set[str] = set()
+        for rank, row in enumerate(rows, start=1):
+            unit_id = str(row.get("unit_id") or "")
+            if not unit_id or unit_id in seen:
+                continue
+            seen.add(unit_id)
+            scores[unit_id] = scores.get(unit_id, 0.0) + weight / (_RRF_K + rank)
+            # Evidence shown for the shot: the view where it ranked best.
+            order = (rank, float(row.get("_distance", 1.0)))
+            if unit_id not in best or order < best[unit_id][0]:
+                best[unit_id] = (order, row)
+    ordered = sorted(scores, key=lambda unit_id: (-scores[unit_id], unit_id))[:candidate_limit]
+    if not ordered:
+        return []
+    texts = _feature_texts(db, profile, [best[unit_id][1]["feature_id"] for unit_id in ordered
+                                         if best[unit_id][1].get("text") is None])
+    unit_rows = _hydrate_units(unit_table, tuple(ordered), film_ids)
+    units_by_id = {_row_id(row): row for row in _rows_in_film_scope(unit_rows, film_ids) if _row_id(row)}
+    ranked: list[dict[str, Any]] = []
+    for unit_id in ordered:
+        unit = units_by_id.get(unit_id)
+        if unit is None:
+            continue
+        feature = best[unit_id][1]
+        row = dict(unit)
+        row["_distance"] = float(feature.get("_distance", 1.0))
+        row["_text_score"] = scores[unit_id]
+        row["_matched_text"] = {
+            "feature_id": feature.get("feature_id"),
+            "view": feature.get("view"),
+            "text": texts.get(str(feature.get("feature_id")), feature.get("text")),
+            "profile_id": profile.profile_id,
+            "query_instruction_version": SEMANTIC_QUERY_INSTRUCTION_VERSION,
+        }
+        ranked.append(row)
+    return ranked
+
+
+# Per-view vote weights: what happens (story) and what it looks like (caption)
+# lead; scene summaries are shared by every shot of a scene; mood, facets and
+# on-screen text are narrow supporting evidence.
+_VIEW_WEIGHTS = {"caption": 1.0, "story": 1.0, "dialogue": 0.8, "scene": 0.6, "mood": 0.4, "facets": 0.35, "ocr": 0.35}
+
+
+def _semantic_view_rankings(
+    vector: np.ndarray,
+    db: lancedb.DBConnection,
+    profile: TextIndexProfile,
+    film_ids: tuple[str, ...],
+    views: tuple[str, ...],
+    *,
+    candidate_limit: int,
+) -> dict[str, list[dict[str, Any]]]:
+    """Each view's nearest feature rows (unit_id, view, feature_id, _distance)."""
+    resident = _resident.matrix(db, profile.table_name, vector_column="vector", key_column="feature_id",
+                                group_column="view", where="is_representative = true")
+    if resident is not None:
+        rankings = _resident.top_rows_by_group(resident, vector, views, film_ids=film_ids, limit=candidate_limit)
+        return {
+            view: [{"feature_id": resident.row_keys[row], "view": view,
+                    "unit_id": resident.unit_ids[int(resident.row_unit[row])], "_distance": 1.0 - similarity}
+                   for row, similarity in rows]
+            for view, rows in rankings.items()
+        }
+    # Lance fallback: one deeper search, ranked within each view.
     feature_filter = col("is_representative") == lit(True)
     film_filter = _film_filter(film_ids)
     if film_filter is not None:
         feature_filter = feature_filter & film_filter
-    view_filter = _any_of("view", requested_views)
+    view_filter = _any_of("view", views)
     assert view_filter is not None
-    feature_filter = feature_filter & view_filter
     feature_table = db.open_table(profile.table_name)
-    feature_limit = candidate_limit * len(requested_views)
-    with search_stage("semantic_retrieval"):
-        feature_rows = None
-        # Unscoped individual views touch many interleaved vector rows. Avoid
-        # expensive scalar-index gathers when an exact sequential scanner is
-        # available. Selective film scopes and ordinary all-view search retain
-        # their existing physical plan, as do tables with vector indexes.
-        scan = getattr(type(feature_table), "scan_vector_rows", None)
-        if not film_ids and len(requested_views) < len(TEXT_VIEWS) and scan is not None:
-            feature_rows = scan(feature_table, vector, column="vector",
-                                columns=_TEXT_FEATURE_COLUMNS, where=feature_filter,
-                                limit=feature_limit)
-        if feature_rows is None:
-            feature_rows = (
-                feature_table.search(vector, vector_column_name="vector")
-                .metric("cosine")
-                # Keep the result projection bounded to scoring evidence.
-                .select(_TEXT_FEATURE_COLUMNS)
-                .where(feature_filter)
-                .limit(feature_limit)
-                .to_list()
-            )
-    feature_rows = _rows_in_film_scope(feature_rows, film_ids)
-    allowed_view_set = set(requested_views)
-    feature_rows = [
-        row
-        for row in feature_rows
-        if str(row.get("view") or "") in allowed_view_set
-    ]
-    feature_rows.sort(
-        key=lambda row: (
-            float(row.get("_distance", 1.0)),
-            str(row.get("feature_id") or ""),
-        )
+    rows = (
+        feature_table.search(vector, vector_column_name="vector")
+        .metric("cosine")
+        .select(_TEXT_FEATURE_COLUMNS)
+        .where(feature_filter & view_filter)
+        .limit(candidate_limit * len(views))
+        .to_list()
     )
+    rows = _rows_in_film_scope(rows, film_ids)
+    rows.sort(key=lambda row: (float(row.get("_distance", 1.0)), str(row.get("feature_id") or "")))
+    per_view: dict[str, list[dict[str, Any]]] = {view: [] for view in views}
+    for row in rows:
+        view = str(row.get("view") or "")
+        if view in per_view and len(per_view[view]) < candidate_limit:
+            per_view[view].append(row)
+    return per_view
 
-    best_by_unit: dict[str, dict[str, Any]] = {}
-    for feature in feature_rows:
-        unit_id = str(feature.get("unit_id") or "")
-        if unit_id and unit_id not in best_by_unit:
-            best_by_unit[unit_id] = feature
-        if len(best_by_unit) >= candidate_limit:
-            break
-    unit_ids = tuple(best_by_unit)
-    unit_filter = _unit_filter(unit_ids)
-    if unit_filter is None:
-        return []
 
-    unit_rows = _hydrate_units(unit_table, unit_ids, film_ids)
-    units_by_id = {
-        _row_id(row): row
-        for row in _rows_in_film_scope(unit_rows, film_ids)
-        if _row_id(row)
-    }
-    ranked: list[dict[str, Any]] = []
-    for unit_id, feature in best_by_unit.items():
-        unit = units_by_id.get(unit_id)
-        if unit is None:
-            continue
-        row = dict(unit)
-        row["_distance"] = float(feature.get("_distance", 1.0))
-        row["_matched_text"] = {
-            "feature_id": feature.get("feature_id"),
-            "view": feature.get("view"),
-            "text": feature.get("text"),
-            "profile_id": feature.get("profile_id"),
-            "query_instruction_version": SEMANTIC_QUERY_INSTRUCTION_VERSION,
-        }
-        ranked.append(row)
-    ranked.sort(key=lambda row: (float(row["_distance"]), _row_id(row)))
-    return ranked[:candidate_limit]
+def _feature_texts(db: lancedb.DBConnection, profile: TextIndexProfile, feature_ids: list[str]) -> dict[str, str]:
+    """Texts of the matched features (resident matrices keep vectors, not documents)."""
+    ids = [str(feature_id) for feature_id in dict.fromkeys(feature_ids) if feature_id]
+    if not ids:
+        return {}
+    quoted = ", ".join("'" + feature_id.replace("'", "''") + "'" for feature_id in ids)
+    rows = (db.open_table(profile.table_name).search().select(["feature_id", "text"])
+            .where(f"feature_id IN ({quoted})").limit(len(ids)).to_list())
+    return {str(row["feature_id"]): str(row.get("text") or "") for row in rows}
 
 
 def _ready_text_profile(
@@ -1531,12 +1582,18 @@ def search(
     film_ids: Iterable[str] | None = None,
     result_limit: int | None = None,
     apply_film_diversity: bool | None = None,
+    preset: str = _priors.DEFAULT_PRESET,
     _defer_result_preferences: bool = False,
     _apply_ordinary_temporal_spread: bool = True,
     _preserve_visual_alternatives: bool = False,
     _return_candidate_pool: bool = False,
 ) -> list[dict]:
     """Return a stable hybrid result prefix.
+
+    Channels: visual (PE frames), semantic text views, lexical, and quotes
+    (subtitle lines; weighted up when the query reads as a quote). ``preset``
+    selects the prior policy applied after relevance (see
+    :mod:`pipeline.search.priors`).
 
     ``_defer_result_preferences`` is an internal recipe boundary: it preserves
     the bounded channel-fused ranking so product-level filtering can run once
@@ -1551,6 +1608,7 @@ def search(
     """
     if _return_candidate_pool:
         _defer_result_preferences = True
+    preset = _priors.validate_preset(preset)
     candidate_limit, result_limit = _validated_search_limits(
         config,
         result_limit,
@@ -1665,6 +1723,28 @@ def search(
                 candidate_limit=channel_candidate_limit,
             )
 
+    # Quotes: remembered dialogue matched against subtitle lines. The channel
+    # counts most when the query reads as a line; otherwise it only adds weak
+    # candidates, because word overlap with dialogue is usually incidental.
+    with search_stage("quote_retrieval"):
+        line_hits = _find_lines(db, query, film_ids=scoped_film_ids, limit=channel_candidate_limit)
+    strength = quote_strength(line_hits)
+    weights["quote"] = 1.2 if strength >= _STRONG_QUOTE else 0.3 * strength
+    specificity = 1.0 if strength >= _STRONG_QUOTE else 0.0
+    quote_rows: list[tuple[dict[str, Any], float, None]] = []
+    if line_hits and weights["quote"] > 0:
+        hit_by_unit = {hit.unit_id: hit for hit in line_hits}
+        hydrated = {
+            _row_id(row): row
+            for row in _rows_in_film_scope(_hydrate_units(table, tuple(hit_by_unit), scoped_film_ids), scoped_film_ids)
+        }
+        for hit in line_hits:
+            unit_row = hydrated.get(hit.unit_id)
+            if unit_row is not None:
+                row = dict(unit_row)
+                row["_matched_line"] = {"t_start": hit.t_start, "t_end": hit.t_end, "text": hit.text, "score": hit.score}
+                quote_rows.append((row, hit.score, None))
+
     fused: dict[str, dict[str, Any]] = {}
 
     def add_channel(
@@ -1720,6 +1800,9 @@ def search(
                     channel_evidence["matched_text"] = matched_text
                 else:
                     channel_evidence["source"] = "legacy_combined_text"
+            elif channel == "quote":
+                channel_evidence["source"] = "dialogue_line"
+                candidate["row"]["_matched_line"] = row.get("_matched_line")
             candidate["channels"][channel] = channel_evidence
             candidate["final_score"] += weights[channel] / (_RRF_K + rank)
 
@@ -1736,6 +1819,7 @@ def search(
         "lex",
         ((row, score, None) for row, score in lexical_ranked),
     )
+    add_channel("quote", quote_rows)
 
     ordered = sorted(
         fused.values(),
@@ -1766,6 +1850,16 @@ def search(
             eligible.append(candidate)
             dedup_candidates.append(row)
 
+    # Priors reorder inside the relevant pool; one card per dramatic scene.
+    evidence: dict[str, dict[str, Any]] = {}
+    if not _defer_result_preferences:
+        with search_stage("priors"):
+            evidence = _priors.load_evidence(db, (_candidate_unit_id(candidate) for candidate in eligible))
+            eligible = _priors.rerank(eligible, evidence, preset=preset, specificity=specificity,
+                                      unit_id=_candidate_unit_id)
+            eligible = _priors.group_by_scene(eligible, evidence, unit_id=_candidate_unit_id,
+                                              attach=_attach_scene_alternative)
+
     # A selected movie is an explicit relevance constraint, so film balancing
     # is disabled. Ordinary unscoped browsing gets a bounded diminishing-return
     # rerank; internal recipe rankings defer their product-level policy until
@@ -1792,6 +1886,10 @@ def search(
         else eligible[:result_limit]
     )
 
+    scenes = _priors.load_scenes(
+        db,
+        ((evidence.get(_candidate_unit_id(candidate)) or {}).get("scene_id") for candidate in ranked_candidates),
+    ) if evidence else {}
     selected: list[dict[str, Any]] = []
     for candidate in ranked_candidates:
         row = candidate["row"]
@@ -1831,9 +1929,41 @@ def search(
         if isinstance(matched_text, dict):
             result["matched_text_view"] = matched_text.get("view")
             result["matched_text"] = matched_text.get("text")
+        if isinstance(row.get("_matched_line"), dict):
+            result["matched_line"] = row["_matched_line"]
+        shot_evidence = evidence.get(str(row["unit_id"]))
+        if shot_evidence:
+            _priors.decorate(result, shot_evidence, scenes.get(shot_evidence.get("scene_id") or ""))
+        if candidate.get("scene_alternatives"):
+            result["scene_alternatives"] = [
+                _scene_alternative(alternative, evidence.get(_candidate_unit_id(alternative)))
+                for alternative in candidate["scene_alternatives"]
+            ]
         selected.append(result)
 
     return selected
+
+
+def _candidate_unit_id(candidate: dict[str, Any]) -> str:
+    return str(candidate["row"].get("unit_id") or "")
+
+
+def _attach_scene_alternative(representative: dict[str, Any], other: dict[str, Any]) -> None:
+    alternatives = representative.setdefault("scene_alternatives", [])
+    if len(alternatives) < _priors.MAX_SCENE_ALTERNATIVES:
+        alternatives.append(other)
+
+
+def _scene_alternative(candidate: dict[str, Any], shot_evidence: dict[str, Any] | None) -> dict[str, Any]:
+    """Compact card for another matching shot of the same scene."""
+    row = candidate["row"]
+    unit_id = str(row["unit_id"])
+    keyframe = f"/media/keyframe/{row.get('shot_id') or unit_id}/{_keyframe_index(row)}"
+    thumbnail = (_priors.hero_url(unit_id, shot_evidence) if shot_evidence and shot_evidence.get("hero_path")
+                 else keyframe)
+    return {"unit_id": unit_id, "t_start": row["t_start"], "t_end": row["t_end"], "keyframe_url": keyframe,
+            "keyframe_index": _keyframe_index(row), "thumbnail_url": thumbnail,
+            "preview_url": f"/media/preview/{row.get('shot_id') or unit_id}"}
 
 
 def _clause_results_from_rows(
@@ -1914,6 +2044,60 @@ def _clause_results_from_rows(
         if len(results) >= result_limit:
             break
     return results
+
+
+@search_execution
+def search_dialogue(
+    query: str,
+    db: lancedb.DBConnection,
+    config: Config,
+    *,
+    film_ids: Iterable[str] | None = None,
+    result_limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Words facet: remembered lines (quote channel) fused with semantic dialogue and on-screen text."""
+    candidate_limit, resolved_result_limit = _validated_search_limits(config, result_limit)
+    scoped_film_ids = _normalise_film_ids(film_ids)
+    hits = _find_lines(db, query, film_ids=scoped_film_ids, limit=candidate_limit)
+    try:
+        semantic = search_semantic_views(query, ("dialogue", "ocr"), db, config, film_ids=scoped_film_ids,
+                                         result_limit=candidate_limit)
+    except SemanticTextProfileUnavailable:
+        if not hits:
+            raise
+        semantic = []
+    hit_by_unit = {hit.unit_id: hit for hit in hits}
+    unit_rows = {
+        _row_id(row): row
+        for row in _rows_in_film_scope(_hydrate_units(db.open_table("units"), tuple(hit_by_unit), scoped_film_ids),
+                                       scoped_film_ids)
+    }
+    quote_rows = []
+    for hit in hits:
+        if hit.unit_id in unit_rows:
+            row = dict(unit_rows[hit.unit_id])
+            row["_distance"] = 1.0 - hit.score
+            quote_rows.append(row)
+    quoted = _clause_results_from_rows(quote_rows, channel="quote", mode="dialogue_line", result_limit=candidate_limit)
+    for result in quoted:
+        hit = hit_by_unit[result["unit_id"]]
+        result["matched_line"] = {"t_start": hit.t_start, "t_end": hit.t_end, "text": hit.text, "score": hit.score}
+    quote_weight = 1.5 if quote_strength(hits) >= _STRONG_QUOTE else 0.5
+    fused: dict[str, dict[str, Any]] = {}
+    scores: dict[str, float] = {}
+    for weight, ranking in ((quote_weight, quoted), (1.0, semantic)):
+        for rank, result in enumerate(ranking, start=1):
+            unit_id = result["unit_id"]
+            scores[unit_id] = scores.get(unit_id, 0.0) + weight / (_RRF_K + rank)
+            if unit_id not in fused:
+                fused[unit_id] = result
+            else:
+                fused[unit_id]["debug"]["channels"].update(result["debug"]["channels"])
+    ordered = sorted(fused.values(), key=lambda result: (-scores[result["unit_id"]], result["unit_id"]))
+    for rank, result in enumerate(ordered[:resolved_result_limit], start=1):
+        result["rank"] = rank
+        result["debug"]["final_score"] = scores[result["unit_id"]]
+    return ordered[:resolved_result_limit]
 
 
 @search_execution
@@ -2094,9 +2278,11 @@ def apply_recipe_result_preferences(
     result_limit: int | None = None,
     apply_reference_temporal_spread: bool = False,
     apply_film_diversity: bool | None = None,
+    preset: str = _priors.DEFAULT_PRESET,
     _preserve_visual_alternatives: bool = False,
 ) -> list[dict[str, Any]]:
-    """Apply final junk, deduplication, temporal, and diversity policy once."""
+    """Apply final junk, deduplication, prior, scene, temporal, and diversity policy once."""
+    preset = _priors.validate_preset(preset)
     _candidate_limit, resolved_result_limit = _validated_search_limits(
         config,
         result_limit,
@@ -2140,14 +2326,24 @@ def apply_recipe_result_preferences(
         dedup_rows.append(row)
         eligible.append(result)
 
+    evidence = _priors.load_evidence(db, (str(result.get("unit_id") or "") for result in eligible))
+    if evidence:
+        specificity = 0.0
+        if requested_text.strip():
+            hits = _find_lines(db, requested_text, film_ids=scoped_film_ids, limit=5)
+            specificity = 1.0 if quote_strength(hits) >= _STRONG_QUOTE else 0.0
+        eligible = _priors.rerank(eligible, evidence, preset=preset, specificity=specificity, unit_id=_result_unit_id)
+        eligible = _priors.group_by_scene(eligible, evidence, unit_id=_result_unit_id,
+                                          attach=_attach_result_alternative)
+
     if apply_reference_temporal_spread:
-        return _reapply_reference_result_preferences(
+        return _decorate_results(_reapply_reference_result_preferences(
             eligible,
             config,
             scoped_film_ids=scoped_film_ids,
             result_limit=resolved_result_limit,
             apply_film_diversity=apply_film_diversity,
-        )
+        ), db, evidence)
     if apply_film_diversity is None:
         apply_film_diversity = not bool(scoped_film_ids)
     wrapped = [{"row": result} for result in eligible]
@@ -2172,7 +2368,35 @@ def apply_recipe_result_preferences(
     )
     for rank, result in enumerate(selected, start=1):
         result["rank"] = rank
-    return selected
+    return _decorate_results(selected, db, evidence)
+
+
+def _result_unit_id(result: dict[str, Any]) -> str:
+    return str(result.get("unit_id") or "")
+
+
+def _attach_result_alternative(representative: dict[str, Any], other: dict[str, Any]) -> None:
+    alternatives = representative.setdefault("scene_alternatives", [])
+    if len(alternatives) < _priors.MAX_SCENE_ALTERNATIVES:
+        alternatives.append({key: other[key] for key in ("unit_id", "t_start", "t_end", "keyframe_url", "keyframe_index",
+                                                         "preview_url") if key in other})
+
+
+def _decorate_results(results: list[dict[str, Any]], db: lancedb.DBConnection,
+                      evidence: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Hero frames, badges, story and scene context for final results."""
+    if not evidence:
+        return results
+    scenes = _priors.load_scenes(db, ((evidence.get(_result_unit_id(r)) or {}).get("scene_id") for r in results))
+    for result in results:
+        shot_evidence = evidence.get(_result_unit_id(result))
+        if shot_evidence:
+            _priors.decorate(result, shot_evidence, scenes.get(shot_evidence.get("scene_id") or ""))
+        for alternative in result.get("scene_alternatives") or []:
+            alternative_evidence = evidence.get(_result_unit_id(alternative)) or {}
+            alternative["thumbnail_url"] = (_priors.hero_url(alternative["unit_id"], alternative_evidence)
+                                            if alternative_evidence.get("hero_path") else alternative.get("keyframe_url"))
+    return results
 
 
 def _spatial_grid_scores(

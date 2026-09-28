@@ -2431,3 +2431,91 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* Ranking presets (Balanced / Famous / Hidden gems) */
+.ranking-preset {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid #262626;
+  border-radius: 999px;
+  background: #0c0c0c;
+}
+
+.ranking-preset > button {
+  min-height: 23px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #777;
+  cursor: pointer;
+  font-size: 0.68rem;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.ranking-preset > button:hover {
+  color: #b7b7b7;
+}
+
+.ranking-preset > button.is-active {
+  background: #1d1a15;
+  color: var(--accent);
+}
+
+.ranking-preset > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Earned placements on result cards */
+.result-badges {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 2;
+  display: flex;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.result-badge {
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(5, 5, 5, 0.78);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.result-badge-iconic {
+  border-color: rgba(212, 169, 106, 0.45);
+  color: var(--accent);
+}
+
+.result-badge-gem {
+  border-color: rgba(128, 190, 170, 0.45);
+  color: #9fd4c2;
+}
+
+.scene-more {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  z-index: 2;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(5, 5, 5, 0.72);
+  color: #c9c9c9;
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+}

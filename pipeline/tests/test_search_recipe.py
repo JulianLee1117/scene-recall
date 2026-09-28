@@ -354,7 +354,7 @@ def test_recipe_execution_reuses_one_source_snapshot_for_search_and_evidence(
 
     semantic_search.assert_called_once_with(
         unit["caption"],
-        ("caption",),
+        ("caption", "story", "scene"),
         db,
         config,
         film_ids=(),
@@ -385,6 +385,7 @@ def test_single_broad_recipe_honors_explicit_result_limit(
     assert broad_search.call_args.kwargs == {
         "film_ids": (),
         "result_limit": 12,
+        "preset": "balanced",
     }
 
 
@@ -1455,6 +1456,7 @@ def test_recipe_api_forwards_typed_clauses_and_returns_matches(
     assert recipe_search.call_args.kwargs == {
         "film_ids": ["film-a", "film-b"],
         "result_limit": 13,
+        "preset": "balanced",
     }
     assert available_slots == 2
 
@@ -1545,6 +1547,7 @@ def test_uploaded_image_recipe_api_decodes_and_forwards_native_clause(
     assert recipe_search.call_args.kwargs == {
         "film_ids": ["film-a", "film-b"],
         "result_limit": 25,
+        "preset": "balanced",
     }
     assert available_slots == 2
 

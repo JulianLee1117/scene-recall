@@ -46,6 +46,10 @@ class _ReadTable:
     def index_stats(self, *args, **kwargs):
         return self.__table.index_stats(*args, **kwargs)
 
+    def to_batches(self, *, columns, filter=None, batch_size=65_536):
+        """Stream this pinned version as Arrow batches (bounded memory for resident loads)."""
+        return self.__table.to_lance().to_batches(columns=list(columns), filter=filter, batch_size=batch_size)
+
     def scan_vector_rows(self, vector, *, column, columns, where, limit):
         """Read exact neighbors without scattered scalar-index vector gathers.
 

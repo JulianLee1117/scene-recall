@@ -47,6 +47,17 @@ def cmd_understand(args) -> int:
     from pipeline.evidence import understanding
     config = _config(args.config)
     db, films = _films(config, args.film)
+    if args.batch == "submit":
+        print(f"[understanding:batch] {understanding.submit_batches(config, db, films, model=args.model, max_usd=args.max_usd, max_chunks=args.max_chunks)}")
+        return 0
+    if args.batch == "collect":
+        summary = understanding.collect_batches(config, db)
+        print(f"[understanding:batch] {summary}")
+        return 0 if summary["failed"] == 0 else 1
+    if args.batch == "status":
+        for job in understanding.batch_status(config):
+            print(f"{job['created']}  {job['state']:26s} {job['chunks']:4d} chunks  {job['name']}")
+        return 0
     summary = understanding.run(config, db, films, model=args.model, max_usd=args.max_usd,
                                 concurrency=args.concurrency, force=args.force)
     print(f"[understanding] {summary}")
@@ -80,6 +91,30 @@ def cmd_synthesize(args) -> int:
     return 0
 
 
+def cmd_compile(args) -> int:
+    from pipeline.evidence import compile as compiler
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+    if args.rebuild:
+        # Compiled tables hold no primary data: drop them and recompile every film.
+        from pipeline.evidence import tables
+        for name in (tables.SHOT_EVIDENCE, tables.SCENES, tables.DIALOGUE_LINES):
+            tables.drop_table(db, name)
+        films = _films(config, None)[1]
+    compiler.compile_film_meta(config, db, _films(config, None)[1])
+    compiler.compile_films(config, db, films)
+    if args.no_text:
+        return 0
+    # Semantic views (story, scene, mood, measured camera) read the compiled
+    # tables; a full reconciliation re-embeds only changed views and activates
+    # the profile once every unit is covered.
+    from pipeline.index.backfill_text import backfill_text_features
+    result = backfill_text_features(config)
+    print(f"[compile] text views: {result.embedded} embedded, {result.skipped_current} current, "
+          f"profile {'active' if result.activated else 'NOT active'}")
+    return 0 if result.activated else 1
+
+
 def cmd_status(args) -> int:
     from pipeline.evidence import metadata, speech, store, subtitles
     config = _config(args.config)
@@ -101,8 +136,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=None, help="config.yaml path (default: CINEMA_CONFIG or ./config.yaml)")
     commands = parser.add_subparsers(dest="command", required=True)
 
+    parsers = {}
+
     def add(name: str, handler, help_text: str):
         command = commands.add_parser(name, help=help_text)
+        parsers[name] = command
         command.add_argument("--film", action="append", help="film ID/prefix or title substring (repeatable)")
         command.set_defaults(handler=handler)
         return command
@@ -117,10 +155,16 @@ def main(argv: list[str] | None = None) -> int:
     und.add_argument("--max-usd", type=float, default=5.0, help="spend ceiling for this run (standard pricing)")
     und.add_argument("--concurrency", type=int, default=6)
     und.add_argument("--force", action="store_true")
+    und.add_argument("--batch", choices=["submit", "collect", "status"],
+                     help="half-price batch transport: submit pending chunks, collect finished jobs, or list jobs")
+    und.add_argument("--max-chunks", type=int, default=None, help="with --batch submit: cap chunks this run")
     mea = add("measure", cmd_measure, "local GPU pass: camera motion, hidden cuts, subjects, look and hero frames")
     mea.add_argument("--force", action="store_true")
     add("hero", cmd_hero, "pick and extract one hero frame per shot from measured samples")         .add_argument("--force", action="store_true")
     add("synthesize", cmd_synthesize, "per-shot priors: fame, craft, distinctiveness, iconic and hidden-gem flags")
+    add("compile", cmd_compile, "rebuild search tables (film_meta, shot_evidence, scenes, dialogue_lines) and text views")         .add_argument("--no-text", action="store_true", help="skip the semantic text-view refresh")
+    parsers["compile"].add_argument("--rebuild", action="store_true",
+                                    help="drop compiled tables and recompile every film (after a schema change)")
     add("status", cmd_status, "show evidence coverage")
     args = parser.parse_args(argv)
     return int(args.handler(args) or 0)

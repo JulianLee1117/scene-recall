@@ -37,11 +37,16 @@ export type SearchRecipeClause =
       facet: RecipeImageFacet;
     };
 
+/** Ordering after relevance (backend pipeline/search/priors.py). */
+export type RankingPreset = "balanced" | "famous" | "gems";
+
 export interface SearchRecipeRequest {
   clauses: SearchRecipeClause[];
   film_ids?: string[];
   /** Requested authoritative result prefix. Omit for the backend default. */
   limit?: number;
+  /** Balanced (default), famous moments first, or hidden gems first. */
+  preset?: RankingPreset;
 }
 
 export type SourceInputEvidence =
@@ -153,6 +158,53 @@ export interface SearchResult {
   matched_text?: string;
   /** Per-clause evidence returned by modular recipe search. */
   matches?: SearchMatch[];
+  /** Display image: the shot's hero frame unless the visual match found it. */
+  thumbnail_url?: string;
+  hero_url?: string;
+  hero_time?: number;
+  /** Earned placements: an iconic moment, or a well-made shot people rarely see. */
+  badges?: SearchBadge[];
+  /** Famous line (Wikiquote) spoken in this shot. */
+  famous_line?: string;
+  /** What happens in the shot, from the understanding pass. */
+  action?: string;
+  characters?: string[];
+  /** Most important instant inside the shot (film seconds). */
+  peak_time?: number;
+  /** The dramatic scene this shot belongs to. */
+  scene?: SceneContext;
+  /** Other matching shots of the same scene, folded into this card. */
+  scene_alternatives?: SceneAlternative[];
+  /** Subtitle line matched by a quote-like query, with exact times. */
+  matched_line?: MatchedLine;
+}
+
+export type SearchBadge = "iconic" | "gem";
+
+export interface SceneContext {
+  id: string;
+  title: string;
+  summary: string;
+  t_start?: number;
+  t_end?: number;
+  shot_count?: number;
+}
+
+export interface SceneAlternative {
+  unit_id: string;
+  t_start: number;
+  t_end: number;
+  keyframe_url: string;
+  keyframe_index?: number;
+  thumbnail_url?: string;
+  preview_url?: string;
+}
+
+export interface MatchedLine {
+  t_start: number;
+  t_end: number;
+  text: string;
+  score: number;
 }
 
 export interface SearchResponse {

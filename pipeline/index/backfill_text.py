@@ -94,7 +94,36 @@ def _unit_rows(db: Any, *, film_id: str | None) -> list[dict[str, Any]]:
         )
     columns = [name for name in _UNIT_TEXT_COLUMNS if name in available]
     query = units.search().select(columns)
-    return _where_film(query, film_id).limit(None).to_list()
+    rows = _where_film(query, film_id).limit(None).to_list()
+    evidence = _evidence_rows(db, film_id=film_id)
+    for row in rows:
+        row.update(evidence.get(str(row.get("unit_id") or ""), {}))
+    return rows
+
+
+# Compiled evidence-v2 columns projected into semantic views, renamed so they
+# cannot shadow the legacy stills-based unit columns.
+_EVIDENCE_TEXT_COLUMNS = {
+    "story_text": "story_text",
+    "scene_text": "scene_text",
+    "mood_text": "mood_text",
+    "camera": "measured_camera",
+    "camera_slow": "measured_camera_slow",
+    "camera_reliability": "measured_camera_reliability",
+}
+
+
+def _evidence_rows(db: Any, *, film_id: str | None) -> dict[str, dict[str, Any]]:
+    """Per-unit evidence text from the compiled ``shot_evidence`` table, if present."""
+    from pipeline.evidence.tables import SHOT_EVIDENCE
+
+    if SHOT_EVIDENCE not in table_names(db):
+        return {}
+    query = db.open_table(SHOT_EVIDENCE).search().select(["unit_id", *_EVIDENCE_TEXT_COLUMNS])
+    return {
+        str(row["unit_id"]): {target: row.get(source) for source, target in _EVIDENCE_TEXT_COLUMNS.items()}
+        for row in _where_film(query, film_id).limit(None).to_list()
+    }
 
 
 def _feature_rows(

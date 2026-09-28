@@ -1,0 +1,48 @@
+# Personal search eval (docs/current-work.md, Phase 0). Keep it small and real.
+# Known-item: film + at (seconds, H:MM:SS, or a list of either) or a subtitle
+# line resolved against the film's current dialogue; optional tolerance (s).
+# Discovery: query only; judged by reading the report side by side.
+queries:
+  # The Matrix
+  - {query: "neo dodges bullets bending backwards on the rooftop", film: "The Matrix", at: "1:46:30"}
+  - {query: "dodge this", film: "The Matrix", line: "Dodge this."}
+  - {query: "there is no spoon", film: "The Matrix", at: ["1:11:58", "1:45:16"]}
+  - {query: "red pill or blue pill", film: "The Matrix", at: "0:29:14", tolerance: 40}
+  - {query: "neo wakes up in the pod and pulls the tube out of his throat", film: "The Matrix", at: "0:32:42"}
+  - {query: "woman in the red dress", film: "The Matrix", at: "0:57:06"}
+  - {query: "I know kung fu", film: "The Matrix", line: "I know kung fu."}
+  - {query: "neo stops the bullets in mid air", film: "The Matrix", at: "2:05:08"}
+  - {query: "guns, lots of guns", film: "The Matrix", line: "Guns. Lots of guns."}
+  - {query: "lobby shootout", film: "The Matrix", at: "1:42:30", tolerance: 90}
+  # In the Mood for Love
+  - {query: "they pass each other in slow motion in the rain", film: "In the Mood for Love", at: "0:24:31"}
+  - {query: "whispering a secret into a hole in the temple wall", film: "In the Mood for Love", at: "1:30:16"}
+  - {query: "woman in a red coat walking down a red hotel corridor", film: "In the Mood for Love", at: ["0:55:39", "0:52:22"]}
+  - {query: "we won't be like them", film: "In the Mood for Love", line: "We won't be like them."}
+  - {query: "sheltering from the rain under the eaves", film: "In the Mood for Love", at: "1:08:32", tolerance: 30}
+  # Parasite
+  - {query: "jessica only child illinois chicago", film: "Parasite", at: "0:20:42", tolerance: 20}
+  - {query: "family drinking whiskey watching the rain through the big window", film: "Parasite", at: "0:56:43"}
+  - {query: "sister smoking on the toilet while sewage erupts", film: "Parasite", at: "1:36:44"}
+  - {query: "a face slowly rising from the dark basement stairs", film: "Parasite", at: "1:21:33"}
+  - {query: "stabbing at the garden birthday party", film: "Parasite", at: "1:52:54", tolerance: 60}
+  - {query: "scraping peach fuzz with a razor blade", film: "Parasite", at: "0:40:18"}
+  - {query: "no plan at all", film: "Parasite", line: "You know what kind of plan never fails? No plan at all."}
+  # Taxi Driver
+  - {query: "you talkin' to me", film: "Taxi Driver", line: "You talkin' to me?"}
+  - {query: "someday a real rain will come and wash all this scum off the streets", film: "Taxi Driver", line: "Someday a real rain will come and wash all this scum off the streets."}
+  # Whiplash
+  - {query: "not quite my tempo", film: "Whiplash", line: "Not quite my tempo."}
+  - {query: "were you rushing or were you dragging", film: "Whiplash", line: "Were you rushing or were you dragging?"}
+  - {query: "no two words more harmful than good job", film: "Whiplash", line: "There are no two words in the English language more harmful than \"good job\"."}
+  # Discovery (whole library)
+  - {query: "rain at night"}
+  - {query: "slow motion"}
+  - {query: "neon city street at night"}
+  - {query: "someone looking at themselves in a mirror"}
+  - {query: "two people in a car at night"}
+  - {query: "running down a corridor"}
+  - {query: "close up of hands"}
+  - {query: "tense dinner table"}
+  - {query: "smoking a cigarette alone"}
+  - {query: "explosion"}
