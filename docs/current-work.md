@@ -36,8 +36,10 @@ Next:
   camera, colour); Framing v2 from measured layout; per-film Highlights and
   Hidden gems browsing; interaction logging; latency (quote and lexical stages,
   under 1 s).
-- **Phase 1 remainder**: boundary audit (split units at hidden cuts
-  cross-checked with the model's cut hint).
+- **Phase 1 boundary audit**, measured on the pilot: hidden cuts in 0.7% of
+  shots (model hint 0.6%; both agree on 0.17%). Cut times stay evidence
+  (`shot_evidence.hidden_cuts`) for consumers such as editor trims to avoid;
+  splitting canonical units is deferred until a concrete failure.
 - **Then Phase 3**: the editor harness; match-cut planning after that, per the
   owner.
 
