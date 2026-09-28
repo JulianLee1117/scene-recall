@@ -140,6 +140,12 @@ def extract_dialogue(film: FilmRecord, config: Config) -> list[DialogueLine]:
             source = _source_with_embedded_validation(film, config, receipt)
         if source["kind"] == "embedded_text":
             lines = _parse_srt(_read_srt_text(film.asset_dir / "subs.srt"))
+        elif source["kind"] == "downloaded_srt":
+            download = _downloaded_subtitle(film, config)
+            if download is None or download["synced_sha256"] != source["sha256"]:
+                raise RuntimeError("downloaded subtitles changed during ingestion")
+            print(f"[dialogue] using downloaded, synced subtitles: file {source['file_id']}", flush=True)
+            lines = _parse_external_srt(_read_srt_text(download["path"]))
         else:
             rejection = source.get("rejected_embedded_subtitles")
             if rejection is not None:
@@ -196,7 +202,35 @@ def _dialogue_source(film: FilmRecord, config: Config) -> dict[str, object]:
             "film_id": film.film_id,
             "stream_index": film.text_subtitle_stream_index,
         }
-    return _whisper_source(film, config)
+    return _fallback_source(film, config)
+
+
+def _downloaded_subtitle(film: FilmRecord, config: Config) -> dict[str, object] | None:
+    """An accepted, synced download from the evidence layer (dialogue v2)."""
+    try:
+        from pipeline.evidence.subtitles import accepted_download
+        return accepted_download(config, film.film_id)
+    except (OSError, ValueError):
+        return None
+
+
+def _fallback_source(film: FilmRecord, config: Config) -> dict[str, object]:
+    """Prefer accepted downloaded subtitles over audio transcription."""
+    download = _downloaded_subtitle(film, config)
+    if download is None:
+        return _whisper_source(film, config)
+    return {
+        "contract_version": _DIALOGUE_CONTRACT_VERSION,
+        "kind": "downloaded_srt",
+        "film_id": film.film_id,
+        "profile_id": download["profile_id"],
+        "file_id": download["file_id"],
+        "sha256": download["synced_sha256"],
+        "derivation_profile": {
+            "profile_version": _SIDECAR_PROFILE_VERSION,
+            "exclude_promotional_cues": True,
+        },
+    }
 
 
 def _whisper_source(film: FilmRecord, config: Config) -> dict[str, object]:
@@ -271,7 +305,7 @@ def _source_with_embedded_validation(
             "subtitle_validation": receipt,
         }
     return {
-        **_whisper_source(film, config),
+        **_fallback_source(film, config),
         "rejected_embedded_subtitles": receipt,
     }
 

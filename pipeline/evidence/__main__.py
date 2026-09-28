@@ -34,11 +34,20 @@ def cmd_metadata(args) -> int:
     return 0 if counts["failed"] == 0 else 1
 
 
-def cmd_status(args) -> int:
-    from pipeline.evidence import metadata, store
+def cmd_subtitles(args) -> int:
+    from pipeline.evidence import subtitles
     config = _config(args.config)
     _db, films = _films(config, args.film)
-    producers = {"metadata": metadata.PRODUCER}
+    counts = subtitles.run(config, films, max_downloads=args.max_downloads, force=args.force)
+    print(f"[subtitles] {counts}")
+    return 0
+
+
+def cmd_status(args) -> int:
+    from pipeline.evidence import metadata, speech, store, subtitles
+    config = _config(args.config)
+    _db, films = _films(config, args.film)
+    producers = {"metadata": metadata.PRODUCER, "subtitles": subtitles.PRODUCER, "audio": speech.PRODUCER}
     for kind, producer in producers.items():
         present = sum(1 for film in films if store.read_artifact(config.paths.assets_dir, film.film_id, producer))
         print(f"{kind:14s} {producer.profile_id:34s} {present}/{len(films)} films")
@@ -60,6 +69,9 @@ def main(argv: list[str] | None = None) -> int:
 
     add("metadata", cmd_metadata, "fetch open metadata (Wikidata, Wikipedia, Wikiquote, pageviews, IMDb votes)") \
         .add_argument("--force", action="store_true", help="refetch even when a current artifact exists")
+    subs = add("subtitles", cmd_subtitles, "download, sync and validate English subtitles for Whisper-only films")
+    subs.add_argument("--max-downloads", type=int, default=20, help="download budget for this run (daily quota applies)")
+    subs.add_argument("--force", action="store_true", help="reprocess films with an existing result")
     add("status", cmd_status, "show evidence coverage")
     args = parser.parse_args(argv)
     return int(args.handler(args) or 0)
