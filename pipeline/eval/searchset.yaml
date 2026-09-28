@@ -14,12 +14,15 @@ queries:
   - {query: "neo stops the bullets in mid air", film: "The Matrix", at: "2:05:08"}
   - {query: "guns, lots of guns", film: "The Matrix", line: "Guns. Lots of guns."}
   - {query: "lobby shootout", film: "The Matrix", at: "1:42:30", tolerance: 90}
+  - {query: "trinity frozen mid-air kicking a cop", film: "The Matrix", at: "0:03:02"}
+  - {query: "agent smith says mr anderson", film: "The Matrix", at: "1:54:24", tolerance: 30}
   # In the Mood for Love
   - {query: "they pass each other in slow motion in the rain", film: "In the Mood for Love", at: "0:24:31"}
   - {query: "whispering a secret into a hole in the temple wall", film: "In the Mood for Love", at: "1:30:16"}
   - {query: "woman in a red coat walking down a red hotel corridor", film: "In the Mood for Love", at: ["0:55:39", "0:52:22"]}
   - {query: "we won't be like them", film: "In the Mood for Love", line: "We won't be like them."}
   - {query: "sheltering from the rain under the eaves", film: "In the Mood for Love", at: "1:08:32", tolerance: 30}
+  - {query: "chow whispers into a hole at angkor wat", film: "In the Mood for Love", at: "1:30:16"}
   # Parasite
   - {query: "jessica only child illinois chicago", film: "Parasite", at: "0:20:42", tolerance: 20}
   - {query: "family drinking whiskey watching the rain through the big window", film: "Parasite", at: "0:56:43"}

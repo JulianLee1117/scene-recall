@@ -31,6 +31,7 @@ from PIL import Image
 from pipeline.search.candidates import frame_neighbors
 from pipeline.search import priors as _priors
 from pipeline.search import rerank as _rerank
+from pipeline.search import signals as _signals
 from pipeline.search import resident as _resident
 from pipeline.search.quotes import STRONG_SCORE as _STRONG_QUOTE, find_lines as _find_lines, quote_strength
 from pipeline.search.request import search_execution, search_stage, reuse_vector
@@ -1864,6 +1865,8 @@ def search(
     shortlist = int(getattr(config.retrieval, "rerank_shortlist", 0) or 0)
     if shortlist and ordered and not _defer_result_preferences:
         ordered = _reranked(query, db, ordered, shortlist)
+    if ordered and not _defer_result_preferences:
+        ordered = _with_query_signals(query, db, ordered)
 
     if _defer_result_preferences:
         eligible = ordered
@@ -1993,6 +1996,33 @@ def _reranked(query: str, db: lancedb.DBConnection, ordered: list[dict[str, Any]
     for candidate, value in zip(head, relevance):
         candidate["channels"]["rerank"] = {"score": round(float(value), 4)}
     return _rerank.blend(head, relevance) + ordered[shortlist:]
+
+
+_SIGNAL_DEPTH = 300
+_SIGNAL_COLUMNS = ["framing", "time_of_day", "palette"]
+
+
+def _with_query_signals(query: str, db: lancedb.DBConnection, ordered: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Lift candidates whose evidence satisfies names, scale, camera, time or colour in the query."""
+    with search_stage("query_signals"):
+        try:
+            signals = _signals.parse(query, _signals.vocabulary(db))
+        except Exception as exc:  # noqa: BLE001 - signals are optional
+            _LOGGER.warning("query signals unavailable: %s", exc)
+            return ordered
+        if not signals:
+            return ordered
+        head = ordered[:_SIGNAL_DEPTH]
+        ids = [_candidate_unit_id(candidate) for candidate in head]
+        resident = _resident.rows(db, "units", key_column="unit_id", columns=_SIGNAL_COLUMNS)
+        if resident is not None:
+            units = {row["unit_id"]: row for row in resident.take(ids)}
+        else:
+            units = {_row_id(row): row for row in filtered_rows(
+                db.open_table("units"), columns=["unit_id", *_SIGNAL_COLUMNS], where=_unit_filter(tuple(ids)),
+                limit=len(ids))}
+        evidence = _priors.load_evidence(db, ids)
+        return _signals.reorder(head, signals, units, evidence, unit_id=_candidate_unit_id) + ordered[_SIGNAL_DEPTH:]
 
 
 def _film_titles(db: lancedb.DBConnection) -> dict[str, str]:

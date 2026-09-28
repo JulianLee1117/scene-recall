@@ -33,7 +33,8 @@ _RANK_OFFSET = 20            # relevance(rank) = 1 / (offset + rank): smooth nea
 _STRENGTH = {"balanced": 0.6, "famous": 1.6, "gems": 1.4}
 _MIN_MULTIPLIER = 0.15
 _EVIDENCE_COLUMNS = ["unit_id", "film_id", "scene_id", "fame", "fame_library", "craft", "distinctiveness", "iconic",
-                     "gem", "famous_line", "iconic_note", "hero_path", "hero_time", "characters", "action", "peak_time"]
+                     "gem", "famous_line", "iconic_note", "hero_path", "hero_time", "characters", "action", "peak_time",
+                     "camera", "camera_reliability", "saturation"]
 _SCENE_COLUMNS = ["scene_id", "title", "summary", "t_start", "t_end", "shot_count"]
 MAX_SCENE_ALTERNATIVES = 8
 

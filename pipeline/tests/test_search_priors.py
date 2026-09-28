@@ -69,3 +69,31 @@ def test_presets_are_validated():
     assert priors.validate_preset(None) == "balanced"
     with pytest.raises(ValueError):
         priors.validate_preset("popular")
+
+
+def test_query_signals_parse_names_scale_camera_time_and_colour():
+    from pipeline.search import signals
+
+    vocab = signals.Vocabulary(key=(), phrases={
+        "agent smith": [("character", "matrix", "agent smith")], "smith": [("character", "other", "caleb smith")],
+        "trinity": [("character", "matrix", "trinity")], "keanu reeves": [("character", "matrix", "neo")],
+        "matrix": [("film", "matrix", "matrix")]}, longest=2)
+    parsed = signals.parse("Close-up of Keanu Reeves as Agent Smith hunts him, slow push in at night", vocab)
+    assert parsed.characters == {("matrix", "neo"), ("matrix", "agent smith")}      # longest match claims "smith"
+    assert parsed.scale == "close_up" and parsed.camera == {"push_in"} and parsed.time == "night"
+    assert signals.parse("black and white rain in the matrix", vocab).black_and_white
+    assert signals.parse("black and white rain in the matrix", vocab).films == {"matrix"}
+    assert not signals.parse("a man walks down a street", vocab)
+
+
+def test_query_signals_lift_satisfying_evidence_and_leave_unknowns_neutral():
+    from pipeline.search import signals
+
+    parsed = signals.Signals(characters={("matrix", "trinity")}, scale="close_up")
+    units = {"a": {"film_id": "matrix", "framing": "wide"}, "b": {"film_id": "matrix", "framing": "close_up"},
+             "c": {"film_id": "other", "framing": "unknown"}}
+    evidence = {"b": {"characters": '["Trinity"]'}}
+    assert signals.multiplier(parsed, units["b"], evidence["b"]) > 2.0
+    assert signals.multiplier(parsed, units["a"], None) < 1.0
+    assert signals.multiplier(parsed, units["c"], None) == 1.0
+    assert signals.reorder(["a", "c", "b"], parsed, units, evidence, unit_id=str)[0] == "b"
