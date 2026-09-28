@@ -82,6 +82,75 @@ def _match_evidence(row, rank):
                               matches=matches, channels=channels).model_dump(mode="json")
 
 
+_EVIDENCE_COLUMNS = ["unit_id", "scene_id", "characters", "action", "peak_time", "emotion", "audio_cue", "camera",
+                     "camera_reliability", "camera_segments", "subject", "motion_energy", "fame_library", "craft",
+                     "iconic", "gem", "famous_line"]
+_CAMERA_WORDS = {"static": "static", "pan_left": "pan left", "pan_right": "pan right", "tilt_up": "tilt up",
+                 "tilt_down": "tilt down", "push_in": "push in", "pull_out": "pull out", "roll": "roll",
+                 "diagonal": "diagonal move", "handheld": "handheld"}
+
+
+def _attach_evidence(sources, db):
+    """Evidence v2 for offered sources: what happens and when it peaks, measured camera and subject, fame/craft.
+
+    Stills-guessed camera labels are replaced by measured movement where it is
+    reliable and dropped otherwise; sources without evidence keep annotations.
+    """
+    from pipeline.evidence.tables import SCENES, SHOT_EVIDENCE
+    from pipeline.index.writer import table_names
+    from pipeline.search.retrieve import _any_of
+    try:
+        names = table_names(db)
+        if SHOT_EVIDENCE not in names:
+            return
+        identities = tuple(sources)
+        rows = {row["unit_id"]: row for row in db.open_table(SHOT_EVIDENCE).search().where(_any_of("unit_id", identities))
+                .select(_EVIDENCE_COLUMNS).limit(len(identities) + 1).to_list()}
+        scene_ids = tuple({row["scene_id"] for row in rows.values() if row.get("scene_id")})
+        scenes = ({row["scene_id"]: row for row in db.open_table(SCENES).search().where(_any_of("scene_id", scene_ids))
+                   .select(["scene_id", "title", "summary"]).limit(len(scene_ids) + 1).to_list()}
+                  if scene_ids and SCENES in names else {})
+    except Exception:  # noqa: BLE001 - optional evidence never blocks selection
+        return
+    for identity, source in sources.items():
+        row = rows.get(identity)
+        if row is None:
+            continue
+        packed = {}
+        if row.get("action"):
+            packed["action"] = row["action"]
+        if row.get("characters"):
+            packed["characters"] = json.loads(row["characters"])[:8]
+        for key in ("emotion", "audio_cue", "famous_line"):
+            if row.get(key):
+                packed[key] = row[key]
+        if row.get("peak_time") is not None:
+            packed["peak_time"] = round(float(row["peak_time"]), 2)
+        scene = scenes.get(row.get("scene_id") or "")
+        if scene:
+            packed["scene"] = {"title": scene.get("title") or "", "summary": scene.get("summary") or ""}
+        reliable = float(row.get("camera_reliability") or 0.0) >= 0.5
+        if row.get("camera") and reliable:
+            packed["camera"] = {"movement": _CAMERA_WORDS.get(row["camera"], row["camera"]),
+                                "segments": json.loads(row.get("camera_segments") or "[]")[:6]}
+        if row.get("subject"):
+            subject = json.loads(row["subject"])
+            packed["subject"] = {key: subject.get(key) for key in ("class", "center", "size", "direction")}
+        if row.get("motion_energy") is not None:
+            packed["subject_motion"] = round(float(row["motion_energy"]), 4)
+        for key in ("fame_library", "craft"):
+            if row.get(key) is not None:
+                packed["fame" if key == "fame_library" else key] = round(float(row[key]), 2)
+        packed["iconic"], packed["gem"] = bool(row.get("iconic")), bool(row.get("gem"))
+        source["evidence"] = packed
+        metadata = source.get("metadata")
+        if isinstance(metadata, dict):
+            if "camera" in packed:
+                metadata["camera_motion"] = packed["camera"]["movement"]
+            else:
+                metadata.pop("camera_motion", None)
+
+
 def _hydrate_metadata(sources, db):
     """Public results omit annotations; hydrate only the bounded offered IDs."""
     from pipeline.index.writer import table_names
@@ -296,6 +365,7 @@ def fill_timeline(document, config, db, progress, job_id, slot_ids=None, *, sugg
         progress("Scene options ready; choose a scene to place it")
         return document
     _hydrate_metadata(offered, db)
+    _attach_evidence(offered, db)
 
     clips_by_id = {clip["id"]: clip for clip in document["clips"]}
     from pipeline.lab.direction_planner import _source_context
