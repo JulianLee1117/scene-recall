@@ -169,6 +169,18 @@ def cmd_refresh(args) -> int:
     return 0 if not any(isinstance(result, dict) and "error" in result for result in summary.values()) else 1
 
 
+def cmd_prune(args) -> int:
+    from pipeline.evidence import maintenance
+    config = _config(args.config)
+    _db, films = _films(config, args.film)
+    report = maintenance.prune(config, films, apply=args.apply)
+    for kind, stats in sorted(report["kinds"].items()):
+        print(f"{kind:14s} {stats['entries']:5d} superseded entries  {stats['bytes'] / 1e6:9.1f} MB")
+    print(f"[prune] {'removed' if report['applied'] else 'would remove'} {report['total_mb']} MB"
+          + ("" if report["applied"] else " (dry run; pass --apply)"))
+    return 0
+
+
 def cmd_status(args) -> int:
     from pipeline.evidence import metadata, speech, store, subtitles
     config = _config(args.config)
@@ -224,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     ref = add("refresh", cmd_refresh, "run every evidence pass for the selected films (cached passes skip)")
     ref.add_argument("--local-only", action="store_true", help="skip hosted passes (metadata, subtitles, understanding)")
     ref.add_argument("--skip-measure", action="store_true", help="skip the GPU measurement pass")
+    add("prune", cmd_prune, "list (or --apply to remove) artifacts of superseded producer profiles")         .add_argument("--apply", action="store_true", help="delete; the default only reports")
     add("status", cmd_status, "show evidence coverage")
     args = parser.parse_args(argv)
     return int(args.handler(args) or 0)

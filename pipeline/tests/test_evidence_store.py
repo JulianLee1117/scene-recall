@@ -68,3 +68,30 @@ def test_producer_settings_round_trip_through_json(tmp_path):
     producer = store.Producer("synthesis", "priors", 1, {"levels": (0.0, 0.5), "nested": {"pair": (1, 2)}})
     store.write_artifact(tmp_path, "a" * 64, producer, {"ok": True}, inputs={})
     assert store.read_artifact(tmp_path, "a" * 64, producer)["data"] == {"ok": True}
+
+
+def test_prune_removes_only_superseded_profiles_when_current_exists(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from pipeline.evidence import maintenance
+    from pipeline.evidence.library import FilmRef
+
+    monkeypatch.setattr(maintenance, "current_profiles",
+                        lambda: {"synthesis": "priors-v2-aaaaaaaaaa", "understanding": "gemini-shots-v1-bbbbbbbbbb"})
+    film = "a" * 64
+    synthesis = tmp_path / film / "evidence" / "synthesis"
+    synthesis.mkdir(parents=True)
+    (synthesis / "priors-v2-aaaaaaaaaa.json").write_text("{}")
+    (synthesis / "priors-v1-cccccccccc.json").write_text("{}")
+    understanding = tmp_path / film / "evidence" / "understanding"
+    (understanding / "gemini-shots-v1-dddddddddd").mkdir(parents=True)            # only an old profile exists
+    (understanding / "gemini-shots-v1-dddddddddd.json").write_text("{}")
+    config = SimpleNamespace(paths=SimpleNamespace(assets_dir=tmp_path))
+    films = [FilmRef(film_id=film, title="Film (2000)", path=tmp_path / "f.mkv", duration=1.0, fps=24.0)]
+    report = maintenance.prune(config, films)
+    assert report["kinds"] == {"synthesis": {"entries": 1, "bytes": 2}} and not report["applied"]
+    assert (synthesis / "priors-v1-cccccccccc.json").exists()
+    maintenance.prune(config, films, apply=True)
+    assert not (synthesis / "priors-v1-cccccccccc.json").exists()
+    assert (synthesis / "priors-v2-aaaaaaaaaa.json").exists()
+    assert (understanding / "gemini-shots-v1-dddddddddd.json").exists()           # protected: no current profile yet

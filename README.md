@@ -31,6 +31,7 @@ uv run python -m pipeline.evidence hero
 uv run python -m pipeline.evidence synthesize
 uv run python -m pipeline.evidence compile                     # search tables + semantic text views
 uv run python -m pipeline.evidence refresh --film "Title"      # every pass for chosen films
+uv run python -m pipeline.evidence prune [--apply]             # remove superseded producer profiles
 ```
 
 Every command accepts `--film` (repeatable: film ID, 8+ character ID prefix or
