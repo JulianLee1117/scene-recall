@@ -1,0 +1,15 @@
+.storage { min-width: 0; color: #c7c3bc; font-size: .76rem; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.summary { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 13px; }
+.summary strong { font-size: .84rem; font-weight: 500; white-space: nowrap; }
+.summary strong > span { color: #9f9b94; font-weight: 400; }
+.volume { color: #c0bcb5; white-space: nowrap; }
+.volume > span { margin-right: 3px; color: #8e8a83; }
+.breakdown { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; margin-top: 1px; color: #8f8b84; font-size: .68rem; }
+.breakdown > span { white-space: nowrap; }
+.pending { color: #96928b; font-size: .76rem; }
+.status { color: #a99983; }
+.refresh { display: inline-grid; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #89857d; cursor: pointer; }
+.refresh:hover:not(:disabled) { color: #e0c6a4; background: #ffffff07; }
+.refresh:focus-visible { outline: 2px solid #d4a96a; outline-offset: 2px; }
+.refresh:disabled { cursor: default; opacity: .4; }
+@media (max-width: 600px) { .summary { gap: 3px 11px; } }

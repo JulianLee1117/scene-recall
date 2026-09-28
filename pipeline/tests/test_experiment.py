@@ -585,6 +585,15 @@ def test_provenance_marks_git_failure_unknown(
         config.models.visual_encoder
     )
     assert provenance["models"]["text_profile_checked"] is False
+    from pipeline.ingest.text_embed import (
+        SEMANTIC_QUERY_INSTRUCTION,
+        SEMANTIC_QUERY_INSTRUCTION_VERSION,
+    )
+
+    assert provenance["models"]["semantic_query_policy"] == {
+        "instruction": SEMANTIC_QUERY_INSTRUCTION,
+        "version": SEMANTIC_QUERY_INSTRUCTION_VERSION,
+    }
 
 
 def test_run_cli_refuses_existing_output_before_database_work(

@@ -14,6 +14,14 @@ import pytest
 from pipeline.config import Config
 
 
+@pytest.fixture(autouse=True)
+def _forbid_unmocked_whisper(monkeypatch):
+    def unexpected_model(*args, **kwargs):
+        raise AssertionError("Dialogue tests must never load a real Whisper model")
+
+    monkeypatch.setattr("pipeline.ingest.dialogue.WhisperModel", unexpected_model)
+
+
 # ---------------------------------------------------------------------------
 # SRT sample data
 # ---------------------------------------------------------------------------
@@ -59,10 +67,9 @@ Hello &amp; world
 
 def _seconds_to_srt(s: float) -> str:
     """Convert float seconds to SRT timestamp string HH:MM:SS,mmm."""
-    h = int(s // 3600)
-    m = int((s % 3600) // 60)
-    sec = int(s % 60)
-    ms = int(round((s - int(s)) * 1000))
+    seconds, ms = divmod(round(s * 1000), 1000)
+    h, remainder = divmod(seconds, 3600)
+    m, sec = divmod(remainder, 60)
     return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
 
 
@@ -73,6 +80,19 @@ def _usable_external_srt(prefix: str = "Ordinary dialogue") -> str:
             f"{index}\n"
             f"{_seconds_to_srt(index * 2 - 1)} --> {_seconds_to_srt(index * 2)}\n"
             f"{prefix} line {index} has several spoken words.\n"
+        )
+    return "\n".join(blocks) + "\n"
+
+
+def _full_embedded_srt(*, repeat_first: int = 0) -> str:
+    """Diverse English dialogue covering the 30-second synthetic film."""
+    blocks = []
+    for index in range(40):
+        label = "repeated" if index < repeat_first else chr(97 + index // 26) + chr(97 + index % 26)
+        blocks.append(
+            f"{index + 1}\n"
+            f"{_seconds_to_srt(.2 + index * .7)} --> {_seconds_to_srt(.55 + index * .7)}\n"
+            f"You know what they want because we are here with something for them {label}.\n"
         )
     return "\n".join(blocks) + "\n"
 
@@ -280,7 +300,7 @@ def test_extract_dialogue_returns_list(config: Config, tmp_path: Path) -> None:
 
     film = _make_film(tmp_path, has_embedded_subs=True)
 
-    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(SRT_TWO_LINES, film.asset_dir)):
+    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(_full_embedded_srt(), film.asset_dir)):
         result = extract_dialogue(film, config)
 
     assert isinstance(result, list)
@@ -292,7 +312,7 @@ def test_extract_dialogue_returns_dialogue_line_instances(config: Config, tmp_pa
 
     film = _make_film(tmp_path, has_embedded_subs=True)
 
-    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(SRT_TWO_LINES, film.asset_dir)):
+    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(_full_embedded_srt(), film.asset_dir)):
         result = extract_dialogue(film, config)
 
     assert all(isinstance(line, DialogueLine) for line in result)
@@ -302,14 +322,8 @@ def test_extract_dialogue_count_within_tolerance(config: Config, tmp_path: Path)
     """extract_dialogue on a clip with known subtitle count returns a list within ±2 lines."""
     from pipeline.ingest.dialogue import extract_dialogue
 
-    EXPECTED = 5
-
-    srt_entries = []
-    for i in range(1, EXPECTED + 1):
-        start = _seconds_to_srt(float(i * 2 - 1))
-        end = _seconds_to_srt(float(i * 2))
-        srt_entries.append(f"{i}\n{start} --> {end}\nLine {i}\n")
-    srt_content = "\n".join(srt_entries) + "\n"
+    EXPECTED = 40
+    srt_content = _full_embedded_srt()
 
     film = _make_film(tmp_path, has_embedded_subs=True)
 
@@ -325,7 +339,7 @@ def test_extract_dialogue_saves_dialogue_json(config: Config, tmp_path: Path) ->
 
     film = _make_film(tmp_path, has_embedded_subs=True)
 
-    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(SRT_TWO_LINES, film.asset_dir)):
+    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(_full_embedded_srt(), film.asset_dir)):
         extract_dialogue(film, config)
 
     json_path = film.asset_dir / "dialogue.json"
@@ -501,12 +515,12 @@ def test_dialogue_json_is_valid_list_of_dicts(config: Config, tmp_path: Path) ->
 
     film = _make_film(tmp_path, has_embedded_subs=True)
 
-    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(SRT_TWO_LINES, film.asset_dir)):
+    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(_full_embedded_srt(), film.asset_dir)):
         extract_dialogue(film, config)
 
     data = json.loads((film.asset_dir / "dialogue.json").read_text(encoding="utf-8"))
     assert isinstance(data, list)
-    assert len(data) == 2
+    assert len(data) == 40
     for entry in data:
         assert "start" in entry
         assert "end" in entry
@@ -519,7 +533,7 @@ def test_dialogue_json_timestamps_match(config: Config, tmp_path: Path) -> None:
 
     film = _make_film(tmp_path, has_embedded_subs=True)
 
-    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(SRT_TWO_LINES, film.asset_dir)):
+    with patch("subprocess.run", side_effect=_fake_ffmpeg_writer(_full_embedded_srt(), film.asset_dir)):
         result = extract_dialogue(film, config)
 
     data = json.loads((film.asset_dir / "dialogue.json").read_text(encoding="utf-8"))
@@ -834,6 +848,9 @@ def test_whisper_gate_does_not_apply_to_subtitle_sources(
         )
         ffmpeg_effect = None
     else:
+        # A repeated passage may be genuine subtitle evidence. Keep enough
+        # surrounding diverse English text for the embedded coverage gate.
+        repeated_subtitles = _full_embedded_srt(repeat_first=16)
         ffmpeg_effect = _fake_ffmpeg_writer(repeated_subtitles, film.asset_dir)
 
     with (
@@ -842,8 +859,12 @@ def test_whisper_gate_does_not_apply_to_subtitle_sources(
     ):
         result = extract_dialogue(film, config)
 
-    assert len(result) == 16
-    assert all(line.text == "The same actual subtitle words" for line in result)
+    if subtitle_source == "external":
+        assert len(result) == 16
+        assert all(line.text == "The same actual subtitle words" for line in result)
+    else:
+        assert len(result) == 40
+        assert len({line.text for line in result[:16]}) == 1
     whisper.assert_not_called()
 
 
@@ -940,7 +961,7 @@ def test_extract_dialogue_maps_selected_text_subtitle_stream(
     film = _make_film(tmp_path, text_subtitle_stream_index=3)
     with patch(
         "subprocess.run",
-        side_effect=_fake_ffmpeg_writer(SRT_TWO_LINES, film.asset_dir),
+        side_effect=_fake_ffmpeg_writer(_full_embedded_srt(), film.asset_dir),
     ) as run:
         extract_dialogue(film, config)
 
@@ -976,3 +997,93 @@ def test_extract_dialogue_uses_whisper_for_bitmap_only_subtitles(
         language_detection_threshold=1.0,
         language_detection_segments=5,
     )
+
+
+@pytest.mark.parametrize("streams", [
+    [{"index": 2, "codec_type": "subtitle", "codec_name": "subrip",
+      "tags": {"language": "eng"}, "disposition": {"forced": 1}}],
+    [{"index": 2, "codec_type": "subtitle", "codec_name": "subrip",
+      "tags": {"language": "fra"}}],
+    [{"index": index, "codec_type": "subtitle", "codec_name": "subrip",
+      "tags": {"language": "eng"}} for index in (2, 3)],
+])
+def test_extract_dialogue_uses_whisper_when_embedded_metadata_is_ineligible_or_ambiguous(
+    config: Config, tmp_path: Path, streams: list[dict],
+) -> None:
+    from pipeline.ingest.dialogue import extract_dialogue
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    film = _make_film(tmp_path, text_subtitle_stream_index=_text_subtitle_stream_index({"streams": streams}))
+    fake_model = MagicMock()
+    fake_model.transcribe.return_value = ([], MagicMock())
+    with (
+        patch("pipeline.ingest.dialogue.WhisperModel", return_value=fake_model),
+        patch("pipeline.ingest.dialogue.subprocess.run") as ffmpeg,
+    ):
+        extract_dialogue(film, config)
+
+    ffmpeg.assert_not_called()
+    fake_model.transcribe.assert_called_once()
+    manifest = json.loads((film.asset_dir / "dialogue.manifest.json").read_text(encoding="utf-8"))
+    assert manifest["kind"] == "whisper"
+
+
+def test_embedded_cache_tracks_selected_stream_without_global_contract_bump(
+    config: Config, tmp_path: Path,
+) -> None:
+    from pipeline.ingest.dialogue import dialogue_cache_is_current, extract_dialogue
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    film = _make_film(tmp_path, text_subtitle_stream_index=2)
+    forced = {"index": 2, "codec_type": "subtitle", "codec_name": "subrip",
+              "tags": {"language": "eng"}, "disposition": {"forced": 1}}
+    full = {"index": 3, "codec_type": "subtitle", "codec_name": "subrip",
+            "tags": {"language": "eng"}}
+    with patch("pipeline.ingest.dialogue.subprocess.run",
+               side_effect=_fake_ffmpeg_writer(_full_embedded_srt(), film.asset_dir)) as ffmpeg:
+        # Simulate evidence cached under the former first-convertible rule.
+        extract_dialogue(film, config)
+        assert dialogue_cache_is_current(film, config)
+        film.text_subtitle_stream_index = _text_subtitle_stream_index({"streams": [forced, full]})
+        assert not dialogue_cache_is_current(film, config)
+        extract_dialogue(film, config)
+        command = ffmpeg.call_args.args[0]
+        assert command[command.index("-map") + 1] == "0:3"
+
+    assert dialogue_cache_is_current(film, config)
+    manifest = json.loads((film.asset_dir / "dialogue.manifest.json").read_text(encoding="utf-8"))
+    validation = manifest.pop("subtitle_validation")
+    assert validation["stream_index"] == 3
+    assert validation["validation"]["automatic_eligible"] is True
+    assert manifest == {"contract_version": 2, "kind": "embedded_text",
+                        "film_id": film.film_id, "stream_index": 3}
+    # Reordering unchanged eligible evidence preserves the cache; abstaining
+    # from a now-ineligible track invalidates the former embedded source.
+    film.text_subtitle_stream_index = _text_subtitle_stream_index({"streams": [full, forced]})
+    assert dialogue_cache_is_current(film, config)
+    film.text_subtitle_stream_index = _text_subtitle_stream_index({"streams": [forced]})
+    assert not dialogue_cache_is_current(film, config)
+
+
+def test_canonical_sidecar_precedence_and_cache_ignore_embedded_selection_changes(
+    config: Config, tmp_path: Path,
+) -> None:
+    from pipeline.ingest.dialogue import dialogue_cache_is_current, extract_dialogue
+
+    film = _make_film(tmp_path, text_subtitle_stream_index=2)
+    sidecar = film.path.with_name(film.path.stem + ".en.srt")
+    sidecar.write_text(_usable_external_srt(), encoding="utf-8")
+    raw = sidecar.read_bytes()
+    with (
+        patch("pipeline.ingest.dialogue.subprocess.run") as ffmpeg,
+        patch("pipeline.ingest.dialogue.WhisperModel") as whisper,
+    ):
+        result = extract_dialogue(film, config)
+
+    assert len(result) == 8
+    ffmpeg.assert_not_called()
+    whisper.assert_not_called()
+    assert dialogue_cache_is_current(film, config)
+    film.text_subtitle_stream_index = None
+    assert dialogue_cache_is_current(film, config)
+    assert sidecar.read_bytes() == raw

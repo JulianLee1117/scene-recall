@@ -59,8 +59,11 @@ from pipeline.ingest.locks import (
     global_ingest_lock,
     require_no_pending_film_relink,
 )
-from pipeline.ingest.media import extract_media, keyframe_seek_time
+from pipeline.ingest.media import (
+    extract_media, keyframe_paths, keyframe_timestamp, keyframe_timestamp_source,
+)
 from pipeline.ingest.probe import FilmRecord, probe_film
+from pipeline.ingest.playback import PlaybackPreparationError, prepare_playback
 from pipeline.ingest.shots import Shot, detect_shots
 
 
@@ -157,6 +160,13 @@ def _run_pipeline_locked(
     extract_media(film, shots, config)
     print(f"[media] {time.perf_counter() - t:.2f}s")
 
+    # Optional browser audio repair uses copied video and CPU-only AAC encoding.
+    # Source-identity changes deliberately propagate and stop ingestion.
+    try:
+        prepare_playback(film, config.paths.playback_dir)
+    except PlaybackPreparationError as exc:
+        print(f"[playback] warning: {exc}; continuing ingestion", flush=True)
+
     # ------------------------------------------------------------------
     # Stages 5-7: Embed + Annotate + Write — always run (per shot)
     # ------------------------------------------------------------------
@@ -166,13 +176,7 @@ def _run_pipeline_locked(
     t = time.perf_counter()
     pending_frames: list[FrameWrite] = []
     shot_image_vectors: list[np.ndarray] = []
-    shot_keyframes = [
-        [
-            film.asset_dir / "keyframes" / f"{shot.shot_id}_{frame_index}.webp"
-            for frame_index in range(len(shot.keyframe_times))
-        ]
-        for shot in shots
-    ]
+    shot_keyframes = [keyframe_paths(film, shot) for shot in shots]
     all_keyframes = [
         path
         for keyframes in shot_keyframes
@@ -198,11 +202,12 @@ def _run_pipeline_locked(
                     unit_id=shot.shot_id,
                     shot_id=shot.shot_id,
                     frame_index=frame_index,
-                    timestamp=keyframe_seek_time(shot, frame_index),
+                    timestamp=keyframe_timestamp(film, shot, frame_index),
                     path=path,
                     visual_encoder=config.models.visual_encoder,
                     visual_vec=vector,
                     is_representative=frame_index == len(keyframes) // 2,
+                    timestamp_source=keyframe_timestamp_source(shot),
                 )
             )
     print(f"[embed] {len(all_keyframes)} keyframes", flush=True)
@@ -292,6 +297,12 @@ def _run_pipeline_locked(
         f"\nSummary: {len(shots)} shots | {total_time:.1f}s total | {row_count} DB rows"
     )
 
+    try:
+        from pipeline.index.search_features import queue_published_film
+        job = queue_published_film(config, db, film.film_id)
+        print(f"[search-features] queued optional preparation {job['id']}", flush=True)
+    except Exception as exc:
+        print(f"[search-features] optional preparation deferred: {exc}", flush=True)
     return film
 
 

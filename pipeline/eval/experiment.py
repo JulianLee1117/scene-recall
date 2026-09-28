@@ -258,6 +258,10 @@ def _text_retrieval_provenance(
         configured_text_profile,
         resolve_ready_text_profile,
     )
+    from pipeline.ingest.text_embed import (
+        SEMANTIC_QUERY_INSTRUCTION,
+        SEMANTIC_QUERY_INSTRUCTION_VERSION,
+    )
 
     configured = configured_text_profile(config)
     active = None
@@ -268,6 +272,10 @@ def _text_retrieval_provenance(
             active = None
     return {
         "configured_semantic_text_profile": asdict(configured),
+        "semantic_query_policy": {
+            "instruction": SEMANTIC_QUERY_INSTRUCTION,
+            "version": SEMANTIC_QUERY_INSTRUCTION_VERSION,
+        },
         "active_semantic_text_profile": (
             asdict(active) if active is not None else None
         ),

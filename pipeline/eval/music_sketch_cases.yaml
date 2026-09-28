@@ -1,0 +1,50 @@
+version: 1
+status: awaiting_human_passages_and_judgments
+instructions:
+  - Supply three real imported passages before freezing the acceptance slice.
+  - Compare a manual draft and an AI draft with the same passage and film scope.
+  - Judge played edits, not captions, isolated frames or beat proximity alone.
+  - Keep synthetic technical verification separate from these quality cases.
+cases:
+  - id: emotional_build
+    intended_character: sparse or contemplative music with a clear emotional change
+    project_id: null
+    passage: null
+    film_scope: []
+    interpretation_grade: null
+    scene_relevance_grade: null
+    progression_grade: null
+    timing_grade: null
+    useful_clips_kept: null
+    total_clips: null
+    manual_minutes: null
+    ai_edit_minutes: null
+    failure_notes: []
+  - id: rhythmic_contrast
+    intended_character: strong pulse with a contrasting phrase or drop
+    project_id: null
+    passage: null
+    film_scope: []
+    interpretation_grade: null
+    scene_relevance_grade: null
+    progression_grade: null
+    timing_grade: null
+    useful_clips_kept: null
+    total_clips: null
+    manual_minutes: null
+    ai_edit_minutes: null
+    failure_notes: []
+  - id: ambiguous_texture
+    intended_character: ambient or irregular timing that should not force constant cuts
+    project_id: null
+    passage: null
+    film_scope: []
+    interpretation_grade: null
+    scene_relevance_grade: null
+    progression_grade: null
+    timing_grade: null
+    useful_clips_kept: null
+    total_clips: null
+    manual_minutes: null
+    ai_edit_minutes: null
+    failure_notes: []

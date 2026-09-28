@@ -1,0 +1,30 @@
+.panel, .form, .choices { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.anchor { display: flex; align-items: flex-start; gap: 8px; padding: 9px; border: 1px solid #39352d; border-radius: 5px; background: #1d1b17; }
+.anchor > svg { flex-shrink: 0; margin-top: 2px; color: var(--accent, #d0ad75); }
+.anchor strong { display: block; font-size: 11px; line-height: 1.4; }
+.anchor span { display: block; margin-top: 3px; color: #aaa; font-size: 10px; line-height: 1.4; }
+.form label { display: block; font-size: 11px; line-height: 1.5; }
+.optional { margin-left: 5px; color: #8e8e8e; font-size: 10px; }
+.form textarea { display: block; width: 100%; min-height: 58px; box-sizing: border-box; margin-top: 5px; padding: 8px; resize: vertical; background: #101010; color: var(--fg, #ddd); border: 1px solid #383838; border-radius: 4px; font: inherit; }
+.form .check { display: flex; align-items: center; gap: 7px; }
+.check input { margin: 0; accent-color: var(--accent, #d0ad75); }
+.check span { margin-left: auto; font-size: 10px; color: #929292; }
+.panel button.find { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-color: #7f6b4c; background: #372f23; color: #ead4b1; }
+.panel button.find { width: 100%; padding: 8px; font-size: 11px; }
+.note, .warning { margin: 0; color: #aaa; font-size: 10.5px; line-height: 1.5; }
+.warning { color: #d8b098; }
+.more summary { color: #aaa; cursor: pointer; font-size: 10.5px; }
+.more p { margin: 6px 0; color: #999; font-size: 10px; line-height: 1.5; }
+.more label { margin-top: 7px; }
+.choice { padding: 9px; border: 1px solid #363636; border-radius: 5px; background: #1a1a1a; }
+.choiceTop { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 9px; }
+.choiceTop strong { display: block; color: #ddd; font-size: 11px; font-weight: 550; line-height: 1.4; }
+.choiceTop p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 3px 0; color: #aaa; font-size: 10.5px; line-height: 1.4; }
+.choiceTop small { color: #aaa; font-size: 9.5px; line-height: 1.4; }
+.panel .thumbnail { position: relative; width: 74px; height: 53px; padding: 0; background: #080808; overflow: hidden; border: 1px solid #424242; }
+.thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.thumbnail span { position: absolute; inset: auto 0 0; display: flex; align-items: center; justify-content: center; gap: 4px; color: #eee; background: #0009; font-size: 10px; padding: 2px; }
+.choiceActions { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin-top: 9px; }
+.panel .choiceActions button { padding: 5px 8px; font-size: 10px; }
+.choice .more { margin-top: 9px; }
+.choice > .warning { margin-top: 7px; }

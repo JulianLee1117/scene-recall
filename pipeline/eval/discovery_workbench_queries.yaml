@@ -1,0 +1,24 @@
+version: 1
+scope:
+  film_ids: []
+instructions:
+  - Proposed acceptance prompts, not human judgments or a frozen corpus.
+  - Replace or approve these with real remembered/imagined scenes before judging.
+  - Record expected known scenes without viewing results first.
+  - Compare current ranking before changing weights or adding evidence profiles.
+queries:
+  - {id: feeling_01, category: emotional_imagery, query: "quiet loneliness in a crowded city"}
+  - {id: feeling_02, category: emotional_imagery, query: "a person watching the world through a window"}
+  - {id: feeling_03, category: emotional_imagery, query: "reunion after a long separation"}
+  - {id: feeling_04, category: emotional_imagery, query: "peaceful acceptance beside the sea"}
+  - {id: visual_01, category: visible_evidence, query: "sunlight passing through leaves"}
+  - {id: visual_02, category: visible_evidence, query: "a solitary silhouette against an open landscape"}
+  - {id: shot_01, category: shot_scale, query: "extreme close-up of one eye"}
+  - {id: shot_02, category: shot_scale, query: "side profile close-up of a face"}
+  - {id: shot_03, category: shot_scale, query: "wide shot of a small person in a vast landscape"}
+  - {id: action_01, category: temporal_evidence, query: "a hand slowly reaching toward another hand"}
+  - {id: action_02, category: temporal_evidence, query: "a person turning their head to the left"}
+  - {id: camera_01, category: temporal_evidence, query: "camera pushing toward a still face"}
+  - {id: theme_01, category: narrative_evidence, query: "someone chooses to leave their old life behind"}
+  - {id: dialogue_01, category: broad_words, query: "I remember"}
+  - {id: graphic_01, category: graphic_rhyme, query: "circular light against a dark background"}

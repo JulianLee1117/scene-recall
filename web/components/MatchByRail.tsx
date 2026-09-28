@@ -1,9 +1,23 @@
 "use client";
-
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import FacetIcon from "./FacetIcon";
+import DirectionIcon from "./DirectionIcon";
 import { formatTime } from "@/lib/format";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
+import { referenceGateCopy, SEARCH_CLUE_COPY } from "@/lib/searchClues";
+import {
+  SCENE_POINTER_EVENT,
+  useScenePointerDrag,
+  type ScenePointerDetail,
+} from "@/hooks/useScenePointerDrag";
 import {
   FACET_LABELS,
   MATCH_FACETS,
@@ -23,26 +37,27 @@ import type {
   RecipeMatchFacet,
   ResolvedSourceEvidence,
 } from "@/types/api";
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const IMAGE_SOURCE_MIME = "application/x-scene-recall-image-source";
-const IMAGE_FACETS: readonly RecipeImageFacet[] = ["look", "composition"];
-
-const FACET_PLACEHOLDERS: Record<TextMatchFacet, string> = {
-  scene: "People, objects, actions, setting…",
-  words: "Spoken or visible text…",
-  look: "Color, light, texture, style…",
-  mood: "Feeling or energy…",
+const PLACEHOLDERS: Record<TextMatchFacet, string> = {
+  scene: "A person running through a city…",
+  words: "Something someone says…",
+  look: "Blue light, warm grain, silhouettes…",
+  mood: "Dreamlike, tense, joyful…",
 };
-
+const SHORT_COPY: Record<RecipeMatchFacet, string> = {
+  scene: "People, actions & setting",
+  words: "Dialogue & on-screen text",
+  look: "Color, light & texture",
+  composition: "Subject positions & layout",
+  mood: "Feeling & energy",
+};
 interface MatchByRailProps {
   clauseCount: number;
   drafts: MatchDrafts;
   image?: RecipeImageInput | null;
   sourceEvidence?: Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>;
   debug?: boolean;
-  onActivateText?: (facet: TextMatchFacet) => void;
-  onTextChange?: (facet: TextMatchFacet, text: string) => void;
   onCommitText?: (facet: TextMatchFacet, text: string) => void;
   onRemove?: (facet: RecipeMatchFacet) => void;
   onBrowse?: (facet: RecipeMatchFacet) => void;
@@ -56,144 +71,100 @@ interface MatchByRailProps {
   onRemoveImage?: () => void;
   onLimit?: () => void;
   targetFacet?: RecipeMatchFacet;
+  referencePicker?: ReactNode;
+  referenceHasResults?: boolean;
+  controls?: ReactNode;
+  idleContent?: ReactNode;
+  onCloseReference?: () => void;
 }
-
-interface SourceInputCopy {
-  text: string;
-  adapter: string;
-  debugDetail?: string;
+function imageFacet(facet: RecipeMatchFacet): facet is RecipeImageFacet {
+  return facet === "look" || facet === "composition";
 }
-
-const SOURCE_TEXT_VIEW_LABELS: Record<string, string> = {
-  caption: "Scene description",
-  dialogue: "Dialogue",
-  ocr: "On-screen text",
-  facets: "Scene detail",
-  mood: "Mood",
-};
-
-function sourceEvidenceMatches(
-  draft: Extract<MatchDraft, { kind: "source" }>,
-  evidence: ResolvedSourceEvidence | undefined,
-): evidence is ResolvedSourceEvidence {
-  if (!evidence || !("unit_id" in evidence.source)) return false;
+interface ClueDragSource {
+  draft: MatchDraft | undefined;
+  image: boolean;
+  facet: RecipeMatchFacet;
+  title: string;
+  thumbnail: string | null;
+}
+function useClueSourceDrag({
+  draft,
+  image,
+  facet,
+  title,
+  thumbnail,
+}: ClueDragSource) {
+  const [dragging, setDragging] = useState(false);
+  const source = !image && draft?.kind === "source" ? draft : null;
+  const pointer = useScenePointerDrag(source, {
+    originFacet: facet,
+    onDragging: setDragging,
+  });
+  return {
+    ...pointer,
+    draggable: image || Boolean(source),
+    "data-dragging": dragging || undefined,
+    onDragStart(event: DragEvent<HTMLElement>) {
+      pointer.onDragStart(event);
+      if (event.defaultPrevented) return;
+      if (image) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(IMAGE_SOURCE_MIME, facet);
+      } else if (
+        !source ||
+        !writeFacetSourceDrag(event.dataTransfer, source, facet)
+      ) {
+        event.preventDefault();
+        return;
+      }
+      setNativeDragPreview(event.dataTransfer, {
+        eyebrow: `Moving ${FACET_LABELS[facet]}`,
+        title,
+        detail: source && typeof source.display?.timestamp === "number"
+          ? formatTime(source.display.timestamp)
+          : undefined,
+        imageUrl: thumbnail ?? undefined,
+      });
+      setDragging(true);
+    },
+    onDragEnd() { setDragging(false); },
+  };
+}
+function ClueChip({
+  source,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { source: ClueDragSource }) {
+  const drag = useClueSourceDrag(source);
+  return <button {...props} {...drag} />;
+}
+function ClueSource(source: ClueDragSource) {
+  const drag = useClueSourceDrag(source);
+  const { draft, title, thumbnail } = source;
   return (
-    evidence.source.unit_id === draft.source.unit_id &&
-    evidence.source.frame_index === draft.source.frame_index
-  );
-}
-
-function sourceInputCopy(
-  evidence: ResolvedSourceEvidence | undefined,
-): SourceInputCopy | null {
-  const text = evidence?.effective_text?.trim();
-  if (!text || !evidence) return null;
-  const adapter =
-    evidence.adapter === "dialogue+ocr"
-      ? "dialogue + visible text"
-      : evidence.adapter === "caption"
-        ? "generated scene description"
-        : evidence.adapter === "mood"
-          ? "mood + energy"
-          : evidence.adapter;
-  const debugDetail = evidence.evidence
-    .filter((item) => item.type === "text")
-    .map(
-      (item) =>
-        `${SOURCE_TEXT_VIEW_LABELS[item.view] ?? item.view}: ${item.text}`,
-    )
-    .join(" · ");
-  return { text, adapter, debugDetail: debugDetail || undefined };
-}
-
-function SourceReferenceIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
+    <div
+      className="clue-source"
+      title="Drag to another category"
+      {...drag}
     >
-      <rect x="3" y="6" width="13" height="12" rx="2" />
-      <path d="M7 6V4M12 6V4M7 18v2M12 18v2" />
-      <circle cx="18" cy="16" r="3" />
-      <path d="m20.2 18.2 2 2" />
-    </svg>
+      {thumbnail && <img src={thumbnail} alt="" draggable={false} />}
+      <span>
+        <strong>{title}</strong>
+        <small>
+          {draft?.kind === "source" &&
+          typeof draft.display?.timestamp === "number"
+            ? formatTime(draft.display.timestamp)
+            : "Image reference"}
+        </small>
+      </span>
+    </div>
   );
 }
-
-function SourceInfoIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 11v6" />
-      <path d="M12 7h.01" />
-    </svg>
-  );
-}
-
-function sourceLabel(draft: MatchDraft): string {
-  if (draft.kind !== "source") return "";
-  return draft.display?.filmTitle || `Scene …${draft.source.unit_id.slice(-8)}`;
-}
-
-function sourceDetail(draft: MatchDraft): string {
-  if (draft.kind !== "source") return "";
-  if (typeof draft.display?.timestamp === "number") {
-    return formatTime(draft.display.timestamp);
-  }
-  return `Frame ${(draft.source.frame_index ?? 0) + 1}`;
-}
-
-function containsSceneSource(transfer: DataTransfer): boolean {
-  return transfer.types.includes(SCENE_SOURCE_MIME);
-}
-
-function containsFile(transfer: DataTransfer): boolean {
-  return transfer.types.includes("Files");
-}
-
-function containsImageSource(transfer: DataTransfer): boolean {
-  return transfer.types.includes(IMAGE_SOURCE_MIME);
-}
-
-function isImageFacet(facet: RecipeMatchFacet): facet is RecipeImageFacet {
-  return IMAGE_FACETS.includes(facet as RecipeImageFacet);
-}
-
-function dragIsOutside(event: DragEvent<HTMLDivElement>): boolean {
-  const bounds = event.currentTarget.getBoundingClientRect();
-  return (
-    event.clientX <= bounds.left ||
-    event.clientX >= bounds.right ||
-    event.clientY <= bounds.top ||
-    event.clientY >= bounds.bottom
-  );
-}
-
 export default function MatchByRail({
   clauseCount,
   drafts,
   image,
   sourceEvidence = {},
   debug = false,
-  onActivateText,
-  onTextChange,
   onCommitText,
   onRemove,
   onBrowse,
@@ -203,583 +174,636 @@ export default function MatchByRail({
   onRemoveImage,
   onLimit,
   targetFacet,
+  referencePicker,
+  referenceHasResults = false,
+  controls,
+  idleContent,
+  onCloseReference,
 }: MatchByRailProps) {
-  const [editingFacet, setEditingFacet] =
-    useState<TextMatchFacet | null>(null);
-  const editingInitialTextRef = useRef("");
-  const closingFacetRef = useRef<TextMatchFacet | null>(null);
-  const [dragOverFacet, setDragOverFacet] =
-    useState<RecipeMatchFacet | null>(null);
-  const [dragSourceFacet, setDragSourceFacet] =
-    useState<RecipeMatchFacet | null>(null);
-  const [dragImageFacet, setDragImageFacet] =
-    useState<RecipeImageFacet | null>(null);
-  const [pageSceneDragActive, setPageSceneDragActive] = useState(false);
-  const [inspectingFacet, setInspectingFacet] =
-    useState<RecipeMatchFacet | null>(null);
-  const overLimit = clauseCount > MAX_RECIPE_CLAUSES;
-
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [editorFacet, setEditorFacet] = useState<RecipeMatchFacet | null>(null);
+  const [editorText, setEditorText] = useState("");
+  const [editorMode, setEditorMode] = useState<"text" | "reference">("text");
+  const [aspectTarget, setAspectTarget] = useState<RecipeMatchFacet | null>(null);
+  const railRef = useRef<HTMLElement>(null);
+  const refineButtonRef = useRef<HTMLButtonElement>(null);
+  const textRef = useRef<HTMLInputElement>(null);
+  const aspectRef = useRef<HTMLSelectElement>(null);
+  const aspectButtonRef = useRef<HTMLButtonElement>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [dragFloating, setDragFloating] = useState(false);
+  const [dragKind, setDragKind] = useState<"scene" | "image">("scene");
+  const [movingReference, setMovingReference] = useState(false);
+  const [dragOver, setDragOver] = useState<RecipeMatchFacet | null>(null);
+  const panelId = useId();
+  const openFacet = targetFacet ?? editorFacet;
+  const panelOpen = refineOpen || Boolean(openFacet) || dragActive;
+  const activeFacets = MATCH_FACETS.filter((facet) =>
+    image?.facet === facet || matchDraftHasClause(drafts[facet]));
+  const canUse = (facet: RecipeMatchFacet) =>
+    Boolean(
+      image?.facet === facet ||
+      matchDraftHasClause(drafts[facet]) ||
+      clauseCount < MAX_RECIPE_CLAUSES,
+    );
   useEffect(() => {
-    if (!editingFacet || drafts[editingFacet]?.kind === "text") return;
-    setEditingFacet(null);
-  }, [drafts, editingFacet]);
-
+    if (editorFacet && editorMode === "text") textRef.current?.focus();
+  }, [editorFacet, editorMode]);
   useEffect(() => {
-    if (!inspectingFacet || drafts[inspectingFacet]?.kind === "source") return;
-    setInspectingFacet(null);
-  }, [drafts, inspectingFacet]);
-
-  const canUseFacet = (facet: RecipeMatchFacet) =>
-    image?.facet === facet ||
-    matchDraftHasClause(drafts[facet]) ||
-    (!overLimit && clauseCount < MAX_RECIPE_CLAUSES);
-
-  const canAcceptSceneDrop = (facet: RecipeMatchFacet) => {
-    if (dragSourceFacet === facet) return false;
-    if (dragSourceFacet) return true;
-    return canUseFacet(facet);
-  };
-
-  const canAcceptImageDrop = (facet: RecipeMatchFacet) => {
-    if (targetFacet) return false;
-    if (!isImageFacet(facet)) return false;
-    if (dragImageFacet === facet) return false;
-    if (image || matchDraftHasClause(drafts[facet])) return true;
-    return !overLimit && clauseCount < MAX_RECIPE_CLAUSES;
-  };
-
-  const clearDragState = () => {
-    setDragOverFacet(null);
-    setDragSourceFacet(null);
-    setDragImageFacet(null);
-    setPageSceneDragActive(false);
-  };
-
+    if (aspectTarget) aspectRef.current?.focus();
+  }, [aspectTarget]);
   useEffect(() => {
-    const handleDocumentDragStart = (event: globalThis.DragEvent) => {
-      if (event.dataTransfer && containsSceneSource(event.dataTransfer)) {
-        setPageSceneDragActive(true);
+    if (!panelOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (railRef.current?.contains(event.target as Node)) return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest(".modal-backdrop")
+      )
+        return;
+      setRefineOpen(false);
+      setEditorFacet(null);
+      setAspectTarget(null);
+      if (targetFacet) onCloseReference?.();
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [panelOpen, targetFacet, onCloseReference]);
+  useEffect(() => {
+    const start = (event: globalThis.DragEvent) => {
+      const bounds = railRef.current?.getBoundingClientRect();
+      setDragFloating(
+        Boolean(
+          bounds && (bounds.top < 48 || bounds.bottom > window.innerHeight),
+        ),
+      );
+      const types = event.dataTransfer?.types ?? [];
+      if (types.includes(SCENE_SOURCE_MIME)) {
+        setMovingReference(event.dataTransfer?.effectAllowed === "move");
+        setDragKind("scene");
+        setDragActive(true);
+      } else if (types.includes("Files") || types.includes(IMAGE_SOURCE_MIME)) {
+        setMovingReference(types.includes(IMAGE_SOURCE_MIME));
+        setDragKind("image");
+        setDragActive(true);
       }
     };
-    const handleDocumentDragFinish = () => {
-      setPageSceneDragActive(false);
-      setDragOverFacet(null);
+    const finish = () => {
+      setDragActive(false);
+      setDragOver(null);
     };
-
-    document.addEventListener("dragstart", handleDocumentDragStart);
-    document.addEventListener("dragend", handleDocumentDragFinish);
-    document.addEventListener("drop", handleDocumentDragFinish);
+    const leave = (event: globalThis.DragEvent) => {
+      if (
+        !event.relatedTarget &&
+        (event.clientX <= 0 ||
+          event.clientY <= 0 ||
+          event.clientX >= window.innerWidth ||
+          event.clientY >= window.innerHeight)
+      )
+        finish();
+    };
+    document.addEventListener("dragstart", start);
+    document.addEventListener("dragenter", start);
+    document.addEventListener("dragleave", leave);
+    document.addEventListener("dragend", finish);
+    document.addEventListener("drop", finish);
     return () => {
-      document.removeEventListener("dragstart", handleDocumentDragStart);
-      document.removeEventListener("dragend", handleDocumentDragFinish);
-      document.removeEventListener("drop", handleDocumentDragFinish);
+      document.removeEventListener("dragstart", start);
+      document.removeEventListener("dragenter", start);
+      document.removeEventListener("dragleave", leave);
+      document.removeEventListener("dragend", finish);
+      document.removeEventListener("drop", finish);
     };
   }, []);
-
   useEffect(() => {
-    const outsideTiles = (target: EventTarget | null) =>
-      !(target instanceof Element && target.closest(".match-tile"));
-    const handleDocumentDragOver = (event: globalThis.DragEvent) => {
-      if (!outsideTiles(event.target) || !event.dataTransfer) return;
-      const movingScene = containsSceneSource(event.dataTransfer);
-      const movingImage = containsImageSource(event.dataTransfer);
-      if (!movingScene && !movingImage) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect =
-        event.dataTransfer.effectAllowed === "move" ? "move" : "copy";
-    };
-    const handleDocumentDrop = (event: globalThis.DragEvent) => {
-      if (!outsideTiles(event.target) || !event.dataTransfer) return;
-      const movingScene = containsSceneSource(event.dataTransfer);
-      const movingImage = containsImageSource(event.dataTransfer);
-      if (!movingScene && !movingImage) return;
-      event.preventDefault();
-      if (movingImage) {
-        onRemoveImage?.();
-      } else {
-        const originFacet = readFacetSourceDragOrigin(event.dataTransfer);
-        if (originFacet) onRemove?.(originFacet);
+    const handlePointerScene = (event: Event) => {
+      const detail = (event as CustomEvent<ScenePointerDetail>).detail;
+      if (detail.phase === "end") {
+        setDragActive(false);
+        setDragOver(null);
+        return;
       }
-      setDragOverFacet(null);
-      setDragSourceFacet(null);
-      setDragImageFacet(null);
+      if (detail.phase === "start") {
+        const bounds = railRef.current?.getBoundingClientRect();
+        setDragFloating(
+          Boolean(
+            bounds && (bounds.top < 48 || bounds.bottom > window.innerHeight),
+          ),
+        );
+        setDragKind("scene");
+        setMovingReference(Boolean(detail.originFacet));
+        setDragActive(true);
+        return;
+      }
+      const target = document
+        .elementFromPoint(detail.x, detail.y)
+        ?.closest<HTMLElement>(".clue-card");
+      const facet = target?.dataset.facet as RecipeMatchFacet | undefined;
+      const valid =
+        facet && MATCH_FACETS.includes(facet) && facet !== detail.originFacet;
+      const allowed = valid && (canUse(facet) || Boolean(detail.originFacet));
+      if (detail.phase === "move") {
+        setDragOver(allowed ? facet : null);
+        return;
+      }
+      setDragActive(false);
+      setDragOver(null);
+      if (allowed) {
+        setRefineOpen(false);
+        setEditorFacet(null);
+        setAspectTarget(null);
+        if (targetFacet) onCloseReference?.();
+        onSource?.(facet, detail.draft, detail.originFacet);
+      } else if (valid) onLimit?.();
     };
-
-    document.addEventListener("dragover", handleDocumentDragOver);
-    document.addEventListener("drop", handleDocumentDrop);
-    return () => {
-      document.removeEventListener("dragover", handleDocumentDragOver);
-      document.removeEventListener("drop", handleDocumentDrop);
-    };
-  }, [onRemove, onRemoveImage]);
-
-  const activateText = (facet: TextMatchFacet) => {
-    if (!canUseFacet(facet)) {
+    document.addEventListener(SCENE_POINTER_EVENT, handlePointerScene);
+    return () =>
+      document.removeEventListener(SCENE_POINTER_EVENT, handlePointerScene);
+  }, [clauseCount, drafts, image, onSource, onLimit, targetFacet, onCloseReference]);
+  const accepts = (facet: RecipeMatchFacet, transfer: DataTransfer) => {
+    if (transfer.types.includes(SCENE_SOURCE_MIME))
+      return canUse(facet) || transfer.effectAllowed === "move";
+    return (
+      imageFacet(facet) &&
+      (transfer.types.includes(IMAGE_SOURCE_MIME) ||
+        (!targetFacet && transfer.types.includes("Files"))) &&
+      (canUse(facet) || Boolean(image))
+    );
+  };
+  const drop = (event: DragEvent<HTMLDivElement>, facet: RecipeMatchFacet) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const transfer = event.dataTransfer;
+    setDragActive(false);
+    setDragOver(null);
+    if (!accepts(facet, transfer)) {
       onLimit?.();
       return;
     }
-    const draft = drafts[facet];
-    editingInitialTextRef.current = draft?.kind === "text" ? draft.text : "";
-    closingFacetRef.current = null;
-    setEditingFacet(facet);
-    onActivateText?.(facet);
+    if (transfer.types.includes(SCENE_SOURCE_MIME)) {
+      const source = readSceneSourceDrag(transfer, facet);
+      const origin = readFacetSourceDragOrigin(transfer);
+      if (source && origin !== facet) {
+        closeEditor();
+        onSource?.(facet, source, origin ?? undefined);
+      }
+    } else if (imageFacet(facet)) {
+      if (transfer.types.includes(IMAGE_SOURCE_MIME)) {
+        if (transfer.getData(IMAGE_SOURCE_MIME) !== facet) {
+          closeEditor();
+          onMoveImage?.(facet);
+        }
+      } else {
+        const file = transfer.files.item(0);
+        if (file) {
+          closeEditor();
+          onImageFile?.(file, facet);
+        }
+      }
+    }
   };
+  const closeEditor = () => {
+    setRefineOpen(false);
+    setEditorFacet(null);
+    setAspectTarget(null);
 
-  const finishTextEdit = (
-    facet: TextMatchFacet,
-    text: string,
-    action: "blur" | "commit" | "cancel",
-  ) => {
-    const initialText = editingInitialTextRef.current;
-    closingFacetRef.current = facet;
-    setEditingFacet(null);
-
-    if (action === "cancel") {
-      if (text !== initialText) onCommitText?.(facet, initialText);
-      else if (!initialText.trim()) onRemove?.(facet);
-      return;
-    }
-    if (action === "blur" && text === initialText) {
-      if (!text.trim()) onRemove?.(facet);
-      return;
-    }
-    onCommitText?.(facet, text);
+    if (targetFacet) onCloseReference?.();
   };
 
   const browse = (facet: RecipeMatchFacet) => {
-    if (!canUseFacet(facet)) {
+    if (!canUse(facet)) {
       onLimit?.();
       return;
     }
-    setEditingFacet(null);
-    const draft = drafts[facet];
-    if (draft?.kind === "text" && !draft.text.trim()) onRemove?.(facet);
+
+    setRefineOpen(true);
+    setEditorFacet(null);
+    setAspectTarget(null);
+
     onBrowse?.(facet);
   };
 
-  const sceneDragActive = pageSceneDragActive || Boolean(dragSourceFacet);
-  const railDragActive = sceneDragActive || Boolean(dragImageFacet);
+  const selectFacet = (facet: RecipeMatchFacet) => {
+    if (openFacet === facet) {
+      closeEditor();
+      return;
+    }
+
+    if (!canUse(facet)) {
+      onLimit?.();
+      return;
+    }
+
+    const draft = drafts[facet];
+    const hasReference = draft?.kind === "source" || image?.facet === facet;
+    if (facet === "composition" && !hasReference) {
+      browse(facet);
+      return;
+    }
+
+    if (targetFacet) onCloseReference?.();
+
+    setEditorText(draft?.kind === "text" ? draft.text : "");
+    setRefineOpen(true);
+    setAspectTarget(null);
+    setEditorMode(hasReference ? "reference" : "text");
+    setEditorFacet(facet);
+  };
+
+  const commit = () => {
+    if (!editorFacet || editorFacet === "composition" || !editorText.trim()) return;
+
+    onCommitText?.(editorFacet, editorText);
+
+    setRefineOpen(false);
+    setEditorFacet(null);
+    window.requestAnimationFrame(() => refineButtonRef.current?.focus());
+  };
+
+  const editorDraft = editorFacet ? drafts[editorFacet] : undefined;
+
+  const editorImage = image?.facet === editorFacet ? image : null;
+
+  const editorSource = editorDraft?.kind === "source" ? editorDraft : undefined;
+  const aspectOptions: readonly RecipeMatchFacet[] = editorImage ? MATCH_FACETS.filter(imageFacet) : MATCH_FACETS;
+  const replacingAspect = Boolean(aspectTarget && aspectTarget !== editorFacet
+    && (matchDraftHasClause(drafts[aspectTarget]) || image?.facet === aspectTarget));
+  const aspectMoveFits = clauseCount - (replacingAspect ? 1 : 0) <= MAX_RECIPE_CLAUSES;
+  const commitAspect = () => {
+    if (!editorFacet || !aspectTarget || aspectTarget === editorFacet
+      || !aspectOptions.includes(aspectTarget) || (!editorImage && !editorSource)) return;
+    if (!aspectMoveFits) { onLimit?.(); return; }
+    const target = aspectTarget;
+    closeEditor();
+    if (editorImage && imageFacet(target)) onMoveImage?.(target);
+    else if (editorSource) onSource?.(target, { ...editorSource, facet: target }, editorFacet);
+    window.requestAnimationFrame(() => refineButtonRef.current?.focus());
+  };
+  const gatedReferences = MATCH_FACETS.flatMap((facet) => {
+    const kind = image?.facet === facet ? "image" : drafts[facet]?.kind === "source" ? "source" : null;
+    const copy = kind && referenceGateCopy(facet, kind);
+    return copy ? [{ facet, kind, ...copy }] : [];
+  });
+
+  const evidence = editorFacet ? sourceEvidence[editorFacet] : undefined;
+
+  const evidenceMatches =
+    editorSource &&
+    evidence &&
+    "unit_id" in evidence.source &&
+    evidence.source.unit_id === editorSource.source.unit_id &&
+    evidence.source.frame_index === editorSource.source.frame_index;
 
   return (
     <section
-      className={`match-rail${railDragActive ? " is-drag-active" : ""}`}
-      aria-labelledby="match-rail-label"
+      ref={railRef}
+      className={`match-rail search-clues${dragActive ? " is-drag-active" : ""}${dragActive && dragFloating ? " is-drag-floating" : ""}`}
+      aria-label="Search details"
+      onKeyDown={(event) => {
+        if (railRef.current?.querySelector(".movie-scope-popover")) return;
+        if (event.key === "Escape" && panelOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          closeEditor();
+          refineButtonRef.current?.focus();
+        }
+      }}
     >
-      <div className="match-rail-heading">
-        <span id="match-rail-label">Match by</span>
+      <div className="clues-toolbar">
+        <button
+          ref={refineButtonRef}
+          type="button"
+          className="clues-refine-toggle"
+          aria-expanded={panelOpen}
+          aria-controls={`${panelId}-panel`}
+          onClick={() => {
+            if (panelOpen) closeEditor();
+            else setRefineOpen(true);
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+            <path d="M4 7h4m4 0h8M4 17h8m4 0h4" />
+            <circle cx="10" cy="7" r="2" /><circle cx="14" cy="17" r="2" />
+          </svg>
+          <span>Refine</span>
+          {activeFacets.length > 0 && <span className="clues-refine-count">{activeFacets.length}</span>}
+          <DirectionIcon name="chevron-down" className="clues-refine-chevron" size={12} />
+        </button>
+        {controls && (
+          <div className="clues-tools" onFocusCapture={closeEditor}>
+            {controls}
+          </div>
+        )}
       </div>
 
-      <div className="match-tiles">
+      {activeFacets.length > 0 && (
+        <div className="clues-active" aria-label="Active refinements">
+          {activeFacets.map((facet) => {
+            const draft = drafts[facet];
+            const hasImage = image?.facet === facet;
+            const title = hasImage ? image.display.label
+              : draft?.kind === "source" ? draft.display?.filmTitle || "Reference scene"
+                : draft?.kind === "text" ? draft.text : "";
+            const thumbnail = hasImage ? image.display.previewUrl
+              : draft?.kind === "source" && draft.display?.keyframeUrl ? `${API_URL}${draft.display.keyframeUrl}` : null;
+            return <ClueChip
+              key={facet}
+              source={{ draft, image: hasImage, facet, title, thumbnail }}
+              type="button"
+              className="clue-summary"
+              aria-label={`Edit ${FACET_LABELS[facet]}: ${title}`}
+              aria-expanded={openFacet === facet}
+              aria-controls={`${panelId}-panel`}
+              title={`${FACET_LABELS[facet]}: ${title}`}
+              onClick={() => selectFacet(facet)}
+            >
+              {thumbnail && <img src={thumbnail} alt="" draggable={false} />}
+              <span className="clue-summary-label">{FACET_LABELS[facet]}</span>
+              <span className="clue-summary-value">{title}</span>
+            </ClueChip>;
+          })}
+        </div>
+      )}
+
+      <div
+        id={`${panelId}-panel`}
+        className={`clues-panel${targetFacet && referenceHasResults ? " has-reference-results" : ""}`}
+        hidden={!panelOpen}
+      >
+      <div className="clues-strip" aria-label="Match by">
+
         {MATCH_FACETS.map((facet) => {
           const draft = drafts[facet];
+
           const hasImage = image?.facet === facet;
-          const hasClause = hasImage || matchDraftHasClause(draft);
-          const canUse = canUseFacet(facet);
-          const canDropScene = canAcceptSceneDrop(facet);
-          const canDropImage = canAcceptImageDrop(facet);
-          const canDropActiveSource = dragImageFacet
-            ? canDropImage
-            : sceneDragActive
-              ? canDropScene
-              : false;
-          const isDragOver = dragOverFacet === facet;
-          const isEditing =
-            draft?.kind === "text" && editingFacet === facet;
-          const resolvedSourceEvidence =
-            draft?.kind === "source" &&
-            sourceEvidenceMatches(draft, sourceEvidence[facet])
-              ? sourceEvidence[facet]
-              : undefined;
-          const sourceInput = sourceInputCopy(resolvedSourceEvidence);
-          const sourceEvidenceId = `source-input-${facet}`;
-          const dropCopy = isDragOver && (canDropScene || canDropImage)
-            ? hasClause
-              ? `Replace ${FACET_LABELS[facet]}`
-              : dragSourceFacet || dragImageFacet
-                ? `Move to ${FACET_LABELS[facet]}`
-                : `Use for ${FACET_LABELS[facet]}`
-            : null;
-          const tileClass = [
-            "match-tile",
-            isEditing ? "is-editing" : "",
-            draft?.kind === "text" && !isEditing ? "has-text" : "",
-            draft?.kind === "source" ? "has-source" : "",
-            hasImage ? "has-image" : "",
-            railDragActive && canDropActiveSource
-              ? "is-drop-ready"
-              : "",
-            isDragOver && (canDropScene || canDropImage)
-              ? "is-drag-over"
-              : "",
-            dragSourceFacet === facet ? "is-dragging-source" : "",
-            dragImageFacet === facet ? "is-dragging-source" : "",
-            targetFacet === facet ? "is-reference-target" : "",
-            !canUse &&
-            !hasClause &&
-            !(
-              railDragActive && canDropActiveSource
-            )
-              ? "is-disabled"
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" ");
+
+          const hasSource = draft?.kind === "source";
+
+          const active = matchDraftHasClause(draft) || hasImage;
+
+          const canDrop =
+            (canUse(facet) || movingReference) &&
+            (dragKind === "scene" ||
+              (imageFacet(facet) && (!targetFacet || movingReference)));
+
+          const title = hasImage
+            ? image.display.label
+            : hasSource
+              ? draft.display?.filmTitle || "Reference scene"
+              : draft?.kind === "text"
+                ? draft.text
+                : "";
+
+          const thumbnail = hasImage
+            ? image.display.previewUrl
+            : hasSource && draft.display?.keyframeUrl
+              ? `${API_URL}${draft.display.keyframeUrl}`
+              : null;
 
           return (
             <div
               key={facet}
-              className={tileClass}
               data-facet={facet}
-              onDragEnter={(event) => {
-                const acceptsScene =
-                  containsSceneSource(event.dataTransfer) && canDropScene;
-                const acceptsImage =
-                  (containsFile(event.dataTransfer) ||
-                    containsImageSource(event.dataTransfer)) &&
-                  canDropImage;
-                if (acceptsScene || acceptsImage) event.preventDefault();
-              }}
-              onDragOver={(event) => {
-                const movingImage = containsImageSource(event.dataTransfer);
-                const droppingFile = containsFile(event.dataTransfer);
-                const droppingScene = containsSceneSource(event.dataTransfer);
-                if (!movingImage && !droppingFile && !droppingScene) return;
-                const allowed =
-                  movingImage || droppingFile
-                    ? canAcceptImageDrop(facet)
-                    : canAcceptSceneDrop(facet);
-                event.dataTransfer.dropEffect = allowed
-                  ? dragSourceFacet || movingImage
-                    ? "move"
-                    : "copy"
-                  : "none";
-                if (!allowed) {
-                  setDragOverFacet(null);
-                  return;
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                setDragOverFacet((current) =>
-                  current === facet ? current : facet,
-                );
-              }}
-              onDragLeave={(event) => {
-                if (!dragIsOutside(event)) return;
-                setDragOverFacet((current) =>
-                  current === facet ? null : current,
-                );
-              }}
-              onDrop={(event) => {
-                if (containsFile(event.dataTransfer)) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const allowed = canAcceptImageDrop(facet);
-                  const file = allowed ? event.dataTransfer.files.item(0) : null;
-                  clearDragState();
-                  if (!allowed) {
-                    if (isImageFacet(facet) && !targetFacet) onLimit?.();
-                    return;
-                  }
-                  if (file && isImageFacet(facet)) onImageFile?.(file, facet);
-                  return;
-                }
-                if (containsImageSource(event.dataTransfer)) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const allowed = canAcceptImageDrop(facet);
-                  clearDragState();
-                  if (!allowed) return;
-                  if (isImageFacet(facet)) onMoveImage?.(facet);
-                  return;
-                }
-                if (!containsSceneSource(event.dataTransfer)) return;
-                event.preventDefault();
-                event.stopPropagation();
-                const originFacet =
-                  readFacetSourceDragOrigin(event.dataTransfer) ??
-                  dragSourceFacet ??
-                  undefined;
-                const allowed =
-                  originFacet === facet
-                    ? false
-                    : originFacet
-                      ? true
-                      : canAcceptSceneDrop(facet);
-                const source = allowed
-                  ? readSceneSourceDrag(event.dataTransfer, facet)
-                  : null;
-                clearDragState();
-                if (!allowed) {
-                  if (originFacet !== facet) onLimit?.();
-                  return;
-                }
-                if (source) onSource?.(facet, source, originFacet);
-              }}
-            >
-              <div className="match-tile-header">
-                <span className="match-tile-label">
-                  <FacetIcon facet={facet} size={14} />
-                  <span>{FACET_LABELS[facet]}</span>
-                </span>
-                <span className="match-tile-actions">
-                  <button
-                    type="button"
-                    className="match-reference-button"
-                    disabled={!canUse}
-                    data-browse-facet={facet}
-                    onClick={() => browse(facet)}
-                    aria-label={`Find a scene for ${FACET_LABELS[facet]}`}
-                    title={`Find a scene for ${FACET_LABELS[facet]}`}
-                  >
-                    <SourceReferenceIcon />
-                  </button>
-                  {hasClause && (
-                    <button
-                      type="button"
-                      className="match-inline-remove"
-                      onClick={() =>
-                        hasImage ? onRemoveImage?.() : onRemove?.(facet)
-                      }
-                      aria-label={`Remove ${FACET_LABELS[facet]} match`}
-                      title="Remove"
-                    >
-                      {"\u00d7"}
-                    </button>
-                  )}
-                </span>
-              </div>
 
-              <div className="match-tile-body">
-                {dropCopy ? (
-                  <span className="match-drop-copy">{dropCopy}</span>
-                ) : hasImage && image ? (
-                  <div
-                    className="match-source-drag match-image-source has-thumbnail"
-                    data-source-facet={facet}
-                    title="Drag between Look and Framing; drop outside to remove"
-                  >
-                    <div
-                      className="match-source-drag-handle"
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData(IMAGE_SOURCE_MIME, facet);
-                        setNativeDragPreview(event.dataTransfer, {
-                          eyebrow: FACET_LABELS[facet],
-                          title: image.display.label,
-                          detail:
-                            image.facet === "look"
-                              ? "Appearance reference"
-                              : "Layout reference",
-                          imageUrl: image.display.previewUrl,
-                        });
-                        setInspectingFacet(null);
-                        setDragImageFacet(image.facet);
-                        setDragOverFacet(null);
-                      }}
-                      onDragEnd={clearDragState}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={image.display.previewUrl}
-                        alt=""
-                        draggable={false}
-                      />
-                      <span className="match-source-copy">
-                        <strong title={image.display.label}>
-                          {image.display.label}
-                        </strong>
-                        <small>
-                          {image.facet === "look"
-                            ? "Appearance reference"
-                            : "Layout reference"}
-                        </small>
-                      </span>
-                    </div>
-                  </div>
-                ) : draft?.kind === "text" ? (
-                  isEditing ? (
-                    <div
-                      className="match-text-editor"
-                      onBlur={(event) => {
-                        if (
-                          event.currentTarget.contains(
-                            event.relatedTarget as Node | null,
-                          )
-                        ) {
-                          return;
-                        }
-                        if (closingFacetRef.current === facet) {
-                          closingFacetRef.current = null;
-                          return;
-                        }
-                        finishTextEdit(draft.facet, draft.text, "blur");
-                      }}
-                    >
-                      <input
-                        type="text"
-                        value={draft.text}
-                        maxLength={500}
-                        autoFocus
-                        placeholder={FACET_PLACEHOLDERS[draft.facet]}
-                        aria-label={`${FACET_LABELS[facet]} match`}
-                        onChange={(event) =>
-                          onTextChange?.(draft.facet, event.target.value)
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") {
-                            event.preventDefault();
-                            finishTextEdit(draft.facet, draft.text, "cancel");
-                          } else if (event.key === "Enter") {
-                            event.preventDefault();
-                            finishTextEdit(draft.facet, draft.text, "commit");
-                          }
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="match-text-affordance has-value"
-                      onClick={() => activateText(draft.facet)}
-                      aria-label={`Edit ${FACET_LABELS[facet]} match: ${draft.text}`}
-                    >
-                      {draft.text}
-                    </button>
+              className={`match-tile clue-card${active ? " is-active" : ""}${openFacet === facet ? " is-open" : ""}${dragOver === facet ? " is-drag-over" : ""}${dragActive && !canDrop ? " is-disabled" : ""}`}
+
+              onDragOver={(event) => {
+                if (!accepts(facet, event.dataTransfer)) return;
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                event.dataTransfer.dropEffect =
+                  event.dataTransfer.effectAllowed === "move" ? "move" : "copy";
+
+                setDragOver(facet);
+              }}
+
+              onDragLeave={(event) => {
+                if (
+                  !event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
                   )
-                ) : draft?.kind === "source" ? (
-                  <div
-                    className={`match-source-drag${
-                      draft.display?.keyframeUrl ? " has-thumbnail" : ""
-                    }`}
-                    role="group"
-                    data-source-facet={facet}
-                    aria-label={`${FACET_LABELS[facet]} scene source: ${sourceLabel(draft)}. Drag to move it, or drop it outside the categories to remove it.`}
-                    aria-describedby={sourceInput ? sourceEvidenceId : undefined}
-                    title="Drag to move; drop outside the categories to remove"
-                    onBlur={(event) => {
-                      if (
-                        !event.currentTarget.contains(
-                          event.relatedTarget as Node | null,
-                        )
-                      ) {
-                        setInspectingFacet((current) =>
-                          current === facet ? null : current,
-                        );
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") setInspectingFacet(null);
-                    }}
-                  >
-                    <div
-                      className="match-source-drag-handle"
-                      draggable
-                      onDragStart={(event) => {
-                        if (
-                          !writeFacetSourceDrag(
-                            event.dataTransfer,
-                            draft,
-                            facet,
-                          )
-                        ) {
-                          event.preventDefault();
-                          return;
-                        }
-                        setNativeDragPreview(event.dataTransfer, {
-                          eyebrow: FACET_LABELS[facet],
-                          title: sourceLabel(draft),
-                          detail: sourceDetail(draft),
-                          imageUrl: draft.display?.keyframeUrl
-                            ? `${API_URL}${draft.display.keyframeUrl}`
-                            : undefined,
-                        });
-                        setInspectingFacet(null);
-                        setDragSourceFacet(facet);
-                        setDragOverFacet(null);
-                      }}
-                      onDragEnd={clearDragState}
-                    >
-                      {draft.display?.keyframeUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={`${API_URL}${draft.display.keyframeUrl}`}
-                          alt=""
-                          draggable={false}
-                        />
-                      )}
-                      <span className="match-source-copy">
-                        <strong title={sourceLabel(draft)}>
-                          {sourceLabel(draft)}
-                        </strong>
-                        <small>{sourceDetail(draft)}</small>
-                      </span>
-                    </div>
-                    {sourceInput && (
-                      <>
-                        <span className="match-source-tools">
-                          <button
-                            type="button"
-                            className="match-source-info"
-                            aria-label={`Inspect ${FACET_LABELS[facet]} source input`}
-                            aria-describedby={sourceEvidenceId}
-                            title={sourceInput.text}
-                            onClick={() =>
-                              setInspectingFacet((current) =>
-                                current === facet ? null : facet,
-                              )
-                            }
-                          >
-                            <SourceInfoIcon />
-                          </button>
-                        </span>
-                        <span
-                          className={`match-source-input${
-                            inspectingFacet === facet ? " is-open" : ""
-                          }`}
-                          id={sourceEvidenceId}
-                          role="tooltip"
-                          title={sourceInput.text}
-                        >
-                          <span>{sourceInput.text}</span>
-                          {debug && (
-                            <small>Input · {sourceInput.adapter}</small>
-                          )}
-                          {debug && sourceInput.debugDetail && (
-                            <small title={sourceInput.debugDetail}>
-                              {sourceInput.debugDetail}
-                            </small>
-                          )}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                ) : facet === "composition" ? (
-                  <button
-                    type="button"
-                    className="match-source-affordance"
-                    disabled={!canUse}
-                    onClick={() => browse(facet)}
-                    aria-label="Choose a scene or drop an image for Framing"
-                  >
-                    Drop a scene or image here
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="match-text-affordance"
-                    disabled={!canUse}
-                    onClick={() => activateText(facet as TextMatchFacet)}
-                    aria-label={`Describe ${FACET_LABELS[facet]}`}
-                  >
-                    {FACET_PLACEHOLDERS[facet as TextMatchFacet]}
-                  </button>
-                )}
-              </div>
+                )
+                  setDragOver(null);
+              }}
+              onDrop={(event) => drop(event, facet)}
+            >
+              <ClueChip
+                source={{ draft, image: hasImage, facet, title, thumbnail }}
+                type="button"
+                className="clue-chip"
+                data-browse-facet={facet}
+
+                aria-label={`${active ? "Edit" : "Add"} ${FACET_LABELS[facet]}${title ? `: ${title}` : ""}`}
+
+                aria-expanded={openFacet === facet}
+                aria-controls={panelId}
+
+                title={
+                  hasSource || hasImage
+                    ? `${FACET_LABELS[facet]}: ${title} · Drag to another category`
+                    : title
+                      ? `${FACET_LABELS[facet]}: ${title}`
+                      : SHORT_COPY[facet]
+                }
+
+                onClick={() => selectFacet(facet)}
+              >
+                <span className="clue-visual">
+                  {thumbnail ? <img src={thumbnail} alt="" draggable={false} /> : <FacetIcon facet={facet} size={14} />}
+                </span>
+
+                <span>{FACET_LABELS[facet]}</span>
+
+              </ClueChip>
+
             </div>
           );
         })}
+
+        {dragActive && (
+          <span className="clues-drag-status" role="status">
+            {dragOver
+              ? `${matchDraftHasClause(drafts[dragOver]) || image?.facet === dragOver ? "Replace" : movingReference ? "Move to" : "Use for"} ${FACET_LABELS[dragOver]}`
+              : ""}
+          </span>
+        )}
       </div>
+
+      {!openFacet && <p className="clues-panel-hint">Choose a detail to describe, or drag in a scene to match it.</p>}
+
+      {openFacet && (
+        <div
+          id={panelId}
+          className={`clue-editor${targetFacet ? " is-reference-picker" : ""}${targetFacet && referenceHasResults ? " has-reference-results" : ""}`}
+        >
+          {targetFacet
+            ? referencePicker
+            : editorFacet && (
+                <>
+                  <header className="clue-editor-heading">
+                    <div>
+                      <strong>{editorMode === "reference" ? `${FACET_LABELS[editorFacet]} reference` : SHORT_COPY[editorFacet]}</strong>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="clue-editor-close"
+                      aria-label="Close detail editor"
+                      onClick={() => {
+                        closeEditor();
+                        refineButtonRef.current?.focus();
+                      }}
+                    >
+                      ×
+                    </button>
+                  </header>
+
+                  {editorMode === "reference" && (editorSource || editorImage) && (
+                    <div className="clue-current-reference">
+                      <ClueSource
+                        draft={editorDraft}
+                        image={Boolean(editorImage)}
+                        facet={editorFacet}
+
+                        title={
+                          editorImage?.display.label ||
+                          editorSource?.display?.filmTitle ||
+                          "Reference scene"
+                        }
+
+                        thumbnail={
+                          editorImage?.display.previewUrl ||
+                          (editorSource?.display?.keyframeUrl
+                            ? `${API_URL}${editorSource.display.keyframeUrl}`
+                            : null)
+                        }
+                      />
+
+                    </div>
+                  )}
+
+                  {editorMode === "reference" && (editorSource || editorImage) && aspectTarget && (
+                    <div className="clue-aspect-editor">
+                      <label htmlFor={`${panelId}-aspect`}>Match aspect</label>
+                      <select id={`${panelId}-aspect`} ref={aspectRef} className="clue-input"
+                        value={aspectTarget} onChange={(event) => setAspectTarget(event.target.value as RecipeMatchFacet)}>
+                        {aspectOptions.map((facet) => <option value={facet} key={facet}>{FACET_LABELS[facet]}</option>)}
+                      </select>
+                      <p>{referenceGateCopy(aspectTarget, editorImage ? "image" : "source")?.description
+                        ?? SEARCH_CLUE_COPY[aspectTarget].description}</p>
+                      <div className="clue-aspect-actions">
+                        <button type="button" className="clue-apply"
+                          disabled={aspectTarget === editorFacet || !aspectMoveFits}
+                          onClick={commitAspect}>
+                          {replacingAspect ? "Replace" : "Move to"} {FACET_LABELS[aspectTarget]}
+                        </button>
+                        <button type="button" className="clue-text-button" onClick={() => {
+                          setAspectTarget(null);
+                          aspectButtonRef.current?.focus();
+                        }}>Cancel</button>
+                      </div>
+                      {!aspectMoveFits && <p role="status">Remove a detail to stay within three matches.</p>}
+                    </div>
+                  )}
+
+                  {editorMode === "text" && editorFacet !== "composition" && (
+                    <div className="clue-text-editor">
+                      <input
+                        ref={textRef}
+                        type="text"
+                        className="clue-input"
+                        value={editorText}
+                        maxLength={500}
+
+                        placeholder={PLACEHOLDERS[editorFacet]}
+                        aria-label={`${FACET_LABELS[editorFacet]} clue`}
+
+                        onChange={(event) => setEditorText(event.target.value)}
+
+                        onKeyDown={(event) => {
+                          if (event.nativeEvent?.isComposing || event.keyCode === 229) return;
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commit();
+                          }
+                        }}
+                      />
+
+                      <button
+                        type="button"
+                        className="clue-apply"
+                        disabled={!editorText.trim()}
+                        onClick={commit}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="clue-editor-footer">
+                    {editorMode === "reference" && (editorSource || editorImage) && (
+                      <button type="button" className="clue-text-button" ref={aspectButtonRef}
+                        aria-expanded={aspectTarget !== null} aria-controls={`${panelId}-aspect`}
+                        onClick={() => setAspectTarget(aspectTarget ? null : editorFacet)}>
+                        Change aspect
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="clue-text-button"
+                      onClick={() => browse(editorFacet)}
+                    >
+                      {editorMode === "reference" ? "Change scene" : "Choose a scene"}
+                    </button>
+
+                    {(editorSource || editorImage) && editorFacet !== "composition" && (
+                      <button type="button" className="clue-text-button" onClick={() => {
+                        setAspectTarget(null);
+                        setEditorMode(editorMode === "reference" ? "text" : "reference");
+                        setEditorText("");
+                      }}>{editorMode === "reference" ? "Use text instead" : "Keep reference"}</button>
+                    )}
+                    {(editorDraft || editorImage) && (
+                      <button type="button" className="clue-text-button clue-clear"
+                        aria-label={`Remove ${FACET_LABELS[editorFacet]} clue`}
+                        onClick={() => {
+                          const facet = editorFacet;
+                          closeEditor();
+                          editorImage ? onRemoveImage?.() : onRemove?.(facet);
+                        }}>Remove</button>
+                    )}
+                  </div>
+
+                  {editorMode === "reference" && debug && evidenceMatches && evidence.effective_text && (
+                    <details className="clue-evidence">
+                      <summary>Matched evidence</summary>
+                      {evidence.effective_text}
+                    </details>
+                  )}
+                </>
+              )}
+        </div>
+      )}
+      </div>
+
+      {!panelOpen && idleContent}
+
+      {!dragActive && gatedReferences.map((gate) => (
+        <p className="clues-framing-note" key={gate.facet}>
+          {gate.description}{" "}
+          <button
+            type="button"
+            onClick={() => {
+              if (openFacet === gate.facet) closeEditor();
+              gate.kind === "image" ? onRemoveImage?.() : onRemove?.(gate.facet);
+            }}
+          >
+            {gate.removeLabel}
+          </button>
+        </p>
+      ))}
     </section>
   );
 }

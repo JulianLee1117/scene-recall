@@ -45,23 +45,14 @@ MINIMAL_CONFIG = """
 # load_config — basic loading
 # ---------------------------------------------------------------------------
 
-def test_load_config_returns_config_object(tmp_path):
-    """load_config(path) returns a Config object (not a dict)."""
-    from pipeline.config import load_config, Config
+def test_load_config_paths(tmp_path):
+    """Legacy configs derive incoming and durable-state paths beside films."""
+    from pipeline.config import Config, load_config
 
     cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
     cfg = load_config(cfg_file)
 
     assert isinstance(cfg, Config)
-
-
-def test_load_config_paths(tmp_path):
-    """Legacy configs derive incoming and durable-state paths beside films."""
-    from pipeline.config import load_config
-
-    cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
-    cfg = load_config(cfg_file)
-
     assert isinstance(cfg.paths.films_dir, Path)
     assert isinstance(cfg.paths.incoming_dir, Path)
     assert isinstance(cfg.paths.assets_dir, Path)
@@ -70,6 +61,17 @@ def test_load_config_paths(tmp_path):
     assert cfg.paths.incoming_dir == Path("/tmp/incoming")
     assert cfg.paths.assets_dir == Path("/tmp/assets")
     assert cfg.paths.state_dir == Path("/tmp/state")
+    assert cfg.paths.playback_dir is None
+
+
+def test_load_config_explicit_playback_dir(tmp_path):
+    from pipeline.config import load_config
+
+    raw = yaml.safe_load(textwrap.dedent(MINIMAL_CONFIG))
+    raw["paths"]["playback_dir"] = "/mnt/films-drive/playback"
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert load_config(cfg_file).paths.playback_dir == Path("/mnt/films-drive/playback")
 
 
 def test_load_config_explicit_incoming_dir(tmp_path):
@@ -322,3 +324,29 @@ def test_load_config_rejects_nonpositive_annotation_concurrency(tmp_path):
     )
     with pytest.raises(ValueError, match="annotation_concurrency"):
         load_config(_write_config(tmp_path, content))
+
+
+def test_music_defaults_to_openai_audio_independently_of_annotation(tmp_path):
+    from pipeline.config import load_config
+    config = load_config(_write_config(tmp_path, MINIMAL_CONFIG))
+    assert config.lab.music_provider == "openai"
+    assert config.lab.music_model == "gpt-audio-1.5"
+    assert config.lab.planner_model == "gpt-5.6-terra"
+
+
+def test_music_preserves_explicit_legacy_gemini_configuration(tmp_path):
+    from pipeline.config import load_config
+    config = load_config(_write_config(tmp_path, MINIMAL_CONFIG + "\n    lab:\n      music_model: gemini-3.8-flash\n"))
+    assert config.lab.music_provider == "gemini"
+    assert config.lab.planner_model == "gemini-3.8-flash"
+
+
+@pytest.mark.parametrize("settings", [
+    "music_provider: invalid", "music_provider: openai\n      music_model: gemini-3.8-flash",
+    "music_provider: openai\n      music_model: gpt-5.6-luna",
+    "planner_model: gpt-audio-1.5", "planner_model: gemini-3.8-flash",
+])
+def test_music_rejects_mismatched_or_text_only_configuration(tmp_path, settings):
+    from pipeline.config import load_config
+    with pytest.raises(ValueError, match="lab.music|lab.planner"):
+        load_config(_write_config(tmp_path, MINIMAL_CONFIG + "\n    lab:\n      " + settings + "\n"))

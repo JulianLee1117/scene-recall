@@ -1,0 +1,44 @@
+.title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 7px; font-size: 11px; }
+.title strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.title span { flex-shrink: 0; color: #b9b7aa; font-variant-numeric: tabular-nums; }
+.trimRail { position: relative; height: 46px; margin: 0 10px; touch-action: pan-y; }
+.trimRail::before { content: ""; position: absolute; inset: 8px 0; border: 1px solid #393933; border-radius: 4px; background: repeating-linear-gradient(90deg, transparent 0 24px, #ffffff09 24px 25px), #171815; }
+.selection { position: absolute; top: 8px; bottom: 8px; background: #8595793d; border-block: 1px solid #aebaa0; pointer-events: none; }
+.playhead { position: absolute; inset: 0; width: 100%; height: 46px; margin: 0; appearance: none; background: transparent; cursor: ew-resize; touch-action: none; }
+.playhead::-webkit-slider-runnable-track { background: transparent; height: 38px; }
+.playhead::-webkit-slider-thumb { appearance: none; height: 38px; width: 3px; margin-top: 0; background: #f1efe3; border-radius: 1px; box-shadow: 0 0 2px #000; }
+.playhead::-moz-range-track { background: transparent; }
+.playhead::-moz-range-thumb { width: 3px; height: 38px; border: 0; background: #f1efe3; border-radius: 1px; }
+.playhead:focus-visible { outline: 1px solid #c6ccbb; outline-offset: 3px; }
+.handle { position: absolute; top: 6px; bottom: 6px; z-index: 2; width: 16px; min-height: 34px; padding: 0 !important; border: 1px solid #b4c2a5 !important; border-radius: 3px !important; color: #172015 !important; background: #b4c2a5 !important; transform: translateX(-50%); cursor: ew-resize !important; touch-action: none; }
+.handle::after { content: ""; width: 2px; height: 12px; display: block; margin: auto; border-inline: 1px solid currentColor; }
+.handle:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.handle:disabled { opacity: .45; cursor: default !important; }
+.trimCaption { display: flex; justify-content: space-between; gap: 8px; color: #aaa99c; font-size: 10px; margin: 2px 0 10px; font-variant-numeric: tabular-nums; }
+.trimCaption span:nth-child(2) { color: #d0d3c4; }
+.frameToolbar { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.frameToolbar button { border: 1px solid #45473e; border-radius: 4px; background: #20221d; color: #d5d8ca; padding: 6px 10px; font-size: 11px; cursor: pointer; }
+.frameToolbar button:hover { border-color: #919a82; }
+.frameToolbar button:focus-visible { outline: 2px solid #e8eddc; outline-offset: 2px; }
+.frameToolbar button:disabled { opacity: .45; cursor: default; }
+.frameToolbar button[aria-pressed="true"] { border-color: #aab69b; color: #eef2e8; background: #30382a; }
+.frameHint { color: #aaa99c; font-size: 10px; line-height: 1.5; margin: 7px 0; }
+.frameSurface { position: absolute; inset: 0; z-index: 3; cursor: grab; touch-action: none; box-shadow: inset 0 0 0 1px #c5cfb9; outline: none; }
+.frameSurface:active { cursor: grabbing; }
+.frameSurface:focus-visible { box-shadow: inset 0 0 0 2px white; }
+.frameSurface::after { content: ""; position: absolute; inset: 33.333%; border: 1px solid #ffffff35; pointer-events: none; }
+.precision { border-top: 1px solid #2c2d27; margin-top: 12px; padding-top: 9px; }
+.precision > summary { cursor: pointer; color: #aaa99c; font-size: 10px; }
+.precision[open] > summary { margin-bottom: 10px; }
+.precision input[type="number"] { max-width: 90px; }
+.monitor { padding: 0 !important; border: 0 !important; background: transparent !important; }
+.monitor .frameToolbar { display: inline-flex; margin-top: 4px; }
+.monitor .precision { margin-bottom: 8px; }
+.monitor .precision:not([open]) { display: inline-block; vertical-align: middle; margin: 0 0 0 14px; padding: 0; border: 0; }
+@media (max-width: 500px) {
+  .handle { width: 22px; }
+  .trimRail { margin-inline: 12px; }
+  .trimCaption { font-size: 9px; flex-wrap: wrap; gap: 4px; }
+  .trimCaption > span:nth-child(2) { order: 3; flex: 1 0 100%; text-align: center; }
+  .savedStatus { display: none; }
+}

@@ -44,7 +44,13 @@ export default function VideoModal({
   const [timestampCopied, setTimestampCopied] = useState(false);
   const titleId = useId();
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const [playbackAttempt, setPlaybackAttempt] = useState(0);
+  const [playback, setPlayback] = useState<{
+    filmId: string; attempt: number; url?: string; error?: string;
+  } | null>(null);
+  const currentPlayback = playback?.filmId === shot.film_id && playback.attempt === playbackAttempt ? playback : null;
   const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
+  const [playheadTime, setPlayheadTime] = useState(evidenceTime);
   const seekTarget = Math.max(0, evidenceTime - 1);
   const matchedTextLabel = shot.matched_text_view
     ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
@@ -55,11 +61,38 @@ export default function VideoModal({
 
   useEffect(() => {
     hasSeenCanPlay.current = false;
-  }, [shot]);
+    setPlayheadTime(evidenceTime);
+    setTimestampCopied(false);
+  }, [shot, evidenceTime]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const filmId = shot.film_id;
+    hasSeenCanPlay.current = false;
+    void (async () => {
+      let errorMessage = "Playback could not be loaded. Check that the API and film are available, then retry.";
+      try {
+        const response = await fetch(`${apiUrl}/video/${encodeURIComponent(filmId)}/playback`, {
+          signal: controller.signal, cache: "no-store",
+        });
+        if (!response.ok) {
+          const problem = await response.json().catch(() => null);
+          if (typeof problem?.detail === "string" && problem.detail.trim()) errorMessage = problem.detail;
+          throw new Error(errorMessage);
+        }
+        const result = await response.json();
+        if (typeof result?.url !== "string" || !result.url.startsWith("/video/")) throw new Error(errorMessage);
+        if (!controller.signal.aborted) setPlayback({ filmId, attempt: playbackAttempt, url: result.url });
+      } catch {
+        if (!controller.signal.aborted) setPlayback({ filmId, attempt: playbackAttempt, error: errorMessage });
+      }
+    })();
+    return () => controller.abort();
+  }, [apiUrl, shot.film_id, playbackAttempt]);
 
   const handleCanPlay = useCallback(() => {
     const video = videoRef.current;
@@ -128,13 +161,13 @@ export default function VideoModal({
 
   const copyTimestamp = useCallback(() => {
     void navigator.clipboard
-      .writeText(formatTime(evidenceTime))
+      .writeText(`${formatTime(videoRef.current?.currentTime ?? playheadTime)} (${(videoRef.current?.currentTime ?? playheadTime).toFixed(3)}s)`)
       .then(() => {
         setTimestampCopied(true);
         window.setTimeout(() => setTimestampCopied(false), 1600);
       })
       .catch(() => setTimestampCopied(false));
-  }, [evidenceTime]);
+  }, [playheadTime]);
 
   return (
     <div
@@ -167,9 +200,9 @@ export default function VideoModal({
                 className={bookmarked ? "is-active" : undefined}
                 disabled={bookmarkDisabled}
                 onClick={() => onToggleBookmark(shot)}
-                aria-label={bookmarked ? "Remove scene from Saved" : "Save scene"}
+                aria-label={bookmarked ? "Remove retrieved scene from Saved" : "Save retrieved scene"}
                 aria-pressed={bookmarked}
-                title={bookmarked ? "Remove from Saved" : "Save this scene"}
+                title={bookmarked ? "Remove from Saved" : `Save retrieved evidence at ${formatTime(evidenceTime)}`}
               >
                 <svg
                   width="17"
@@ -196,15 +229,32 @@ export default function VideoModal({
           </div>
         </div>
 
-        <video
+        {currentPlayback?.error ? <div className="modal-evidence">
+          <p role="alert">{currentPlayback.error}</p>
+          <div className="modal-actions"><button type="button" onClick={() => setPlaybackAttempt((attempt) => attempt + 1)}>Retry playback</button></div>
+        </div> : currentPlayback?.url ? <video
+          key={`${shot.unit_id}:${evidenceTime}:${currentPlayback.url}`}
           ref={videoRef}
-          src={`${apiUrl}/video/${shot.film_id}`}
+          src={`${apiUrl}${currentPlayback.url}`}
           controls
           onCanPlay={handleCanPlay}
+          onError={() => setPlayback({ filmId: shot.film_id, attempt: playbackAttempt,
+            error: "This video could not play. Retry playback, or check that the film is available." })}
+          onTimeUpdate={(event) => setPlayheadTime(event.currentTarget.currentTime)}
+          onSeeked={(event) => setPlayheadTime(event.currentTarget.currentTime)}
           style={{ width: "100%", display: "block", background: "#000" }}
-        />
+        /> : <p className="modal-evidence" role="status">Loading player…</p>}
 
         <div className="modal-evidence">
+          <div className="modal-anchor-context">
+            <span>Playing <strong>{formatTime(playheadTime)}</strong></span>
+            <button type="button" onClick={() => {
+              if (videoRef.current) videoRef.current.currentTime = evidenceTime;
+            }}>Return to retrieved moment · {formatTime(evidenceTime)}</button>
+          </div>
+          {(onUseInSearch || onToggleBookmark) && (
+            <p className="modal-anchor-note">Save and Find related use the retrieved scene and reference frame at {formatTime(evidenceTime)}. Scrubbing changes playback.</p>
+          )}
           {matchedTextLabel && shot.matched_text && (
             <div className="modal-match-evidence">
               <span>{matchedTextLabel} match</span>
@@ -228,7 +278,7 @@ export default function VideoModal({
             ) && <p>{shot.caption}</p>}
           <div className="modal-actions">
             <button type="button" onClick={copyTimestamp}>
-              {timestampCopied ? "Timestamp copied" : "Copy timestamp"}
+              {timestampCopied ? "Timestamp copied" : "Copy current timestamp"}
             </button>
             {onUseInSearch && sourceReferenceFacet ? (
               <button

@@ -13,7 +13,10 @@ GET /unit/{unit_id}                 Full unit record from the LanceDB units tabl
 GET /media/keyframe/{shot_id}/{n}   Serve a WebP keyframe image
 GET /media/preview/{shot_id}        Serve a WebM preview clip
 GET /video/{film_id}                Stream source video with HTTP range support
+GET /video/{film_id}/playback       Resolve the scene player's prepared media URL
 GET /library                        List indexed films plus source-directory files
+GET /library/scenes                 Browse selected published films chronologically
+GET /library/storage                Cached background inventory of library files
 GET /incoming                       List completed downloads awaiting review
 POST /films/import                  Move a reviewed film into the library
 POST /ingest                        Queue a background ingest job for a film
@@ -28,23 +31,21 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import hashlib
 import json
 import mimetypes
 import os
 import re
-import shutil
 import subprocess
 import sys
 import threading
 import time
-import uuid
 from collections import deque
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Annotated, Any, Callable, Iterator, Literal, Sequence
+from typing import Annotated, Any, BinaryIO, Callable, Iterator, Literal, Sequence
 
 from dotenv import load_dotenv
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -64,7 +65,8 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from starlette.background import BackgroundTask
 from lancedb.expr import col, lit
 from pydantic import (
     BaseModel,
@@ -77,18 +79,44 @@ from pydantic import (
 
 from pipeline.bookmarks import Bookmark, BookmarkStore
 from pipeline.config import VIDEO_EXTENSIONS, Config, load_config
+from pipeline.index.snapshot import SearchLibraryUnavailable
 from pipeline.index.writer import (
     ensure_search_indexes,
     open_db,
     published_film_ids,
     table_names,
 )
-from pipeline.ingest.subtitles import inspect_external_srt
+from pipeline.intake import (
+    _IMPORTED_RELEASE_MARKER,
+    canonical_film_filename as _canonical_film_filename,
+    release_suggestion as _release_suggestion,
+    is_regular_video as _is_regular_video,
+    is_link_or_junction as _is_link_or_junction,
+    videos_in_release as _videos_in_release,
+    resolve_external_sidecars as _resolve_external_sidecars,
+    copy_file_no_replace as _copy_file_no_replace,
+    move_file_no_replace as _move_file_no_replace,
+    probe_intake_duration as _probe_intake_duration,
+)
+from pipeline.ingest.subtitles import validate_external_srt
+from pipeline.ingest.playback import PlaybackPreparationError, lookup_playback, playback_representation_token
+from pipeline.lab.api import router as lab_router
+from pipeline.matching.api import router as matching_router
+from pipeline.transitions.api import router as transitions_router
+from pipeline.acquisition.api import router as acquisition_router
+from pipeline.project_info import router as project_info_router
+from pipeline.api.search_intent import router as search_intent_router
+from pipeline.acquisition.service import AcquisitionService
+from pipeline.lab.jobs import DurableIngestQueue as _IngestQueue
+from pipeline.lab.store import DuplicateJob as _DuplicateIngestError, LabStore
+from pipeline.library_storage import LibraryStorageStats, scan_library_storage
+from pipeline.index.maintenance import api_database_read_lease
 from pipeline.search.retrieve import (
     resolve_result_limit,
     search as _search,
     search_by_image as _search_by_image,
 )
+from pipeline.search.browse import browse_scenes as _browse_scenes
 from pipeline.search.recipe import (
     RecipeSourceNotFound,
     RecipeSourceUnavailable,
@@ -126,6 +154,12 @@ def _warm_search_models(config: Config, app: FastAPI) -> None:
             f"[startup] visual encoder ready in {time.perf_counter() - started:.1f}s",
             flush=True,
         )
+        from pipeline.index.text_features import resolve_ready_text_profile
+        from pipeline.ingest.text_embed import embed_semantic_query
+
+        if resolve_ready_text_profile(config, app.state.db) is not None:
+            embed_semantic_query("warmup", config)
+            print("[startup] semantic text encoder ready", flush=True)
     except Exception as exc:
         print(f"[startup] visual encoder warmup failed: {exc}", flush=True)
     finally:
@@ -216,20 +250,20 @@ def _preflight_runtime_paths(config: Config) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def _runtime_lifespan(app: FastAPI, config: Config):
     """Open config and DB on startup; yield; clean up on shutdown.
 
     ``SCENE_RECALL_SKIP_WARMUP`` (set by the test suite) skips the encoder
     warmup thread: tests must not load real model weights, and their
     endpoints should be immediately ready.
     """
-    config: Config = load_config()
-    _preflight_runtime_paths(config)
     db = open_db(config)
     # One-time legacy migration plus a correctness check for rows added by a
     # prior interrupted ingest. Search traffic is not accepted until native
     # FTS covers the complete units table.
     ensure_search_indexes(db)
+    app.state.config = config
+    app.state.db = db
     if os.environ.get("SCENE_RECALL_SKIP_WARMUP"):
         app.state.encoder_ready = True
     else:
@@ -240,8 +274,6 @@ async def lifespan(app: FastAPI):
             daemon=True,
             name="encoder-warmup",
         ).start()
-    app.state.config = config
-    app.state.db = db
     app.state.bookmarks = BookmarkStore(config.paths.state_dir)
     app.state.bookmarks.initialize()
     app.state.ready_units_version = None
@@ -252,12 +284,32 @@ async def lifespan(app: FastAPI):
     app.state.image_search_slots = asyncio.Queue(maxsize=2)
     app.state.image_search_slots.put_nowait(None)
     app.state.image_search_slots.put_nowait(None)
-    app.state.ingest_queue = _IngestQueue(_run_ingest_subprocess)
+    app.state.lab = LabStore(config.paths.state_dir, config.paths.assets_dir)
+    app.state.lab.initialize()
+    app.state.ingest_queue = _IngestQueue(app.state.lab)
+    app.state.acquisition = AcquisitionService(config)
+    storage_cancelled = threading.Event()
+    app.state.library_storage = LibraryStorageStats(
+        lambda: scan_library_storage(
+            config, lambda: _library_source_paths(db), cancelled=storage_cancelled,
+        ),
+        cancel=storage_cancelled.set,
+    )
     try:
         yield
     finally:
+        app.state.library_storage.close()
         app.state.ingest_queue.close()
         # LanceDB connections do not require explicit closing.
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    config = load_config()
+    _preflight_runtime_paths(config)
+    with api_database_read_lease(config):
+        async with _runtime_lifespan(app, config):
+            yield
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +317,17 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="scene-recall", version="0.1.0", lifespan=lifespan)
+app.include_router(search_intent_router)
+
+
+@app.exception_handler(SearchLibraryUnavailable)
+async def search_publication_busy(_request, exc):
+    return JSONResponse(status_code=503, content={"detail": str(exc)}, headers={"Retry-After": "1"})
+app.include_router(lab_router)
+app.include_router(matching_router)
+app.include_router(transitions_router)
+app.include_router(acquisition_router)
+app.include_router(project_info_router)
 
 _DEFAULT_ALLOWED_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 _allowed_origins = [
@@ -550,16 +613,15 @@ def _bookmark_frame_timestamp(
     """Validate a frame locator and return its timestamp when indexed."""
     unit_id = str(unit.get("unit_id") or "")
     if "frames" in table_names(db):
-        rows = (
-            db.open_table("frames")
-            .search()
-            .where(
+        from pipeline.index.reads import filtered_rows
+        rows = filtered_rows(
+            db.open_table("frames"),
+            where=(
                 (col("unit_id") == lit(unit_id))
                 & (col("frame_index") == lit(frame_index))
-            )
-            .select(["timestamp"])
-            .limit(2)
-            .to_list()
+            ),
+            columns=["timestamp"],
+            limit=2,
         )
         if len(rows) != 1:
             raise HTTPException(status_code=422, detail="Frame is not indexed")
@@ -795,8 +857,14 @@ class SubtitleSkipDecision(BaseModel):
     action: Literal["skip"]
 
 
+class SubtitleAutoDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["auto"]
+
+
 SubtitleImportDecision = Annotated[
-    SubtitleUseDecision | SubtitleSkipDecision,
+    SubtitleUseDecision | SubtitleSkipDecision | SubtitleAutoDecision,
     Field(discriminator="action"),
 ]
 
@@ -1353,6 +1421,8 @@ def unit_endpoint(unit_id: str, request: Request) -> dict:
 @app.get("/media/keyframe/{shot_id}/{n}")
 def keyframe_endpoint(shot_id: str, n: int, request: Request) -> FileResponse:
     """Serve the *n*-th WebP keyframe for *shot_id*."""
+    from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE
+
     config: Config = request.app.state.config
     unit = _unit_for_shot(shot_id, request)
     try:
@@ -1369,12 +1439,31 @@ def keyframe_endpoint(shot_id: str, n: int, request: Request) -> FileResponse:
             detail=f"Keyframe not found: {shot_id}_{n}.webp",
         )
 
+    filename = f"{shot_id}_{n}.webp"
+    stored = Path(keyframe_paths[n]).absolute()
+    keyframe_root = (
+        config.paths.assets_dir.absolute() / str(unit["film_id"]) / "keyframes"
+    )
+    if stored == keyframe_root / filename:
+        media_dir = "keyframes"
+    elif stored == keyframe_root / SHORT_SHOT_SAMPLING_PROFILE / filename:
+        media_dir = f"keyframes/{SHORT_SHOT_SAMPLING_PROFILE}"
+    else:
+        raise HTTPException(status_code=404, detail="Keyframe not found")
     path = _safe_media_path(
         config.paths.assets_dir,
         str(unit["film_id"]),
-        "keyframes",
-        f"{shot_id}_{n}.webp",
+        media_dir,
+        filename,
     )
+    # Resolving the configured asset root is allowed; a symlink beneath it
+    # must not redirect this film's indexed image into another file or film.
+    expected = (
+        config.paths.assets_dir.resolve() / str(unit["film_id"])
+        / media_dir / filename
+    )
+    if path != expected:
+        raise HTTPException(status_code=404, detail="Keyframe not found")
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Keyframe not found: {shot_id}_{n}.webp")
     return FileResponse(str(path), media_type="image/webp")
@@ -1396,9 +1485,8 @@ def preview_endpoint(shot_id: str, request: Request) -> FileResponse:
     return FileResponse(str(path), media_type="video/webm")
 
 
-@app.get("/video/{film_id}")
-def video_endpoint(film_id: str, request: Request) -> StreamingResponse:
-    """Stream a source video file with HTTP range-request support."""
+def _video_source(film_id: str, request: Request) -> Path:
+    """Resolve an indexed source, including films outside the library folder."""
     db = request.app.state.db
     tbl = db.open_table("films")
     rows = tbl.search().where(col("film_id") == lit(film_id)).to_list()
@@ -1406,22 +1494,119 @@ def video_endpoint(film_id: str, request: Request) -> StreamingResponse:
         raise HTTPException(status_code=404, detail=f"Film {film_id!r} not found")
 
     path = Path(rows[0]["path"])
-    if not path.exists():
+    if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Video file not found: {path.name}")
+    return path
 
-    file_size = path.stat().st_size
+
+def _prepared_video(source: Path, film_id: str, request: Request) -> Path | None:
+    # IDs are components, never paths; legacy/test IDs also remain usable.
+    if re.fullmatch(r"[A-Za-z0-9_-]+", film_id) is None:
+        return None
+    config: Config = request.app.state.config
+    return lookup_playback(source, config.paths.assets_dir / film_id,
+                           config.paths.playback_dir, film_id=film_id)
+
+
+def _playback_token(path: Path) -> str:
+    return playback_representation_token(path)
+
+
+def _open_prepared_video(source: Path, film_id: str, request: Request,
+                         representation: str) -> tuple[Path, BinaryIO, int]:
+    """Pin an open generation before migration can remove its old pathname."""
+    for _ in range(2):
+        prepared = _prepared_video(source, film_id, request)
+        if prepared is None:
+            break
+        handle = None
+        try:
+            handle = prepared.open("rb")
+            opened = os.fstat(handle.fileno())
+            token = _playback_token(prepared)
+            current = prepared.stat()
+            identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+            if token == representation and identity(opened) == identity(current):
+                return prepared, handle, opened.st_size
+        except (OSError, PlaybackPreparationError):
+            # A verified relocation can remove the old pathname between lookup
+            # and open. Retry the new location, still requiring the exact token.
+            pass
+        if handle is not None:
+            handle.close()
+    raise HTTPException(
+        status_code=409, detail="Playback changed; reopen the scene or retry playback",
+    )
+
+
+def _stream_prepared_file(handle: BinaryIO, start: int, end: int) -> Iterator[bytes]:
+    try:
+        handle.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            chunk = handle.read(min(_CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+    finally:
+        handle.close()
+
+
+@app.get("/video/{film_id}/playback")
+def video_playback_endpoint(film_id: str, request: Request, response: Response) -> dict:
+    """Resolve once per player; preparing media is strictly an offline operation."""
+    source = _video_source(film_id, request)
+    url = f"/video/{film_id}"
+    for _ in range(2):
+        prepared = _prepared_video(source, film_id, request)
+        if prepared is None:
+            break
+        try:
+            url += f"?representation={_playback_token(prepared)}"
+            break
+        except (OSError, PlaybackPreparationError):
+            continue
+    response.headers["Cache-Control"] = "no-store"
+    return {"url": url}
+
+
+@app.get("/video/{film_id}")
+def video_endpoint(
+    film_id: str, request: Request, representation: str | None = None,
+) -> StreamingResponse:
+    """Stream original bytes or one explicitly pinned, immutable derivative."""
+    path = _video_source(film_id, request)
+    extra_headers = {}
+    prepared_handle = None
+    if representation is not None:
+        path, prepared_handle, file_size = _open_prepared_video(path, film_id, request, representation)
+        extra_headers = {"Cache-Control": "no-store", "ETag": f'"{representation}"'}
+    else:
+        file_size = path.stat().st_size
+
     media_type, _ = mimetypes.guess_type(str(path))
     media_type = media_type or "application/octet-stream"
 
     range_header = request.headers.get("Range")
+    try:
+        start, end = _parse_range(range_header, file_size) if range_header else (0, file_size - 1)
+    except HTTPException:
+        if prepared_handle is not None:
+            prepared_handle.close()
+        raise
+    stream = (_stream_prepared_file(prepared_handle, start, end) if prepared_handle is not None
+              else _stream_file(path, start, end))
+    cleanup = BackgroundTask(prepared_handle.close) if prepared_handle is not None else None
     if range_header:
-        start, end = _parse_range(range_header, file_size)
         content_length = end - start + 1
         return StreamingResponse(
-            _stream_file(path, start, end),
+            stream,
             status_code=206,
             media_type=media_type,
+            background=cleanup,
             headers={
+                **extra_headers,
                 "Content-Range": f"bytes {start}-{end}/{file_size}",
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(content_length),
@@ -1429,14 +1614,55 @@ def video_endpoint(film_id: str, request: Request) -> StreamingResponse:
         )
 
     return StreamingResponse(
-        _stream_file(path, 0, file_size - 1),
+        stream,
         status_code=200,
         media_type=media_type,
+        background=cleanup,
         headers={
+            **extra_headers,
             "Content-Length": str(file_size),
             "Accept-Ranges": "bytes",
         },
     )
+
+
+def _library_source_paths(db: Any) -> list[Path]:
+    """Read every registered source, including unpublished or external films."""
+    if "films" not in table_names(db):
+        return []
+    rows = db.open_table("films").search().select(["path"]).limit(None).to_list()
+    paths = []
+    for row in rows:
+        raw_path = row.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise ValueError("A registered film is missing its source path")
+        paths.append(Path(raw_path))
+    return paths
+
+
+@app.get("/library/storage")
+def library_storage_endpoint(request: Request, refresh: bool = False) -> dict[str, Any]:
+    """Start or poll a coalesced background scan without delaying library reads."""
+    return request.app.state.library_storage.get(refresh=refresh)
+
+
+@app.get("/library/scenes")
+def library_scenes_endpoint(
+    request: Request,
+    film_id: Annotated[list[str], Query(min_length=1, max_length=1_000)],
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Browse explicit movie scopes without waiting for or loading encoders."""
+    config: Config = request.app.state.config
+    result_limit = _resolve_api_result_limit(config, limit)
+    try:
+        results = _browse_scenes(
+            request.app.state.db, config, film_ids=film_id,
+            result_limit=_result_probe_limit(config, result_limit),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _search_response(_with_film_titles(request, results), config, result_limit)
 
 
 @app.get("/library")
@@ -1543,502 +1769,8 @@ def library_endpoint(request: Request) -> list[dict]:
     )
 
 
-_INGEST_LOG_TAIL_LINES = 30
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_IMPORTED_RELEASE_MARKER = ".scene-recall-imported"
-_WINDOWS_INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_WINDOWS_RESERVED_NAMES = frozenset(
-    {"CON", "PRN", "AUX", "NUL"}
-    | {f"COM{number}" for number in range(1, 10)}
-    | {f"LPT{number}" for number in range(1, 10)}
-)
-_RELEASE_YEAR = re.compile(r"(?<!\d)((?:18|19|20)\d{2})(?!\d)")
-_RELEASE_TECHNICAL = re.compile(
-    r"\b(?:480p|576p|720p|1080[pi]|2160p|4k|uhd|bluray|blu-ray|brrip|"
-    r"webrip|web-dl|webdl|dvdrip|hdtv|remux|x26[45]|h[.-]?26[45]|hevc|"
-    r"av1|hdr10?|dolby[ .]?vision|aac|dts|truehd|atmos)\b",
-    re.IGNORECASE,
-)
-_EDITION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bdirector'?s\s+cut\b", re.IGNORECASE), "Director's Cut"),
-    (re.compile(r"\bextended(?:\s+(?:cut|edition))?\b", re.IGNORECASE), "Extended"),
-    (re.compile(r"\bfinal\s+cut\b", re.IGNORECASE), "Final Cut"),
-    (re.compile(r"\bcriterion(?:\s+collection)?\b", re.IGNORECASE), "Criterion"),
-    (re.compile(r"\bunrated\b", re.IGNORECASE), "Unrated"),
-    (re.compile(r"\btheatrical(?:\s+(?:cut|edition))?\b", re.IGNORECASE), "Theatrical"),
-    (re.compile(r"\bspecial\s+edition\b", re.IGNORECASE), "Special Edition"),
-    (re.compile(r"\bremaster(?:ed)?\b", re.IGNORECASE), "Remastered"),
-)
 
-
-class _DuplicateIngestError(RuntimeError):
-    pass
-
-
-class _IngestQueue:
-    """Small in-memory FIFO with one dedicated worker thread."""
-
-    def __init__(
-        self,
-        runner: Callable[[Path, Callable[[str], None]], None],
-    ) -> None:
-        self._runner = runner
-        self._jobs: dict[str, dict[str, Any]] = {}
-        self._pending: deque[str] = deque()
-        self._condition = threading.Condition()
-        self._worker: threading.Thread | None = None
-        self._closed = False
-
-    def enqueue(self, path: Path) -> dict:
-        canonical_path = path.resolve()
-        path_key = os.path.normcase(str(canonical_path))
-        with self._condition:
-            if self._closed:
-                raise RuntimeError("ingest queue is shutting down")
-            if any(
-                job["_path_key"] == path_key
-                and job["status"] in {"queued", "running"}
-                for job in self._jobs.values()
-            ):
-                raise _DuplicateIngestError("Already queued for ingestion")
-
-            job_id = str(uuid.uuid4())[:8]
-            self._jobs[job_id] = {
-                "job_id": job_id,
-                "path": str(canonical_path),
-                "_path_key": path_key,
-                "filename": canonical_path.name,
-                "status": "queued",
-                "queued_at": time.time(),
-                "started_at": None,
-                "finished_at": None,
-                "error": None,
-                "log": deque(maxlen=_INGEST_LOG_TAIL_LINES),
-            }
-            self._pending.append(job_id)
-            if self._worker is None or not self._worker.is_alive():
-                self._worker = threading.Thread(
-                    target=self._worker_loop,
-                    daemon=True,
-                    name="ingest-runner",
-                )
-                self._worker.start()
-            self._condition.notify()
-            return self._response_locked(self._jobs[job_id])
-
-    def snapshots(self) -> list[dict]:
-        with self._condition:
-            return [self._response_locked(job) for job in self._jobs.values()]
-
-    def close(self) -> None:
-        with self._condition:
-            self._closed = True
-            self._condition.notify_all()
-
-    def _append_log(self, job_id: str, line: str) -> None:
-        line = line.rstrip()
-        if not line:
-            return
-        with self._condition:
-            self._jobs[job_id]["log"].append(line)
-
-    def _response_locked(self, job: dict[str, Any]) -> dict:
-        queued_ids = list(self._pending)
-        try:
-            queue_position: int | None = queued_ids.index(job["job_id"]) + 1
-        except ValueError:
-            queue_position = None
-        log = list(job["log"])
-        return {
-            key: value
-            for key, value in job.items()
-            if key not in {"_path_key", "log"}
-        } | {
-            "queue_position": queue_position,
-            "log": log,
-            "progress": log[-1] if log else None,
-        }
-
-    def _worker_loop(self) -> None:
-        while True:
-            with self._condition:
-                while not self._pending and not self._closed:
-                    self._condition.wait()
-                if self._closed:
-                    return
-                job_id = self._pending.popleft()
-                job = self._jobs[job_id]
-                job["status"] = "running"
-                job["started_at"] = time.time()
-                path = Path(job["path"])
-
-            error: str | None = None
-            try:
-                self._runner(
-                    path,
-                    lambda line, current=job_id: self._append_log(current, line),
-                )
-            except Exception as exc:
-                error = str(exc) or type(exc).__name__
-
-            with self._condition:
-                job = self._jobs[job_id]
-                job["status"] = "error" if error else "done"
-                job["error"] = error
-                job["finished_at"] = time.time()
-
-
-def _sanitize_filename_component(value: str, field: str) -> str:
-    cleaned = value.replace(":", " - ")
-    cleaned = _WINDOWS_INVALID_FILENAME.sub(" ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
-    if not cleaned:
-        raise ValueError(f"{field} cannot be empty")
-    if cleaned.upper() in _WINDOWS_RESERVED_NAMES:
-        cleaned = f"_{cleaned}"
-    return cleaned
-
-
-def _canonical_film_filename(
-    title: str,
-    year: int | None,
-    edition: str | None,
-    extension: str,
-) -> str:
-    clean_title = _sanitize_filename_component(title, "title")
-    clean_edition = (
-        _sanitize_filename_component(edition, "edition") if edition else None
-    )
-    if extension.lower() not in VIDEO_EXTENSIONS:
-        raise ValueError("unsupported video extension")
-    stem = clean_title
-    if year is not None:
-        stem += f" ({year})"
-    if clean_edition:
-        stem += f" [{clean_edition}]"
-    filename = stem + extension.lower()
-    if len(filename) > 255:
-        raise ValueError("canonical filename is longer than 255 characters")
-    return filename
-
-
-def _release_suggestion(label: str) -> tuple[str, int | None, str | None]:
-    """Parse only obvious year, quality, and edition markers from a release."""
-    stem = Path(label).stem if Path(label).suffix.lower() in VIDEO_EXTENSIONS else label
-    normalized = re.sub(r"[._]+", " ", stem)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    technical_match = _RELEASE_TECHNICAL.search(normalized)
-    # Numeric film titles are common. The release year is conventionally the
-    # last plausible year before quality/codec metadata, not the first number.
-    year_search_end = technical_match.start() if technical_match else len(normalized)
-    year_matches = list(_RELEASE_YEAR.finditer(normalized, 0, year_search_end))
-    year_match = year_matches[-1] if year_matches else None
-    year = int(year_match.group(1)) if year_match else None
-    cut_at = len(normalized)
-    if year_match:
-        cut_at = min(cut_at, year_match.start())
-    if technical_match:
-        cut_at = min(cut_at, technical_match.start())
-    raw_title = re.sub(r"[\[\](){}]+", " ", normalized[:cut_at])
-    raw_title = re.sub(r"\s+", " ", raw_title).strip(" -")
-    if not raw_title:
-        raw_title = normalized
-    if raw_title.islower() or raw_title.isupper():
-        raw_title = raw_title.title()
-
-    edition_tail = normalized[year_match.end():] if year_match else ""
-    edition = next(
-        (
-            display
-            for pattern, display in _EDITION_PATTERNS
-            if pattern.search(edition_tail)
-        ),
-        None,
-    )
-    return raw_title, year, edition
-
-
-def _is_regular_video(path: Path) -> bool:
-    try:
-        return (
-            not path.is_symlink()
-            and path.is_file()
-            and path.suffix.lower() in VIDEO_EXTENSIONS
-        )
-    except OSError:
-        return False
-
-
-def _is_link_or_junction(path: Path) -> bool:
-    """Keep discovery on the configured volume and out of reparse trees."""
-    try:
-        return path.is_symlink() or (
-            hasattr(path, "is_junction") and path.is_junction()
-        )
-    except OSError:
-        return True
-
-
-def _videos_in_release(root: Path, release: Path) -> list[Path]:
-    videos: list[Path] = []
-    for directory, child_dirs, filenames in os.walk(release, followlinks=False):
-        directory_path = Path(directory)
-        child_dirs[:] = [
-            name
-            for name in child_dirs
-            if not _is_link_or_junction(directory_path / name)
-        ]
-        for filename in filenames:
-            path = directory_path / filename
-            if (
-                path.suffix.lower() in VIDEO_EXTENSIONS
-                and _is_regular_video(path)
-                and path.resolve().is_relative_to(root)
-            ):
-                videos.append(path)
-    return videos
-
-
-def _subtitle_files_in_release(root: Path, release: Path) -> list[Path]:
-    """Return safe SRT candidates without following release reparse points."""
-    subtitles: list[Path] = []
-    for directory, child_dirs, filenames in os.walk(release, followlinks=False):
-        directory_path = Path(directory)
-        child_dirs[:] = [
-            name
-            for name in child_dirs
-            if not _is_link_or_junction(directory_path / name)
-        ]
-        for filename in filenames:
-            path = directory_path / filename
-            try:
-                if (
-                    path.suffix.lower() == ".srt"
-                    and path.is_file()
-                    and not path.is_symlink()
-                    and path.resolve().is_relative_to(root)
-                ):
-                    subtitles.append(path)
-            except OSError:
-                continue
-    return subtitles
-
-
-@dataclass(frozen=True, slots=True)
-class _SubtitleReviewCandidate:
-    path: Path
-    excerpt: str
-
-
-def _resolve_external_sidecars(
-    incoming_root: Path,
-    source: Path,
-    release_dir: Path | None,
-) -> tuple[Path | None, list[_SubtitleReviewCandidate]]:
-    """Resolve an automatic English sidecar or safe candidates for review."""
-    if release_dir is None:
-        candidates = [
-            source.with_name(source.stem + suffix)
-            for suffix in (".en.srt", ".eng.srt", ".english.srt", ".srt")
-        ]
-        candidates = [
-            candidate
-            for candidate in candidates
-            if candidate.is_file() and not candidate.is_symlink()
-        ]
-    else:
-        candidates = _subtitle_files_in_release(incoming_root, release_dir)
-
-    def label_tokens(label: str) -> set[str]:
-        return {
-            token
-            for token in re.split(r"[^a-z0-9]+", label.casefold())
-            if token
-        }
-
-    english_markers = {"en", "eng", "english"}
-    alternate_markers = {"commentary", "forced"}
-    accessibility_markers = {"cc", "sdh", "hoh", "hearing", "impaired"}
-    extra_markers = {
-        "bonus",
-        "deleted",
-        "extra",
-        "extras",
-        "featurette",
-        "featurettes",
-        "interview",
-        "sample",
-        "trailer",
-    }
-    foreign_markers = {
-        "arabic", "ara",
-        "chinese", "chi", "zho",
-        "czech", "cze", "ces",
-        "danish", "dan",
-        "dutch", "dut", "nld",
-        "finnish", "fin",
-        "french", "fre", "fra",
-        "german", "ger", "deu",
-        "greek", "gre", "ell",
-        "hebrew", "heb",
-        "hindi", "hin",
-        "hungarian", "hun",
-        "indonesian", "ind",
-        "italian", "ita",
-        "japanese", "jpn",
-        "korean", "kor",
-        "norwegian", "nor",
-        "polish", "pol",
-        "portuguese", "por",
-        "romanian", "rom", "rum", "ron",
-        "russian", "rus",
-        "spanish", "spa",
-        "swedish", "swe",
-        "thai", "tha",
-        "turkish", "tur",
-        "ukrainian", "ukr",
-        "vietnamese", "vie",
-    }
-    insignificant_title_tokens = {"a", "an", "and", "of", "the", "to"}
-    source_title, source_year, _source_edition = _release_suggestion(source.name)
-    source_identity = (
-        label_tokens(source_title) - insignificant_title_tokens
-    )
-    if not source_identity:
-        return None, []
-    release_matches_source = False
-    if release_dir is not None:
-        release_title, _release_year, _release_edition = _release_suggestion(
-            release_dir.name
-        )
-        release_identity = (
-            label_tokens(release_title) - insignificant_title_tokens
-        )
-        release_matches_source = release_identity == source_identity
-
-    generic_track_tokens = english_markers | accessibility_markers | {
-        "default",
-        "full",
-        "sub",
-        "subs",
-        "subtitle",
-        "subtitles",
-    }
-
-    review_candidates: list[_SubtitleReviewCandidate] = []
-    descriptors_by_path: dict[Path, set[str]] = {}
-    automatic_paths: set[Path] = set()
-    for path in sorted(set(candidates), key=lambda item: str(item).casefold()):
-        filename_tokens = label_tokens(path.stem)
-        filename_associated = source_identity.issubset(filename_tokens)
-        generic_label_tokens = {
-            token for token in filename_tokens if not token.isdigit()
-        }
-        generic_english_label = bool(generic_label_tokens & english_markers) and (
-            generic_label_tokens <= generic_track_tokens
-        )
-        if not filename_associated and not (
-            release_matches_source and generic_english_label
-        ):
-            continue
-        candidate_years = {
-            int(token)
-            for token in filename_tokens
-            if re.fullmatch(r"(?:18|19|20)\d{2}", token)
-        }
-        if (
-            source_year is not None
-            and candidate_years
-            and source_year not in candidate_years
-        ):
-            continue
-        if release_dir is None:
-            context_tokens = filename_tokens
-        else:
-            relative_label = " ".join(path.relative_to(release_dir).parts)
-            context_tokens = label_tokens(relative_label)
-        descriptors = context_tokens - source_identity
-        if descriptors & (alternate_markers | extra_markers | foreign_markers):
-            continue
-        inspection = inspect_external_srt(path)
-        if inspection is None:
-            continue
-        review_candidates.append(
-            _SubtitleReviewCandidate(path=path, excerpt=inspection.excerpt)
-        )
-        descriptors_by_path[path] = descriptors
-        if filename_associated:
-            automatic_paths.add(path)
-
-    english_candidates = [
-        candidate
-        for candidate in review_candidates
-        if candidate.path in automatic_paths
-        and descriptors_by_path[candidate.path] & english_markers
-    ]
-    automatic: Path | None = None
-    if len(english_candidates) == 1:
-        automatic = english_candidates[0].path
-    elif len(english_candidates) > 1:
-        # Prefer one ordinary full-dialogue track over accessibility variants.
-        # Multiple ordinary or multiple accessibility tracks remain ambiguous.
-        standard = [
-            candidate.path
-            for candidate in english_candidates
-            if not (descriptors_by_path[candidate.path] & accessibility_markers)
-        ]
-        if len(standard) == 1:
-            automatic = standard[0]
-
-    if automatic is not None:
-        return automatic, []
-    return None, review_candidates
-
-
-def _select_english_sidecar(
-    incoming_root: Path,
-    source: Path,
-    release_dir: Path | None,
-) -> Path | None:
-    """Choose one source-associated English SRT, failing closed on ambiguity."""
-    automatic, _review_candidates = _resolve_external_sidecars(
-        incoming_root,
-        source,
-        release_dir,
-    )
-    return automatic
-
-
-def _copy_file_no_replace(source: Path, destination: Path) -> None:
-    """Copy a small raw sidecar without replacing an existing peer."""
-    destination_created = False
-    try:
-        with source.open("rb") as source_file, destination.open("xb") as target_file:
-            destination_created = True
-            shutil.copyfileobj(source_file, target_file)
-        shutil.copystat(source, destination)
-    except Exception:
-        if destination_created:
-            destination.unlink(missing_ok=True)
-        raise
-
-
-def _move_file_no_replace(source: Path, destination: Path) -> None:
-    """Move a same-volume regular file without ever replacing a peer."""
-    if os.name == "nt":
-        # MoveFileEx without MOVEFILE_REPLACE_EXISTING is the behavior exposed
-        # by Path.rename on Windows.
-        source.rename(destination)
-        return
-
-    # POSIX rename replaces an existing destination, so create the destination
-    # link exclusively and then remove the incoming name.
-    os.link(source, destination, follow_symlinks=False)
-    try:
-        source.unlink()
-    except OSError:
-        destination.unlink(missing_ok=True)
-        raise
 
 
 def _incoming_candidate(
@@ -2082,6 +1814,7 @@ def _incoming_candidate(
                 "relative_path": candidate.path.relative_to(root).as_posix(),
                 "filename": candidate.path.name,
                 "excerpt": candidate.excerpt,
+                "validation": candidate.validation.summary,
             }
             for candidate in subtitle_review_candidates
         ],
@@ -2097,6 +1830,8 @@ def _resolve_incoming_file(config: Config, raw_relative_path: str) -> Path:
         or ".." in relative_path.parts
     ):
         raise HTTPException(status_code=400, detail="Invalid incoming relative path")
+    if relative_path.parts and relative_path.parts[0].casefold() == ".scene-recall-managed":
+        raise HTTPException(status_code=409, detail="Use the managed download queue to review this acquisition")
 
     root = config.paths.incoming_dir.resolve()
     unresolved = root / relative_path
@@ -2166,12 +1901,22 @@ def _run_ingest_subprocess(
 
     assert process.stdout is not None
     log_tail: deque[str] = deque(maxlen=5)
-    for raw_line in process.stdout:
-        line = raw_line.rstrip()
-        if line:
-            log_tail.append(line)
-            append_log(line)
-    returncode = process.wait()
+    try:
+        for raw_line in process.stdout:
+            line = raw_line.rstrip()
+            if line:
+                log_tail.append(line)
+                append_log(line)
+        returncode = process.wait()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        process.stdout.close()
     if returncode != 0:
         tail = " | ".join(log_tail) or "no output"
         raise RuntimeError(f"ingest exited with code {returncode}: {tail}")
@@ -2188,6 +1933,8 @@ def incoming_endpoint(request: Request) -> list[dict]:
         root = incoming_root.resolve()
         candidates: list[dict] = []
         for entry in root.iterdir():
+            if entry.name.casefold() == ".scene-recall-managed":
+                continue
             if _is_link_or_junction(entry):
                 continue
             if _is_regular_video(entry):
@@ -2227,6 +1974,15 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
 
     config: Config = request.app.state.config
     source = _resolve_incoming_file(config, body.relative_path)
+    def source_fingerprint():
+        if _is_link_or_junction(source):
+            raise HTTPException(status_code=409, detail="Incoming film changed during validation")
+        try:
+            stat = source.stat()
+        except OSError as exc:
+            raise HTTPException(status_code=409, detail="Incoming film changed during validation") from exc
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    verified_source = source_fingerprint()
     try:
         filename = _canonical_film_filename(
             body.title, body.year, body.edition, source.suffix
@@ -2245,44 +2001,37 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
         automatic_subtitle, subtitle_review_candidates = (
             _resolve_external_sidecars(incoming_root, source, release_dir)
         )
-        if automatic_subtitle is not None:
-            if body.subtitle_decision is not None:
+        # Inventory stays metadata-only. Probe just this selected film, on import,
+        # and recompute before any source or sidecar mutation.
+        media_duration = None
+        if subtitle_review_candidates and not isinstance(body.subtitle_decision, SubtitleSkipDecision):
+            media_duration = _probe_intake_duration(source)
+            automatic_subtitle, subtitle_review_candidates = _resolve_external_sidecars(
+                incoming_root, source, release_dir, media_duration=media_duration)
+        if isinstance(body.subtitle_decision, SubtitleSkipDecision):
+            subtitle_source = None
+        elif isinstance(body.subtitle_decision, SubtitleUseDecision):
+            eligible = [candidate.path for candidate in subtitle_review_candidates]
+            if automatic_subtitle is not None:
+                eligible.append(automatic_subtitle)
+            subtitle_source = next((path for path in eligible
+                if path.relative_to(incoming_root).as_posix() == body.subtitle_decision.relative_path), None)
+            if subtitle_source is None:
                 raise HTTPException(
                     status_code=409,
                     detail="Subtitle choices changed; review this film again",
                 )
+        elif automatic_subtitle is not None or isinstance(body.subtitle_decision, SubtitleAutoDecision):
             subtitle_source = automatic_subtitle
         elif subtitle_review_candidates:
-            if body.subtitle_decision is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Choose an English subtitle or explicitly skip subtitles",
-                )
-            if isinstance(body.subtitle_decision, SubtitleSkipDecision):
-                subtitle_source = None
-            else:
-                selected = next(
-                    (
-                        candidate.path
-                        for candidate in subtitle_review_candidates
-                        if candidate.path.relative_to(incoming_root).as_posix()
-                        == body.subtitle_decision.relative_path
-                    ),
-                    None,
-                )
-                if selected is None:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subtitle choices changed; review this film again",
-                    )
-                subtitle_source = selected
+            raise HTTPException(status_code=409,
+                detail="Choose Automatic to check subtitles, select a known English track, or skip subtitles")
         else:
-            if body.subtitle_decision is not None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Subtitle choices changed; review this film again",
-                )
             subtitle_source = None
+        subtitle_validation = validate_external_srt(subtitle_source, media_duration) if subtitle_source else None
+        if subtitle_validation and (not subtitle_validation.valid or (
+                not isinstance(body.subtitle_decision, SubtitleUseDecision) and not subtitle_validation.automatic_eligible)):
+            raise HTTPException(status_code=409, detail="Subtitle changed during validation; review this film again")
 
         films_root = config.paths.films_dir.resolve()
         films_root.mkdir(parents=True, exist_ok=True)
@@ -2314,6 +2063,8 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
             )
         marker_created = False
         subtitle_copied = False
+        if source_fingerprint() != verified_source:
+            raise HTTPException(status_code=409, detail="Incoming film changed during validation")
         if marker is not None:
             try:
                 with marker.open("x", encoding="utf-8") as marker_file:
@@ -2326,8 +2077,11 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
                 ) from None
         try:
             if subtitle_source is not None and subtitle_destination is not None:
-                _copy_file_no_replace(subtitle_source, subtitle_destination)
+                _copy_file_no_replace(subtitle_source, subtitle_destination,
+                    expected_sha256=subtitle_validation.sha256)
                 subtitle_copied = True
+            if source_fingerprint() != verified_source:
+                raise HTTPException(status_code=409, detail="Incoming film changed during validation")
             _move_file_no_replace(source, destination)
         except Exception:
             if subtitle_copied and subtitle_destination is not None:
@@ -2337,6 +2091,8 @@ def import_film_endpoint(body: FilmImportRequest, request: Request) -> dict:
             raise
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except FileExistsError:
         raise HTTPException(status_code=409, detail="Destination film already exists") from None
     except PermissionError as exc:

@@ -1,0 +1,1506 @@
+.workspace {
+  --workbench-height: clamp(270px, calc(100dvh - 506px), 560px);
+  --preview-height: calc(var(--workbench-height) - 110px);
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0 auto;
+  --workspace-gutter: 16px;
+  padding: 0 var(--workspace-gutter) 12px;
+  min-height: 100dvh;
+  background: var(--editor-bg);
+  color: var(--editor-text);
+  color-scheme: dark;
+  font-size: 13px;
+  --editor-bg: #111214;
+  --editor-surface: #17181a;
+  --editor-raised: #202226;
+  --editor-line: #2b2d31;
+  --editor-muted: #92969e;
+  --editor-text: #e7e8ea;
+}
+.workspace button,
+.workspace input,
+.workspace select,
+.workspace textarea {
+  font: inherit;
+}
+.workspace ::selection {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 42%, #101010);
+}
+.workspace button,
+.workspace a {
+  -webkit-tap-highlight-color: transparent;
+}
+.workspace button {
+  cursor: pointer;
+  border: 1px solid var(--editor-line);
+  border-radius: 4px;
+  background: var(--editor-raised);
+  color: var(--editor-text);
+  padding: 6px 9px;
+  line-height: 1.3;
+}
+.workspace button:hover:not(:disabled) {
+  border-color: #484b52;
+  background: #292c31;
+}
+.workspace button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.workspace .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #17120b;
+  font-weight: 550;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.workspace .primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 86%, white);
+  color: #17120b;
+}
+.workspace button:focus-visible,
+.workspace a:focus-visible,
+.workspace input:focus-visible,
+.workspace textarea:focus-visible,
+.workspace select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.workspace .exportButton {
+  border-color: var(--editor-line);
+  background: var(--editor-raised);
+  color: var(--editor-text);
+  margin-left: 7px;
+}
+.mediaToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 48px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--editor-bg);
+  border-block: 1px solid var(--editor-line);
+}
+.workspace .trackButton {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: 48%;
+  text-align: left;
+}
+.trackButton > span {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--editor-muted);
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.trackButton > div {
+  min-width: 0;
+}
+.trackButton strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+.trackButton small {
+  display: block;
+  margin-top: 2px;
+  color: #aaaaaa;
+  font-size: 11px;
+}
+.advancedActions {
+  color: #aaaaaa;
+  font-size: 11px;
+}
+.songTools { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.songTools .trackButton { max-width: 100%; min-width: 0; flex: 1; }
+.songTools > button:last-child:not(.trackButton) { flex: none; color: #aaa; background: transparent; border-color: transparent; font-size: 11px; }
+.inspectorTitle > button, .clipOptions button, .musicAnalysis button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.musicAnalysis { display: grid; gap: 12px; color: #bbb; font-size: 12px; line-height: 1.6; }
+.musicAnalysis p { margin: 0; }
+.musicAnalysis small { color: #999; font-size: 11px; }
+.musicAnalysis strong { color: var(--fg); font-weight: 500; }
+.musicAnalysis details { border-top: 1px solid #333; padding-top: 10px; }
+.musicAnalysis summary { cursor: pointer; color: var(--fg); font-size: 12px; }
+.musicAnalysis details p { margin-top: 10px; }
+.clipOptions { display: grid; gap: 7px; }
+.clipOptions button { justify-content: flex-start; }
+.workspaceTools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 0 0 7px; }
+.workspace .workspaceTools > button { padding: 5px 8px; border-color: transparent; background: transparent; color: #aaa; font-size: 10.5px; }
+.outputSettings label { display: grid; gap: 7px; margin-bottom: 15px; color: #bbb; font-size: 11px; }
+.outputSettings input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
+.outputSettings select { width: 100%; padding: 7px; border: 1px solid #424242; border-radius: 4px; background: #151515; color: #ddd; }
+.outputSettings .scope { align-items: stretch; flex-direction: column; gap: 7px; }
+.outputSettings :global(.movie-scope) { width: 100%; }
+.outputSettings :global(.movie-scope-trigger) { width: 100%; }
+.outputSettings :global(.movie-scope-popover) { position: static; width: 100%; max-width: none; margin-top: 7px; box-sizing: border-box; box-shadow: none; }
+.advancedActions p {
+  margin: 0 0 9px;
+}
+.advancedActions > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.shotAdvancedActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.advancedActions small {
+  display: block;
+  margin-top: 9px;
+  line-height: 1.6;
+  color: #aaaaaa;
+}
+.shotAdvancedActions {
+  margin: 12px 0;
+}
+.statusLine {
+  min-height: 28px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 11px;
+  color: #aaaaaa;
+  padding: 4px 2px;
+}
+.statusLine > span {
+  flex: 1;
+}
+.workspace .statusLine button {
+  background: transparent;
+  border: 0;
+  font-size: 11px;
+  color: #c9c9c9;
+}
+.busyDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.3s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  gap: 16px;
+  align-items: stretch;
+}
+.monitor {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.monitor > section {
+  flex: 1;
+}
+.inspector {
+  border: 1px solid var(--editor-line);
+  background: var(--editor-surface);
+  border-radius: 4px;
+  min-width: 0;
+  height: var(--workbench-height);
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+}
+.inspectorTitle {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid #303030;
+}
+.inspectorTitle > div:not([popover]) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.inspectorTitle span {
+  font-size: 11px;
+  letter-spacing: normal;
+  color: var(--editor-muted);
+}
+.inspectorTitle strong {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.workspace .inspectorTitle button {
+  font-size: 11px;
+  padding: 5px 7px;
+}
+.workspace .inspectorTitle button[aria-pressed="true"] {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+.inspectorTabs {
+  display: flex;
+  border-bottom: 1px solid #363636;
+  gap: 2px;
+  padding: 0 8px;
+}
+.inspectorTabs button > span {
+  margin-left: 6px;
+  font-size: 10px;
+  color: #c9c9c9;
+}
+.processDetails {
+  margin: 0;
+  color: #c9c9c9;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.processDetails ol { padding-left: 18px; margin: 0 0 10px; }
+.processDetails li + li { margin-top: 6px; }
+.processDetails p { margin: 8px 0; }
+.processDetails strong { font-weight: 550; color: var(--fg); }
+.workspace .inspectorTabs button {
+  flex: 1;
+  font-size: 11px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 9px 3px;
+  color: #aaaaaa;
+  border-bottom: 2px solid transparent;
+}
+.workspace .inspectorTabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+}
+.inspectorBody {
+  overflow-y: auto;
+  padding: 10px;
+  min-height: 0;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+.inspectorTitle,
+.inspectorTabs,
+.inspectorFooter {
+  flex-shrink: 0;
+}
+.workspace label {
+  display: block;
+  font-size: 11px;
+  color: #c9c9c9;
+}
+.workspace label + label {
+  margin-top: 14px;
+}
+.workspace label input:not([type="range"]):not([type="checkbox"]),
+.workspace label select,
+.workspace label textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  background: #151515;
+  border: 1px solid #343434;
+  border-radius: 4px;
+  padding: 9px;
+  margin-top: 7px;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+}
+.workspace textarea {
+  resize: vertical;
+}
+.workspace label input[type="range"] {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  accent-color: var(--accent);
+}
+.hint {
+  font-size: 10px;
+  line-height: 1.6;
+  color: #aaaaaa;
+  margin: 12px 0;
+}
+.inspectorBody .hint {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+.inspectorBody > .primary {
+  width: 100%;
+  font-size: 11px;
+}
+.inspectorBody > button {
+  font-size: 11px;
+  margin: 6px 0;
+}
+.reason {
+  border-top: 1px solid #363636;
+  margin-top: 16px;
+  padding-top: 13px;
+}
+.reason > span {
+  color: #c9c9c9;
+  font-size: 10px;
+}
+.reason p {
+  font-size: 11px;
+  color: #aaaaaa;
+  line-height: 1.6;
+  margin: 6px 0 0;
+}
+.inspectorEmpty h2 {
+  font-size: 16px;
+  font-weight: 450;
+  margin: 8px 0;
+}
+.inspectorEmpty p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #aaaaaa;
+}
+.workspace .danger {
+  color: #c79483;
+  border-color: #503c30;
+}
+.timeline {
+  --clip-height: 112px;
+  --clip-image-height: 64px;
+  --music-height: 56px;
+  --ruler-height: 44px;
+  margin-top: 10px;
+  min-height: 0;
+  min-width: 0;
+  border: 1px solid var(--editor-line);
+  border-radius: 4px;
+  background: var(--editor-surface);
+  overflow: hidden;
+}
+.timelineExpanded {
+  --clip-height: clamp(180px, 26dvh, 300px);
+  --clip-image-height: clamp(84px, 12dvh, 130px);
+  --music-height: 80px;
+}
+.timelineTools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-height: 38px;
+  padding: 4px 10px;
+  background: var(--editor-surface);
+  border-bottom: 1px solid var(--editor-line);
+}
+.timelineTitle,
+.timelineActions,
+.timelineZoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.timelineTitle {
+  gap: 10px;
+  min-width: 0;
+}
+.timelineTitle strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+.timelineTitle > span {
+  font-size: 10px;
+  color: #aaaaaa;
+  white-space: nowrap;
+}
+.timelineActions {
+  flex-wrap: wrap;
+}
+.workspace .timelineTools .missingScenes {
+  padding: 3px 5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+}
+.workspace .timelineTools button {
+  padding: 5px 9px;
+  font-size: 11px;
+  min-height: 28px;
+  white-space: nowrap;
+}
+.workspace .timelineTools .addCut {
+  background: var(--editor-raised);
+  border-color: var(--editor-line);
+  color: var(--editor-text);
+  font-weight: 500;
+}
+.workspace .timelineTools .addCut:hover:not(:disabled) {
+  background: #292c31;
+  border-color: #484b52;
+}
+.workspace .timelineTools .snapToggle[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, #151515);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--editor-line));
+  color: var(--fg);
+}
+.timelineZoom {
+  gap: 2px;
+  border-inline: 1px solid #343434;
+  padding-inline: 7px;
+}
+.timelineZoom > span {
+  min-width: 22px;
+  text-align: center;
+  font-size: 10px;
+  color: #aaaaaa;
+}
+.workspace .timelineZoom button {
+  min-width: 26px;
+  padding-inline: 6px;
+}
+.timelineTracks {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+}
+.trackNames {
+  background: #1b1b1b;
+  border-right: 1px solid #363636;
+  color: #aaaaaa;
+  font-size: 10px;
+}
+.trackRulerSpacer {
+  height: var(--ruler-height);
+  padding: 24px 0 0 10px;
+  box-sizing: border-box;
+  border-bottom: 1px solid #363636;
+}
+.clipTrackName,
+.musicTrackName {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding-left: 10px;
+  box-sizing: border-box;
+}
+.clipTrackName {
+  height: calc(var(--clip-height) + 12px);
+}
+.musicTrackName {
+  height: var(--music-height);
+  border-top: 1px solid #363636;
+}
+.trackNames b {
+  color: #c9c9c9;
+  font-weight: 500;
+  font-size: 11px;
+}
+.timelineScroll {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent) 24%, #141414) #1b1b1b;
+}
+.timelineCanvas {
+  position: relative;
+  min-width: 100%;
+  padding-bottom: 7px;
+}
+.ruler {
+  height: var(--ruler-height);
+  position: relative;
+  cursor: crosshair;
+  border-bottom: 1px solid #363636;
+  box-sizing: border-box;
+  user-select: none;
+  touch-action: none;
+  background: #1b1b1b;
+}
+.ruler > span {
+  position: absolute;
+  top: 5px;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: #aaaaaa;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ruler > span::after {
+  content: "";
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  height: 5px;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 44%, #242424);
+}
+.ruler > span:first-child {
+  transform: none;
+  padding-left: 3px;
+}
+.ruler > span:last-child {
+  transform: translateX(-100%);
+  padding-right: 3px;
+}
+.clipLane {
+  position: relative;
+  height: var(--clip-height);
+  margin: 6px 0;
+}
+.workspace .timeline .timelineClip {
+  position: absolute;
+  top: 0;
+  height: var(--clip-height);
+  min-width: 0;
+  padding: 0;
+  border: 1px solid #4a4d54;
+  border-radius: 3px;
+  background: #25282e;
+  text-align: left;
+  overflow: hidden;
+}
+.workspace .timeline .timelineClip:hover:not(:disabled) {
+  border-color: #8c919b;
+  background: #30343b;
+}
+.timelineClip img {
+  position: absolute;
+  inset: 0 0 auto;
+  width: 100%;
+  height: var(--clip-image-height);
+  object-fit: cover;
+  opacity: 0.78;
+  pointer-events: none;
+}
+.timelineClip::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--clip-image-height);
+  background: linear-gradient(#0e0e0e90, transparent 35%, #151515d9);
+  z-index: 1;
+  pointer-events: none;
+}
+.clipTopline {
+  position: absolute;
+  top: 5px;
+  left: 7px;
+  right: 7px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg);
+  font-size: 9px;
+  z-index: 2;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 1px 2px #000000;
+}
+.clipTopline b {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.clipImageLabel {
+  position: absolute;
+  top: calc(var(--clip-image-height) - 20px);
+  left: 7px;
+  right: 7px;
+  z-index: 2;
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  text-shadow: 0 1px 3px #000000;
+}
+.clipDirection {
+  position: absolute;
+  top: var(--clip-image-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 6px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-top: 1px solid #343434;
+  overflow: hidden;
+  pointer-events: none;
+}
+.clipDirectionMeta {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  font-size: 9px;
+  line-height: 1.15;
+  color: #c9c9c9;
+  max-height: 28px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.pendingDirection {
+  font-style: normal;
+  font-size: 8px;
+  font-weight: 500;
+  color: #c9c9c9;
+  background: color-mix(in srgb, var(--accent) 16%, #151515);
+  padding: 2px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.clipPrompt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg);
+  overflow-wrap: normal;
+}
+.emptyPrompt {
+  color: #aaaaaa;
+}
+.clipPurpose {
+  color: #aaaaaa;
+  font-size: 10px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.timelineExpanded .clipPrompt {
+  -webkit-line-clamp: 6;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.timelineExpanded .clipDirectionMeta { display: flex; }
+.compactClip .clipDirectionMeta,
+.compactClip .clipPurpose { display: none; }
+.compactClip .clipPrompt { display: block; white-space: nowrap; text-overflow: ellipsis; }
+.narrowClip .clipTopline { left: 4px; right: 4px; }
+.narrowClip .clipTopline > span { display: none; }
+.narrowClip .clipDirection,
+.narrowClip .clipImageLabel { display: none; }
+.narrowClip img,
+.narrowClip::before { height: 100%; }
+.workspace .timeline .gapClip {
+  background: repeating-linear-gradient(135deg, #202226 0 6px, #2b2926 6px 7px);
+  border-style: dashed;
+  border-color: #8c7656;
+}
+.workspace .timeline .gapClip::before {
+  background: transparent;
+}
+.gapClip.narrowClip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 1px;
+  transform: translateX(-50%);
+  background: var(--accent);
+}
+.workspace .timeline .selectedClip {
+  border: 1px solid var(--accent);
+  box-shadow: inset 0 2px var(--accent);
+}
+.workspace .timeline .selectedClip .clipDirection {
+  background: color-mix(in srgb, var(--accent) 8%, #25282e);
+}
+.cutStrip {
+  position: absolute;
+  top: 25px;
+  left: 0;
+  right: 0;
+  height: calc(var(--ruler-height) - 25px);
+  z-index: 5;
+  pointer-events: none;
+}
+.workspace .timeline .cutHandle {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px 3px 0 0;
+  transform: translateX(-50%);
+  background: transparent;
+  z-index: 5;
+  pointer-events: auto;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.cutHandle::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  height: calc(var(--clip-height) + 12px);
+  left: 11px;
+  width: 1px;
+  background: #666b74;
+  pointer-events: none;
+}
+.cutHandle > i {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px 3px 0 0;
+  background: #3e424a;
+  color: #e7e8ea;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 650;
+  line-height: 17px;
+  pointer-events: none;
+}
+.cutHandle.crowdedCut > i {
+  top: 5px;
+  left: 10.5px;
+  width: 3px;
+  height: 8px;
+  border-radius: 1px;
+  font-size: 0;
+}
+.workspace .timeline .cutHandle:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10.6%, transparent);
+}
+.workspace .timeline .selectedCut {
+  z-index: 6;
+  background: color-mix(in srgb, var(--accent) 9.4%, transparent);
+}
+.workspace .timeline .selectedCut::after,
+.workspace .timeline .selectedCut > i {
+  background: var(--accent);
+}
+.workspace .timeline .cutHandle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.workspace .timeline .cutHandle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--accent) 15.7%, transparent);
+}
+.cutTime {
+  position: absolute;
+  top: -25px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #17120b;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.musicLane {
+  position: relative;
+  height: var(--music-height);
+  background: #25282c;
+  border-block: 1px solid #454a52;
+  box-sizing: border-box;
+  cursor: crosshair;
+  overflow: hidden;
+  touch-action: none;
+}
+.musicLane svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: #aaaaaa;
+}
+.beatLine,
+.downbeatLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 17.3%, transparent);
+}
+.downbeatLine {
+  background: color-mix(in srgb, var(--accent) 43.9%, transparent);
+}
+.downbeatLine::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 5px;
+  background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.waveformMessage {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: #c9c9c9;
+  padding: 3px 6px;
+  background: #1b1b1bd9;
+  border-radius: 3px;
+}
+.fadeShape {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--accent) 14.9%, transparent);
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+  pointer-events: none;
+}
+.playheadLine {
+  position: absolute;
+  top: 17px;
+  bottom: 7px;
+  width: 1px;
+  z-index: 6;
+  background: var(--accent);
+  pointer-events: none;
+}
+.workspace .timeline .editPlayhead {
+  position: absolute;
+  top: 0;
+  height: 24px;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  z-index: 7;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.editPlayhead > span {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  width: 12px;
+  height: 15px;
+  background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
+  pointer-events: none;
+}
+.workspace .timeline .editPlayhead:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16.9%, transparent);
+}
+.workspace .timeline .editPlayhead:focus-visible,
+.timeline .ruler:focus-visible,
+.timeline .musicLane:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.timelineFooter {
+  min-height: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 14px;
+  padding: 4px 10px;
+  border-top: 1px solid #363636;
+  background: #1b1b1b;
+}
+.timelineHint {
+  margin: 0;
+  color: #aaaaaa;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.timelineHint kbd {
+  font: inherit;
+  color: #c9c9c9;
+}
+.cutSelection {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.cutSelection > span {
+  font-size: 10px;
+  color: #c9c9c9;
+  margin-right: 5px;
+  white-space: nowrap;
+}
+.cutSelection b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  margin-left: 6px;
+}
+.workspace .cutSelection button {
+  font-size: 10px;
+  padding: 3px 7px;
+  min-height: 24px;
+}
+.timelineOptions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.workspace .timelineOptions > button,
+.workspace .replanCuts > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  text-align: left;
+  font-size: 11px;
+}
+.timelineOptions button > svg { flex-shrink: 0; }
+.inspectorTitle > div:not([popover]) { flex: 1; min-width: 0; }
+.workspace .timelineOptions label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  color: #c9c9c9;
+}
+.timelineOptions input {
+  accent-color: var(--accent);
+}
+.replanCuts {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid #343434;
+}
+.replanCuts strong {
+  font-size: 11px;
+  font-weight: 500;
+  color: #c9c9c9;
+}
+.replanCuts p {
+  font-size: 10px;
+  line-height: 1.5;
+  color: #aaaaaa;
+  margin: 3px 0 0;
+}
+.workspace .replanCuts > button {
+  justify-self: start;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.overallGrid {
+  display: block;
+}
+.scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: #aaaaaa;
+  margin-top: 12px;
+}
+.interpretation {
+  color: #aaaaaa;
+  font-size: 11px;
+  line-height: 1.7;
+  max-width: 900px;
+}
+.workspace dialog {
+  margin: auto;
+  color: var(--fg);
+  border: 1px solid color-mix(in srgb, var(--accent) 44%, #242424);
+  border-radius: 7px;
+  padding: 22px;
+  background: #151515;
+  box-sizing: border-box;
+  max-height: 90vh;
+}
+.workspace dialog::backdrop {
+  background: #0e0e0ebd;
+}
+.workspace dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  gap: 20px;
+}
+.workspace dialog > header strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+.passageDialog {
+  width: min(780px, 95vw);
+}
+.exportDialog {
+  width: min(1050px, 95vw);
+}
+.exportDialog video {
+  width: 100%;
+  display: block;
+  max-height: 65vh;
+  background: #080808;
+}
+.exportDialog > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding-top: 16px;
+  color: #aaaaaa;
+  font-size: 12px;
+}
+.error {
+  border: 1px solid #6d4935;
+  background: #251910;
+  color: #d7b49a;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 13px;
+  border-radius: 4px;
+  margin: 10px 0;
+}
+.error > div {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.history {
+  margin: 0;
+}
+.history > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 6px 0;
+}
+.welcome {
+  max-width: 620px;
+  margin: 90px auto;
+}
+.welcome > span {
+  font-size: 12px;
+  letter-spacing: 0.13em;
+  color: #aaaaaa;
+}
+.welcome h1 {
+  font-size: 38px;
+  letter-spacing: -0.035em;
+  font-weight: 450;
+  line-height: 1.15;
+}
+.welcome p {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #aaaaaa;
+  margin-bottom: 26px;
+}
+.noMusic {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #363636;
+  background: #0e0e0e;
+}
+.noMusic h2 {
+  font-size: 20px;
+  font-weight: 450;
+}
+.inspectorFooter {
+  padding: 8px 12px;
+  border-top: 1px solid #363636;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+.workspace .inspectorFooter > button {
+  width: auto;
+  min-width: 0;
+  padding: 6px 7px;
+  line-height: 1.35;
+  white-space: normal;
+  min-height: 34px;
+  font-size: 11px;
+}
+.inspectorFooter > p {
+  grid-column: 1 / -1;
+  margin: 0 0 3px;
+  color: #c9c9c9;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.inspectorBody label + label {
+  margin-top: 8px;
+}
+.workspace .inspectorBody label select,
+.workspace .inspectorBody label textarea {
+  padding: 6px 8px;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.workspace .inspectorBody label textarea {
+  font-size: 13px;
+}
+.musicCue {
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  background: #1b1b1b;
+  border-radius: 0 4px 4px 0;
+}
+.musicCue > span {
+  color: var(--fg);
+  font-size: 10px;
+}
+.musicCue p {
+  color: #aaaaaa;
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 4px 0 0;
+}
+.directionDetails {
+  margin-top: 14px;
+  border-top: 1px solid #363636;
+  padding-top: 12px;
+}
+.directionDetails summary {
+  font-size: 11px;
+  color: #c9c9c9;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.visualPlanSummary {
+  color: #c9c9c9;
+}
+.visualPlanSummary > span {
+  font-size: 10px;
+  color: #aaaaaa;
+}
+.visualPlanSummary p {
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 5px 0 9px;
+  white-space: pre-wrap;
+}
+.visualPlanSummary p strong {
+  font-weight: 500;
+}
+.workspace .visualPlanSummary button {
+  font-size: 11px;
+  padding: 5px 9px;
+}
+.shotFeedback {
+  border: 0;
+  border-top: 1px solid #343434;
+  padding: 10px 0 0;
+  margin: 14px 0 2px;
+  min-width: 0;
+}
+.shotFeedback legend {
+  font-size: 10px;
+  color: #c9c9c9;
+  padding: 0 6px 0 0;
+}
+.shotFeedback>div {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.workspace .shotFeedback button {
+  font-size: 9px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  background: #222222;
+  border-color: #343434;
+  color: #c9c9c9;
+}
+.workspace .shotFeedback button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 24%, #141414);
+  color: var(--fg);
+}
+.shotFeedback p {
+  font-size: 9px;
+  line-height: 1.6;
+  color: #aaaaaa;
+  margin: 9px 0 0;
+}
+.workspace:has(.timelineExpanded) {
+  --workbench-height: 220px;
+}
+.promptReview {
+  margin: 0 0 8px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #c5ae83;
+}
+@media (min-width: 1500px) {
+  .workbench {
+    grid-template-columns: minmax(0, 1fr) 430px;
+  }
+}
+@media (min-width: 901px) {
+  .editor { display: grid; grid-template-columns: minmax(0, 1fr) 370px; grid-template-rows: var(--workbench-height) auto; gap: 8px; }
+  .editor .workbench { display: contents; }
+  .editor .monitor { grid-column: 1; grid-row: 1; height: var(--workbench-height); }
+  .editor .timeline { grid-column: 1 / -1; grid-row: 2; margin-top: 0; }
+  .editor .inspector { grid-column: 2; grid-row: 1; height: var(--workbench-height); min-height: 0; overflow: hidden; }
+}
+@media (max-width: 900px) {
+  .workspace {
+    --workspace-gutter: 12px;
+    padding: 0 var(--workspace-gutter) 20px;
+  }
+  .workbench {
+    grid-template-columns: minmax(0, 1fr) 330px;
+    gap: 10px;
+  }
+  .inspectorBody {
+    padding: 11px;
+  }
+  .timelineTitle > span {
+    display: none;
+  }
+  .timelineTools {
+    gap: 6px 10px;
+  }
+}
+@media (min-width: 681px) and (max-height: 800px) {
+  .timeline:not(.timelineExpanded) {
+    --clip-height: 96px;
+    --clip-image-height: 54px;
+    --music-height: 44px;
+    --ruler-height: 40px;
+    min-height: 0;
+    margin-top: 6px;
+  }
+  .timelineFooter {
+    padding-block: 3px;
+  }
+  .inspectorTitle {
+    padding-block: 6px;
+  }
+  .workspace .inspectorTabs button {
+    padding-block: 6px;
+  }
+}
+@media (max-width: 680px) {
+  .workspace {
+    --workspace-gutter: 10px;
+    padding: 0 var(--workspace-gutter) 20px;
+    --preview-height: min(30dvh, 220px);
+  }
+  .mediaToolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+  }
+  .workspace .trackButton {
+    max-width: 100%;
+  }
+  .songTools { flex-wrap: wrap; gap: 7px; }
+  .songTools .trackButton { flex-basis: 100%; }
+  .statusLine {
+    font-size: 10px;
+    line-height: 1.5;
+    min-height: 38px;
+  }
+  .workbench {
+    display: flex;
+    flex-direction: column;
+  }
+  .inspector {
+    max-height: 390px;
+    order: 2;
+  }
+  .monitor {
+    order: 1;
+  }
+  .timeline {
+    --clip-height: 104px;
+    --clip-image-height: 54px;
+    --music-height: 56px;
+    min-height: 0;
+    margin-top: 10px;
+  }
+  .timelineTools {
+    gap: 6px 10px;
+    align-items: center;
+    padding: 7px;
+  }
+  .timelineTools > div {
+    gap: 5px;
+  }
+  .timelineTools > div:first-child {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .timelineTools label {
+    font-size: 9px;
+    margin-right: 3px;
+  }
+  .overallGrid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .workspace dialog {
+    margin: auto;
+    padding: 14px;
+    max-height: 94vh;
+  }
+  .workspace dialog > header {
+    margin-bottom: 10px;
+  }
+  .exportDialog > div {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .welcome {
+    margin: 60px auto;
+  }
+  .welcome h1 {
+    font-size: 30px;
+  }
+  .editor {
+    display: flex;
+    flex-direction: column;
+  }
+  .editor .workbench {
+    display: contents;
+  }
+  .editor .monitor {
+    order: 1;
+  }
+  .editor .timeline {
+    order: 2;
+  }
+  .editor .inspector {
+    order: 3;
+    margin-top: 12px;
+    height: clamp(360px, 65dvh, 520px);
+    max-height: none;
+  }
+  .workspace:has(.timelineExpanded) {
+    --preview-height: min(24dvh, 160px);
+  }
+  .timelineExpanded {
+    --clip-height: 270px;
+    --clip-image-height: 72px;
+    --music-height: 76px;
+  }
+  .timelineTools .timelineTitle {
+    flex-direction: row;
+    align-items: center;
+  }
+  .timelineTitle > span {
+    display: inline;
+  }
+  .timelineActions {
+    width: 100%;
+    gap: 5px;
+  }
+  .workspace .timelineTools button {
+    padding: 5px 7px;
+    font-size: 10px;
+    min-height: 30px;
+  }
+  .timelineZoom {
+    margin-left: auto;
+    padding-inline: 4px;
+  }
+  .timelineTracks {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+  .trackRulerSpacer,
+  .clipTrackName,
+  .musicTrackName {
+    padding-left: 6px;
+    font-size: 9px;
+  }
+  .trackNames b {
+    font-size: 10px;
+  }
+  .trackNames span {
+    font-size: 8px;
+  }
+  .timelineFooter {
+    padding: 6px 8px;
+  }
+  .timelineHint {
+    font-size: 9px;
+  }
+  .cutSelection {
+    flex-wrap: wrap;
+  }
+  .workspace .inspectorTabs button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+  .workspace .inspectorFooter > button {
+    min-height: 40px;
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .busyDot {
+    animation: none;
+  }
+}
+
+.workspaceHeader { margin-inline: calc(-1 * var(--workspace-gutter)); }
+.viewTabs { display: flex; gap: 22px; align-items: stretch; height: 42px; border-bottom: 1px solid var(--editor-line); }
+.workspace .viewTabs button { padding: 0 2px; border: 0; border-radius: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--editor-muted); font-size: 12px; }
+.workspace .viewTabs button[aria-selected="true"] { color: var(--editor-text); border-bottom-color: var(--accent); }
+.workspace .viewTabs button:hover { color: var(--editor-text); }
+.workspace .viewTabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+.workspace .viewPanel[hidden] { display: none !important; }
+.mediaToolbar { border-top: 0; gap: 18px; }
+.workspace .outputFormat { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--editor-muted); font-size: 11px; white-space: nowrap; }
+.workspace .outputFormat select { width: auto; margin: 0; padding: 5px 7px; color: var(--editor-text); background: transparent; border: 1px solid var(--editor-line); border-radius: 4px; font-size: 11px; }
+@media (max-width: 680px) {
+  .viewTabs { gap: 24px; }
+  .mediaToolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+  .songTools { display: contents; }
+  .songTools .trackButton { grid-column: 1 / -1; }
+  .songTools > button:last-child:not(.trackButton) { justify-self: start; }
+}

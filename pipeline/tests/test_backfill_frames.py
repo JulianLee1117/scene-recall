@@ -28,11 +28,12 @@ def _add_unit(
     t_end: float = 18.0,
     frame_count: int = 3,
     create_files: bool = True,
+    sampling_profile: str = "",
 ) -> list[Path]:
     db = open_db(config)
     create_tables(db, vector_dim=VEC_DIM)
     paths = [
-        tmp_path / "keyframes" / f"{unit_id}_{index}.webp"
+        tmp_path / "keyframes" / sampling_profile / f"{unit_id}_{index}.webp"
         for index in range(frame_count)
     ]
     if create_files:
@@ -197,3 +198,60 @@ def test_backfill_fails_before_embedding_when_keyframe_missing(
 def test_backfill_rejects_nonpositive_batch_size(config: Config) -> None:
     with pytest.raises(ValueError, match="batch_size"):
         backfill_frames(config, batch_size=0)
+
+
+def _add_native_unit(config: Config, tmp_path: Path) -> tuple[list[Path], Path]:
+    from pipeline.ingest.media import _artifact_record, _media_manifest_path
+    from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE
+
+    paths = _add_unit(config, tmp_path, t_start=10.0, t_end=11.2, sampling_profile=SHORT_SHOT_SAMPLING_PROFILE)
+    manifest = _media_manifest_path(tmp_path / "media-manifests" / SHORT_SHOT_SAMPLING_PROFILE, "film_a_0001")
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "identity": {"shot": {"shot_id": "film_a_0001", "t_start": 10.0, "t_end": 11.2, "sampling_profile": SHORT_SHOT_SAMPLING_PROFILE}, "source": {"film_id": "film_a"}},
+        "artifacts": {"keyframes": [{**_artifact_record(path), "timestamp": timestamp, "source_pts": timestamp, "timestamp_origin": 0.0} for path, timestamp in zip(paths, [10.041, 10.584, 11.126], strict=True)]},
+    }), encoding="utf-8")
+    return paths, manifest
+
+
+def test_frame_backfill_retains_native_pts_and_is_idempotent(config: Config, tmp_path: Path) -> None:
+    _add_native_unit(config, tmp_path)
+    with patch("pipeline.index.backfill_frames.embed_images", side_effect=_fake_vectors) as embed:
+        first = backfill_frames(config)
+        second = backfill_frames(config)
+    rows = sorted(open_db(config).open_table("frames").to_arrow().to_pylist(), key=lambda row: row["frame_index"])
+    assert first.upserted == 3 and second.skipped_current == 3
+    assert embed.call_count == 1
+    assert [row["timestamp"] for row in rows] == [10.041, 10.584, 11.126]
+    assert {row["timestamp_source"] for row in rows} == {"decoded_container_relative_pts_v2"}
+
+
+@pytest.mark.parametrize("corruption", ["missing", "wrong-shot", "wrong-film", "out-of-bounds", "duplicate", "changed-frame"])
+def test_frame_backfill_never_guesses_missing_or_corrupt_native_pts(config: Config, tmp_path: Path, corruption: str) -> None:
+    paths, manifest = _add_native_unit(config, tmp_path)
+    contents = json.loads(manifest.read_text(encoding="utf-8"))
+    if corruption == "missing":
+        manifest.unlink()
+    elif corruption == "changed-frame":
+        paths[0].write_bytes(b"different image")
+    else:
+        if corruption == "wrong-shot":
+            contents["identity"]["shot"]["t_start"] = 9.0
+        elif corruption == "wrong-film":
+            contents["identity"]["source"]["film_id"] = "other"
+        elif corruption == "out-of-bounds":
+            contents["artifacts"]["keyframes"][0]["timestamp"] = 9.9
+        else:
+            contents["artifacts"]["keyframes"][1]["timestamp"] = contents["artifacts"]["keyframes"][0]["timestamp"]
+        manifest.write_text(json.dumps(contents), encoding="utf-8")
+    with patch("pipeline.index.backfill_frames.embed_images") as embed:
+        with pytest.raises(ValueError, match="native sample evidence"):
+            backfill_frames(config)
+    embed.assert_not_called()
+
+
+def test_frame_backfill_rejects_unknown_sampling_profile(config: Config, tmp_path: Path) -> None:
+    _add_unit(config, tmp_path, sampling_profile="future-profile")
+    with pytest.raises(ValueError, match="unsupported sampling profile"):
+        backfill_frames(config)

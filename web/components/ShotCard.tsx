@@ -3,7 +3,8 @@
 import { useState, useRef, useCallback, useId } from "react";
 import UseInSearchMenu from "./UseInSearchMenu";
 import FacetIcon from "./FacetIcon";
-import { FACET_LABELS, writeSceneSourceDrag } from "@/lib/searchRecipe";
+import { FACET_LABELS, sourceDraftFromShot, writeSceneSourceDrag } from "@/lib/searchRecipe";
+import { useScenePointerDrag } from "@/hooks/useScenePointerDrag";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
 import type {
   RecipeMatchFacet,
@@ -17,6 +18,7 @@ interface ShotCardProps {
   position: number;
   debug: boolean;
   showRank?: boolean;
+  allowSourceDrag?: boolean;
   onClick: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   disabledUseFacets?: ReadonlySet<RecipeMatchFacet>;
@@ -77,6 +79,7 @@ export default function ShotCard({
   position,
   debug,
   showRank = true,
+  allowSourceDrag = true,
   onClick,
   onUseInSearch,
   disabledUseFacets,
@@ -88,6 +91,7 @@ export default function ShotCard({
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const suppressClickRef = useRef(false);
   const debugDescriptionId = useId();
   const displayedRank = shot.rank ?? position;
   const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
@@ -99,8 +103,9 @@ export default function ShotCard({
   );
   const sourceAvailable = Number.isInteger(shot.keyframe_index);
   const canDragSource = Boolean(
-    !sourceReferenceFacet && onUseInSearch && sourceAvailable,
+    allowSourceDrag && !sourceReferenceFacet && onUseInSearch && sourceAvailable,
   );
+  const pointerDrag = useScenePointerDrag(canDragSource ? sourceDraftFromShot("scene", shot) : null, { onDragging: setDragging });
 
   const handleMouseEnter = useCallback(() => {
     setHovered(true);
@@ -116,6 +121,7 @@ export default function ShotCard({
   }, []);
 
   const handleClick = useCallback(() => {
+    if (suppressClickRef.current) return;
     handleMouseLeave();
     onClick(shot);
   }, [handleMouseLeave, onClick, shot]);
@@ -133,6 +139,27 @@ export default function ShotCard({
       <button
         type="button"
         className="result-card-primary"
+        draggable={canDragSource}
+        {...pointerDrag}
+        onDragStart={(event) => {
+          pointerDrag.onDragStart(event);
+          if (event.defaultPrevented) return;
+          if (!canDragSource || !writeSceneSourceDrag(event.dataTransfer, shot)) {
+            event.preventDefault();
+            return;
+          }
+          suppressClickRef.current = true;
+          handleMouseLeave();
+          setNativeDragPreview(event.dataTransfer, {
+            eyebrow: "Scene", title: shot.film_title ?? filmLabel(shot.film_id),
+            detail: formatTime(evidenceTime), imageUrl: `${API_URL}${shot.keyframe_url}`,
+          });
+          setDragging(true);
+        }}
+        onDragEnd={() => {
+          setDragging(false);
+          window.setTimeout(() => { suppressClickRef.current = false; }, 150);
+        }}
         onClick={handleClick}
         onFocus={handleMouseEnter}
         onBlur={handleMouseLeave}
@@ -142,28 +169,13 @@ export default function ShotCard({
       >
         <span
           className="result-card-media"
-          draggable={canDragSource}
-          onDragStart={(event) => {
-            if (!writeSceneSourceDrag(event.dataTransfer, shot)) {
-              event.preventDefault();
-              return;
-            }
-            handleMouseLeave();
-            setNativeDragPreview(event.dataTransfer, {
-              eyebrow: "Scene",
-              title: shot.film_title ?? filmLabel(shot.film_id),
-              detail: formatTime(evidenceTime),
-              imageUrl: `${API_URL}${shot.keyframe_url}`,
-            });
-            setDragging(true);
-          }}
-          onDragEnd={() => setDragging(false)}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${API_URL}${shot.keyframe_url}`}
             alt=""
             loading="lazy"
+            draggable={false}
             style={{
               opacity: hovered ? 0 : 1,
             }}
@@ -177,6 +189,7 @@ export default function ShotCard({
             playsInline
             preload="none"
             aria-hidden="true"
+            draggable={false}
             style={{
               opacity: hovered ? 1 : 0,
             }}

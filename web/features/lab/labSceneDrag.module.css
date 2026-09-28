@@ -1,0 +1,21 @@
+.ghost {
+  position: fixed;
+  z-index: 10000;
+  max-width: 230px;
+  padding: 9px 12px;
+  overflow: hidden;
+  color: var(--fg);
+  background: #222222f2;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  box-shadow: 0 6px 24px #00000077;
+  font: 12px/1.4 system-ui, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.ghost[data-accepted="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, #151515);
+}

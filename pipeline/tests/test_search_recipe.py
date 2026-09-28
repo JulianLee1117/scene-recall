@@ -47,13 +47,14 @@ def _result(unit_id: str, *, frame_index: int = 0) -> dict:
 
 
 def _chain(rows: list[dict]) -> MagicMock:
+    from pipeline.tests.query_helpers import add_scalar_batches
     query = MagicMock()
     query.metric.return_value = query
     query.select.return_value = query
     query.where.return_value = query
     query.limit.return_value = query
     query.to_list.return_value = rows
-    return query
+    return add_scalar_batches(query)
 
 
 def _png_bytes(color: str = "red") -> bytes:
@@ -74,6 +75,71 @@ def test_equal_rrf_promotes_cross_facet_agreement() -> None:
 
     assert [result["unit_id"] for result in fused] == ["b", "a", "c"]
     assert [match["facet"] for match in fused[0]["matches"]] == ["all", "mood"]
+
+
+def test_visual_display_preserves_semantic_query_provenance_per_clause() -> None:
+    from pipeline.ingest.text_embed import SEMANTIC_QUERY_INSTRUCTION_VERSION
+
+    visual = _result("match", frame_index=2)
+    visual["rank"] = 2
+    visual["debug"] = {"final_score": 0.8, "channels": {"img": {"rank": 2}}}
+    semantic = _result("match")
+    semantic["matched_text_view"] = "caption"
+    semantic["matched_text"] = "A red hallway."
+    semantic["debug"] = {
+        "final_score": 0.7,
+        "channels": {
+            "txt": {
+                "rank": 1,
+                "matched_text": {
+                    "view": "caption",
+                    "text": "A red hallway.",
+                    "query_instruction_version": SEMANTIC_QUERY_INSTRUCTION_VERSION,
+                },
+            },
+        },
+    }
+    rankings = [
+        _ClauseRanking(
+            SearchClause("reference", "image", "look"),
+            [_result("other"), visual],
+            "",
+        ),
+        _ClauseRanking(
+            SearchClause("memory", "text", "scene", text="red hallway"),
+            [semantic, _result("text-only")],
+            "red hallway",
+        ),
+    ]
+
+    fused = _fuse_rankings(rankings, set())
+
+    assert [result["unit_id"] for result in fused] == ["match", "other"]
+    assert fused[0]["keyframe_index"] == 2
+    assert fused[0]["debug"]["channels"] == visual["debug"]["channels"]
+    assert fused[0]["debug"]["clauses"] == {
+        "reference": visual["debug"],
+        "memory": semantic["debug"],
+    }
+    assert fused[0]["debug"]["clauses"]["memory"]["channels"]["txt"][
+        "matched_text"
+    ]["query_instruction_version"] == SEMANTIC_QUERY_INSTRUCTION_VERSION
+    assert fused[0]["matches"] == [
+        {
+            "clause_id": "reference",
+            "facet": "look",
+            "rank": 2,
+            "evidence": {"type": "frame", "frame_index": 2},
+        },
+        {
+            "clause_id": "memory",
+            "facet": "scene",
+            "rank": 1,
+            "evidence": {"type": "text", "view": "caption", "text": "A red hallway."},
+        },
+    ]
+    assert "clauses" not in visual["debug"]
+    assert "clauses" not in semantic["debug"]
 
 
 def test_broad_recipe_clause_defers_product_preferences(config: Config) -> None:

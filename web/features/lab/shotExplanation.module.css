@@ -1,0 +1,20 @@
+.explanation { display: grid; gap: 15px; min-width: 0; color: var(--editor-muted, #92969e); font-size: 12px; line-height: 1.55; }
+.sequence { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.sequence figure { display: grid; align-content: start; gap: 5px; min-width: 0; margin: 0; }
+.sequence figure > span { color: var(--editor-muted, #92969e); font-size: 11px; }
+.sequence figure:nth-child(2) > span { color: var(--editor-text, #e7e8ea); }
+.thumbnail { display: grid; place-items: center; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 3px; background: var(--editor-bg, #111214); }
+.thumbnail img { width: 100%; height: 100%; object-fit: contain; }
+.thumbnail > span { font-size: 11px; }
+.sequence figcaption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--editor-text, #e7e8ea); font-size: 11px; }
+.sequence small { font-size: 10px; font-variant-numeric: tabular-nums; }
+.explanation p { margin: 0; }
+.explanation > section { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--editor-line, #2b2d31); }
+.explanation h3, .explanation h4 { margin: 0; color: var(--editor-text, #e7e8ea); font-size: 12px; font-weight: 500; }
+.explanation dl { display: grid; gap: 3px; margin: 0; }
+.explanation dt { margin-top: 6px; color: var(--editor-text, #e7e8ea); font-size: 11px; }
+.explanation dt:first-child { margin-top: 0; }
+.explanation dd { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.explanation ul { display: grid; gap: 5px; margin: 0; padding-left: 17px; overflow-wrap: anywhere; }
+.explanation .note { color: var(--editor-muted, #92969e); font-size: 11px; }
+.sourceRange { font-variant-numeric: tabular-nums; }

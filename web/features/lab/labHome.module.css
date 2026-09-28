@@ -1,0 +1,297 @@
+.home {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 32px 80px;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 34px;
+  font-size: 12px;
+  color: #aaaaaa;
+}
+.home ::selection {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 42%, #101010);
+}
+
+.nav a {
+  color: var(--fg);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+}
+
+.nav a:hover {
+  color: #c9c9c9;
+}
+.header {
+  margin: 32px 0 26px;
+}
+
+.header h1 {
+  margin: 0 0 9px;
+  font-size: 36px;
+  font-weight: 450;
+  line-height: 1.2;
+  letter-spacing: -0.04em;
+}
+
+.header p {
+  margin: 0;
+  color: #aaaaaa;
+  font-size: 14px;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 26px;
+  margin-bottom: 12px;
+}
+
+.sectionHeading h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 550;
+}
+.sectionHeading > span {
+  font-size: 11px;
+  color: #aaaaaa;
+}
+.experiments,
+.projectList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.experiments {
+  display: grid;
+  gap: 10px;
+}
+
+.experiment {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 17px 24px;
+  border: 1px solid #363636;
+  border-radius: 7px;
+  background: #151515;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.experiment:hover {
+  border-color: color-mix(in srgb, var(--accent) 44%, #242424);
+  background: #1b1b1b;
+}
+
+.number {
+  display: grid;
+  place-items: center;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #363636;
+  border-radius: 6px;
+  color: #aaaaaa;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.experimentDescription {
+  flex: 1;
+  min-width: 0;
+}
+.experiment h3 {
+  margin: 0 0 5px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.experiment p {
+  margin: 0;
+  color: #aaaaaa;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.open {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 12px;
+}
+.open > span {
+  font-size: 18px;
+}
+.projects {
+  margin-top: 28px;
+}
+
+.showAll,
+.error button {
+  background: none;
+  border: 0;
+  padding: 5px 0;
+  color: #c5b394;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.showAll:hover,
+.error button:hover {
+  color: #efd3a6;
+}
+.projectList {
+  border-top: 1px solid #2b2b2b;
+}
+
+.projectRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #2b2b2b;
+}
+
+.project {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 16px 4px;
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: #aaaaaa;
+}
+
+.project > div {
+  flex: 1;
+  min-width: 0;
+}
+.project strong {
+  display: block;
+  color: var(--fg);
+  font-weight: 450;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project div > span {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #aaaaaa;
+}
+.project time {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.resume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--accent);
+}
+.project:hover strong,
+.project:hover .resume {
+  color: color-mix(in srgb, var(--accent) 86%, white);
+}
+.empty {
+  padding: 20px 0;
+  border-top: 1px solid #363636;
+  margin: 0;
+  color: #aaaaaa;
+  font-size: 12px;
+}
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid #5e3e31;
+  border-radius: 5px;
+  color: #e2b3a4;
+  font-size: 12px;
+}
+.error button {
+  flex-shrink: 0;
+}
+.home a:focus-visible,
+.home button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+@media (max-width: 600px) {
+  .home {
+    padding: 16px 20px 50px;
+  }
+  .header {
+    margin: 26px 0 24px;
+  }
+  .header h1 {
+    font-size: 31px;
+  }
+  .header p {
+    max-width: 270px;
+    font-size: 13px;
+  }
+  .experiment {
+    padding: 16px;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .number {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+    align-self: flex-start;
+    margin-top: 2px;
+  }
+  .experimentDescription {
+    flex-basis: calc(100% - 48px);
+  }
+  .experiment h3 {
+    font-size: 16px;
+  }
+  .open {
+    margin-left: 48px;
+    font-size: 11px;
+    gap: 9px;
+  }
+  .projects {
+    margin-top: 26px;
+  }
+  .project {
+    gap: 12px;
+  }
+  .resume {
+    font-size: 0;
+    gap: 0;
+  }
+  .resume > span {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .experiment {
+    transition: none;
+  }
+}

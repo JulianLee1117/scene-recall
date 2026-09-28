@@ -81,18 +81,52 @@ _PROMPT = (
 
 _PROMPT_SHA256 = hashlib.sha256(_PROMPT.encode("utf-8")).hexdigest()
 
+_TEMPORAL_PROMPT = (
+    "You are annotating one film shot, shown as ordered keyframes, for a "
+    "cinematography search index. The images are in chronological order, "
+    "sampled near the beginning, middle, and end when enough distinct source "
+    "frames exist. Extremely short shots may supply only one or two images.\n"
+    "- caption: one concise paragraph covering observable events and changes "
+    "across the images, then the setting, composition, lighting, and visual "
+    "mood. Describe subjects appearing, disappearing, entering, leaving, or "
+    "changing pose when supported by the images. Do not describe only the "
+    "last image or treat a static camera as evidence that nothing happens.\n"
+    "- Distinguish observation from uncertainty: sparse stills do not prove "
+    "continuous motion or its cause. If someone is visible earlier and absent "
+    "later, describe that change without inventing how it happened. Describe "
+    "a fade only when visible intermediate evidence supports it. Do not guess "
+    "character names, identities, plot, or unseen actions.\n"
+    "- mood: 2-4 specific mood keywords.\n"
+    "- framing: the dominant shot scale.\n"
+    "- setting: interior or exterior.\n"
+    "- time_of_day: apparent time of day in the scene.\n"
+    "- people_count: the highest clearly visible count in any supplied image; "
+    "never answer zero if a person is visible in an earlier image. Answer 20 "
+    "for 20 or more.\n"
+    "- energy: how kinetic the observed subject action feels, from static to "
+    "kinetic. Use unknown when motion evidence is insufficient, especially "
+    "with one image; a fixed camera alone does not justify static.\n"
+    "- camera_motion: infer only from framing changes across the ordered "
+    "images, independently of subject motion. Use unknown when the stills "
+    "are inconclusive or only one image is supplied.\n"
+    "- palette: 1-3 dominant color descriptors (e.g. 'neon red', 'teal').\n"
+    "- subjects: 1-5 short noun phrases naming key subjects visible in any "
+    "supplied image, including subjects absent from the final image.\n"
+    "- on_screen_text: legible text in frame (titles, signs, credits), "
+    "verbatim; an empty string when there is none."
+)
+
+_TEMPORAL_PROMPT_SHA256 = hashlib.sha256(
+    _TEMPORAL_PROMPT.encode("utf-8")
+).hexdigest()
+
 _OPENAI_CONTENT_FILTER_VARIANT = "content_filter_no_ocr_v1"
-_OPENAI_NO_OCR_PROMPT = (
-    _PROMPT
-    + "\nFor this fallback request, do not quote, transcribe, spell out, or "
+_OPENAI_NO_OCR_SUFFIX = (
+    "\nFor this fallback request, do not quote, transcribe, spell out, or "
     "reproduce any on-screen text. Set on_screen_text to an empty string. "
     "If text is visually present, describe only its generic role (for "
     "example, title card or sign) in caption without stating its content."
 )
-_OPENAI_NO_OCR_PROMPT_SHA256 = hashlib.sha256(
-    _OPENAI_NO_OCR_PROMPT.encode("utf-8")
-).hexdigest()
-
 _ANNOTATION_CACHE_SCHEMA_VERSION = 2
 
 # MIME type mapping for common image extensions
@@ -113,7 +147,9 @@ class AnnotationError(RuntimeError):
     additionally marks output that was truncated or schema-invalid, where the
     retry should raise the output-token budget; a plain network retry keeps
     the normal budget. ``content_filtered`` identifies the one incomplete
-    status eligible for the bounded no-transcription fallback.
+    status eligible for the bounded no-transcription fallback; ``truncated``
+    identifies an ``max_output_tokens`` cutoff, which that fallback also
+    covers once the escalated retry has failed the same way.
     """
 
     def __init__(
@@ -123,11 +159,13 @@ class AnnotationError(RuntimeError):
         retryable: bool = False,
         escalate: bool = False,
         content_filtered: bool = False,
+        truncated: bool = False,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.escalate = escalate
         self.content_filtered = content_filtered
+        self.truncated = truncated
 
 
 class _ShotAnnotation(BaseModel):
@@ -249,8 +287,15 @@ def annotate_shot(
     cache_path: Path | None = None
     fallback_cache_identity: dict | None = None
     fallback_cache_path: Path | None = None
+    sampling_profile = shot.sampling_profile
+    prompt = _TEMPORAL_PROMPT if sampling_profile else _PROMPT
+    fallback_prompt_sha256 = hashlib.sha256(
+        (prompt + _OPENAI_NO_OCR_SUFFIX).encode("utf-8")
+    ).hexdigest()
     if cache_dir is not None:
-        cache_identity = _annotation_cache_identity(keyframes, config, provider)
+        cache_identity = _annotation_cache_identity(
+            keyframes, config, provider, sampling_profile=sampling_profile
+        )
         profile_id = _annotation_profile_id(cache_identity)
         cache_path = _annotation_cache_path(
             cache_dir,
@@ -276,8 +321,9 @@ def annotate_shot(
                 keyframes,
                 config,
                 provider,
-                prompt_sha256=_OPENAI_NO_OCR_PROMPT_SHA256,
+                prompt_sha256=fallback_prompt_sha256,
                 request_variant=_OPENAI_CONTENT_FILTER_VARIANT,
+                sampling_profile=sampling_profile,
             )
             fallback_profile_id = _annotation_profile_id(fallback_cache_identity)
             fallback_cache_path = _annotation_cache_path(
@@ -293,9 +339,9 @@ def annotate_shot(
     if annotation is None:
         request_variant: str | None = None
         if provider == "openai":
-            raw, request_variant = _annotate_openai(keyframes, config)
+            raw, request_variant = _annotate_openai(keyframes, config, prompt=prompt)
         else:
-            raw = _annotate_gemini(keyframes, config)
+            raw = _annotate_gemini(keyframes, config, prompt=prompt)
 
         annotation = _validate_annotation(raw, provider)
         if cache_dir is not None:
@@ -305,8 +351,9 @@ def annotate_shot(
                         keyframes,
                         config,
                         provider,
-                        prompt_sha256=_OPENAI_NO_OCR_PROMPT_SHA256,
+                        prompt_sha256=fallback_prompt_sha256,
                         request_variant=_OPENAI_CONTENT_FILTER_VARIANT,
+                        sampling_profile=sampling_profile,
                     )
                     fallback_cache_path = _annotation_cache_path(
                         cache_dir,
@@ -425,8 +472,9 @@ def _annotation_cache_identity(
     config: Config,
     provider: str,
     *,
-    prompt_sha256: str = _PROMPT_SHA256,
+    prompt_sha256: str | None = None,
     request_variant: str | None = None,
+    sampling_profile: str = "",
 ) -> dict:
     """Describe every input that can change the hosted visual annotation."""
     settings: dict[str, str] = {}
@@ -448,13 +496,17 @@ def _annotation_cache_identity(
     identity = {
         "provider": provider,
         "model": config.models.annotator,
-        "prompt_sha256": prompt_sha256,
+        "prompt_sha256": prompt_sha256 or (
+            _TEMPORAL_PROMPT_SHA256 if sampling_profile else _PROMPT_SHA256
+        ),
         "response_schema_sha256": _response_schema_sha256(),
         "settings": settings,
         "keyframes": frames,
     }
     if request_variant is not None:
         identity["request_variant"] = request_variant
+    if sampling_profile:
+        identity["sampling_profile"] = sampling_profile
     return identity
 
 
@@ -533,6 +585,8 @@ def _write_annotation_cache(
 def _annotate_gemini(
     keyframes: list[Path],
     config: Config,
+    *,
+    prompt: str = _PROMPT,
 ) -> dict:
     """Return one raw structured annotation dict from the Gemini model."""
     parts: list[types.Part] = []
@@ -542,7 +596,7 @@ def _annotate_gemini(
         img_bytes = kf_path.read_bytes()
         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
 
-    parts.append(types.Part.from_text(text=_PROMPT))
+    parts.append(types.Part.from_text(text=prompt))
 
     try:
         api_key = os.environ.get("GEMINI_API_KEY")
@@ -576,7 +630,7 @@ def _annotate_gemini(
 # names into ``on_screen_text``, truncating the JSON mid-stream).  Neither cap
 # is part of the annotation cache identity, so tuning them never re-bills
 # cached shots — unlike the prompt or response schema, which must stay frozen
-# until a deliberate full re-annotation.
+# until a deliberate re-annotation under a new profile.
 _OPENAI_MAX_OUTPUT_TOKENS = 800
 _OPENAI_RETRY_MAX_OUTPUT_TOKENS = 3000
 
@@ -584,25 +638,15 @@ _OPENAI_RETRY_MAX_OUTPUT_TOKENS = 3000
 def _annotate_openai(
     keyframes: list[Path],
     config: Config,
+    *,
+    prompt: str = _PROMPT,
 ) -> tuple[dict, str | None]:
     """Return one structured annotation dict, retrying one unusable response."""
     try:
-        return _annotate_openai_once(keyframes, config), None
+        return _annotate_openai_once(keyframes, config, prompt=prompt), None
     except AnnotationError as exc:
         if exc.content_filtered:
-            fallback = _annotate_openai_once(
-                keyframes,
-                config,
-                prompt=_OPENAI_NO_OCR_PROMPT,
-            )
-            if fallback["on_screen_text"].strip():
-                raise AnnotationError(
-                    "OpenAI no-transcription fallback returned on-screen text."
-                )
-            return (
-                fallback,
-                _OPENAI_CONTENT_FILTER_VARIANT,
-            )
+            return _annotate_openai_no_ocr(keyframes, config, prompt=prompt)
         if not exc.retryable:
             raise
         retry_budget = (
@@ -610,14 +654,48 @@ def _annotate_openai(
             if exc.escalate
             else _OPENAI_MAX_OUTPUT_TOKENS
         )
-        return (
-            _annotate_openai_once(
+        try:
+            return (
+                _annotate_openai_once(
+                    keyframes,
+                    config,
+                    max_output_tokens=retry_budget,
+                    prompt=prompt,
+                ),
+                None,
+            )
+        except AnnotationError as retry_exc:
+            # A shot that still overruns the raised budget is almost always
+            # transcribing text (terminal screens, credits) or looping in
+            # ``on_screen_text``. One bounded no-transcription request lets the
+            # film finish instead of failing hours into ingestion.
+            if not (exc.escalate and retry_exc.truncated):
+                raise
+            return _annotate_openai_no_ocr(
                 keyframes,
                 config,
-                max_output_tokens=retry_budget,
-            ),
-            None,
-        )
+                prompt=prompt,
+                max_output_tokens=_OPENAI_RETRY_MAX_OUTPUT_TOKENS,
+            )
+
+
+def _annotate_openai_no_ocr(
+    keyframes: list[Path],
+    config: Config,
+    *,
+    prompt: str,
+    max_output_tokens: int = _OPENAI_MAX_OUTPUT_TOKENS,
+) -> tuple[dict, str]:
+    """Return the bounded no-transcription fallback annotation and its variant."""
+    fallback = _annotate_openai_once(
+        keyframes,
+        config,
+        max_output_tokens=max_output_tokens,
+        prompt=prompt + _OPENAI_NO_OCR_SUFFIX,
+    )
+    if fallback["on_screen_text"].strip():
+        raise AnnotationError("OpenAI no-transcription fallback returned on-screen text.")
+    return fallback, _OPENAI_CONTENT_FILTER_VARIANT
 
 
 def _annotate_openai_once(
@@ -700,6 +778,7 @@ def _annotate_openai_once(
         if response.error is not None:
             reason = f"{response.error.code}: {response.error.message}"
         content_filtered = reason == "content_filter" and response.error is None
+        truncated = reason == "max_output_tokens" and response.error is None
         raise AnnotationError(
             f"OpenAI response status {response.status}: {reason}",
             # Truncation (max_output_tokens) and other incomplete responses
@@ -708,6 +787,7 @@ def _annotate_openai_once(
             retryable=response.error is None and not content_filtered,
             escalate=response.error is None and not content_filtered,
             content_filtered=content_filtered,
+            truncated=truncated,
         )
 
     raw_text = response.output_text
@@ -733,4 +813,12 @@ def _annotate_openai_once(
             escalate=True,
         ) from exc
 
-    return parsed.model_dump()
+    raw = parsed.model_dump()
+    try:
+        # Structurally valid JSON can still have an empty caption or unusable
+        # moods. Check those inside the existing two-attempt boundary; more
+        # output tokens do not repair content that already fit the schema.
+        _validate_annotation(raw, "OpenAI")
+    except AnnotationError as exc:
+        raise AnnotationError(str(exc), retryable=True) from exc
+    return raw

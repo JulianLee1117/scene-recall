@@ -1,0 +1,45 @@
+.library { display: flex; flex-direction: column; gap: 12px; min-width: 0; color: var(--editor-text, #e7e8ea); }
+.emptySlot { display: grid; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--editor-line, #2b2d31); }
+.emptySlot > strong { color: var(--editor-text, #e7e8ea); font-size: 12px; font-weight: 500; }
+.emptySlot > p { margin: 0; color: var(--editor-muted, #92969e); font-size: 12px; line-height: 1.5; }
+.search { display: grid; gap: 8px; margin: 0; }
+.search > label { color: var(--editor-muted, #92969e); font-size: 12px; }
+.search textarea {
+  width: 100%; min-width: 0; box-sizing: border-box; resize: vertical; max-height: 140px;
+  padding: 9px 10px; border: 1px solid var(--editor-line, #2b2d31); border-radius: 4px;
+  color: var(--editor-text, #e7e8ea); background: var(--editor-bg, #111214);
+  font: inherit; font-size: 13px; line-height: 1.5;
+}
+.search textarea::placeholder { color: var(--editor-muted, #92969e); }
+.searchActions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.library button.quietButton, .context > button {
+  min-height: 30px; padding: 5px 6px; border-color: transparent; background: transparent;
+  color: var(--editor-muted, #92969e); font-size: 12px;
+}
+.library button.quietButton:hover:not(:disabled), .context > button:hover:not(:disabled) {
+  border-color: transparent; background: var(--editor-raised, #202226); color: var(--editor-text, #e7e8ea);
+}
+.searchActions .find {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px;
+  padding: 6px 10px; border: 1px solid var(--editor-line, #2b2d31); border-radius: 4px;
+  color: var(--editor-text, #e7e8ea); background: var(--editor-raised, #202226); font-size: 12px;
+}
+.searchActions .find:hover:not(:disabled) { border-color: #45484f; background: #292c31; }
+.context {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px;
+  border-top: 1px solid var(--editor-line, #2b2d31); padding-top: 6px;
+}
+.context > strong { color: var(--editor-muted, #92969e); font-size: 12px; font-weight: 500; }
+.views { display: flex; flex-wrap: wrap; gap: 10px; }
+.views button {
+  min-height: 30px; padding: 5px 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0;
+  background: transparent; color: var(--editor-muted, #92969e); font-size: 12px; white-space: nowrap;
+}
+.views button:hover:not(:disabled) { border-color: transparent; background: transparent; color: var(--editor-text, #e7e8ea); }
+.views button[aria-pressed="true"] { border-bottom-color: var(--accent, #d4a96a); color: var(--editor-text, #e7e8ea); }
+.hint, .empty, .direction p { margin: 0; color: var(--editor-muted, #92969e); font-size: 12px; line-height: 1.5; }
+.empty { padding: 8px 0; max-width: 34ch; }
+.direction { display: grid; gap: 12px; }
+.direction p strong { display: block; margin-bottom: 4px; color: var(--editor-text, #e7e8ea); font-weight: 500; }
+.direction button { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.error { margin: 0; padding-left: 9px; border-left: 2px solid #a88264; color: #c6aa94; font-size: 12px; line-height: 1.5; }

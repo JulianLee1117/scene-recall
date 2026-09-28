@@ -1,0 +1,223 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const { test } = require("node:test");
+const ts = require("typescript");
+
+const nodes = (node) => node == null || typeof node !== "object" ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
+const text = (node) => node == null || typeof node === "boolean" ? "" : typeof node !== "object" ? String(node) : Array.isArray(node) ? node.map(text).join("") : text(node.props?.children);
+const same = (a, b) => a && b && a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
+const film = (id = "film-a", evidence = 23) => ({ film_id: id, unit_id: `${id}_0001`, film_title: id, t_start: 20, t_end: 30, matched_frame_timestamp: evidence, caption: "A scene", matches: [] });
+const compiled = ts.transpileModule(fs.readFileSync(path.join(__dirname, "VideoModal.tsx"), "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+}).outputText;
+
+function harness({ shot = film(), apiUrl = "http://api.invalid" } = {}) {
+  const hooks = [], requests = [], listeners = new Map(), elements = new Map(), bookmarks = [];
+  let cursor = 0, output, scheduled = false, disposed = false, effects = [], closes = 0;
+  const previousFocus = { isConnected: true, focuses: 0, focus() { this.focuses++; } };
+  const document = { activeElement: previousFocus, body: { style: { overflow: "auto" } } };
+  const props = { shot, onClose: () => { closes++; }, onToggleBookmark: (value) => bookmarks.push(value) };
+  const schedule = () => { if (!scheduled && !disposed) { scheduled = true; queueMicrotask(render); } };
+  const react = {
+    useId() { cursor++; return "video-modal"; },
+    useState(initial) {
+      const i = cursor++; hooks[i] ??= { value: typeof initial === "function" ? initial() : initial };
+      return [hooks[i].value, (update) => {
+        const value = typeof update === "function" ? update(hooks[i].value) : update;
+        if (!Object.is(value, hooks[i].value)) { hooks[i].value = value; schedule(); }
+      }];
+    },
+    useRef(initial) { const i = cursor++; return hooks[i] ??= { current: initial }; },
+    useCallback(callback, deps) {
+      const i = cursor++; if (!hooks[i] || !same(deps, hooks[i].deps)) hooks[i] = { callback, deps };
+      return hooks[i].callback;
+    },
+    useEffect(effect, deps) {
+      const i = cursor++;
+      if (!hooks[i] || !same(deps, hooks[i].deps)) {
+        const old = hooks[i]; hooks[i] = { deps, cleanup: old?.cleanup };
+        effects.push(() => { hooks[i].cleanup?.(); hooks[i].cleanup = effect(); });
+      }
+    },
+  };
+  const exports = {};
+  vm.runInNewContext(compiled, {
+    exports, AbortController, document, process: { env: { NEXT_PUBLIC_API_URL: apiUrl } },
+    fetch(url, init) { return new Promise((resolve, reject) => requests.push({ url, init, resolve, reject })); },
+    window: {
+      requestAnimationFrame(callback) { callback(); return 1; }, cancelAnimationFrame() {}, setTimeout() {},
+      addEventListener(name, callback) { listeners.set(name, callback); },
+      removeEventListener(name, callback) { if (listeners.get(name) === callback) listeners.delete(name); },
+    },
+    navigator: { clipboard: { writeText: async () => {} } },
+    require(name) {
+      if (name === "react") return react;
+      if (name === "react/jsx-runtime") return { jsx: (type, props, key) => ({ type, props, key }), jsxs: (type, props, key) => ({ type, props, key }) };
+      if (name === "@/lib/format") return { filmLabel: String, formatTime: (value) => `${value}s` };
+      if (name === "@/lib/searchRecipe") return { FACET_LABELS: {} };
+      return { default: name };
+    },
+  });
+  function render() {
+    if (disposed) return;
+    scheduled = false; cursor = 0; output = exports.default(props);
+    const activeRefs = new Set();
+    for (const node of nodes(output)) {
+      const ref = node.props?.ref;
+      if (!ref || typeof ref !== "object") continue;
+      activeRefs.add(ref);
+      if (!elements.has(ref) || elements.get(ref).key !== node.key) {
+        elements.set(ref, { key: node.key, element: {
+          currentTime: 0, plays: 0, isConnected: true,
+          play() { this.plays++; return Promise.resolve(); }, pause() {},
+          focus() { document.activeElement = this; }, hasAttribute: () => false,
+          querySelectorAll: () => [...elements.values()].map((value) => value.element),
+        } });
+      }
+      ref.current = elements.get(ref).element;
+    }
+    for (const [ref] of elements) if (!activeRefs.has(ref)) ref.current = null;
+    const run = effects; effects = []; run.forEach((effect) => effect());
+  }
+  const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+  render();
+  return {
+    requests, bookmarks, listeners, document, previousFocus, flush,
+    get state() { return output; }, get closes() { return closes; },
+    find: (predicate) => nodes(output).find(predicate),
+    video: () => nodes(output).find((node) => node.type === "video"),
+    button: (label) => nodes(output).find((node) => node.type === "button" && text(node) === label),
+    async resolve(index, body, status = 200) { requests[index].resolve({ ok: status >= 200 && status < 300, status, json: async () => body }); await flush(); },
+    async updateShot(next) { props.shot = next; render(); await flush(); },
+    dispose() { disposed = true; hooks.forEach((hook) => hook?.cleanup?.()); },
+  };
+}
+
+test("compatible playback URL loads only after metadata and retains evidence seeking with audio enabled", async () => {
+  const app = harness();
+  try {
+    assert.equal(app.video(), undefined);
+    assert.match(text(app.state), /Loading player/);
+    assert.equal(app.requests[0].url, "http://api.invalid/video/film-a/playback");
+    assert.equal(app.requests[0].init.cache, "no-store");
+    await app.resolve(0, { url: "/video/film-a?representation=0123456789abcdef01234567" });
+    const video = app.video();
+    assert.equal(video.props.src, "http://api.invalid/video/film-a?representation=0123456789abcdef01234567");
+    assert.equal(video.props.controls, true);
+    assert.notEqual(video.props.muted, true);
+    video.props.onCanPlay();
+    assert.equal(video.props.ref.current.currentTime, 22);
+    assert.equal(video.props.ref.current.plays, 1);
+    video.props.ref.current.currentTime = 27;
+    video.props.onCanPlay();
+    assert.equal(video.props.ref.current.currentTime, 27, "later canplay events do not rewind playback");
+    video.props.onTimeUpdate({ currentTarget: { currentTime: 27 } }); await app.flush();
+    app.button("Return to retrieved moment · 23s").props.onClick();
+    assert.equal(video.props.ref.current.currentTime, 23);
+    app.find((node) => node.props?.["aria-label"] === "Save retrieved scene").props.onClick();
+    assert.equal(app.bookmarks[0].matched_frame_timestamp, 23, "saving retains the retrieved anchor after scrubbing");
+  } finally { app.dispose(); }
+});
+
+test("same-film scene or evidence changes remount the player while reusing playback metadata", async () => {
+  const app = harness({ shot: { ...film(), matched_frame_timestamp: undefined } });
+  try {
+    await app.resolve(0, { url: "/video/film-a" });
+    assert.equal(app.video().props.src, "http://api.invalid/video/film-a");
+    app.video().props.onCanPlay();
+    assert.equal(app.video().props.ref.current.currentTime, 19);
+    const firstPlayer = app.video().props.ref.current;
+    const firstKey = app.video().key;
+    await app.updateShot(film("film-a", 40));
+    assert.equal(app.requests.length, 1);
+    const nextVideo = app.video();
+    assert.notEqual(nextVideo.key, firstKey, "the changed evidence creates a fresh video element");
+    assert.notEqual(nextVideo.props.ref.current, firstPlayer);
+    assert.equal(nextVideo.props.src, "http://api.invalid/video/film-a");
+    // A remounted player loads normally; do not synthesize canplay on the old player.
+    nextVideo.props.onCanPlay();
+    assert.equal(nextVideo.props.ref.current.currentTime, 39);
+    const secondPlayer = nextVideo.props.ref.current;
+    const secondKey = nextVideo.key;
+    await app.updateShot({ ...film("film-a", 40), unit_id: "film-a_0002" });
+    assert.notEqual(app.video().key, secondKey, "changing the scene also remounts at the same evidence time");
+    assert.notEqual(app.video().props.ref.current, secondPlayer);
+    assert.equal(app.requests.length, 1);
+  } finally { app.dispose(); }
+});
+
+test("changing films aborts old metadata and ignores a late response", async () => {
+  const app = harness();
+  try {
+    await app.updateShot(film("film-b", 80));
+    assert.equal(app.requests[0].init.signal.aborted, true);
+    assert.equal(app.video(), undefined);
+    await app.resolve(1, { url: "/video/film-b?representation=bbbbbbbbbbbbbbbbbbbbbbbb" });
+    await app.resolve(0, { url: "/video/film-a" });
+    assert.equal(app.video().props.src, "http://api.invalid/video/film-b?representation=bbbbbbbbbbbbbbbbbbbbbbbb");
+    app.video().props.onCanPlay();
+    assert.equal(app.video().props.ref.current.currentTime, 79);
+    await app.updateShot(film("film-c", 4));
+    assert.equal(app.video(), undefined, "the old film is hidden while the next URL resolves");
+  } finally { app.dispose(); }
+});
+
+test("closing cancels metadata and preserves Escape, focus and scroll cleanup", async () => {
+  const app = harness();
+  assert.equal(app.document.body.style.overflow, "hidden");
+  let prevented = false;
+  app.listeners.get("keydown")({ key: "Escape", preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(app.closes, 1);
+  app.dispose();
+  assert.equal(app.requests[0].init.signal.aborted, true);
+  assert.equal(app.document.body.style.overflow, "auto");
+  assert.equal(app.previousFocus.focuses, 1);
+  assert.equal(app.listeners.size, 0);
+  await app.resolve(0, { url: "/video/film-a" });
+  assert.equal(app.video(), undefined);
+});
+
+test("metadata failure explains the problem and retries without loading the original film", async () => {
+  const app = harness();
+  try {
+    await app.resolve(0, { detail: "Compatible playback is not ready." }, 409);
+    assert.match(text(app.find((node) => node.props?.role === "alert")), /Compatible playback is not ready/);
+    assert.equal(app.video(), undefined);
+    assert.equal(app.requests.length, 1);
+    app.button("Retry playback").props.onClick(); await app.flush();
+    assert.match(text(app.state), /Loading player/);
+    assert.equal(app.requests.length, 2);
+    await app.resolve(1, { url: "/video/film-a?representation=aaaaaaaaaaaaaaaaaaaaaaaa" });
+    assert.ok(app.video().props.src.includes("representation="));
+    assert.equal(app.find((node) => node.props?.role === "alert"), undefined);
+  } finally { app.dispose(); }
+});
+
+test("network failures have actionable playback guidance", async () => {
+  const app = harness();
+  try {
+    app.requests[0].reject(new TypeError("Failed to fetch")); await app.flush();
+    assert.match(text(app.find((node) => node.props?.role === "alert")), /Playback could not be loaded.*API and film.*retry/);
+    assert.ok(app.button("Retry playback"));
+    assert.equal(app.video(), undefined);
+  } finally { app.dispose(); }
+});
+
+test("media errors retry URL resolution and restore the original evidence seek", async () => {
+  const app = harness();
+  try {
+    await app.resolve(0, { url: "/video/film-a" });
+    app.video().props.onCanPlay();
+    app.video().props.onError(); await app.flush();
+    assert.match(text(app.find((node) => node.props?.role === "alert")), /This video could not play/);
+    assert.equal(app.video(), undefined);
+    assert.equal(app.requests.length, 1);
+    app.button("Retry playback").props.onClick(); await app.flush();
+    await app.resolve(1, { url: "/video/film-a?representation=aaaaaaaaaaaaaaaaaaaaaaaa" });
+    app.video().props.onCanPlay();
+    assert.equal(app.video().props.ref.current.currentTime, 22);
+  } finally { app.dispose(); }
+});

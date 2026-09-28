@@ -218,7 +218,7 @@ export interface IncomingFilm {
   suggested_filename: string;
   /** Other video files in the torrent folder that will not be imported. */
   extra_video_count: number;
-  /** Usable associated SRTs that need an explicit English-language decision. */
+  /** Associated SRTs available for automatic validation or explicit selection. */
   subtitle_review_candidates: SubtitleReviewCandidate[];
 }
 
@@ -228,9 +228,12 @@ export interface SubtitleReviewCandidate {
   filename: string;
   /** Short non-promotional preview; never persisted as metadata. */
   excerpt: string;
+  /** Available validation result; final checks happen during import. */
+  validation?: string | null;
 }
 
 export type SubtitleImportDecision =
+  | { action: "auto" }
   | { action: "use_as_english"; relative_path: string }
   | { action: "skip" };
 
@@ -267,4 +270,52 @@ export interface ImportFilmResponse {
   filename: string;
   subtitle_filename: string | null;
   job: IngestJob | null;
+}
+
+export type LibraryStorageCategoryId =
+  | "source_films"
+  | "derived_assets"
+  | "indexes"
+  | "user_state"
+  | "incoming"
+  | "managed_archive"
+  | "models";
+
+export interface LibraryStorageCategory {
+  id: LibraryStorageCategoryId;
+  label: string;
+  bytes: number;
+  file_count: number;
+  paths: string[];
+  incomplete: boolean;
+}
+
+export interface LibraryStorageVolume {
+  id: string;
+  label: string;
+  bytes: number;
+  file_count: number;
+  free_bytes: number | null;
+  total_capacity_bytes: number | null;
+  incomplete: boolean;
+}
+
+export interface LibraryStorageSnapshot {
+  measured_at: string;
+  measurement: "logical_file_bytes";
+  total_bytes: number;
+  file_count: number;
+  incomplete: boolean;
+  categories: LibraryStorageCategory[];
+  volumes: LibraryStorageVolume[];
+  issues: Array<{ path: string; reason: string }>;
+  omitted_issue_count: number;
+  excluded: string[];
+}
+
+export interface LibraryStorageResponse {
+  status: "scanning" | "ready" | "error";
+  snapshot: LibraryStorageSnapshot | null;
+  started_at: string | null;
+  error: string | null;
 }

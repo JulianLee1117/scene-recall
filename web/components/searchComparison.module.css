@@ -1,0 +1,17 @@
+.root { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; max-width: 1600px; margin: 0 auto 16px; padding: 0 24px; font-size: 12px; }
+.start, .switcher button, .close, .cancel { font: inherit; cursor: pointer; transition: color .15s, background .15s; }
+.start { padding: 7px 12px; border: 1px solid #353027; border-radius: 7px; color: #cbb38e; background: #191611; }
+.start:hover { background: #242019; color: #e1c69f; }
+.start:disabled { cursor: wait; opacity: .65; }
+.switcher { display: flex; padding: 3px; border: 1px solid #282828; border-radius: 9px; background: #101010; }
+.switcher button { padding: 7px 11px; border: 0; border-radius: 6px; white-space: nowrap; color: #929292; background: transparent; }
+.switcher button[aria-pressed="true"] { color: #e5d2b5; background: #30291f; }
+.switcher button:hover { color: #ededed; }
+.note { color: #888; }
+.close { color: #999; background: none; border: 0; padding: 5px 8px; font-size: 19px; }
+.close:hover { color: #eee; }
+.cancel { padding: 7px 4px; border: 0; color: #aaa; background: transparent; }
+.cancel:hover { color: #eee; }
+.root button:focus-visible { outline: 2px solid #d4a96a; outline-offset: 3px; }
+.error { color: #cda27f; }
+@media (max-width: 480px) { .root { padding: 0 16px; gap: 9px; } .switcher button { padding: 7px 9px; } .note { flex-basis: 100%; order: 2; } }

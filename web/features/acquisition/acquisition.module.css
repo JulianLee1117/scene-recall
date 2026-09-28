@@ -1,0 +1,31 @@
+.actions, .rowActions { display: flex; align-items: center; gap: 6px; }
+.note, .notice, .connection { margin: 6px 0; color: #999; font-size: .73rem; line-height: 1.55; overflow-wrap: anywhere; }
+.notice { color: #91bd96; }
+.connection { padding: 10px 12px; background: #17140e; border: 1px solid #332b1f; border-radius: 6px; color: #c3ac87; }
+.queue { margin-top: 12px; }
+.row { align-items: flex-start; }
+.rowHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; justify-content: space-between; }
+.rowHeading h3 { white-space: normal; }
+.rowHeading .state { flex-shrink: 0; }
+.rowActions { flex-wrap: wrap; padding-top: 4px; }
+.state { margin: 4px 0; font-size: .71rem; color: #c5aa82; }
+.progress { display: block; width: min(360px, 100%); height: 4px; margin: 10px 0; border: 0; border-radius: 10px; overflow: hidden; background: #292929; accent-color: #b28a50; }
+.progress::-webkit-progress-bar { background: #292929; }
+.progress::-webkit-progress-value { background: #b28a50; }
+.waiting { margin-top: 12px; font-size: .74rem; color: #aaa; }
+.waiting summary { cursor: pointer; padding: 6px 0; }
+.waiting > div { margin-top: 8px; }
+.details { margin-top: 7px; color: #888; font-size: .68rem; line-height: 1.5; }
+.details summary { width: fit-content; cursor: pointer; }
+.details p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.setup { margin: 12px 0 0; color: #999; font-size: .7rem; line-height: 1.6; }
+.setup summary { width: fit-content; cursor: pointer; color: #aaa; }
+.setup p { margin: 8px 0; max-width: 680px; }
+.setup details { margin-top: 8px; }
+.setup code { color: #c5b08f; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .actions { flex-wrap: wrap; justify-content: flex-end; }
+  .row { flex-wrap: wrap; }
+  .row > :first-child { flex-basis: 100%; }
+  .rowActions { padding-top: 0; }
+}

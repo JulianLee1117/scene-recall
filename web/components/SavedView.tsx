@@ -80,6 +80,7 @@ export default function SavedView({
                   shot={bookmark.scene}
                   position={index + 1}
                   showRank={false}
+                  allowSourceDrag={false}
                   debug={false}
                   onClick={onShotClick}
                   onUseInSearch={onUseInSearch}

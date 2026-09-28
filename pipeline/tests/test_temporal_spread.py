@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 
 from pipeline.config import Config
+from pipeline.tests.query_helpers import add_scalar_batches
 
 
 def _row(
@@ -35,7 +36,7 @@ def _row(
 
 
 def _preference_db(rows: list[dict]) -> MagicMock:
-    query = MagicMock()
+    query = add_scalar_batches(MagicMock())
     query.select.return_value = query
     query.where.return_value = query
     query.limit.return_value = query

@@ -16,6 +16,11 @@ from pipeline.ingest.shots import Shot
 
 
 _DIM = 1024
+_V1_QUERY_INSTRUCTION = (
+    "Retrieve film-shot evidence matching the user's remembered dialogue, "
+    "visible content, cinematography, mood, or narrative moment."
+)
+_V1_QUERY_INSTRUCTION_VERSION = "scene-recall-semantic-query-v1"
 
 
 def _film(tmp_path: Path, film_id: str) -> FilmRecord:
@@ -282,6 +287,119 @@ def test_manifest_requires_the_current_text_view_contract(
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     assert resolve_ready_text_profile(config, db) is None
+
+
+def test_known_older_query_instruction_preserves_complete_document_readiness(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    from pipeline.index.backfill_text import backfill_text_features
+    from pipeline.index.text_features import (
+        configured_text_profile,
+        manifest_path,
+        resolve_ready_text_profile,
+    )
+    from pipeline.index.writer import open_db
+
+    _write_unit(config, tmp_path, "film_a")
+    with patch(
+        "pipeline.index.backfill_text.embed_semantic_documents",
+        side_effect=_fake_embeddings,
+    ):
+        backfill_text_features(config)
+
+    db = open_db(config)
+    profile = configured_text_profile(config)
+    path = manifest_path(config, profile)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["query_instruction"] = _V1_QUERY_INSTRUCTION
+    payload["query_instruction_version"] = _V1_QUERY_INSTRUCTION_VERSION
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    original_manifest = path.read_bytes()
+    table = db.open_table(profile.table_name)
+    original_version = table.version
+    original_rows = table.search().limit(None).to_list()
+
+    assert resolve_ready_text_profile(config, db) == profile
+    assert table.version == original_version
+    assert table.search().limit(None).to_list() == original_rows
+    assert path.read_bytes() == original_manifest
+
+    _write_unit(config, tmp_path, "film_b")
+    assert resolve_ready_text_profile(config, db) is None
+
+
+@pytest.mark.parametrize(
+    ("stale_field", "stale_value"),
+    [
+        ("query_instruction", "Unrecognized retrieval instruction."),
+        ("query_instruction_version", "unknown-query-version"),
+        ("query_instruction", _V1_QUERY_INSTRUCTION),
+        ("query_instruction_version", _V1_QUERY_INSTRUCTION_VERSION),
+    ],
+    ids=["unknown-text", "unknown-version", "mismatched-text", "mismatched-version"],
+)
+def test_invalid_query_provenance_reconciles_without_reembedding_documents(
+    tmp_path: Path,
+    config: Config,
+    stale_field: str,
+    stale_value: str,
+) -> None:
+    from pipeline.index.backfill_text import backfill_text_features
+    from pipeline.index.text_features import (
+        configured_text_profile,
+        manifest_path,
+        resolve_ready_text_profile,
+    )
+    from pipeline.index.writer import open_db
+    from pipeline.ingest.text_embed import (
+        SEMANTIC_QUERY_INSTRUCTION,
+        SEMANTIC_QUERY_INSTRUCTION_VERSION,
+    )
+
+    _write_unit(config, tmp_path, "film_a")
+    with patch(
+        "pipeline.index.backfill_text.embed_semantic_documents",
+        side_effect=_fake_embeddings,
+    ):
+        backfill_text_features(config)
+
+    db = open_db(config)
+    profile = configured_text_profile(config)
+    table = db.open_table(profile.table_name)
+    original_version = table.version
+    original_rows = {
+        row["feature_id"]: row for row in table.search().limit(None).to_list()
+    }
+    path = manifest_path(config, profile)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload[stale_field] = stale_value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert resolve_ready_text_profile(config, db) is None
+
+    with patch("pipeline.index.backfill_text.embed_semantic_documents") as embed:
+        result = backfill_text_features(config)
+
+    embed.assert_not_called()
+    assert result.embedded == 0
+    assert result.replaced == 0
+    assert result.skipped_current == len(original_rows)
+    assert result.activated is True
+    assert configured_text_profile(config) == profile
+    assert resolve_ready_text_profile(config, db) == profile
+    current_table = db.open_table(profile.table_name)
+    assert current_table.version == original_version
+    assert {
+        row["feature_id"]: row
+        for row in current_table.search().limit(None).to_list()
+    } == original_rows
+    current_manifest = json.loads(path.read_text(encoding="utf-8"))
+    assert current_manifest["query_instruction"] == SEMANTIC_QUERY_INSTRUCTION
+    assert (
+        current_manifest["query_instruction_version"]
+        == SEMANTIC_QUERY_INSTRUCTION_VERSION
+    )
 
 
 def test_full_backfill_prunes_features_for_deleted_films(

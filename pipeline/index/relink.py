@@ -28,6 +28,7 @@ from pipeline.ingest.media import (
     _media_manifest_path,
 )
 from pipeline.ingest.probe import _content_hash
+from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE
 from pipeline.index.writer import published_film_ids, update_film_source
 
 
@@ -579,9 +580,11 @@ def _is_relink_cache_path(relative: Path) -> bool:
     """Whitelist the only cache identities a source relocation may edit."""
     if relative.parts == ("shots.json",):
         return True
-    if len(relative.parts) != 2 or relative.parts[0] != "media-manifests":
+    if len(relative.parts) not in {2, 3} or relative.parts[0] != "media-manifests":
         return False
-    filename = relative.parts[1]
+    if len(relative.parts) == 3 and relative.parts[1] != SHORT_SHOT_SAMPLING_PROFILE:
+        return False
+    filename = relative.parts[-1]
     if not filename.endswith(".json"):
         return False
     stem = filename[:-5]
@@ -758,19 +761,45 @@ def _plan_cache_changes(
         shot_change_count = 1
 
     shot_ids: list[str] = []
+    shot_profiles: dict[str, str] = {}
     for index, row in enumerate(shot_rows):
         if not isinstance(row, dict) or not isinstance(row.get("shot_id"), str):
             raise FilmRelinkError(
                 f"shot cache row {index} has no valid shot_id: {shots_path}"
             )
         shot_ids.append(row["shot_id"])
+        profile = row.get("sampling_profile") or ""
+        if profile not in {"", SHORT_SHOT_SAMPLING_PROFILE}:
+            raise FilmRelinkError(
+                f"unsupported shot sampling profile in cache: {profile!r}"
+            )
+        shot_profiles[row["shot_id"]] = profile
     if len(set(shot_ids)) != len(shot_ids):
         raise FilmRelinkError(f"shot cache contains duplicate shot IDs: {shots_path}")
 
     manifest_dir = asset_dir / "media-manifests"
     manifest_change_count = 0
+    manifests: list[tuple[str, str, Path]] = []
     for shot_id in shot_ids:
-        manifest_path = _media_manifest_path(manifest_dir, shot_id)
+        found = set()
+        for profile in ("", SHORT_SHOT_SAMPLING_PROFILE):
+            directory = manifest_dir / profile if profile else manifest_dir
+            path = _media_manifest_path(directory, shot_id)
+            if not path.exists():
+                continue
+            if path.resolve() != path.absolute():
+                raise FilmRelinkError(
+                    f"media manifest path redirects outside its owned cache: {path}"
+                )
+            found.add(profile)
+            manifests.append((shot_id, profile, path))
+        # Fresh temporal ingests need only their profile manifest. Backfills
+        # retain the legacy manifest alongside it; update both when present.
+        if not found or (shot_profiles[shot_id] and shot_profiles[shot_id] not in found):
+            raise FilmRelinkError(
+                f"media manifest is missing for shot {shot_id!r}"
+            )
+    for shot_id, profile, manifest_path in manifests:
         before, payload = _read_json_object(manifest_path)
         identity = payload.get("identity")
         source = identity.get("source") if isinstance(identity, dict) else None
@@ -784,6 +813,7 @@ def _plan_cache_changes(
             or identity.get("schema_version") != _MEDIA_CACHE_SCHEMA_VERSION
             or not isinstance(shot_identity, dict)
             or shot_identity.get("shot_id") != shot_id
+            or (shot_identity.get("sampling_profile") or "") != profile
         ):
             raise FilmRelinkError(
                 f"media manifest schema or shot identity is invalid: "

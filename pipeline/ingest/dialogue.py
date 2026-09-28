@@ -1,10 +1,10 @@
 """dialogue.py — extract dialogue lines from a film as a list of DialogueLine.
 
-Primary path (text subtitle available):
-    Use ffmpeg to extract the first convertible text subtitle stream to an SRT
-    file, then parse that SRT into a list of :class:`DialogueLine` objects.
+Primary path (eligible subtitle available):
+    Parse a usable canonical English sidecar, or use ffmpeg to extract the
+    unambiguous English text stream selected by the probe metadata rules.
 
-Fallback path (no subtitles or bitmap-only subtitles):
+Fallback path (no eligible sidecar or embedded track):
     Use faster-whisper to transcribe audio and produce :class:`DialogueLine`
     objects from the returned segments.
 
@@ -36,17 +36,22 @@ from faster_whisper import WhisperModel, __version__ as _FASTER_WHISPER_VERSION
 from pipeline.config import Config
 from pipeline.ingest.probe import FilmRecord
 from pipeline.ingest.subtitles import (
+    SUBTITLE_VALIDATION_PROFILE,
     external_srt_is_usable,
     parse_external_dialogue_srt,
     parse_srt,
     parse_srt_timestamp as _parse_srt_timestamp,
     read_srt_text as _read_srt_text,
+    validate_external_srt,
 )
 
 
 _DIALOGUE_CONTRACT_VERSION = 2
 _DIALOGUE_MANIFEST_NAME = "dialogue.manifest.json"
 _SIDECAR_PROFILE_VERSION = 1
+_EMBEDDED_VALIDATION_PROFILE_VERSION = 1
+_EMBEDDED_VALIDATION_RECEIPT_NAME = "subs.validation.json"
+_MAX_EMBEDDED_VALIDATION_RECEIPT_BYTES = 64 * 1024
 _WHISPER_PROFILE_VERSION = 2
 _WHISPER_QUALITY_GATE_VERSION = 1
 _WHISPER_LOOP_REJECT_AT = 16
@@ -97,11 +102,12 @@ def extract_dialogue(film: FilmRecord, config: Config) -> list[DialogueLine]:
     """Extract all dialogue from *film* and return as a :class:`DialogueLine` list.
 
     A usable, non-trivial canonical English SRT sidecar is preferred when
-    present. Otherwise, an FFmpeg-convertible embedded text subtitle stream is
+    present. Otherwise, the probe-selected English embedded text stream is
     extracted to
-    ``film.asset_dir/subs.srt`` and parsed. If neither exists, faster-whisper
-    transcribes the audio track. Bitmap subtitles such as PGS require OCR, so
-    they intentionally take the audio fallback.
+    ``film.asset_dir/subs.srt`` and checked for English dialogue and film coverage
+    before parsing. Ineligible text remains raw evidence while faster-whisper
+    transcribes the audio track. Bitmap, forced, commentary, unknown-language
+    and ambiguous embedded tracks also take the audio fallback.
 
     The result is also serialised to ``film.asset_dir/dialogue.json`` as a list
     of ``{"start": float, "end": float, "text": str}`` dicts.
@@ -126,10 +132,24 @@ def extract_dialogue(film: FilmRecord, config: Config) -> list[DialogueLine]:
             raise RuntimeError("dialogue sidecar disappeared during ingestion")
         print(f"[dialogue] using external subtitles: {sidecar.name}", flush=True)
         lines = _parse_external_srt(_read_srt_text(sidecar))
-    elif film.text_subtitle_stream_index is not None:
-        lines = _extract_via_ffmpeg(film, film.text_subtitle_stream_index)
     else:
-        lines = _extract_via_whisper(film, config)
+        if source["kind"] == "embedded_pending":
+            _extract_via_ffmpeg(film, film.text_subtitle_stream_index)
+            receipt = _embedded_validation_receipt(film)
+            _save_manifest(receipt, film.asset_dir / _EMBEDDED_VALIDATION_RECEIPT_NAME)
+            source = _source_with_embedded_validation(film, config, receipt)
+        if source["kind"] == "embedded_text":
+            lines = _parse_srt(_read_srt_text(film.asset_dir / "subs.srt"))
+        else:
+            rejection = source.get("rejected_embedded_subtitles")
+            if rejection is not None:
+                print(
+                    "[dialogue] embedded subtitles did not pass content checks: "
+                    + " ".join(rejection["validation"]["reasons"])
+                    + "; transcribing audio; raw subs.srt retained",
+                    flush=True,
+                )
+            lines = _extract_via_whisper(film, config)
 
     _save_json(lines, film.asset_dir / "dialogue.json")
     _save_manifest(source, film.asset_dir / _DIALOGUE_MANIFEST_NAME)
@@ -146,7 +166,10 @@ def dialogue_cache_is_current(film: FilmRecord, config: Config) -> bool:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return False
-    return manifest == _dialogue_source(film, config)
+    source = _dialogue_source(film, config)
+    # A pending extraction is never evidence, even if an interrupted or corrupt
+    # writer happened to persist a matching manifest.
+    return source["kind"] != "embedded_pending" and manifest == source
 
 
 def _dialogue_source(film: FilmRecord, config: Config) -> dict[str, object]:
@@ -164,18 +187,92 @@ def _dialogue_source(film: FilmRecord, config: Config) -> dict[str, object]:
             },
         }
     if film.text_subtitle_stream_index is not None:
+        receipt = _load_embedded_validation_receipt(film)
+        if receipt is not None:
+            return _source_with_embedded_validation(film, config, receipt)
         return {
             "contract_version": _DIALOGUE_CONTRACT_VERSION,
-            "kind": "embedded_text",
+            "kind": "embedded_pending",
             "film_id": film.film_id,
             "stream_index": film.text_subtitle_stream_index,
         }
+    return _whisper_source(film, config)
+
+
+def _whisper_source(film: FilmRecord, config: Config) -> dict[str, object]:
+    """Keep ordinary Whisper lineage unchanged when no embedded gate is used."""
     return {
         "contract_version": _DIALOGUE_CONTRACT_VERSION,
         "kind": "whisper",
         "film_id": film.film_id,
         "model": config.models.whisper,
         "transcription_profile": _whisper_transcription_profile(film),
+    }
+
+
+def _embedded_validation_receipt(film: FilmRecord) -> dict[str, object]:
+    """Validate only the bounded extracted text, never the movie or a model."""
+    validation = validate_external_srt(film.asset_dir / "subs.srt", film.duration)
+    result = asdict(validation)
+    result["reasons"] = list(validation.reasons)
+    return {
+        "film_id": film.film_id,
+        "stream_index": film.text_subtitle_stream_index,
+        "duration": film.duration,
+        "validation_profile": {
+            "profile_version": _EMBEDDED_VALIDATION_PROFILE_VERSION,
+            "validator": SUBTITLE_VALIDATION_PROFILE,
+        },
+        "validation": result,
+    }
+
+
+def _load_embedded_validation_receipt(film: FilmRecord) -> dict[str, object] | None:
+    """Reuse a decision only while its complete source and SRT evidence match.
+
+    Rechecking the small SRT is deterministic and bounded by the shared
+    validator. It also prevents a malformed/tampered receipt from promoting an
+    incomplete track or hiding its rejection. No extraction or write runs here.
+    """
+    path = film.asset_dir / _EMBEDDED_VALIDATION_RECEIPT_NAME
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        with path.open("rb") as handle:
+            data = handle.read(_MAX_EMBEDDED_VALIDATION_RECEIPT_BYTES + 1)
+        if len(data) > _MAX_EMBEDDED_VALIDATION_RECEIPT_BYTES:
+            return None
+        receipt = json.loads(data.decode("utf-8"))
+        expected = _embedded_validation_receipt(film)
+        # Empty, oversized or unreadable text has no validator fingerprint.
+        # Retain its rejection, but do not call that missing evidence reusable.
+        if expected["validation"]["sha256"] is None:
+            return None
+        # JSON equality distinguishes booleans from stream indexes/profile
+        # versions, and rejects unexpected fields as well as altered decisions.
+        if json.dumps(receipt, sort_keys=True, allow_nan=False) != json.dumps(
+            expected, sort_keys=True, allow_nan=False
+        ):
+            return None
+        return expected
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return None
+
+
+def _source_with_embedded_validation(
+    film: FilmRecord, config: Config, receipt: dict[str, object],
+) -> dict[str, object]:
+    if receipt["validation"]["automatic_eligible"]:
+        return {
+            "contract_version": _DIALOGUE_CONTRACT_VERSION,
+            "kind": "embedded_text",
+            "film_id": film.film_id,
+            "stream_index": film.text_subtitle_stream_index,
+            "subtitle_validation": receipt,
+        }
+    return {
+        **_whisper_source(film, config),
+        "rejected_embedded_subtitles": receipt,
     }
 
 
@@ -261,8 +358,8 @@ def _save_manifest(source: dict[str, object], path: Path) -> None:
 def _extract_via_ffmpeg(
     film: FilmRecord,
     stream_index: int,
-) -> list[DialogueLine]:
-    """Extract one text subtitle stream and parse the resulting SRT."""
+) -> None:
+    """Extract raw text; the caller validates it before any permissive parsing."""
     srt_path = film.asset_dir / "subs.srt"
     cmd = [
         "ffmpeg",
@@ -273,7 +370,6 @@ def _extract_via_ffmpeg(
         str(srt_path),
     ]
     subprocess.run(cmd, capture_output=True, check=True)
-    return _parse_srt(srt_path.read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------------------

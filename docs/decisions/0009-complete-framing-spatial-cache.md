@@ -4,6 +4,7 @@
 - Date: 2026-08-29
 - Supersedes: None
 - Superseded by: ADR-0020 (unscoped uploaded-reference candidate intake only)
+- Superseded by: ADR-0082 for source-hashed partial cache reuse; legacy caches retain this contract
 
 ## Context
 

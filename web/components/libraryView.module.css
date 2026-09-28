@@ -1,0 +1,16 @@
+.page :global(.films-header p), .page :global(.films-section-header p) { color: #929292; }
+.page :global(.film-meta), .page :global(.film-filename) { color: #909090; }
+.filter { display: grid; gap: 5px; flex: 0 1 220px; font-size: .72rem; color: #aaa; }
+.filter input { min-width: 0; width: 100%; border: 1px solid #343434; border-radius: 6px; background: #111; padding: 8px 10px; color: #eee; font-size: .78rem; outline: none; }
+.filter input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px #d4a96a22; }
+.page .incomingEmpty { margin-bottom: 0; }
+.incomingEmpty > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.incomingEmpty h2 { flex-shrink: 0; }
+.page .incomingEmpty p { margin: 0; }
+.page .libraryHeader { align-items: flex-end; }
+.libraryHeader > div { min-width: 0; }
+@media (max-width: 600px) {
+  .page :global(.films-header) { flex-wrap: wrap; gap: 10px; }
+  .page :global(.films-section-header) { flex-wrap: wrap; }
+  .filter { flex-basis: 100%; }
+}

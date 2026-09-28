@@ -1,0 +1,24 @@
+.header { color: #e2e3e6; background: #111214; border-bottom: 1px solid #292b30; }
+.navigation { display: flex; align-items: center; gap: 16px; min-height: 49px; padding: 0 20px; }
+.navigation .back { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 0; border: 0; background: transparent; border-radius: 3px; color: #a6abb6; font: inherit; font-size: 12px; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.navigation .back:hover:not(:disabled) { background: transparent; color: #f0f2f7; }
+.navigation .back:disabled { opacity: .45; cursor: default; }
+.back:focus-visible, .identity input:focus-visible { outline: 2px solid #b7c2dc; outline-offset: 3px; }
+.divider { height: 15px; width: 1px; background: #34373f; }
+.navigation h1 { margin: 0; font-size: 13px; line-height: 1.5; font-weight: 550; }
+.projectRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 43px; padding: 0 20px 8px; }
+.identity { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.identity input { width: 220px; min-width: 110px; max-width: 100%; padding: 5px 0; border: 0; border-radius: 2px; background: none; color: #e2e3e6; font: inherit; font-size: 14px; line-height: 1.4; }
+.status { color: #92969e; font-size: 10px; white-space: nowrap; }
+.tools { display: flex; align-items: center; gap: 3px; }
+.tools > button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #a7a7a7; font: inherit; font-size: 11px; cursor: pointer; }
+.tools > button:hover:not(:disabled) { background: #292c31; border-color: #484b52; color: #eee; }
+.tools > button:disabled { opacity: .4; cursor: default; }
+.empty { max-width: 440px; margin: clamp(70px, 18vh, 170px) auto 0; padding: 24px; text-align: center; }
+.empty h2 { color: #dde0e7; font-size: 20px; font-weight: 550; letter-spacing: -.02em; margin: 0 0 8px; }
+.empty p { color: #979eac; font-size: 13px; line-height: 1.6; margin: 0 0 22px; }
+.empty.empty > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 12px; border: 1px solid #dce0e8; border-radius: 4px; background: #dce0e8; color: #181a20; font: inherit; font-size: 12px; font-weight: 550; line-height: 1.5; cursor: pointer; }
+.empty.empty > button:hover:not(:disabled) { background: #f0f2f7; border-color: #f0f2f7; }
+.empty small { display: block; color: #737c8c; font-size: 11px; margin-top: 12px; }
+@media (max-width: 850px) { .projectRow { flex-wrap: wrap; gap: 6px; } .identity { flex: 1 1 auto; } .tools { flex-wrap: wrap; } }
+@media (max-width: 600px) { .navigation { padding-inline: 16px; } .projectRow { padding-inline: 16px; } .identity input { width: 190px; } }

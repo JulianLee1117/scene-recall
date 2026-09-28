@@ -1,0 +1,302 @@
+version: 1
+kind: scene-recall-intent-retrieval-queries
+created: '2026-09-21'
+purpose: Compare original hybrid retrieval, fixed supplemental evidence retrieval, and Jev-planned supplemental
+  retrieval. No automatic promotion.
+provenance:
+  source_fixture: pipeline/eval/search_intent_queries.yaml
+  source_fixture_sha256: 1e3455dc02f6c816f4b7fb5327951558273cb554946fe689fc6b19d8278943f7
+  source_evidence_policy:
+    frame_verified: An agent visually inspected the retained frame at its indexed timestamp. This is not human
+      relevance judgment, full-shot playback, proof of motion or narrative truth.
+    source_verified: Reserved for source playback verification; no new window in this fixture is assigned this
+      status.
+    timed_text_provisional: Exact retained timed text was read, but audio synchronization, translation, speakers
+      or source lineage remain unverified. Exclude from verified-positive metrics.
+    caption_only_provisional: A caption-derived hypothesis that has not been visually checked; never treat
+      as a verified positive.
+    reference_coverage: Expected windows are known references, not exhaustive relevance labels. Other matching
+      results may be valid; missing an unjudged scene is not automatically a ranking error.
+    negative_controls: An exclusion identifies a checked local contradiction only. An empty expected_windows
+      list never asserts that the whole corpus has no positives.
+    human_review: All human factual, relevance and played judgments remain pending; no machine scores are acceptance.
+  selection_limits: Eleven historical targeted queries plus five author-written explorations. References are
+    incomplete and correlated; no representative recall or human relevance claim. Confirmed film scope is only
+    film_ids, never title-like words in query.
+cases:
+- id: booth_remembered_scoped
+  group_id: booth
+  category: remembered
+  query: Jesse and Celine in a listening booth listening to a song, with romantic tension, he almost kisses
+    her
+  film_ids:
+  - f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972
+  expected_windows:
+  - anchor_id: booth
+    film_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972
+    start: 1632.298965632299
+    end: 1651.192859526193
+    unit_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972_0206
+    status: frame-verified
+  negative_distinctions:
+  - Glances, proximity and a smile must not be treated as proof of an actual kiss.
+  - Do not use the known 153.56-second Whisper cue to assert that surrounding speech occurs in the booth.
+  review_status: pending-human-relevance-and-playback
+  query_details_unverified:
+  - almost kisses
+  - music audible during returned excerpt
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+  scene_windows:
+  - anchor_id: booth-scene
+    film_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972
+    start: 1613.4050717384052
+    end: 1688.980647313981
+    status: prior-source-window; not full-window relevance verification
+- id: booth_remembered_unscoped
+  group_id: booth
+  category: remembered
+  query: Jesse and Celine in a listening booth listening to a song, with romantic tension, he almost kisses
+    her
+  film_ids: []
+  expected_windows:
+  - anchor_id: booth
+    film_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972
+    start: 1632.298965632299
+    end: 1651.192859526193
+    unit_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972_0206
+    status: frame-verified
+  negative_distinctions:
+  - Glances, proximity and a smile must not be treated as proof of an actual kiss.
+  - Do not use the known 153.56-second Whisper cue to assert that surrounding speech occurs in the booth.
+  review_status: pending-human-relevance-and-playback
+  query_details_unverified:
+  - almost kisses
+  - music audible during returned excerpt
+  paired_with: booth_remembered_scoped
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+  scene_windows:
+  - anchor_id: booth-scene
+    film_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972
+    start: 1613.4050717384052
+    end: 1688.980647313981
+    status: prior-source-window; not full-window relevance verification
+- id: booth_visual_scoped
+  group_id: booth
+  category: visual
+  query: couple exchanging glances in a wood-paneled room
+  film_ids:
+  - f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972
+  expected_windows:
+  - anchor_id: booth
+    film_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972
+    start: 1632.298965632299
+    end: 1651.192859526193
+    unit_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972_0206
+    status: frame-verified
+  negative_distinctions:
+  - Glances, proximity and a smile must not be treated as proof of an actual kiss.
+  - Do not use the known 153.56-second Whisper cue to assert that surrounding speech occurs in the booth.
+  review_status: pending-human-relevance-and-playback
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+  scene_windows:
+  - anchor_id: booth-scene
+    film_id: f23d5e2cbcf85f03df1196cbb15cd480dea75b76f3856d34adecae9c7ee00972
+    start: 1613.4050717384052
+    end: 1688.980647313981
+    status: prior-source-window; not full-window relevance verification
+- id: matrix_screen_literal
+  group_id: matrix_screen
+  category: on-screen-text
+  query: '"Wake up, Neo..." on a computer screen'
+  film_ids:
+  - e8d7151c862a2833b5f3e9385c9d171d449c2a7cefff24905322d7c1cad99fef
+  expected_windows:
+  - anchor_id: matrix_screen
+    film_id: e8d7151c862a2833b5f3e9385c9d171d449c2a7cefff24905322d7c1cad99fef
+    start: 433.51641666666666
+    end: 435.56012499999997
+    unit_id: e8d7151c862a2833b5f3e9385c9d171d449c2a7cefff24905322d7c1cad99fef_0122
+    status: frame-verified
+  negative_distinctions:
+  - Spoken wake-up dialogue alone is not the requested visible text.
+  - Do not replace the exact wording with another computer message.
+  review_status: pending-human-relevance-and-playback
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+- id: matrix_pill_screen_sides
+  group_id: matrix_pills
+  category: visual
+  query: close-up of two open hands, a red capsule on the left and a blue capsule on the right
+  film_ids: []
+  expected_windows:
+  - anchor_id: matrix_pills
+    film_id: e8d7151c862a2833b5f3e9385c9d171d449c2a7cefff24905322d7c1cad99fef
+    start: 1752.625875
+    end: 1754.1690833333332
+    unit_id: e8d7151c862a2833b5f3e9385c9d171d449c2a7cefff24905322d7c1cad99fef_0472
+    status: frame-verified
+  negative_distinctions:
+  - Reversing the requested screen-left/screen-right colors is a mismatch.
+  - Blue appears blue-green under the retained frame's lighting.
+  review_status: pending-human-relevance-and-playback
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+- id: shining_eerie_symmetry
+  group_id: shining_twins
+  category: shot
+  query: eerie symmetrical wide hallway with two girls in matching blue dresses
+  film_ids: []
+  expected_windows:
+  - anchor_id: shining_twins
+    film_id: 30d234ea6b1ddbf142d0b182f274ef01367e30c4ae69c8374926d18308f27c96
+    start: 3008.2135416666665
+    end: 3010.3823749999997
+    unit_id: 30d234ea6b1ddbf142d0b182f274ef01367e30c4ae69c8374926d18308f27c96_0333
+    status: frame-verified
+  negative_distinctions:
+  - Close-ups of one girl do not preserve the requested two-person wide composition.
+  review_status: pending-human-relevance-and-playback
+  interpretive_terms:
+  - eerie
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+- id: moonlight_child_bath
+  group_id: moonlight_bath
+  category: visual
+  query: a child sitting in a bathtub with shampoo lather in his hair
+  film_ids:
+  - d5239d743b6af879603a78fb0b22c8b7bcddd756b6b3c3c94f75beb7ec2b0b90
+  expected_windows:
+  - anchor_id: moonlight_bath
+    film_id: d5239d743b6af879603a78fb0b22c8b7bcddd756b6b3c3c94f75beb7ec2b0b90
+    start: 1534.4078749999999
+    end: 1544.8558125
+    unit_id: d5239d743b6af879603a78fb0b22c8b7bcddd756b6b3c3c94f75beb7ec2b0b90_0193
+    status: frame-verified
+  negative_distinctions:
+  - The caption's older gray-haired man label is contradicted by the retained image.
+  - Do not infer old age from the white lather.
+  review_status: pending-human-relevance-and-playback
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+- id: moonlight_wrong_older_man
+  group_id: moonlight_bath
+  category: negative-control
+  query: an elderly gray-haired man bathing alone
+  film_ids:
+  - d5239d743b6af879603a78fb0b22c8b7bcddd756b6b3c3c94f75beb7ec2b0b90
+  expected_windows: []
+  negative_distinctions:
+  - This is a specific known counterexample, not a claim that no matching moment exists anywhere in the film
+    or library.
+  review_status: pending-human-relevance-and-playback
+  exclusions:
+  - anchor_id: moonlight_bath
+    film_id: d5239d743b6af879603a78fb0b22c8b7bcddd756b6b3c3c94f75beb7ec2b0b90
+    start: 1534.4078749999999
+    end: 1544.8558125
+    unit_id: d5239d743b6af879603a78fb0b22c8b7bcddd756b6b3c3c94f75beb7ec2b0b90_0193
+    status: frame-verified
+    reason: Inspected frame shows a child with white lather; the indexed older-man caption is wrong.
+  judgment_scope: known-counterexample-only
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+- id: dune_profile_tight
+  group_id: dune_profile
+  category: shot
+  query: tight right-facing silhouette profile
+  film_ids: []
+  expected_windows:
+  - anchor_id: dune_profile
+    film_id: 2b84b021be500d45c870cf03199a8f126c9be60e45eed497103c17267ac8eaf8
+    start: 3908.6130416666665
+    end: 3909.8642916666663
+    unit_id: 2b84b021be500d45c870cf03199a8f126c9be60e45eed497103c17267ac8eaf8_1041
+    status: frame-verified
+  negative_distinctions:
+  - A left-facing profile or small full-body silhouette is not equivalent.
+  review_status: pending-human-relevance-and-playback
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+- id: fallen_partners_exact
+  group_id: fallen_quote
+  category: dialogue
+  query: '"Are we still partners?"'
+  film_ids: []
+  expected_windows:
+  - anchor_id: fallen_quote
+    film_id: 513831eef8eb598038f62bde3bddd7bff6b6e50d533edf5f1bc4e0f5fd4a6e03
+    start: 33.867
+    end: 36.078
+    unit_id: 513831eef8eb598038f62bde3bddd7bff6b6e50d533edf5f1bc4e0f5fd4a6e03_0003
+    status: timed-text-provisional
+  - anchor_id: fallen_quote
+    film_id: 513831eef8eb598038f62bde3bddd7bff6b6e50d533edf5f1bc4e0f5fd4a6e03
+    start: 4677.965
+    end: 4680.134
+    unit_id: 513831eef8eb598038f62bde3bddd7bff6b6e50d533edf5f1bc4e0f5fd4a6e03_0656
+    status: timed-text-provisional
+  negative_distinctions:
+  - English subtitle text is not proof that English is spoken.
+  - Both retained occurrences are potential quote matches; do not penalize the later occurrence solely for
+    not being the opening shot.
+  review_status: pending-human-relevance-and-playback
+  query_details_unverified:
+  - audio synchronization
+  - translation accuracy
+  - speaker
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+- id: fallen_partners_black_and_white
+  group_id: fallen_quote
+  category: mixed
+  query: black-and-white smoking scene with the line "Are we still partners?"
+  film_ids:
+  - 513831eef8eb598038f62bde3bddd7bff6b6e50d533edf5f1bc4e0f5fd4a6e03
+  expected_windows:
+  - anchor_id: fallen_quote
+    film_id: 513831eef8eb598038f62bde3bddd7bff6b6e50d533edf5f1bc4e0f5fd4a6e03
+    start: 33.867
+    end: 36.078
+    unit_id: 513831eef8eb598038f62bde3bddd7bff6b6e50d533edf5f1bc4e0f5fd4a6e03_0003
+    status: timed-text-provisional
+  negative_distinctions:
+  - The quote alone does not meet the additional black-and-white smoking-image request.
+  review_status: pending-human-relevance-and-playback
+  query_details_unverified:
+  - audio synchronization
+  - translation accuracy
+  origin: Retained targeted diagnostic from search_intent_queries.yaml; not held out
+- id: film_crew
+  group_id: crew
+  category: visual
+  query: a film crew setting up a camera and lights on a movie set
+  film_ids: []
+  expected_windows: []
+  origin: New author-written exploration query; no predeclared positive, not a relevance test
+  review_status: pending-human-relevance-and-playback
+- id: medium_two_shot_noir
+  group_id: cinematography
+  category: mixed
+  query: medium shot of two people talking in a dim neo noir interior
+  film_ids: []
+  expected_windows: []
+  origin: New author-written exploration query; no predeclared positive, not a relevance test
+  review_status: pending-human-relevance-and-playback
+- id: lonely_neon
+  group_id: atmosphere
+  category: mixed
+  query: a lonely person outside at night with rain and red neon reflections
+  film_ids: []
+  expected_windows: []
+  origin: New author-written exploration query; no predeclared positive, not a relevance test
+  review_status: pending-human-relevance-and-playback
+- id: realization_betrayal
+  group_id: narrative
+  category: narrative
+  query: the moment someone realizes that a person they trusted has betrayed them
+  film_ids: []
+  expected_windows: []
+  origin: New author-written exploration query; no predeclared positive, not a relevance test
+  review_status: pending-human-relevance-and-playback
+- id: unconfirmed_title
+  group_id: title
+  category: remembered
+  query: in Before Sunrise a couple listens to a song and exchanges nervous glances
+  film_ids: []
+  expected_windows: []
+  origin: New author-written exploration query; no predeclared positive, not a relevance test
+  review_status: pending-human-relevance-and-playback

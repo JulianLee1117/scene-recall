@@ -1,9 +1,9 @@
 # ADR-0022: Require explicit review for uncertain external subtitles
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-31
 - Supersedes: None
-- Superseded by: None
+- Superseded by: [ADR-0023](0023-operator-archive-imported-releases.md) for post-ingest release location; [ADR-0056](0056-automated-external-subtitle-checks.md) for validation, automatic selection and review defaults. Raw-evidence preservation and exact-path checks remain in force.
 
 ## Context
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import threading
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -11,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pipeline.config import Config
+from pipeline.tests.subtitle_helpers import full_english_srt
 
 
 @contextmanager
@@ -131,6 +130,32 @@ def test_import_requires_confirmation_and_rejects_traversal(config: Config) -> N
     assert outside.exists()
 
 
+def test_manual_intake_cannot_discover_or_import_managed_downloads(config: Config) -> None:
+    incoming = config.paths.incoming_dir
+    managed = incoming / ".scene-recall-managed" / ("a" * 32) / "data"
+    managed.mkdir(parents=True)
+    managed_source = managed / "Mirror.1975.mkv"
+    managed_source.write_bytes(b"Torrent client still owns these bytes")
+    manual_source = incoming / "Film.2020.mkv"
+    manual_source.write_bytes(b"Manual intake remains available")
+
+    with _api_client(config) as client:
+        response = client.get("/incoming")
+        assert response.status_code == 200
+        assert [item["relative_path"] for item in response.json()] == [manual_source.name]
+        for prefix in (".scene-recall-managed", ".SCENE-RECALL-MANAGED"):
+            blocked = client.post("/films/import", json={
+                "relative_path": f"{prefix}/{'a' * 32}/data/{managed_source.name}",
+                "title": "Mirror", "year": 1975, "confirm_finished": True, "ingest": False,
+            })
+            assert blocked.status_code == 409
+            assert "managed download queue" in blocked.json()["detail"]
+
+    assert managed_source.read_bytes() == b"Torrent client still owns these bytes"
+    assert manual_source.read_bytes() == b"Manual intake remains available"
+    assert not (config.paths.films_dir / "Mirror (1975).mkv").exists()
+
+
 def test_import_sanitizes_name_moves_file_and_suppresses_release_extras(
     config: Config,
 ) -> None:
@@ -180,6 +205,7 @@ def test_import_sanitizes_name_moves_file_and_suppresses_release_extras(
 
 def test_import_preserves_best_english_srt_as_canonical_sidecar(
     config: Config,
+    monkeypatch,
 ) -> None:
     release = config.paths.incoming_dir / "Singin.in.the.Rain.1952.1080p"
     source = release / "Singin.in.the.Rain.1952.mp4"
@@ -187,13 +213,14 @@ def test_import_preserves_best_english_srt_as_canonical_sidecar(
     subtitles.mkdir(parents=True)
     source.write_bytes(b"feature")
     english = subtitles / "Singin.in.the.Rain.1952.Eng.srt"
-    english_content = _usable_external_srt()
+    english_content = full_english_srt()
     english.write_text(english_content, encoding="utf-8")
     commentary = subtitles / "Singin.in.the.Rain.1952.English.Commentary.srt"
     commentary.write_text(
         _usable_external_srt("Director commentary"), encoding="utf-8"
     )
 
+    monkeypatch.setattr("pipeline.api.main._probe_intake_duration", lambda path: 6000)
     with _api_client(config) as client:
         response = client.post(
             "/films/import",
@@ -216,6 +243,82 @@ def test_import_preserves_best_english_srt_as_canonical_sidecar(
     imported = config.paths.films_dir / response.json()["subtitle_filename"]
     assert imported.read_text(encoding="utf-8") == english_content
     assert english.exists(), "the incoming subtitle remains as raw release evidence"
+
+
+@pytest.mark.parametrize("decision", [None, {"action": "auto"}, {"action": "use_as_english", "relative_path": "Film.2020/Film.2020.srt"}])
+def test_import_validates_unmarked_english_after_lightweight_inventory(config, monkeypatch, decision):
+    release = config.paths.incoming_dir / "Film.2020"
+    release.mkdir(parents=True)
+    source = release / "Film.2020.mkv"
+    source.write_bytes(b"film")
+    subtitle = release / "Film.2020.srt"
+    raw = full_english_srt().encode()
+    subtitle.write_bytes(raw)
+    probe = MagicMock(return_value=6000)
+    monkeypatch.setattr("pipeline.api.main._probe_intake_duration", probe)
+    with _api_client(config) as client:
+        listing = client.get("/incoming")
+        assert listing.json()[0]["subtitle_review_candidates"]
+        probe.assert_not_called()
+        response = client.post("/films/import", json={
+            "relative_path": "Film.2020/Film.2020.mkv", "title": "Film", "year": 2020,
+            "confirm_finished": True, "ingest": False, "subtitle_decision": decision,
+        })
+    assert response.status_code == 200, response.text
+    probe.assert_called_once_with(source)
+    assert (config.paths.films_dir / "Film (2020).en.srt").read_bytes() == raw
+    assert subtitle.read_bytes() == raw
+
+
+@pytest.mark.parametrize("kind", ["sparse", "foreign", "malformed", "out_of_bounds", "unknown_duration", "ambiguous"])
+def test_automatic_import_uses_fallback_when_external_track_does_not_pass(config, monkeypatch, kind):
+    release = config.paths.incoming_dir / "Film.2020"
+    release.mkdir(parents=True)
+    source = release / "Film.2020.mkv"
+    source.write_bytes(b"film")
+    subtitle = release / "Film.2020.en.srt"
+    raw = full_english_srt()
+    if kind == "sparse":
+        raw = _usable_external_srt()
+    elif kind == "foreign":
+        raw = raw.replace("You know what they said about the house. We should come back with your friend at number", "No puedo venir a casa porque tengo que trabajar con mi amigo numero")
+    elif kind == "malformed":
+        raw += "121\nthis is not a timestamp\ntext\n\n"
+    elif kind == "out_of_bounds":
+        raw += "121\n03:00:00,000 --> 03:00:02,000\nYou know what they said.\n\n"
+    elif kind == "ambiguous":
+        (release / "Film.2020.eng.srt").write_text(raw.replace("house", "garden"), encoding="utf-8")
+    subtitle.write_text(raw, encoding="utf-8")
+    expected = subtitle.read_bytes()
+    monkeypatch.setattr("pipeline.api.main._probe_intake_duration", lambda path: None if kind == "unknown_duration" else 6000)
+    with _api_client(config) as client:
+        response = client.post("/films/import", json={
+            "relative_path": "Film.2020/Film.2020.mkv", "title": "Film", "year": 2020,
+            "confirm_finished": True, "ingest": False, "subtitle_decision": {"action": "auto"},
+        })
+    assert response.status_code == 200, response.text
+    assert response.json()["subtitle_filename"] is None
+    assert subtitle.read_bytes() == expected
+    assert not (config.paths.films_dir / "Film (2020).en.srt").exists()
+
+
+def test_explicit_choice_cannot_bypass_subtitle_time_bounds(config, monkeypatch):
+    incoming = config.paths.incoming_dir
+    incoming.mkdir(parents=True)
+    source = incoming / "Film.2020.mkv"
+    source.write_bytes(b"film")
+    subtitle = incoming / "Film.2020.srt"
+    subtitle.write_text(full_english_srt(), encoding="utf-8")
+    monkeypatch.setattr("pipeline.api.main._probe_intake_duration", lambda path: 100)
+    with _api_client(config) as client:
+        response = client.post("/films/import", json={
+            "relative_path": source.name, "title": "Film", "year": 2020,
+            "confirm_finished": True, "ingest": False,
+            "subtitle_decision": {"action": "use_as_english", "relative_path": subtitle.name},
+        })
+    assert response.status_code == 409
+    assert source.exists() and subtitle.exists()
+    assert not (config.paths.films_dir / "Film (2020).mkv").exists()
 
 
 def test_unmarked_sidecar_requires_explicit_review_before_import(
@@ -254,11 +357,12 @@ def test_unmarked_sidecar_requires_explicit_review_before_import(
                 "English dialogue line 2 has several spoken words. · "
                 "English dialogue line 3 has several spoken words."
             ),
+            "validation": "English dialogue could not be established throughout the file. Film duration will be checked when adding the film.",
         }
     ]
     assert response.status_code == 409
     assert response.json()["detail"] == (
-        "Choose an English subtitle or explicitly skip subtitles"
+        "Choose Automatic to check subtitles, select a known English track, or skip subtitles"
     )
     assert source.read_bytes() == b"feature"
     assert subtitle.read_text(encoding="utf-8") == subtitle_content
@@ -423,7 +527,7 @@ def test_import_recomputes_and_exactly_validates_subtitle_selection(
 def test_sidecar_selection_declines_forced_or_ambiguous_english_tracks(
     config: Config,
 ) -> None:
-    from pipeline.api.main import _select_english_sidecar
+    from pipeline.intake import resolve_external_sidecars
 
     incoming = config.paths.incoming_dir
     release = incoming / "Film.2020"
@@ -433,7 +537,7 @@ def test_sidecar_selection_declines_forced_or_ambiguous_english_tracks(
     forced = release / "Film.2020.en.forced.srt"
     forced.write_text(_usable_external_srt("Forced subtitle"), encoding="utf-8")
 
-    assert _select_english_sidecar(incoming, source, release) is None
+    assert resolve_external_sidecars(incoming, source, release)[0] is None
 
     forced.unlink()
     (release / "Film.2020.en.srt").write_text(
@@ -443,7 +547,7 @@ def test_sidecar_selection_declines_forced_or_ambiguous_english_tracks(
         _usable_external_srt("Second subtitle"), encoding="utf-8"
     )
 
-    assert _select_english_sidecar(incoming, source, release) is None
+    assert resolve_external_sidecars(incoming, source, release)[0] is None
 
 
 @pytest.mark.parametrize(
@@ -460,7 +564,7 @@ def test_sidecar_selection_requires_source_association_and_english_evidence(
     config: Config,
     subtitle_name: str,
 ) -> None:
-    from pipeline.api.main import _select_english_sidecar
+    from pipeline.intake import resolve_external_sidecars
 
     incoming = config.paths.incoming_dir
     release = incoming / "Film.2020"
@@ -470,7 +574,7 @@ def test_sidecar_selection_requires_source_association_and_english_evidence(
     subtitle = release / subtitle_name
     subtitle.write_text(_usable_external_srt(), encoding="utf-8")
 
-    assert _select_english_sidecar(incoming, source, release) is None
+    assert resolve_external_sidecars(incoming, source, release)[0] is None
 
 
 def test_import_rejects_trivial_promo_only_srt_but_preserves_release_copy(
@@ -624,110 +728,145 @@ def test_ingest_only_accepts_direct_library_files(config: Config) -> None:
     assert rejected.status_code == 400
 
 
-def test_two_film_ingest_queue_runs_strictly_one_at_a_time(tmp_path: Path) -> None:
+def test_ingest_queue_is_durable_fifo_and_survives_api_close(tmp_path: Path) -> None:
     from pipeline.api.main import _IngestQueue
+    from pipeline.lab.store import LabStore
 
-    first = tmp_path / "First.mkv"
-    second = tmp_path / "Second.mkv"
-    first.touch()
-    second.touch()
-    first_started = threading.Event()
-    release_first = threading.Event()
-    second_finished = threading.Event()
-    state_lock = threading.Lock()
-    order: list[str] = []
-    active = 0
-    max_active = 0
-
-    def runner(path: Path, _append_log) -> None:
-        nonlocal active, max_active
-        with state_lock:
-            active += 1
-            max_active = max(max_active, active)
-            order.append(path.name)
-        if path == first.resolve():
-            first_started.set()
-            assert release_first.wait(timeout=2)
-        with state_lock:
-            active -= 1
-        if path == second.resolve():
-            second_finished.set()
-
-    queue = _IngestQueue(runner)
-    queue.enqueue(first)
-    assert first_started.wait(timeout=2)
-    second_job = queue.enqueue(second)
-    assert second_job["status"] == "queued"
-    assert second_job["queue_position"] == 1
-    assert order == ["First.mkv"]
-
-    release_first.set()
-    assert second_finished.wait(timeout=2)
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        snapshots = queue.snapshots()
-        if all(job["status"] == "done" for job in snapshots):
-            break
-        time.sleep(0.01)
+    store = LabStore(tmp_path)
+    store.initialize()
+    queue = _IngestQueue(store)
+    first = queue.enqueue(tmp_path / "First.mkv")
+    second = queue.enqueue(tmp_path / "Second.mkv")
     queue.close()
-
-    assert order == ["First.mkv", "Second.mkv"]
-    assert max_active == 1
-    assert all(job["status"] == "done" for job in snapshots)
+    reopened = _IngestQueue(LabStore(tmp_path))
+    assert [job["job_id"] for job in reopened.snapshots()] == [first["job_id"], second["job_id"]]
+    claimed = store.claim()
+    assert claimed["id"] == first["job_id"]
+    assert reopened.snapshots()[1]["queue_position"] == 1
+    store.finish(claimed["id"])
+    assert store.claim()["id"] == second["job_id"]
 
 
 def test_ingest_queue_deduplicates_active_canonical_path(tmp_path: Path) -> None:
     from pipeline.api.main import _DuplicateIngestError, _IngestQueue
+    from pipeline.lab.store import LabStore
 
+    store = LabStore(tmp_path)
+    store.initialize()
+    queue = _IngestQueue(store)
     film = tmp_path / "Film.mkv"
-    film.touch()
-    started = threading.Event()
-    release = threading.Event()
-
-    def runner(_path: Path, _append_log) -> None:
-        started.set()
-        assert release.wait(timeout=2)
-
-    queue = _IngestQueue(runner)
-    queue.enqueue(film)
-    assert started.wait(timeout=2)
-    try:
-        try:
-            queue.enqueue(film.parent / "." / film.name)
-        except _DuplicateIngestError:
-            pass
-        else:
-            raise AssertionError("active canonical path was enqueued twice")
-    finally:
-        release.set()
-        queue.close()
+    job = queue.enqueue(film)
+    with pytest.raises(_DuplicateIngestError):
+        queue.enqueue(film.parent / "." / film.name)
+    store.claim()
+    with pytest.raises(_DuplicateIngestError):
+        queue.enqueue(film)
+    store.finish(job["job_id"])
+    assert queue.enqueue(film)["status"] == "queued"
 
 
-def test_ingest_queue_failure_does_not_block_next_film(tmp_path: Path) -> None:
+def test_ingest_queue_failure_does_not_block_next_film(config: Config) -> None:
     from pipeline.api.main import _IngestQueue
+    from pipeline.lab.store import LabStore
+    from pipeline.lab.worker import execute_job
 
-    first = tmp_path / "First.mkv"
-    second = tmp_path / "Second.mkv"
-    first.touch()
-    second.touch()
-    second_ran = threading.Event()
+    store = LabStore(config.paths.state_dir)
+    store.initialize()
+    queue = _IngestQueue(store)
+    queue.enqueue(config.paths.films_dir / "First.mkv")
+    queue.enqueue(config.paths.films_dir / "Second.mkv")
+    order = []
 
-    def runner(path: Path, _append_log) -> None:
-        if path == first.resolve():
+    def runner(path, progress):
+        order.append(path.name)
+        progress("working")
+        if path.name == "First.mkv":
             raise RuntimeError("mock ingest failed")
-        second_ran.set()
 
-    queue = _IngestQueue(runner)
-    queue.enqueue(first)
-    queue.enqueue(second)
-    assert second_ran.wait(timeout=2)
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        snapshots = queue.snapshots()
-        if all(job["status"] in {"done", "error"} for job in snapshots):
-            break
-        time.sleep(0.01)
-    queue.close()
-
+    execute_job(store.claim(), config, None, store, ingest_runner=runner)
+    execute_job(store.claim(), config, None, store, ingest_runner=runner)
+    assert order == ["First.mkv", "Second.mkv"]
+    snapshots = queue.snapshots()
     assert [job["status"] for job in snapshots] == ["error", "done"]
     assert snapshots[0]["error"] == "mock ingest failed"
+    assert snapshots[1]["log"][-1] == "working"
+
+
+def test_import_preserves_explicit_sdh_when_regular_track_is_automatic(
+    config: Config, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pipeline.intake import resolve_external_sidecars
+
+    incoming = config.paths.incoming_dir
+    release = incoming / "Film.1985.1080p"
+    release.mkdir(parents=True)
+    source = release / "Film.1985.mkv"
+    source.write_bytes(b"feature")
+    regular = release / "Film.1985.en.srt"
+    regular.write_text(full_english_srt(), encoding="utf-8")
+    sdh = release / "Film.1985.en.sdh.srt"
+    sdh.write_text(full_english_srt().replace("You know", "[SPEAKING] You know"), encoding="utf-8")
+    selected_bytes = sdh.read_bytes()
+    automatic, _ = resolve_external_sidecars(incoming, source, release, media_duration=6000)
+    assert automatic == regular
+    monkeypatch.setattr("pipeline.api.main._probe_intake_duration", lambda _path: 6000.0)
+
+    with _api_client(config) as client:
+        listing = client.get("/incoming")
+        assert sdh.name in {
+            candidate["filename"]
+            for candidate in listing.json()[0]["subtitle_review_candidates"]
+        }
+        response = client.post("/films/import", json={
+            "relative_path": source.relative_to(incoming).as_posix(),
+            "title": "Film", "year": 1985, "ingest": False, "confirm_finished": True,
+            "subtitle_decision": {
+                "action": "use_as_english",
+                "relative_path": sdh.relative_to(incoming).as_posix(),
+            },
+        })
+
+    assert response.status_code == 200, response.text
+    canonical = config.paths.films_dir / "Film (1985).en.srt"
+    assert canonical.read_bytes() == selected_bytes != regular.read_bytes()
+    assert sdh.read_bytes() == selected_bytes
+
+
+def test_import_rejects_source_replaced_during_subtitle_duration_probe(
+    config: Config, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    incoming = config.paths.incoming_dir
+    release = incoming / "Film.1985.1080p"
+    release.mkdir(parents=True)
+    source = release / "Film.1985.mkv"
+    source.write_bytes(b"feature A")
+    original_stat = source.stat()
+    subtitle = release / "Film.1985.en.srt"
+    subtitle.write_text(full_english_srt(), encoding="utf-8")
+    subtitle_bytes = subtitle.read_bytes()
+
+    def replace_while_probing(path: Path) -> float:
+        replacement = release / "replacement.download"
+        replacement.write_bytes(b"feature B")
+        os.utime(replacement, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        replacement.replace(path)
+        return 6000.0
+
+    monkeypatch.setattr("pipeline.api.main._probe_intake_duration", replace_while_probing)
+    with _api_client(config) as client:
+        response = client.post("/films/import", json={
+            "relative_path": source.relative_to(incoming).as_posix(),
+            "title": "Film", "year": 1985, "ingest": True, "confirm_finished": True,
+            "subtitle_decision": {"action": "auto"},
+        })
+        assert client.get("/ingest/jobs").json() == []
+
+    assert response.status_code == 409, response.text
+    assert "changed during validation" in response.json()["detail"]
+    assert source.read_bytes() == b"feature B"
+    assert subtitle.read_bytes() == subtitle_bytes
+    assert {path.name for path in release.iterdir()} == {source.name, subtitle.name}
+    assert not (config.paths.films_dir / "Film (1985).mkv").exists()
+    assert not (config.paths.films_dir / "Film (1985).en.srt").exists()

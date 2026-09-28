@@ -1,0 +1,101 @@
+.panel { max-width: 1100px; margin: 0 auto; padding: 24px 16px 0; min-width: 0; color: var(--editor-text, #e7e8ea); }
+.panel label, .panel legend { font-size: 12px; font-weight: 500; }
+.panel .pacing label, .panel .precision label, .panel .cueFields > label { margin: 0; }
+.panel textarea, .panel select, .panel .precision input { width: 100%; box-sizing: border-box; border: 1px solid var(--editor-line, #2b2d31); border-radius: 4px; background: var(--editor-bg, #111214); color: inherit; padding: 9px 10px; font: inherit; font-size: 12px; line-height: 1.55; }
+.panel textarea { resize: vertical; }
+.panel textarea::placeholder { color: #737780; }
+.panel textarea:focus, .panel select:focus, .panel input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.panel button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.panel p { line-height: 1.55; }
+.overview { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 36px; }
+.mainDirection { min-width: 0; }
+.mainDirection > label { font-size: 16px; font-weight: 500; letter-spacing: -.02em; }
+.intro { margin: 7px 0 14px; color: var(--editor-muted, #92969e); font-size: 12px; }
+.mainDirection > textarea { min-height: 166px; }
+.examples { margin-top: 10px; }
+.examples summary, .precision summary { width: fit-content; cursor: pointer; font-size: 11px; color: var(--editor-muted, #92969e); }
+.examples > div { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 9px; }
+.examples button { font-size: 11px; }
+.capabilities { font-size: 10.5px; color: var(--editor-muted, #92969e); margin: 12px 0 0; }
+.preferences { min-width: 0; }
+.pacing, .filmScope { padding: 0; border: 0; min-width: 0; margin: 0 0 16px; }
+.pacing legend, .filmScope legend { padding: 0; margin-bottom: 9px; }
+.pacing > div { display: flex; width: 100%; border: 1px solid var(--editor-line, #2b2d31); border-radius: 4px; overflow: hidden; }
+.pacing label { position: relative; flex: 1; cursor: pointer; }
+.pacing label + label { border-left: 1px solid var(--editor-line, #2b2d31); }
+.pacing input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.pacing span { display: block; font-size: 11px; font-weight: 400; text-align: center; padding: 8px 5px; color: var(--editor-muted, #92969e); }
+.pacing input:checked + span { color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, transparent); }
+.pacing input:focus-visible + span { outline: 1px solid var(--accent); outline-offset: -2px; }
+.pacing:disabled label { cursor: default; opacity: .5; }
+.pacing p, .filmScope p { font-size: 10.5px; color: var(--editor-muted, #92969e); margin: 7px 0 0; }
+.field { display: block; }
+.field > textarea, .field > select { display: block; margin-top: 7px; }
+.filmScope { margin: 16px 0 0; }
+.filmScope :global(.movie-scope) { width: 100%; }
+.filmScope :global(.movie-scope-trigger) { width: 100%; max-width: none; justify-content: flex-start; }
+.filmScope :global(.movie-scope-popover) { left: auto; right: 0; min-width: min(340px, calc(100vw - 52px)); display: flex; flex-direction: column; max-height: min(360px, 42dvh); border-radius: 4px; }
+.filmScope :global(.movie-scope-options) { min-height: 0; }
+.filmScope :global(.movie-scope-heading), .filmScope :global(.movie-scope-search-wrap) { flex-shrink: 0; }
+.ranges { margin-top: 26px; border-top: 1px solid var(--editor-line, #2b2d31); padding-top: 22px; }
+.rangeHeading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.rangeHeading h3 { font-size: 13px; font-weight: 500; margin: 0; }
+.rangeHeading p { color: var(--editor-muted, #92969e); font-size: 11px; margin: 5px 0 0; }
+.rangeHeading > button { flex-shrink: 0; font-size: 11px; }
+.transport { display: flex; gap: 9px; align-items: center; margin: 16px 0 9px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.transport button { width: 28px; height: 27px; padding: 0; }
+.transport small { margin-left: auto; color: var(--editor-muted, #92969e); font-size: 10px; }
+.directionWave { position: relative; height: 104px; background: var(--editor-surface, #17181a); border: 1px solid var(--editor-line, #2b2d31); border-radius: 4px; touch-action: none; user-select: none; overflow: hidden; cursor: crosshair; }
+.directionWave > svg { position: absolute; inset: 27px 0 0; width: 100%; height: 72px; color: #8c8281; pointer-events: none; }
+.directionWave path { fill: none; stroke: currentColor; stroke-width: .8; opacity: .8; }
+.rangeBlock { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 12%, transparent); border-inline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); box-sizing: border-box; }
+.selectedRange { background: color-mix(in srgb, var(--accent) 19%, transparent); box-shadow: inset 0 0 0 1px var(--accent); }
+.panel .rangeBody { position: absolute; inset: 0; width: 100%; min-width: 0; box-sizing: border-box; justify-content: flex-start; align-items: flex-start; padding: 7px min(12px, 15%); border: 0; border-radius: 0; background: transparent; font-size: 10px; color: var(--editor-text); overflow: hidden; display: flex; text-align: left; cursor: grab; }
+.rangeBody > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.panel .rangeBody:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.panel .rangeEdge { position: absolute; top: 0; bottom: 0; width: min(10px, 35%); padding: 0; border: 0; border-radius: 0; background: transparent; cursor: ew-resize; }
+.panel .rangeEdge:hover, .panel .rangeEdge:focus-visible { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.rangeEdge::after { content: ""; position: absolute; top: 50%; left: calc(50% - 1px); width: 2px; height: 20px; margin-top: -10px; border-radius: 1px; background: var(--accent); opacity: .55; }
+.selectedRange .rangeEdge::after, .rangeEdge:hover::after, .rangeEdge:focus-visible::after { opacity: 1; }
+.rangeEdge.start { left: 0; }
+.rangeEdge.end { right: 0; }
+.draftRange { position: absolute; inset-block: 0; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); pointer-events: none; }
+.playhead { position: absolute; inset-block: 0; width: 1px; background: #eee4d8; pointer-events: none; z-index: 2; }
+.playhead::before { content: ""; position: absolute; top: 0; left: -4px; width: 9px; height: 6px; background: #eee4d8; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.ruler { display: flex; justify-content: space-between; padding-top: 5px; color: var(--editor-muted, #92969e); font-size: 10px; font-variant-numeric: tabular-nums; }
+.rangeList { display: flex; gap: 7px; margin-top: 14px; padding-bottom: 3px; overflow-x: auto; }
+.panel .rangeList button { display: flex; flex-direction: column; gap: 4px; min-width: 125px; max-width: 235px; align-items: flex-start; padding: 8px 10px; text-align: left; }
+.rangeList button[aria-pressed="true"] { border-color: var(--accent); }
+.rangeList span { font-size: 10px; color: var(--editor-muted, #92969e); white-space: nowrap; }
+.rangeList strong { font-size: 11px; font-weight: 400; display: block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rangeList small { font-size: 10px; color: var(--accent); }
+.rangeEditor { margin-top: 14px; }
+.rangeEditor > div:first-child { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.rangeEditor button { font-size: 10px; }
+.precision { margin-top: 9px; }
+.precision > div { display: flex; gap: 12px; margin-top: 9px; }
+.precision label { max-width: 180px; font-size: 10px; color: var(--editor-muted, #92969e); }
+.precision input { margin-top: 5px; }
+.hint { font-size: 10.5px; color: var(--editor-muted, #92969e); }
+.error { color: #e1b0a0; font-size: 11px; }
+.songNotes { border-top: 1px solid var(--editor-line, #2b2d31); margin-top: 22px; }
+.songNotes > summary { display: flex; align-items: center; gap: 8px; padding: 15px 0; cursor: pointer; font-size: 12px; }
+.songNotes > summary::before { content: "›"; font-size: 17px; color: var(--editor-muted); }
+.songNotes[open] > summary::before { transform: rotate(90deg); }
+.songNotes summary small { color: var(--editor-muted, #92969e); font-size: 10px; margin-left: auto; }
+.notesBody { padding: 0 0 18px; }
+.cueHeading { display: flex; align-items: center; gap: 10px; margin: 13px 0 8px; color: var(--editor-muted); font-size: 11px; }
+.cueHeading p { margin: 0; }
+.cueHeading strong { color: var(--editor-text); font-size: 11px; font-weight: 500; }
+.cueHeading > button { margin-left: auto; font-size: 10px; flex-shrink: 0; }
+.cue { border-top: 1px solid var(--editor-line, #2b2d31); margin-top: 14px; padding-top: 2px; }
+.cueFields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cueFields label { font-size: 11px; }
+.footer { position: sticky; bottom: 0; z-index: 4; display: flex; justify-content: space-between; align-items: center; gap: 24px; border-top: 1px solid var(--editor-line, #2b2d31); padding: 14px 0 max(14px, env(safe-area-inset-bottom)); background: var(--editor-bg, #111214); box-shadow: 0 -10px 18px -14px #000; }
+.footer p { max-width: 620px; margin: 0; color: var(--editor-muted, #92969e); font-size: 11px; }
+.footer p.error { color: #e1b0a0; }
+.panel .generate { background: var(--accent); border-color: var(--accent); color: #17120b; font-weight: 550; padding: 9px 14px; white-space: nowrap; }
+.panel .generate:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 86%, white); }
+@media (max-width: 850px) { .overview { grid-template-columns: minmax(0, 1fr) 265px; gap: 22px; } .panel { padding-inline: 0; } }
+@media (max-width: 650px) { .overview { grid-template-columns: 1fr; gap: 20px; } .preferences { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } .pacing { grid-column: 1 / -1; margin-bottom: 0; } .filmScope { margin-top: 0; } .transport small { display: none; } .rangeHeading { align-items: flex-start; gap: 10px; } .rangeHeading p { max-width: 245px; } .footer { gap: 14px; align-items: flex-start; } .footer p { font-size: 10px; } .cueFields { grid-template-columns: 1fr; } .cueHeading { flex-wrap: wrap; } }
+@media (max-width: 390px) { .preferences { grid-template-columns: 1fr; } .pacing { grid-column: auto; } .footer { flex-direction: column; } .footer .generate { align-self: flex-end; } }

@@ -15,8 +15,10 @@ Usage::
     from pipeline.ingest.media import extract_media
 
     extract_media(film, shots, config)
+    # Legacy samples use keyframes/{shot_id}_{n}.webp; current short-shot
+    # samples and their manifests add a sampling-profile subdirectory.
     # Writes to:
-    #   film.asset_dir / "keyframes" / "{shot_id}_{n}.webp"
+    #   film.asset_dir / "keyframes" / "{profile}" / "{shot_id}_{n}.webp"
     #   film.asset_dir / "previews"  / "{shot_id}.webm"
     #   film.asset_dir / "media-manifests" / "{shot_id_hash}.json"
 """
@@ -25,31 +27,33 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import subprocess
+import time
+from fractions import Fraction
 from pathlib import Path
 from uuid import uuid4
 
-from PIL import Image, UnidentifiedImageError
-
 from pipeline.config import Config
 from pipeline.ingest.probe import FilmRecord
-from pipeline.ingest.shots import Shot
+from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE, Shot
 
 # ---------------------------------------------------------------------------
 # Display constants — not tunable thresholds
 # ---------------------------------------------------------------------------
 
-_KEYFRAME_MAX_WIDTH: int = 1280   # px — scale=1280:-1 preserves aspect ratio
+_KEYFRAME_MAX_WIDTH: int = 1280   # px — scale=1280:-1 preserves display aspect ratio
 _KEYFRAME_QUALITY: int = 82
-_PREVIEW_HEIGHT: int = 480         # px — scale=-1:480 preserves aspect ratio
+_PREVIEW_HEIGHT: int = 480         # px — scale=-1:480 preserves display aspect ratio
 _PREVIEW_MAX_DURATION: float = 4.0 # seconds — cap on hover-preview length
 _PREVIEW_CODEC: str = "libvpx-vp9"
 _PREVIEW_CRF: int = 35
 _PREVIEW_BITRATE: str = "0"
 _KEYFRAME_START_PAD: float = 0.1  # seconds — avoids black frame at a hard cut
 _MEDIA_CACHE_SCHEMA_VERSION: int = 1
-_MEDIA_EXTRACTION_VERSION: int = 1
+_MEDIA_EXTRACTION_VERSION: int = 2  # v2: correct anamorphic sample aspect ratio
+NATIVE_TIMESTAMP_SOURCE = "decoded_container_relative_pts_v2"
 
 
 # ---------------------------------------------------------------------------
@@ -57,15 +61,18 @@ _MEDIA_EXTRACTION_VERSION: int = 1
 # ---------------------------------------------------------------------------
 
 
-def extract_media(film: FilmRecord, shots: list[Shot], config: Config) -> None:
+def extract_media(
+    film: FilmRecord, shots: list[Shot], config: Config, *, extract_previews: bool = True,
+) -> None:
     """Extract keyframe images and hover-preview clips for each shot.
 
     Writes to *film.asset_dir* (created if necessary):
 
-    * ``keyframes/{shot_id}_{n}.webp``
-        One WebP per ``shot.keyframe_times`` entry (max width 1280 px, q=82).
-        The first keyframe seek is padded by :data:`_KEYFRAME_START_PAD` to
-        avoid capturing the black transitional frame at a hard cut boundary.
+    * ``keyframes/{profile}/{shot_id}_{n}.webp`` for current short shots
+        Up to three distinct decoded WebP samples (max width 1280 px, q=82).
+        Updates ``shot.keyframe_times`` with retained player-relative timestamps.
+        Legacy samples omit the profile directory and retain their first-seek
+        padding of :data:`_KEYFRAME_START_PAD`.
 
     * ``previews/{shot_id}.webm``
         VP9 WebM clip, 480p, CRF 35, no audio, duration ``min(4s, shot
@@ -81,6 +88,9 @@ def extract_media(film: FilmRecord, shots: list[Shot], config: Config) -> None:
     config:
         Pipeline configuration (reserved for future per-config overrides;
         display constants are module-level, not in ``config``).
+    extract_previews:
+        False retains matching existing previews without generating them,
+        allowing a sampling-only backfill to avoid unnecessary video encoding.
 
     Returns
     -------
@@ -100,7 +110,11 @@ def extract_media(film: FilmRecord, shots: list[Shot], config: Config) -> None:
     source_identity = _source_identity(film)
     total = len(shots)
     for index, shot in enumerate(shots, start=1):
-        manifest_path = _media_manifest_path(manifest_dir, shot.shot_id)
+        profile_dir = _sampling_directory(shot)
+        shot_kf_dir = kf_dir / profile_dir if profile_dir else kf_dir
+        shot_manifest_dir = manifest_dir / profile_dir if profile_dir else manifest_dir
+        shot_kf_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = _media_manifest_path(shot_manifest_dir, shot.shot_id)
         expected_identity = _media_cache_identity(source_identity, shot)
         manifest = _read_media_manifest(manifest_path)
         identity_matches = (
@@ -115,18 +129,28 @@ def extract_media(film: FilmRecord, shots: list[Shot], config: Config) -> None:
             if isinstance(manifest_artifacts, dict)
             else {}
         )
-        keyframe_records = _extract_keyframes(
-            film.path,
-            shot,
-            kf_dir,
-            cached_records=cached_artifacts.get("keyframes"),
-        )
-        preview_record = _extract_preview(
-            film.path,
-            shot,
-            preview_dir,
-            cached_record=cached_artifacts.get("preview"),
-        )
+        if shot.sampling_profile:
+            keyframe_records = _extract_native_keyframes(
+                film.path, shot, shot_kf_dir, cached_artifacts.get("keyframes"),
+            )
+        else:
+            keyframe_records = _extract_keyframes(
+                film.path, shot, shot_kf_dir,
+                cached_records=cached_artifacts.get("keyframes"),
+            )
+        preview_record = cached_artifacts.get("preview")
+        # A sampling-only change cannot alter the established preview recipe.
+        # Check the old manifest explicitly before deciding a re-encode is needed.
+        if profile_dir and not preview_record:
+            legacy = _read_media_manifest(_media_manifest_path(manifest_dir, shot.shot_id))
+            if legacy and _preview_identity(legacy["identity"]) == _preview_identity(expected_identity):
+                preview_record = legacy["artifacts"].get("preview")
+        if extract_previews:
+            preview_record = _extract_preview(
+                film.path, shot, preview_dir, cached_record=preview_record,
+            )
+        elif not _artifact_matches(preview_dir / f"{shot.shot_id}.webm", preview_record):
+            preview_record = None
         if _source_identity(film) != source_identity:
             raise RuntimeError(
                 f"source film changed while extracting media: {film.path}"
@@ -142,6 +166,8 @@ def extract_media(film: FilmRecord, shots: list[Shot], config: Config) -> None:
                 },
             },
         )
+        if shot.sampling_profile:
+            shot.keyframe_times = [record["timestamp"] for record in keyframe_records]
         if index % 100 == 0 or index == total:
             print(f"[media] {index}/{total}", flush=True)
 
@@ -154,9 +180,47 @@ def keyframe_seek_time(shot: Shot, frame_index: int) -> float:
         raise ValueError(
             f"shot {shot.shot_id!r} has no keyframe index {frame_index}"
         ) from exc
-    if frame_index == 0:
+    if frame_index == 0 and not shot.sampling_profile:
         return max(timestamp, shot.t_start + _KEYFRAME_START_PAD)
     return timestamp
+
+
+def _sampling_directory(shot: Shot) -> str:
+    if not shot.sampling_profile:
+        return ""
+    if shot.sampling_profile != SHORT_SHOT_SAMPLING_PROFILE:
+        raise ValueError(f"Unsupported sampling profile: {shot.sampling_profile!r}")
+    return shot.sampling_profile
+
+
+def keyframe_paths(film: FilmRecord | Path, shot: Shot) -> list[Path]:
+    """Resolve retained legacy or independently versioned sampling artifacts."""
+    directory = (film if isinstance(film, Path) else film.asset_dir) / "keyframes"
+    profile = _sampling_directory(shot)
+    if profile:
+        directory /= profile
+    _media_manifest_path(directory, shot.shot_id)  # validate the supplied ID
+    return [directory / f"{shot.shot_id}_{index}.webp" for index in range(len(shot.keyframe_times))]
+
+
+def keyframe_timestamp_source(shot: Shot) -> str:
+    return NATIVE_TIMESTAMP_SOURCE if shot.sampling_profile else "ingest_keyframe_seek_v1"
+
+
+def keyframe_timestamp(film: FilmRecord, shot: Shot, frame_index: int) -> float:
+    """Read the actual decoded PTS for current samples; preserve legacy seeks."""
+    if not shot.sampling_profile:
+        return keyframe_seek_time(shot, frame_index)
+    directory = film.asset_dir / "media-manifests" / _sampling_directory(shot)
+    manifest = _read_media_manifest(_media_manifest_path(directory, shot.shot_id))
+    identity = _media_cache_identity(_source_identity(film), shot)
+    if not manifest or manifest["identity"] != identity:
+        raise ValueError(f"Current native sample manifest is unavailable for {shot.shot_id}")
+    records = manifest["artifacts"].get("keyframes")
+    paths = keyframe_paths(film, shot)
+    if not paths or not _native_records_valid(shot, paths[0].parent, records) or len(paths) != len(records) or frame_index < 0 or frame_index >= len(records):
+        raise ValueError(f"Native sample evidence is invalid for {shot.shot_id}")
+    return float(records[frame_index]["timestamp"])
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +261,7 @@ def _media_manifest_path(manifest_dir: Path, shot_id: str) -> Path:
 
 def _media_cache_identity(source_identity: dict, shot: Shot) -> dict:
     """Build the complete, JSON-stable identity for one shot's media."""
-    return {
+    identity = {
         "schema_version": _MEDIA_CACHE_SCHEMA_VERSION,
         "extraction_version": _MEDIA_EXTRACTION_VERSION,
         "source": dict(source_identity),
@@ -233,6 +297,166 @@ def _media_cache_identity(source_identity: dict, shot: Shot) -> dict:
             "audio": False,
         },
     }
+    if shot.sampling_profile:
+        import av
+        from PIL import __version__ as pillow_version
+
+        _sampling_directory(shot)
+        # Actual PTS is output evidence, never an input that invalidates resume.
+        identity["shot"].pop("keyframe_times")
+        identity["shot"]["sampling_profile"] = shot.sampling_profile
+        identity["keyframes"] = {
+            "decoder": "pyav", "pyav_version": av.__version__,
+            "pillow_version": pillow_version, "format": "webp",
+            "selection": "second-middle-penultimate; first-middle-last-if-under-five",
+            "timestamp": "decoded-native-pts-relative-to-container-start", "maximum_frames": 3,
+            "timestamp_origin": "container-start-time-or-zero-v1",
+            "scale_width": _KEYFRAME_MAX_WIDTH, "quality": _KEYFRAME_QUALITY,
+        }
+    return identity
+
+
+def _preview_identity(identity: dict) -> dict:
+    shot = identity.get("shot", {})
+    return {key: identity.get(key) for key in ("schema_version", "extraction_version", "source", "preview")} | {
+        "shot": {key: shot.get(key) for key in ("shot_id", "t_start", "t_end")},
+    }
+
+
+def _native_records_valid(shot: Shot, directory: Path, records: object) -> bool:
+    if not isinstance(records, list) or not 1 <= len(records) <= 3:
+        return False
+    previous = -math.inf
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            return False
+        timestamp = record.get("timestamp")
+        if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or not math.isfinite(timestamp) or not shot.t_start <= timestamp < shot.t_end or timestamp <= previous:
+            return False
+        raw_timestamp = record.get("source_pts")
+        origin = record.get("timestamp_origin")
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in (raw_timestamp, origin)):
+            return False
+        if not math.isclose(raw_timestamp - origin, timestamp, rel_tol=0.0, abs_tol=1e-9):
+            return False
+        if not _artifact_matches(directory / f"{shot.shot_id}_{index}.webp", record):
+            return False
+        previous = timestamp
+    return True
+
+
+def _decode_native_samples(path: Path, shot: Shot) -> tuple[Fraction, list[tuple[float, object, float]]]:
+    """Decode a bounded shot, retaining only seven native candidate frames.
+
+    The second and penultimate frames avoid cut edges when five frames exist.
+    Tiny shots retain every available distinct instant up to three. We use
+    actual PTS relative to the container's start, matching ordinary ffmpeg -ss
+    and player time. Retained raw PTS/origin make that normalization auditable.
+    Also returns the stream's sample aspect ratio: decoded frames are raw,
+    square-pixel-assumed pixel grids, so anamorphic sources need it to display
+    at their true proportions instead of stretching to the coded pixel shape.
+    """
+    deadline = time.monotonic() + 45
+    for preroll in (0.0, 5.0):
+        # Some inter-frame sources seek to a keyframe whose first decoded image
+        # is already past this short shot. Reopen once with five seconds of
+        # preroll; a shorter lookback can still land beyond the whole shot.
+        # keep the same deadline and accept only actual frames inside the shot.
+        sar, samples = _decode_native_samples_from(path, shot, deadline, preroll)
+        if samples:
+            return sar, samples
+    raise ValueError(f"No native video frame inside the shot boundaries ({shot.shot_id}, {shot.t_start}-{shot.t_end}s)")
+
+
+def _decode_native_samples_from(path: Path, shot: Shot, deadline: float, preroll: float) -> tuple[Fraction, list[tuple[float, object, float]]]:
+    import av
+
+    midpoint = (shot.t_start + shot.t_end) / 2.0
+    first: list[tuple[float, object]] = []
+    middle: list[tuple[float, object]] = []
+    last: list[tuple[float, object]] = []
+    count = 0
+    with av.open(str(path)) as container:
+        stream = container.streams.video[0]
+        # A missing or zero SAR means "undefined"; ordinary square pixels.
+        sample_aspect_ratio = stream.sample_aspect_ratio or Fraction(1)
+        origin_fraction = Fraction(container.start_time, av.time_base) if container.start_time is not None else Fraction(0)
+        origin = float(origin_fraction)
+        stream.thread_type = "SLICE"
+        stream.codec_context.thread_count = 2
+        if float(stream.metadata.get("rotate", "0")) % 360:
+            raise ValueError("Native sampling requires unrotated source video")
+        # Negative container epochs are legal, but some demuxers reject a
+        # negative seek. Decode from the newly opened beginning in that case;
+        # clamping to zero would silently skip the original opening frames.
+        player_seek = shot.t_start - preroll
+        absolute_start = player_seek + origin
+        # A retry reaching the opening decodes from the fresh container instead
+        # of seeking to zero, which can itself skip leading reordered frames.
+        if absolute_start >= 0 and (preroll == 0 or player_seek > 0):
+            container.seek(math.floor(absolute_start / stream.time_base), stream=stream, backward=True)
+        previous = -math.inf
+        for frame in container.decode(stream):
+            if time.monotonic() > deadline:
+                raise TimeoutError("Native shot sampling exceeded its bounded decode time")
+            if frame.pts is None:
+                continue
+            # Subtract exact rational time bases before converting to seconds;
+            # float cancellation can otherwise drop a frame exactly on a bound.
+            timestamp = float(frame.pts * stream.time_base - origin_fraction)
+            if timestamp >= shot.t_end:
+                break
+            if timestamp < shot.t_start or timestamp <= previous:
+                continue
+            if any(str(side.type).endswith("DISPLAYMATRIX") for side in frame.side_data):
+                raise ValueError("Native sampling requires unrotated source video")
+            previous = timestamp
+            count += 1
+            if count > 4096:
+                raise ValueError("Native short-shot sampling exceeded its frame bound")
+            sample = (timestamp, frame)
+            if len(first) < 2:
+                first.append(sample)
+            last = [*last, sample][-2:]
+            middle = sorted([*middle, sample], key=lambda item: (round(abs(item[0] - midpoint), 9), item[0]))[:3]
+        if not first:
+            return sample_aspect_ratio, []
+        if count < 3:
+            selected = sorted({item[0]: item for item in [*first, *last]}.values(), key=lambda item: item[0])
+        else:
+            beginning = first[1] if count >= 5 else first[0]
+            ending = last[-2] if count >= 5 else last[-1]
+            centre = min((item for item in middle if beginning[0] < item[0] < ending[0]), key=lambda item: (round(abs(item[0] - midpoint), 9), item[0]))
+            selected = [beginning, centre, ending]
+        # Convert only selected frames; never buffer full-shot RGB images.
+        return sample_aspect_ratio, [(timestamp, frame.to_image(), origin) for timestamp, frame in selected]
+
+
+def _extract_native_keyframes(path: Path, shot: Shot, directory: Path, records: object) -> list[dict]:
+    if _native_records_valid(shot, directory, records):
+        return [dict(record) for record in records]
+    from PIL import Image
+
+    sample_aspect_ratio, samples = _decode_native_samples(path, shot)
+    result = []
+    for index, (timestamp, image, origin) in enumerate(samples):
+        destination = directory / f"{shot.shot_id}_{index}.webp"
+        temporary = destination.with_name(f".{uuid4().hex}.webp")
+        try:
+            image = image.convert("RGB")
+            # Decoded frames are raw, square-pixel-assumed pixel grids; correct
+            # for anamorphic sources before fitting the target width, or the
+            # image stretches to the coded pixel shape instead of its true one.
+            display_width = image.width * float(sample_aspect_ratio)
+            size = (_KEYFRAME_MAX_WIDTH, max(1, round(image.height * _KEYFRAME_MAX_WIDTH / display_width)))
+            if image.size != size:
+                image = image.resize(size, Image.Resampling.LANCZOS)
+            image.save(temporary, format="WEBP", quality=_KEYFRAME_QUALITY)
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        result.append({**_artifact_record(destination), "timestamp": timestamp, "source_pts": timestamp + origin, "timestamp_origin": origin})
+    return result
 
 
 def _read_media_manifest(path: Path) -> dict | None:
@@ -352,7 +576,8 @@ def _extract_keyframes(
             "-ss", str(seek_t),
             "-i", str(film_path),
             "-frames:v", "1",
-            "-vf", f"scale={_KEYFRAME_MAX_WIDTH}:-1",
+            "-vf", ("scale=w='max(2,trunc(iw*sar/2)*2)':h=ih,setsar=1,"
+                    f"scale={_KEYFRAME_MAX_WIDTH}:-1"),
             "-q:v", str(_KEYFRAME_QUALITY),
             str(out_path),
         ]
@@ -399,7 +624,8 @@ def _extract_preview(
         "-ss", str(seek_start),
         "-i", str(film_path),
         "-t", str(actual_dur),
-        "-vf", f"scale=-1:{_PREVIEW_HEIGHT}",
+        "-vf", ("scale=w='max(2,trunc(iw*sar/2)*2)':h=ih,setsar=1,"
+                f"scale=-1:{_PREVIEW_HEIGHT}"),
         "-c:v", _PREVIEW_CODEC,
         "-crf", str(_PREVIEW_CRF),
         "-b:v", _PREVIEW_BITRATE,
@@ -408,45 +634,6 @@ def _extract_preview(
     ]
     _run_atomic_ffmpeg(cmd, out_path)
     return _artifact_record(out_path)
-
-
-def _is_valid_keyframe(path: Path) -> bool:
-    """Return whether *path* is a complete decodable WebP image."""
-    if not path.is_file() or path.stat().st_size <= 0:
-        return False
-    try:
-        with Image.open(path) as image:
-            if image.format != "WEBP":
-                return False
-            image.verify()
-    except (OSError, SyntaxError, UnidentifiedImageError):
-        return False
-    return True
-
-
-def _is_valid_preview(path: Path) -> bool:
-    """Return whether ffprobe can read a positive-duration WebM preview."""
-    if not path.is_file() or path.stat().st_size <= 0:
-        return False
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "json",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return False
-    try:
-        duration = float(json.loads(result.stdout)["format"]["duration"])
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return False
-    return duration > 0.0
 
 
 def _run_atomic_ffmpeg(cmd: list[str], destination: Path) -> None:

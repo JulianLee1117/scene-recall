@@ -1,0 +1,134 @@
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actions button,
+.delete,
+.dialog button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #343434;
+  border-radius: 5px;
+  background: #1b1b1b;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.actions .save,
+.dialog .save {
+  background: #303030;
+  border-color: #464646;
+  color: #eeeeee;
+}
+
+.compact { gap: 3px; flex-wrap: nowrap; }
+.compact > button { min-height: 28px; padding: 4px 8px; border-color: transparent; background: transparent; color: #a7a7a7; }
+.compact > .save { border-color: #373737; background: #242424; color: #d2d2d2; }
+.compact > .save:disabled { background: transparent; border-color: #2b2b2b; color: #777; opacity: 1; }
+.compact > .projectMenu { margin-left: 3px; color: #999; }
+.menuContents { display: grid; gap: 8px; }
+.projectName { margin: 0; padding: 0 2px 8px; border-bottom: 1px solid #303030; overflow-wrap: anywhere; color: #aaa; font-size: 11px; }
+.menuContents .delete { justify-content: flex-start; width: 100%; }
+
+.actions .delete,
+.delete {
+  background: transparent;
+  border-color: transparent;
+  color: #aaaaaa;
+}
+
+.actions button:hover:not(:disabled),
+.delete:hover:not(:disabled),
+.dialog button:hover:not(:disabled) {
+  border-color: #555;
+  background: #2b2b2b;
+  color: #eee;
+}
+
+.actions button:disabled,
+.delete:disabled,
+.dialog button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.actions button:focus-visible,
+.delete:focus-visible,
+.dialog button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 24px;
+  overflow: auto;
+  border: 1px solid #414141;
+  border-radius: 9px;
+  background: #151515;
+  color: var(--fg);
+  box-shadow: 0 24px 100px #000000bb;
+  color-scheme: dark;
+}
+
+.dialog::backdrop {
+  background: #000000bb;
+  backdrop-filter: blur(4px);
+}
+.dialog ::selection {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 42%, #101010);
+}
+
+.dialog h2 {
+  font-size: 19px;
+  line-height: 1.4;
+  font-weight: 500;
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+
+.dialog p {
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0 0 12px;
+}
+
+.dialog .detail {
+  color: #aaaaaa;
+}
+
+.dialog .error {
+  padding: 10px;
+  background: #321f18;
+  border: 1px solid #734b38;
+  border-radius: 4px;
+  color: #edbba8;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.dialog .confirmDelete {
+  background: #8f3c2f;
+  border-color: #aa5343;
+  color: #fff0e9;
+}

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -249,10 +250,6 @@ def test_extract_media_resumes_only_missing_expected_artifacts(
     calls: list[list[str]] = []
     with (
         patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
-        patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(calls),
         ),
@@ -291,10 +288,6 @@ def test_extract_media_replaces_corrupt_expected_keyframe(
 
     calls: list[list[str]] = []
     with (
-        patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
         patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(calls),
@@ -360,10 +353,6 @@ def test_extract_media_timing_change_regenerates_entire_shot(
     calls: list[list[str]] = []
     with (
         patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
-        patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(calls),
         ),
@@ -387,10 +376,6 @@ def test_extract_media_source_stat_change_regenerates_entire_shot(
     shot = _make_shots(film.film_id)[1]
     calls: list[list[str]] = []
     with (
-        patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
         patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(calls),
@@ -417,17 +402,13 @@ def test_extract_media_recipe_version_change_regenerates_entire_shot(
     calls: list[list[str]] = []
     with (
         patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
-        patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(calls),
         ),
     ):
         extract_media(film, [shot], config)
         calls.clear()
-        with patch("pipeline.ingest.media._MEDIA_EXTRACTION_VERSION", 2):
+        with patch("pipeline.ingest.media._MEDIA_EXTRACTION_VERSION", 3):
             extract_media(film, [shot], config)
 
     assert len([cmd for cmd in calls if cmd[-1].endswith(".webp")]) == 1
@@ -445,10 +426,6 @@ def test_extract_media_recipe_setting_change_regenerates_entire_shot(
     shot = _make_shots(film.film_id)[1]
     calls: list[list[str]] = []
     with (
-        patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
         patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(calls),
@@ -475,10 +452,6 @@ def test_extract_media_corrupt_manifest_regenerates_entire_shot(
     manifest = _manifest_path(film, shot)
     calls: list[list[str]] = []
     with (
-        patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
         patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(calls),
@@ -515,10 +488,6 @@ def test_extract_media_interrupted_identity_change_keeps_old_manifest(
     initial_calls: list[list[str]] = []
     with (
         patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
-        patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(initial_calls),
         ),
@@ -551,10 +520,6 @@ def test_extract_media_interrupted_identity_change_keeps_old_manifest(
 
     retry_calls: list[list[str]] = []
     with (
-        patch(
-            "pipeline.ingest.media._is_valid_preview",
-            side_effect=lambda path: path.is_file(),
-        ),
         patch(
             "subprocess.run",
             side_effect=_capturing_valid_ffmpeg(retry_calls),
@@ -606,7 +571,7 @@ def test_extract_media_manifest_is_small_and_complete(
         "t_end": shot.t_end,
         "keyframe_times": shot.keyframe_times,
     }
-    assert identity["extraction_version"] == 1
+    assert identity["extraction_version"] == 2
     assert identity["keyframes"]["quality"] == 82
     assert identity["keyframes"]["scale_width"] == 1280
     assert identity["preview"]["video_codec"] == "libvpx-vp9"
@@ -879,3 +844,191 @@ def test_extract_media_integration_creates_previews(
     preview_path = film.asset_dir / "previews" / f"{shots[0].shot_id}.webm"
     assert preview_path.exists(), f"Missing preview file: {preview_path}"
     assert preview_path.stat().st_size > 0, f"Preview file is empty: {preview_path}"
+
+
+def _write_native_test_video(path: Path, count: int = 12, *, origin_frames: int = 0) -> None:
+    """Early red subject vanishes before the midpoint; native time base is 10fps."""
+    import av
+    from fractions import Fraction
+
+    with av.open(str(path), mode="w", options={"avoid_negative_ts": "disabled"}) as container:
+        stream = container.add_stream("ffv1", rate=10)
+        stream.width, stream.height, stream.pix_fmt = 64, 48, "bgr0"
+        for index in range(count):
+            image = Image.new("RGB", (64, 48), "red" if index < 4 else "blue")
+            frame = av.VideoFrame.from_image(image)
+            frame.pts = origin_frames + index
+            frame.time_base = Fraction(1, 10)
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+
+
+def test_native_short_samples_retain_early_event_actual_pts_and_legacy_evidence(tmp_path: Path, config: Config) -> None:
+    from pipeline.ingest.media import extract_media, keyframe_paths, keyframe_timestamp, keyframe_timestamp_source
+    from pipeline.ingest.shots import Shot, resample_shot
+
+    film = _make_film(tmp_path)
+    _write_native_test_video(film.path)
+    legacy = Shot("event", 0.0, 1.2, None, [0.6])
+    calls = []
+    with patch("subprocess.run", side_effect=_capturing_valid_ffmpeg(calls)):
+        extract_media(film, [legacy], config)
+    old_frame = keyframe_paths(film, legacy)[0]
+    old_manifest = _manifest_path(film, legacy)
+    preserved = {path: path.read_bytes() for path in (old_frame, old_manifest, film.asset_dir / "previews/event.webm")}
+    shot = resample_shot(legacy, fps=10)
+    with patch("subprocess.run", side_effect=AssertionError("sampling must reuse the existing preview")):
+        extract_media(film, [shot], config)
+    assert shot.keyframe_times == pytest.approx([0.1, 0.6, 1.0])
+    assert [keyframe_timestamp(film, shot, index) for index in range(3)] == pytest.approx(shot.keyframe_times)
+    assert keyframe_timestamp_source(shot) == "decoded_container_relative_pts_v2"
+    paths = keyframe_paths(film, shot)
+    assert old_frame not in paths
+    with Image.open(paths[0]) as image:
+        r, g, b = image.convert("RGB").getpixel((100, 100))
+        assert r > 200 and b < 30
+    with Image.open(paths[1]) as image:
+        r, g, b = image.convert("RGB").getpixel((100, 100))
+        assert b > 200 and r < 30
+    for path, content in preserved.items():
+        assert path.read_bytes() == content
+    # Recreate requested targets as a normal resumed ingest would do.
+    resumed = resample_shot(legacy, fps=10)
+    with patch("pipeline.ingest.media._decode_native_samples", side_effect=AssertionError("must reuse native samples")):
+        extract_media(film, [resumed], config)
+    assert resumed.keyframe_times == shot.keyframe_times
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 4])
+def test_native_tiny_shots_never_duplicate_frames(tmp_path: Path, config: Config, count: int) -> None:
+    from pipeline.ingest.media import extract_media, keyframe_paths, keyframe_timestamp
+    from pipeline.ingest.shots import Shot, resample_shot
+
+    film = _make_film(tmp_path)
+    _write_native_test_video(film.path, count)
+    shot = resample_shot(Shot("tiny", 0.0, count / 10, None), fps=10)
+    extract_media(film, [shot], config, extract_previews=False)
+    assert len(shot.keyframe_times) == min(3, count)
+    assert shot.keyframe_times == sorted(set(shot.keyframe_times))
+    assert all(0 <= value < shot.t_end for value in shot.keyframe_times)
+    assert len(keyframe_paths(film, shot)) == min(3, count)
+    assert keyframe_timestamp(film, shot, 0) == shot.keyframe_times[0]
+    assert not (film.asset_dir / "previews/tiny.webm").exists()
+
+
+def test_native_pts_reader_rejects_corrupt_frame(tmp_path: Path, config: Config) -> None:
+    from pipeline.ingest.media import extract_media, keyframe_paths, keyframe_timestamp
+    from pipeline.ingest.shots import Shot, resample_shot
+
+    film = _make_film(tmp_path)
+    _write_native_test_video(film.path)
+    shot = resample_shot(Shot("corruption", 0.0, 1.2, None), fps=10)
+    extract_media(film, [shot], config, extract_previews=False)
+    keyframe_paths(film, shot)[0].write_bytes(b"changed frame")
+    with pytest.raises(ValueError, match="evidence is invalid"):
+        keyframe_timestamp(film, shot, 0)
+
+
+def test_native_samples_exclude_adjacent_shot_frames(tmp_path: Path, config: Config) -> None:
+    from pipeline.ingest.media import extract_media
+    from pipeline.ingest.shots import Shot, resample_shot
+
+    film = _make_film(tmp_path)
+    _write_native_test_video(film.path)
+    shot = resample_shot(Shot("bounded", 0.11, 0.99, None), fps=10)
+    extract_media(film, [shot], config, extract_previews=False)
+    assert shot.keyframe_times == pytest.approx([0.3, 0.5, 0.8])
+
+
+@pytest.mark.parametrize("start,end,expected", [
+    (0.2, 1.1, [0.3, 0.6, 0.9]),
+    (6.2, 7.1, [6.3, 6.6, 6.9]),
+])
+def test_native_samples_recover_seek_overshoot_without_neighbor_frames(tmp_path, monkeypatch, start, end, expected):
+    import av
+    from pipeline.ingest.media import _decode_native_samples
+    from pipeline.ingest.shots import Shot
+
+    path = tmp_path / "seek-edge.mkv"
+    _write_native_test_video(path, count=90)
+    original = path.read_bytes()
+    real_open = av.open
+    opened, seeks = [], []
+
+    class OvershootingContainer:
+        def __init__(self):
+            self.inner = real_open(str(path))
+            self.attempt = len(opened)
+            opened.append(self)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            self.inner.close()
+
+        def seek(self, offset, **kwargs):
+            seeks.append((self.attempt, float(offset * kwargs["stream"].time_base)))
+            self.inner.seek(offset, **kwargs)
+
+        def decode(self, stream):
+            for frame in self.inner.decode(stream):
+                # Reproduce a demuxer's first image arriving at the exclusive
+                # end, while keeping the real video's frames and native PTS.
+                if self.attempt == 0 and float(frame.pts * stream.time_base) < end:
+                    continue
+                yield frame
+
+    monkeypatch.setattr(av, "open", lambda *_args, **_kwargs: OvershootingContainer())
+    _sar, samples = _decode_native_samples(path, Shot("seek-edge", start, end, None))
+    assert len(opened) == 2
+    assert [row[0] for row in samples] == pytest.approx(expected)
+    assert all(start <= timestamp < end and origin == 0 for timestamp, _, origin in samples)
+    if start < 5:
+        assert len(seeks) == 1  # Recovery near the opening must not seek past it again.
+    else:
+        assert seeks[1][1] <= start - 5
+    assert path.read_bytes() == original
+
+
+def test_native_sample_recovery_has_one_retry_and_shared_deadline(tmp_path, monkeypatch):
+    from pipeline.ingest import media
+    from pipeline.ingest.shots import Shot
+
+    attempts = []
+    monkeypatch.setattr(media.time, "monotonic", lambda: 100.)
+    def empty(_path, _shot, deadline, preroll):
+        attempts.append((deadline, preroll))
+        return Fraction(1), []
+    monkeypatch.setattr(media, "_decode_native_samples_from", empty)
+    with pytest.raises(ValueError, match="No native video frame.*empty-shot"):
+        media._decode_native_samples(tmp_path / "source.mkv", Shot("empty-shot", 4., 5., None))
+    assert attempts == [(145., 0.), (145., 5.)]
+
+
+@pytest.mark.parametrize("origin_frames", [100, -10])
+def test_native_samples_use_player_timeline_with_nonzero_container_epoch(tmp_path: Path, config: Config, origin_frames: int) -> None:
+    from pipeline.ingest.media import extract_media, keyframe_paths, keyframe_timestamp
+    from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE, Shot, resample_shot
+
+    film = _make_film(tmp_path)
+    _write_native_test_video(film.path, origin_frames=origin_frames)
+    shot = resample_shot(Shot("epoch", 0.0, 1.2, None), fps=10)
+    extract_media(film, [shot], config, extract_previews=False)
+    assert shot.keyframe_times == pytest.approx([0.1, 0.6, 1.0])
+    assert [keyframe_timestamp(film, shot, index) for index in range(3)] == pytest.approx(shot.keyframe_times)
+    with Image.open(keyframe_paths(film, shot)[0]) as image:
+        red, _, blue = image.convert("RGB").getpixel((100, 100))
+        assert red > 200 and blue < 30
+    manifest = json.loads(next((film.asset_dir / "media-manifests" / SHORT_SHOT_SAMPLING_PROFILE).glob("*.json")).read_text(encoding="utf-8"))
+    records = manifest["artifacts"]["keyframes"]
+    assert [record["timestamp_origin"] for record in records] == [origin_frames / 10] * 3
+    assert [record["source_pts"] for record in records] == pytest.approx([origin_frames / 10 + timestamp for timestamp in shot.keyframe_times])
+    bounded = resample_shot(Shot("epoch-bound", 0.2, 1.1, None), fps=10)
+    extract_media(film, [bounded], config, extract_previews=False)
+    assert bounded.keyframe_times == pytest.approx([0.3, 0.6, 0.9])

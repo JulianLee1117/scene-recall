@@ -525,7 +525,8 @@ def resolve_ready_framing_profile(
         return None
     if profile is None:
         return None
-    manifest = _read_manifest(manifest_path(config, profile))
+    path = manifest_path(config, profile)
+    manifest = db.read_profile_manifest(path) if getattr(db, "is_index_snapshot", False) is True else _read_manifest(path)
     if manifest is None:
         return None
     expected = {

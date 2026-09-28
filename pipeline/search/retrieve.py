@@ -28,11 +28,15 @@ from lancedb.expr import col, lit
 from lancedb.query import BooleanQuery, FullTextOperator, MatchQuery, Occur
 from PIL import Image
 
+from pipeline.search.candidates import frame_neighbors
+from pipeline.search.request import search_execution, search_stage, reuse_vector
+
 from pipeline.config import (
     DEFAULT_SEARCH_CANDIDATE_LIMIT,
     DEFAULT_SEARCH_RESULT_WINDOW,
     Config,
 )
+from pipeline.index.framing_cache import resolve_partial_profile, resolve_candidate_grids, canonical_grid
 from pipeline.index.framing_features import (
     load_framing_grids,
     resolve_ready_framing_profile,
@@ -43,12 +47,32 @@ from pipeline.index.text_features import (
     resolve_ready_text_profile,
 )
 from pipeline.index.writer import require_visual_encoder_profile, table_names
+from pipeline.index.reads import filtered_rows
 from pipeline.ingest.embed import (
     embed_pil_images,
     embed_spatial_images,
-    embed_text,
+    embed_text as _embed_text,
 )
-from pipeline.ingest.text_embed import embed_semantic_query
+from pipeline.ingest.text_embed import (
+    SEMANTIC_QUERY_INSTRUCTION_VERSION,
+    embed_semantic_query as _embed_semantic_query,
+    get_text_model_spec,
+    SEMANTIC_QUERY_INSTRUCTION,
+)
+
+
+def embed_semantic_query(text, config):
+    spec = get_text_model_spec(config)
+    return reuse_vector(
+        ("semantic_query", spec.profile_id, SEMANTIC_QUERY_INSTRUCTION_VERSION,
+         SEMANTIC_QUERY_INSTRUCTION, text.strip()),
+        lambda: _embed_semantic_query(text, config),
+    )
+
+
+def embed_text(texts, config):
+    return reuse_vector(("visual_text", config.models.visual_encoder, tuple(texts)),
+                        lambda: _embed_text(texts, config))
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -166,6 +190,8 @@ _FRAME_CANDIDATE_COLUMNS = [
     "frame_index",
     "timestamp",
     "path",
+    "source_size",
+    "source_mtime_ns",
     "_distance",
 ]
 
@@ -189,12 +215,16 @@ _JUNK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
             # "end-credit cards/frame", so separators allow a hyphen and the
             # trailing noun allows a plural.
             r"\bcredits?[-\s]+(?:rolls?|crawls?|sequences?|screens?|cards?"
-            r"|text|frames?)\b",
+            r"|text|frames?|overlays?)\b",
             r"\bcredits?[-\s]+(?:scroll|scrolls|scrolling|list|names)\b",
             r"\b(?:opening|closing|end|final|rolling|production|cast|crew)"
             r"[-\s]+credits?\b",
             r"\b(?:film|movie|music|legal)[-\s]+credits?\b",
             r"\b(?:directed|written|produced)\s+by\b",
+            # Explicit full-screen credit typography may omit "end credits".
+            r"^\s*(?:static\s+)?(?:black|white)\s+screen\s+"
+            r"(?:filled|covered)\s+with\b(?=[^.!?]*\bcredits\b)"
+            r"[^.!?]*\b(?:dense\s+(?:rows|columns)|text\s+columns|cast\s+list)\b",
         )
     ),
     "logos": tuple(
@@ -209,8 +239,12 @@ _JUNK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(pattern, re.IGNORECASE)
         for pattern in (
             r"\btitle[- ]cards?\b",
+            r"\btitle\s+graphics\b",
             r"\bintertitles?\b",
             r"\b(?:opening|main|film|movie)\s+titles?\b",
+            r"^\s*centered\b[^.!?]*\btitle\s+text\s+appears\s+on\s+"
+            r"(?:a\s+)?(?:completely\s+)?(?:black|white)\s+screen\b"
+            r"[^.!?]*\bopening[- ]card\s+composition\b",
         )
     ),
     "static": tuple(
@@ -226,11 +260,23 @@ _JUNK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     "blank": tuple(
         re.compile(pattern, re.IGNORECASE)
         for pattern in (
-            r"\b(?:blank|black|white|solid[- ]colou?r)"
-            r"\s+(?:screen|frame|image)\b",
-            r"\b(?:fade|fades|faded|cut|cuts)\s+to\s+black\b",
-            r"\bnearly\s+black\s+(?:screen|frame|image)\b",
-            r"\b(?:almost|nearly)\s+(?:entirely\s+)?black\b",
+            # A dark object/background or a fade inside a populated shot is
+            # not empty footage. Require a whole-caption blank-frame label,
+            # optionally completed by an explicit absence of visual content.
+            # Ambiguous captions remain eligible; other junk categories are
+            # classified independently, including credits on a black screen.
+            r"^\s*(?:(?:a|an|the)\s+)?"
+            r"(?:(?:completely|entirely|uniformly|solid|pure|empty|featureless"
+            r"|nearly(?:\s+(?:or\s+)?complete(?:ly)?)?)\s+)*"
+            r"(?:blank|black|white|solid[- ]colou?r)\s+(?:screens?|frames?|images?)"
+            r"(?:\s*[.!]?\s*$|\s*,?\s*"
+            r"(?:with\s+no|showing\s+no|containing\s+no|without(?:\s+any)?)\b"
+            r"(?![^.!?]*\b(?:but|except|although|however|only|then|before|after)\b)"
+            r"(?=[^.!?]*\b(?:visual\s+(?:detail|content|information)"
+            r"|(?:visible|discernible)\s+(?:detail|content)|imagery"
+            r"|(?:setting[^.!?]*subjects?|subjects?[^.!?]*setting)"
+            r"[^.!?]*(?:lighting|action))\b)"
+            r"[^.!?]*[.!]?\s*$)",
         )
     ),
 }
@@ -238,12 +284,13 @@ _JUNK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
 _JUNK_QUERY_PATTERNS: dict[str, re.Pattern[str]] = {
     "credits": re.compile(
         r"\b(?:credits|credit roll|opening credit|closing credit|end credit"
-        r"|cast list|crew list)\b",
+        r"|credit overlays?|cast list|crew list)\b",
         re.IGNORECASE,
     ),
     "logos": re.compile(r"\b(?:logo|logos|studio ident|idents?)\b", re.IGNORECASE),
     "title_cards": re.compile(
-        r"\b(?:title card|title cards|intertitle|intertitles|title sequence)\b",
+        r"\b(?:title card|title cards|title graphics|intertitle|intertitles"
+        r"|title sequence)\b",
         re.IGNORECASE,
     ),
     "static": re.compile(
@@ -268,7 +315,7 @@ _JUNK_NEGATED_QUERY_PATTERNS: dict[str, re.Pattern[str]] = {
     ),
     "title_cards": re.compile(
         r"\b(?:no|without|exclude|excluding)\s+"
-        r"(?:title cards?|intertitles?|title sequences?)\b",
+        r"(?:title cards?|title graphics|intertitles?|title sequences?)\b",
         re.IGNORECASE,
     ),
     "static": re.compile(
@@ -337,14 +384,6 @@ def _broad_query_uses_lexical_vote(
     if len(query_tokens) != 1 or _is_explicitly_quoted_query(query):
         return True
     return not bool(enabled_channels & {"img", "txt"})
-
-
-def _row_text(row: dict[str, Any]) -> str:
-    """Combine text fields for content classification."""
-    return " ".join(
-        str(row.get(field) or "")
-        for field in ("caption", "searchable_text", "dialogue")
-    )
 
 
 def _lexical_text(row: dict[str, Any]) -> str:
@@ -544,12 +583,9 @@ def _attach_image_vectors(
     unit_filter = _unit_filter(unit_ids)
     if unit_filter is None:
         return ranked
-    vector_rows = (
-        unit_table.search()
-        .select(["unit_id", "img_vec"])
-        .where(_representative_filter(film_ids) & unit_filter)
-        .limit(len(unit_ids))
-        .to_list()
+    vector_rows = filtered_rows(
+        unit_table, columns=["unit_id", "img_vec"],
+        where=_representative_filter(film_ids) & unit_filter, limit=len(unit_ids),
     )
     vectors = {
         str(row["unit_id"]): row.get("img_vec")
@@ -589,7 +625,11 @@ def _is_unrequested_junk(
     ``_requested_junk_categories(query)`` and pass it as *requested*; the
     query-side regexes are constant per request.
     """
-    text = _row_text(row)
+    # These categories describe the picture. Dialogue can discuss a credit
+    # card, a letter "written by" someone, or a film's end credits without
+    # making this shot a credit roll. searchable_text also includes dialogue,
+    # so only the visual caption can establish visual junk (ADR-0054).
+    text = str(row.get("caption") or "")
     if requested is None:
         requested = _requested_junk_categories(query)
     detected = {
@@ -616,26 +656,6 @@ def _as_float_vec(value: Any) -> np.ndarray | None:
     if vec.ndim != 1 or vec.size == 0:
         return None
     return vec
-
-
-def _cosine_similarity(left: Any, right: Any) -> float | None:
-    """Return cosine similarity, or ``None`` for absent/invalid vectors."""
-    try:
-        left_vec = np.asarray(left, dtype=np.float32)
-        right_vec = np.asarray(right, dtype=np.float32)
-    except (TypeError, ValueError):
-        return None
-    if (
-        left_vec.ndim != 1
-        or right_vec.ndim != 1
-        or left_vec.shape != right_vec.shape
-        or left_vec.size == 0
-    ):
-        return None
-    denominator = float(np.linalg.norm(left_vec) * np.linalg.norm(right_vec))
-    if denominator == 0.0:
-        return None
-    return float(np.dot(left_vec, right_vec) / denominator)
 
 
 def _temporally_close(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -814,19 +834,10 @@ def _global_frame_candidate_rows(
         else base_frame_depth
     )
 
-    frame_query = (
-        db.open_table("frames")
-        .search(vector, vector_column_name="visual_vec")
-        .metric("cosine")
-    )
-    film_filter = _film_filter(film_ids)
-    if film_filter is not None:
-        frame_query = frame_query.where(film_filter)
     frame_rows = _stable_vector_ranking(
         _rows_in_film_scope(
-            frame_query.select(_FRAME_CANDIDATE_COLUMNS)
-            .limit(metadata_depth)
-            .to_list(),
+            frame_neighbors(db, vector, columns=_FRAME_CANDIDATE_COLUMNS,
+                            limit=metadata_depth, where=_film_filter(film_ids)),
             film_ids,
         ),
         candidate_limit=metadata_depth,
@@ -947,13 +958,7 @@ def _frame_search_rows(
     unit_filter = _unit_filter(unit_ids)
     if unit_filter is None:
         return []
-    unit_rows = (
-        unit_table.search()
-        .select(_CANDIDATE_COLUMNS)
-        .where(_representative_filter(film_ids) & unit_filter)
-        .limit(len(unit_ids))
-        .to_list()
-    )
+    unit_rows = _hydrate_units(unit_table, unit_ids, film_ids)
     unit_rows = _rows_in_film_scope(unit_rows, film_ids)
     return _frame_image_ranking(
         frame_rows,
@@ -1001,17 +1006,29 @@ def _semantic_text_search_rows(
     view_filter = _any_of("view", requested_views)
     assert view_filter is not None
     feature_filter = feature_filter & view_filter
-    feature_rows = (
-        db.open_table(profile.table_name)
-        .search(vector, vector_column_name="vector")
-        .metric("cosine")
-        # Ask for scoring evidence explicitly without materializing hundreds
-        # of unused 1024-float document vectors into Python for every query.
-        .select(_TEXT_FEATURE_COLUMNS)
-        .where(feature_filter)
-        .limit(candidate_limit * len(requested_views))
-        .to_list()
-    )
+    feature_table = db.open_table(profile.table_name)
+    feature_limit = candidate_limit * len(requested_views)
+    with search_stage("semantic_retrieval"):
+        feature_rows = None
+        # Unscoped individual views touch many interleaved vector rows. Avoid
+        # expensive scalar-index gathers when an exact sequential scanner is
+        # available. Selective film scopes and ordinary all-view search retain
+        # their existing physical plan, as do tables with vector indexes.
+        scan = getattr(type(feature_table), "scan_vector_rows", None)
+        if not film_ids and len(requested_views) < len(TEXT_VIEWS) and scan is not None:
+            feature_rows = scan(feature_table, vector, column="vector",
+                                columns=_TEXT_FEATURE_COLUMNS, where=feature_filter,
+                                limit=feature_limit)
+        if feature_rows is None:
+            feature_rows = (
+                feature_table.search(vector, vector_column_name="vector")
+                .metric("cosine")
+                # Keep the result projection bounded to scoring evidence.
+                .select(_TEXT_FEATURE_COLUMNS)
+                .where(feature_filter)
+                .limit(feature_limit)
+                .to_list()
+            )
     feature_rows = _rows_in_film_scope(feature_rows, film_ids)
     allowed_view_set = set(requested_views)
     feature_rows = [
@@ -1038,13 +1055,7 @@ def _semantic_text_search_rows(
     if unit_filter is None:
         return []
 
-    unit_rows = (
-        unit_table.search()
-        .select(_CANDIDATE_COLUMNS)
-        .where(_representative_filter(film_ids) & unit_filter)
-        .limit(len(unit_ids))
-        .to_list()
-    )
+    unit_rows = _hydrate_units(unit_table, unit_ids, film_ids)
     units_by_id = {
         _row_id(row): row
         for row in _rows_in_film_scope(unit_rows, film_ids)
@@ -1062,6 +1073,7 @@ def _semantic_text_search_rows(
             "view": feature.get("view"),
             "text": feature.get("text"),
             "profile_id": feature.get("profile_id"),
+            "query_instruction_version": SEMANTIC_QUERY_INSTRUCTION_VERSION,
         }
         ranked.append(row)
     ranked.sort(key=lambda row: (float(row["_distance"]), _row_id(row)))
@@ -1197,6 +1209,17 @@ def _film_filter(film_ids: tuple[str, ...]) -> Any | None:
 def _unit_filter(unit_ids: tuple[str, ...]) -> Any | None:
     """Build a safe Lance expression matching returned frame-hit unit IDs."""
     return _any_of("unit_id", unit_ids)
+
+
+def _hydrate_units(table, identities, film_ids):
+    from pipeline.search.request import reuse_rows
+    def fetch(missing):
+        if not missing:
+            return []
+        return filtered_rows(table, columns=_CANDIDATE_COLUMNS,
+                where=_representative_filter(film_ids) & _unit_filter(tuple(missing)),
+                limit=len(missing))
+    return reuse_rows(("units", id(table), tuple(film_ids)), identities, fetch)
 
 
 def _representative_filter(film_ids: tuple[str, ...]) -> Any:
@@ -1499,6 +1522,7 @@ def _soft_temporal_spread(
     return [*preferred, *deferred]
 
 
+@search_execution
 def search(
     query: str,
     db: lancedb.DBConnection,
@@ -1509,6 +1533,8 @@ def search(
     apply_film_diversity: bool | None = None,
     _defer_result_preferences: bool = False,
     _apply_ordinary_temporal_spread: bool = True,
+    _preserve_visual_alternatives: bool = False,
+    _return_candidate_pool: bool = False,
 ) -> list[dict]:
     """Return a stable hybrid result prefix.
 
@@ -1517,7 +1543,14 @@ def search(
     after independent clause rankings are fused. The ordinary temporal switch
     lets reference fusion reserve temporal ordering for its separate 90-second
     policy. Public callers retain the established result preferences.
+
+    ``_return_candidate_pool`` is an internal comparison boundary. It returns
+    the complete bounded ordinary pool, including the existing unscoped film
+    reserve, before result preferences. This preserves ordinary recall while
+    allowing one final preference pass after optional evidence-route fusion.
     """
+    if _return_candidate_pool:
+        _defer_result_preferences = True
     candidate_limit, result_limit = _validated_search_limits(
         config,
         result_limit,
@@ -1540,7 +1573,9 @@ def search(
         candidate_limit,
         scoped_film_ids,
         apply_film_diversity=apply_film_diversity,
-        defer_result_preferences=_defer_result_preferences,
+        defer_result_preferences=(
+            _defer_result_preferences and not _return_candidate_pool
+        ),
     )
     use_lexical_vote = _broad_query_uses_lexical_vote(query, enabled)
 
@@ -1726,7 +1761,7 @@ def search(
             row = candidate["row"]
             if _is_unrequested_junk(row, query, requested_junk):
                 continue
-            if _is_duplicate(row, dedup_candidates):
+            if not _preserve_visual_alternatives and _is_duplicate(row, dedup_candidates):
                 continue
             eligible.append(candidate)
             dedup_candidates.append(row)
@@ -1745,7 +1780,7 @@ def search(
         and not scoped_film_ids
     ):
         eligible = _soft_temporal_spread(eligible)
-    ranked_candidates = (
+    ranked_candidates = eligible if _return_candidate_pool else (
         _bounded_film_repeat_rerank(
             eligible,
             result_limit=result_limit,
@@ -1881,6 +1916,7 @@ def _clause_results_from_rows(
     return results
 
 
+@search_execution
 def search_semantic_views(
     query: str,
     views: Iterable[str],
@@ -1965,6 +2001,7 @@ def _search_look_by_vector(
     )
 
 
+@search_execution
 def search_look_by_vector(
     vector: np.ndarray,
     db: lancedb.DBConnection,
@@ -1984,6 +2021,7 @@ def search_look_by_vector(
     )
 
 
+@search_execution
 def search_look_by_image(
     image: Image.Image,
     db: lancedb.DBConnection,
@@ -2026,6 +2064,7 @@ def search_look_by_image(
     )
 
 
+@search_execution
 def search_look_by_text(
     query: str,
     db: lancedb.DBConnection,
@@ -2055,6 +2094,7 @@ def apply_recipe_result_preferences(
     result_limit: int | None = None,
     apply_reference_temporal_spread: bool = False,
     apply_film_diversity: bool | None = None,
+    _preserve_visual_alternatives: bool = False,
 ) -> list[dict[str, Any]]:
     """Apply final junk, deduplication, temporal, and diversity policy once."""
     _candidate_limit, resolved_result_limit = _validated_search_limits(
@@ -2073,13 +2113,10 @@ def apply_recipe_result_preferences(
     if unit_filter is None:
         return []
     scoped_film_ids = _normalise_film_ids(film_ids)
-    rows = (
-        db.open_table("units")
-        .search()
-        .select(_CANDIDATE_COLUMNS)
-        .where(_representative_filter(scoped_film_ids) & unit_filter)
-        .limit(len(unit_ids))
-        .to_list()
+    rows = filtered_rows(
+        db.open_table("units"), columns=_CANDIDATE_COLUMNS,
+        where=_representative_filter(scoped_film_ids) & unit_filter,
+        limit=len(unit_ids),
     )
     units_by_id = {
         _row_id(row): row
@@ -2098,7 +2135,7 @@ def apply_recipe_result_preferences(
             requested_junk,
         ):
             continue
-        if _is_duplicate(row, dedup_rows):
+        if not _preserve_visual_alternatives and _is_duplicate(row, dedup_rows):
             continue
         dedup_rows.append(row)
         eligible.append(result)
@@ -2210,10 +2247,11 @@ def _reference_frame_candidates(
         )
         return []
 
-    framing_profile = resolve_ready_framing_profile(
-        config,
-        db,
-        validate_frame_ids=False,
+    from pipeline.search.composition import selected_profile, rank_candidates
+    composition = selected_profile(config, db)
+    partial_profile = resolve_partial_profile(config, db)
+    framing_profile = partial_profile or resolve_ready_framing_profile(
+        config, db, validate_frame_ids=False,
     )
     cache_reason = (
         "profile_ready"
@@ -2235,6 +2273,17 @@ def _reference_frame_candidates(
         config,
         **query_embed_kwargs,
     )
+    if composition is not None and query_spatial is not None:
+        from pipeline.index.framing_features import configured_framing_spatial_profile
+        source_profile = framing_profile or configured_framing_spatial_profile(config)
+        if source_profile is not None and composition[0].source_profile_id == source_profile.profile_id:
+            return rank_candidates(
+                db, config, composition, source_profile, query_global[0], query_spatial[0], film_ids,
+                limit=min(candidate_limit, _REFERENCE_SPATIAL_CANDIDATE_LIMIT),
+                reserve=min(cross_film_reserve_limit, _UNSCOPED_UPLOAD_FILM_RESERVE_LIMIT),
+                encode=embed_spatial_images, score=_spatial_grid_scores,
+            )
+        _LOGGER.warning("Composition profile does not match the current spatial encoder; using baseline Framing")
     if framing_profile is not None and query_spatial is not None:
         if query_spatial.shape[1:] != (
             framing_profile.grid_size,
@@ -2259,7 +2308,7 @@ def _reference_frame_candidates(
             spatial_candidate_count=0,
         )
         return []
-    if framing_profile is not None:
+    if framing_profile is not None and partial_profile is None:
         # Candidate retrieval and manifest resolution are separate reads. A
         # film can publish a new frames generation between them, so validate
         # the complete manifest again after the candidate snapshot was read.
@@ -2298,7 +2347,14 @@ def _reference_frame_candidates(
     spatial_scores: np.ndarray | None = None
     candidate_spatial: np.ndarray | None = None
     cache_path = "unavailable"
-    if query_spatial is not None and framing_profile is not None:
+    if query_spatial is not None and partial_profile is not None and framing_profile is not None:
+        valid_rows, candidate_spatial, hits = resolve_candidate_grids(
+            valid_rows, spatial_shortlist_limit, db, config, partial_profile, embed_spatial_images,
+        )
+        query_spatial = np.stack([canonical_grid(query_spatial[0], partial_profile)])
+        cache_path = "hit" if hits == len(candidate_spatial) else "partial" if hits else "live"
+        cache_reason = "source_hashed_v2"
+    elif query_spatial is not None and framing_profile is not None:
         cached_frame_ids = [
             str(row.get("frame_id") or "")
             for row in valid_rows[:spatial_shortlist_limit]
@@ -2347,6 +2403,10 @@ def _reference_frame_candidates(
     elif query_spatial is None:
         cache_reason = "query_grid_unavailable"
     if query_spatial is not None and candidate_spatial is not None:
+        # The numeric scorer contract does not depend on cache occupancy,
+        # including a library with no cache table or an evicted old cache.
+        query_spatial = np.asarray(query_spatial, dtype="<f2").astype(np.float32)
+        candidate_spatial = np.asarray(candidate_spatial, dtype="<f2").astype(np.float32)
         spatial_scores = _spatial_grid_scores(
             query_spatial[0],
             candidate_spatial,
@@ -2558,13 +2618,7 @@ def _search_by_image_only(
         return []
 
     unit_table = db.open_table("units")
-    unit_rows = (
-        unit_table.search()
-        .select(_CANDIDATE_COLUMNS)
-        .where(_representative_filter(scoped_film_ids) & unit_filter)
-        .limit(len(unit_ids))
-        .to_list()
-    )
+    unit_rows = _hydrate_units(unit_table, unit_ids, scoped_film_ids)
     units_by_id = {
         str(row.get("unit_id") or row.get("shot_id") or ""): row
         for row in _rows_in_film_scope(unit_rows, scoped_film_ids)
@@ -2661,6 +2715,9 @@ def _search_by_image_only(
             "matched_frame": matched_frame,
         }
         channels: dict[str, dict[str, Any]] = {"img": image_channel}
+        if frame.get("_composition_profile"):
+            image_channel["rank_scope"] = frame["_semantic_rank_scope"]
+            image_channel["candidate_profile"] = frame["_composition_profile"]
         if frame.get("_spatial_score") is not None:
             channels["spatial"] = _channel_debug(
                 int(frame["_spatial_rank"]),
@@ -2836,6 +2893,7 @@ def _reapply_reference_result_preferences(
     return selected
 
 
+@search_execution
 def search_by_image(
     image: Image.Image,
     db: lancedb.DBConnection,

@@ -1,0 +1,442 @@
+.editor {
+  color-scheme: dark;
+  max-width: 1200px;
+  padding-top: 20px;
+  color: var(--fg);
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  margin: 28px 0 20px;
+}
+.header > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.header input {
+  display: block;
+  font-size: 24px;
+  margin: 7px 0;
+  max-width: 650px;
+}
+.header p {
+  font-size: 11px;
+  color: #999999;
+  margin: 0;
+}
+.stepBody,
+.matchWorkspace {
+  min-width: 0;
+}
+.scope {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 20px;
+  font-size: 12px;
+  color: #999999;
+}
+.more {
+  border-top: 1px solid #363636;
+  margin-top: 16px;
+  padding: 12px 0;
+  font-size: 12px;
+  min-width: 0;
+}
+.more summary {
+  color: #aaaaaa;
+  cursor: pointer;
+  padding: 4px 0;
+  list-style-position: inside;
+}
+.more[open] > summary {
+  margin-bottom: 16px;
+}
+.more button {
+  cursor: pointer;
+}
+.settingsRow {
+  display: flex;
+  align-items: end;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.settingsRow label {
+  min-width: 190px;
+}
+.check {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px !important;
+}
+.check input {
+  width: 16px !important;
+  height: 16px;
+  accent-color: var(--accent);
+  margin: 0 !important;
+}
+.notice {
+  font-size: 12px;
+  color: #aaaaaa;
+  margin: 14px 0;
+}
+.jobStatus {
+  border: 1px solid #343434;
+  background: #1b1b1b;
+  border-radius: 6px;
+  padding: 18px 20px;
+  margin: 18px 0 28px;
+  position: sticky;
+  top: 10px;
+  z-index: 20;
+  box-shadow: 0 8px 28px #00000055;
+}
+.jobHeading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.jobHeading strong {
+  font-size: 13px;
+  font-weight: 550;
+  flex: 1;
+}
+.jobHeading span {
+  color: #aaaaaa;
+  font-size: 11px;
+}
+.jobHeading button {
+  border: 0;
+  background: transparent;
+  color: #c9c9c9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.jobStatus p {
+  color: #aaaaaa;
+  font-size: 12px;
+  margin: 10px 0 0;
+}
+.activity {
+  height: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 12%, #151515);
+  margin-top: 13px;
+  border-radius: 3px;
+}
+.activity i {
+  display: block;
+  height: 100%;
+  width: 32%;
+  background: var(--accent);
+  animation: travel 1.8s ease-in-out infinite;
+}
+@keyframes travel {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(420%);
+  }
+}
+.centerActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.matchSymbol {
+  font-size: 44px;
+  color: #c9c9c9;
+  display: flex;
+  gap: 35px;
+  align-items: center;
+  letter-spacing: -0.04em;
+}
+.matchSymbol span {
+  font-size: 27px;
+  color: #999999;
+}
+.referenceLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 285px;
+  gap: 28px;
+  align-items: start;
+}
+.matchOptions {
+  min-width: 0;
+  background: #1b1b1b;
+  border: 1px solid #363636;
+  border-radius: 6px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.matchOptions h2 {
+  font-size: 12px;
+  font-weight: 550;
+  margin: 0 0 3px;
+}
+.matchChoices {
+  display: grid;
+  gap: 7px;
+}
+.matchChoices button {
+  border: 1px solid #363636;
+  color: #c9c9c9;
+  background: transparent;
+  padding: 13px;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font: inherit;
+}
+.matchChoices button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: #222222;
+  color: var(--fg);
+}
+.matchChoices strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+.matchChoices small {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #aaaaaa;
+}
+.matchChoices button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.referenceSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 0 0;
+}
+.referenceSummary span {
+  font-size: 10px;
+  color: #999999;
+}
+.referenceSummary strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: #c9c9c9;
+  margin-left: auto;
+}
+.referenceSummary small {
+  font-size: 10px;
+  color: #999999;
+  flex-basis: 100%;
+}
+.matchOptions .more {
+  margin: 0;
+}
+.matchOptions > p {
+  margin: 0 !important;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #aaaaaa;
+}
+.matchPreview {
+  max-width: 850px;
+  margin: 0 auto 20px;
+  border: 1px solid #363636;
+  background: #151515;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.matchPreview > video {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  background: #0e0e0e;
+}
+.previewCaption {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  justify-content: space-between;
+  padding: 18px 20px;
+}
+.previewCaption span {
+  font-size: 10px;
+  color: #999999;
+}
+.previewCaption h2 {
+  font-size: 19px;
+  font-weight: 450;
+  letter-spacing: -0.02em;
+  margin: 3px 0;
+}
+.previewCaption p {
+  font-size: 11px;
+  color: #aaaaaa;
+  margin: 0;
+}
+.matchPreview > .check {
+  padding: 0 20px 15px;
+}
+.previewPlaceholder {
+  position: relative;
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #0e0e0e;
+}
+.previewPlaceholder img {
+  width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  opacity: 0.55;
+}
+.previewPlaceholder > button {
+  position: absolute;
+}
+.candidates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 850px;
+  margin: 0 auto 16px;
+}
+.candidates > button {
+  padding: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #363636;
+  border-radius: 5px;
+  background: #1b1b1b;
+  cursor: pointer;
+  color: #c9c9c9;
+  text-align: left;
+}
+.candidates > button.chosenCandidate {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.candidates img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: contain;
+  background: #0e0e0e;
+  display: block;
+}
+.candidates > button > span {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 12px;
+}
+.candidates small {
+  color: #999999;
+  font-size: 10px;
+}
+.candidates strong {
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 450;
+}
+.editor button:focus-visible,
+.editor input:focus-visible,
+.editor summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (max-width: 900px) {
+  .referenceLayout {
+    grid-template-columns: minmax(0, 1fr) 250px;
+    gap: 16px;
+  }
+  .matchOptions {
+    padding: 15px;
+  }
+  .editor {
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+}
+@media (max-width: 680px) {
+  .editor {
+    padding: 14px 16px 50px;
+  }
+  .header {
+    align-items: flex-start;
+    gap: 15px;
+    flex-direction: column;
+  }
+  .header > div:first-child {
+    width: 100%;
+  }
+  .header input {
+    font-size: 21px;
+  }
+  .header > div:last-child {
+    align-self: flex-end;
+  }
+  .referenceLayout {
+    grid-template-columns: 1fr;
+  }
+  .matchChoices {
+    grid-template-columns: 1fr;
+  }
+  .matchOptions {
+    padding: 18px;
+  }
+  .matchOptions > button {
+    width: 100%;
+  }
+  .candidates {
+    gap: 7px;
+  }
+  .candidates > button > span {
+    padding: 9px;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .candidates strong {
+    font-size: 10px;
+  }
+  .previewCaption {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 15px;
+  }
+  .previewCaption > button {
+    width: 100%;
+  }
+  .jobStatus {
+    position: relative;
+    top: 0;
+    padding: 14px;
+  }
+  .jobHeading {
+    gap: 10px;
+  }
+  .jobHeading strong {
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity i {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}
+
+.editor.editor { max-width: none; padding-top: 0; padding-inline: 20px; }
+.workspaceHeader { margin-inline: -20px; margin-bottom: 20px; }

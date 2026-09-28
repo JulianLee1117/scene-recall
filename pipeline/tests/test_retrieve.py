@@ -93,13 +93,14 @@ def _cosine_vec(
 
 
 def _make_query_chain(rows: list[dict]) -> MagicMock:
+    from pipeline.tests.query_helpers import add_scalar_batches
     chain = MagicMock()
     chain.metric.return_value = chain
     chain.select.return_value = chain
     chain.where.return_value = chain
     chain.limit.return_value = chain
     chain.to_list.return_value = rows
-    return chain
+    return add_scalar_batches(chain)
 
 
 def test_any_of_balances_large_candidate_filters(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -421,12 +422,15 @@ def test_zero_weight_channels_do_no_retrieval_work(
         assert vector_columns == [expected_vector_column]
 
 
+@pytest.mark.parametrize("focused", [False, True])
 def test_ready_semantic_profile_uses_qwen_and_collapses_views_per_unit(
     config: Config,
+    focused: bool,
 ) -> None:
     """Independent text views produce one RRF vote and expose match evidence."""
     from pipeline.index.text_features import TextIndexProfile
-    from pipeline.search.retrieve import search
+    from pipeline.ingest.text_embed import SEMANTIC_QUERY_INSTRUCTION_VERSION
+    from pipeline.search.retrieve import search, search_semantic_views
 
     config.retrieval.weights.img = 0.0
     config.retrieval.weights.txt = 1.0
@@ -491,7 +495,13 @@ def test_ready_semantic_profile_uses_qwen_and_collapses_views_per_unit(
         ) as semantic_embed,
         patch("pipeline.search.retrieve.embed_text") as pe_embed,
     ):
-        results = search("meet me after midnight", db, config)
+        results = (
+            search_semantic_views(
+                "meet me after midnight", ("caption", "dialogue"), db, config
+            )
+            if focused
+            else search("meet me after midnight", db, config)
+        )
 
     semantic_embed.assert_called_once_with("meet me after midnight", config)
     pe_embed.assert_not_called()
@@ -502,6 +512,9 @@ def test_ready_semantic_profile_uses_qwen_and_collapses_views_per_unit(
     assert results[0]["matched_text_view"] == "dialogue"
     assert results[0]["matched_text"] == "Meet me after midnight."
     assert results[0]["debug"]["channels"]["txt"]["source"] == "dialogue"
+    assert results[0]["debug"]["channels"]["txt"]["matched_text"][
+        "query_instruction_version"
+    ] == SEMANTIC_QUERY_INSTRUCTION_VERSION
     assert features.search.call_count == 1
     features.search.return_value.select.assert_called_once_with(
         [
@@ -836,6 +849,137 @@ def test_junk_override_rejects_incidental_and_negated_credit_queries() -> None:
     assert _is_unrequested_junk(credits, "credit card")
     assert _is_unrequested_junk(credits, "black screen without credits")
     assert not _is_unrequested_junk(credits, "end credits")
+
+
+@pytest.mark.parametrize(
+    ("caption", "dialogue"),
+    [
+        (
+            "A bespectacled mustached man in a red checkered shirt looks "
+            "downward toward someone or something below camera in a warmly "
+            "lit modern interior.",
+            "Um, just a couple from your credit card company.",
+        ),
+        (
+            "Two men converse inside a warmly lit modern gallery or shop, "
+            "with framed artwork, shelving, and a coral-red wall.",
+            "Like if it was from a chick, but written by a dude and still "
+            "from a chick, that would still be sick.",
+        ),
+        (
+            "Close-up of a young man and a partially obscured woman framed "
+            "through curved golden architectural forms in a dim interior.",
+            "That's the sound he makes at, like, the end credits.",
+        ),
+    ],
+    ids=("her-credit-card-company", "her-letter-written-by", "didi-end-credits"),
+)
+def test_visual_junk_filter_ignores_spoken_credit_references(
+    caption: str,
+    dialogue: str,
+) -> None:
+    """Real-library dialogue cannot relabel an ordinary picture as credits."""
+    from pipeline.search.retrieve import _is_unrequested_junk
+
+    row = _make_unit_row(
+        caption=caption,
+        searchable_text=f"{caption} {dialogue}",
+        dialogue=json.dumps([dialogue]),
+    )
+
+    assert not _is_unrequested_junk(row, "red")
+    assert not _is_unrequested_junk(row, "without credits")
+
+
+def test_search_keeps_red_scene_with_credit_card_dialogue(config: Config) -> None:
+    """Visual filtering preserves a valid retrieved scene and real credits stay out."""
+    from pipeline.search.retrieve import search
+
+    caption = "A bespectacled man in a red checkered shirt in a warm interior"
+    dialogue = "Um, just a couple from your credit card company."
+    scene = _make_unit_row(
+        "red_shirt",
+        "her",
+        caption=caption,
+        searchable_text=f"{caption} {dialogue}",
+        dialogue=json.dumps([dialogue]),
+        img_vec=_basis_vec(0),
+        _distance=0.01,
+    )
+    credits = _make_unit_row(
+        "actual_credits",
+        "another_film",
+        caption="Rolling end credits over a red screen",
+        searchable_text="Rolling end credits over a red screen",
+        img_vec=_basis_vec(1),
+        _distance=0.02,
+    )
+    db = _make_hybrid_mock_db(
+        image_rows=[scene, credits],
+        text_rows=[scene, credits],
+        lexical_rows=[scene, credits],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("red", db, config)
+
+    assert [result["unit_id"] for result in results] == ["red_shirt"]
+
+
+@pytest.mark.parametrize(
+    ("caption", "requested", "negated"),
+    [
+        (
+            "Low-angle extreme close-up of a young man in a white collared "
+            "shirt wearing a wired earpiece, his face backlit by a pale blue "
+            "sky with warm sun flare along his jaw; the centered Japanese "
+            "credit overlays the image, creating a dreamy, serene mood.",
+            "credit overlay",
+            "without credit overlays",
+        ),
+        (
+            "Wide exterior view of a lone person in a vivid green rice field "
+            "beneath a hazy pale sky, with dark flags and distant field "
+            "structures scattered across the sloping landscape; white "
+            "Japanese and English credits overlay the image, creating a "
+            "serene, pastoral, dreamlike mood.",
+            "credits",
+            "without credits",
+        ),
+        (
+            "A quiet, steep residential lane descends between dark trees and "
+            "apartment buildings at dusk, with utility poles and overhead "
+            "wires silhouetted against a pale pink sky; faint bright Japanese "
+            "title graphics appear across the skyline and lower road, "
+            "creating a moody cinematic transition.",
+            "title graphics",
+            "without title graphics",
+        ),
+    ],
+    ids=("lily-credit-overlays", "lily-credits-overlay", "cure-title-graphics"),
+)
+def test_captioned_credit_and_title_overlays_require_explicit_request(
+    caption: str,
+    requested: str,
+    negated: str,
+) -> None:
+    """Observed visual overlays stay filtered without relying on subtitle text."""
+    from pipeline.search.retrieve import _is_unrequested_junk
+
+    row = _make_unit_row(caption=caption, searchable_text=caption, dialogue="[]")
+
+    assert _is_unrequested_junk(row, "red")
+    assert _is_unrequested_junk(row, negated)
+    assert not _is_unrequested_junk(row, requested)
+    # Identical wording spoken over an ordinary picture is still not visual
+    # credit/title evidence, including when duplicated in searchable_text.
+    ordinary_caption = "A person stands in a sunlit field"
+    dialogue_row = _make_unit_row(
+        caption=ordinary_caption,
+        searchable_text=f"{ordinary_caption} {caption}",
+        dialogue=json.dumps([caption]),
+    )
+    assert not _is_unrequested_junk(dialogue_row, "red")
 
 
 def test_hyphenated_end_credit_captions_are_filtered() -> None:
@@ -1188,7 +1332,8 @@ def test_uploaded_frame_candidates_use_metadata_depth_and_hydrate_only_union(
     assert [row["unit_id"] for row in rows] == ["a1", "a2", "b1", "c1", "d1"]
     frames._query_chain.select.assert_called_once_with(_FRAME_CANDIDATE_COLUMNS)
     frames._query_chain.limit.assert_called_once_with(7_200)
-    units._scalar_query_chains[-1].limit.assert_called_once_with(5)
+    units._scalar_query_chains[-1].limit.assert_called_once_with(None)
+    units._scalar_query_chains[-1].to_batches.assert_called_once_with(batch_size=5)
 
 
 def test_uploaded_frame_candidate_expansion_bypasses_explicit_scope() -> None:
@@ -1754,7 +1899,8 @@ def test_search_fetches_frame_hit_units_outside_lexical_candidates(
     lexical_query.limit.assert_called_once_with(
         config.retrieval.candidate_limit * 3
     )
-    frame_unit_query.limit.assert_called_once_with(1)
+    frame_unit_query.limit.assert_called_once_with(None)
+    frame_unit_query.to_batches.assert_called_once_with(batch_size=1)
     frame_unit_query.where.assert_called_once()
     frames._query_chain.where.assert_called_once()
 
@@ -2920,7 +3066,8 @@ def test_search_by_image_excludes_source_unit(
     frames.search.return_value = _make_query_chain(frame_rows)
     _mark_frames_as_current_profile(frames, len(frame_rows))
     units = MagicMock()
-    units.search.return_value = _make_query_chain([source, other])
+    # Scalar hydration asks for the remaining candidate identity only.
+    units.search.return_value = _make_query_chain([other])
     db = MagicMock()
     db.list_tables.return_value.tables = ["frames", "units"]
     db.open_table.side_effect = lambda name: {
@@ -3624,10 +3771,14 @@ def test_api_keyframe_returns_file(tmp_path: Path, config: Config) -> None:
     shot_id = MEDIA_SHOT_ID
     keyframe_dir = config.paths.assets_dir / film_id / "keyframes"
     keyframe_dir.mkdir(parents=True, exist_ok=True)
-    (keyframe_dir / f"{shot_id}_0.webp").write_bytes(b"RIFF fake webp")
+    path = keyframe_dir / f"{shot_id}_0.webp"
+    path.write_bytes(b"RIFF fake webp")
 
     mock_db = _make_filter_mock_db([
-        _make_unit_row(shot_id=shot_id, film_id=film_id)
+        _make_unit_row(
+            shot_id=shot_id, film_id=film_id,
+            keyframe_paths=json.dumps([str(path)]),
+        )
     ])
 
     with (
@@ -3639,6 +3790,126 @@ def test_api_keyframe_returns_file(tmp_path: Path, config: Config) -> None:
             response = client.get(f"/media/keyframe/{shot_id}/0")
 
     assert response.status_code == 200
+    assert response.content == b"RIFF fake webp"
+
+
+def test_api_keyframe_serves_exact_published_profile_with_legacy_retained(
+    config: Config,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    from fastapi.testclient import TestClient
+    from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE
+
+    # Hash-named film/frame paths plus a profile need a short temporary root
+    # on Windows hosts that retain the 260-character path limit.
+    config.paths.assets_dir = tmp_path_factory.mktemp("kf")
+    root = config.paths.assets_dir / MEDIA_FILM_ID / "keyframes"
+    directory = root / SHORT_SHOT_SAMPLING_PROFILE
+    directory.mkdir(parents=True)
+    (root / f"{MEDIA_SHOT_ID}_0.webp").write_bytes(b"old midpoint")
+    paths = [directory / f"{MEDIA_SHOT_ID}_{index}.webp" for index in range(3)]
+    for index, path in enumerate(paths):
+        path.write_bytes(f"current temporal sample {index}".encode())
+    # A plausible file outside the published list must not become accessible.
+    (directory / f"{MEDIA_SHOT_ID}_3.webp").write_bytes(b"unlisted sample")
+    row = _make_unit_row(
+        shot_id=MEDIA_SHOT_ID, film_id=MEDIA_FILM_ID,
+        keyframe_paths=json.dumps([str(path) for path in paths]),
+    )
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=_make_filter_mock_db([row])),
+    ):
+        import pipeline.api.main as api_mod
+        with TestClient(api_mod.app) as client:
+            for index in range(3):
+                response = client.get(f"/media/keyframe/{MEDIA_SHOT_ID}/{index}")
+                assert response.status_code == 200
+                assert response.content == f"current temporal sample {index}".encode()
+            assert client.get(f"/media/keyframe/{MEDIA_SHOT_ID}/3").status_code == 404
+
+
+@pytest.mark.parametrize("kind", ["outside", "other_film", "other_shot", "unknown_profile"])
+def test_api_keyframe_rejects_unowned_published_paths(
+    config: Config, kind: str, tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    config.paths.assets_dir = tmp_path_factory.mktemp("kf")
+    root = config.paths.assets_dir / MEDIA_FILM_ID / "keyframes"
+    paths = {
+        "outside": config.paths.assets_dir.parent / f"{MEDIA_SHOT_ID}_0.webp",
+        "other_film": config.paths.assets_dir / OTHER_FILM_ID / "keyframes" / f"{MEDIA_SHOT_ID}_0.webp",
+        "other_shot": root / f"{MEDIA_FILM_ID}_9999_0.webp",
+        "unknown_profile": root / "unrecognized-profile" / f"{MEDIA_SHOT_ID}_0.webp",
+    }
+    path = paths[kind]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"must never be served")
+    row = _make_unit_row(
+        shot_id=MEDIA_SHOT_ID, film_id=MEDIA_FILM_ID,
+        keyframe_paths=json.dumps([str(path)]),
+    )
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=_make_filter_mock_db([row])),
+    ):
+        import pipeline.api.main as api_mod
+        with TestClient(api_mod.app) as client:
+            assert client.get(f"/media/keyframe/{MEDIA_SHOT_ID}/0").status_code == 404
+
+
+def test_api_keyframe_missing_profile_does_not_fall_back_to_old_image(
+    config: Config, tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    from fastapi.testclient import TestClient
+    from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE
+
+    config.paths.assets_dir = tmp_path_factory.mktemp("kf")
+    root = config.paths.assets_dir / MEDIA_FILM_ID / "keyframes"
+    root.mkdir(parents=True)
+    (root / f"{MEDIA_SHOT_ID}_0.webp").write_bytes(b"old midpoint")
+    row = _make_unit_row(
+        shot_id=MEDIA_SHOT_ID, film_id=MEDIA_FILM_ID,
+        keyframe_paths=json.dumps([str(root / SHORT_SHOT_SAMPLING_PROFILE / f"{MEDIA_SHOT_ID}_0.webp")]),
+    )
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=_make_filter_mock_db([row])),
+    ):
+        import pipeline.api.main as api_mod
+        with TestClient(api_mod.app) as client:
+            assert client.get(f"/media/keyframe/{MEDIA_SHOT_ID}/0").status_code == 404
+
+
+def test_api_keyframe_rejects_profile_directory_redirect_to_another_film(
+    config: Config, tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    from fastapi.testclient import TestClient
+    from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE
+
+    config.paths.assets_dir = tmp_path_factory.mktemp("kf")
+    root = config.paths.assets_dir / MEDIA_FILM_ID / "keyframes"
+    target = config.paths.assets_dir / OTHER_FILM_ID / "keyframes"
+    root.mkdir(parents=True)
+    target.mkdir(parents=True)
+    (target / f"{MEDIA_SHOT_ID}_0.webp").write_bytes(b"different film private image")
+    directory = root / SHORT_SHOT_SAMPLING_PROFILE
+    try:
+        directory.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("This host does not permit temporary directory symlinks")
+    row = _make_unit_row(
+        shot_id=MEDIA_SHOT_ID, film_id=MEDIA_FILM_ID,
+        keyframe_paths=json.dumps([str(directory / f"{MEDIA_SHOT_ID}_0.webp")]),
+    )
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=_make_filter_mock_db([row])),
+    ):
+        import pipeline.api.main as api_mod
+        with TestClient(api_mod.app) as client:
+            assert client.get(f"/media/keyframe/{MEDIA_SHOT_ID}/0").status_code == 404
 
 
 def test_api_keyframe_404_when_missing(config: Config) -> None:

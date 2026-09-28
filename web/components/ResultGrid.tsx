@@ -11,7 +11,8 @@ const EMPTY_UNIT_IDS: ReadonlySet<string> = new Set();
 
 interface ResultGridProps {
   results: SearchResult[];
-  streamKey: number;
+  order?: "ranked" | "chronological";
+  streamKey: number | string;
   revealDisabled?: boolean;
   hasMore?: boolean;
   onRequestMore?: () => void;
@@ -37,6 +38,7 @@ function resolvedColumnCount(grid: HTMLOListElement): number | null {
 
 export default function ResultGrid({
   results,
+  order = "ranked",
   streamKey,
   revealDisabled = false,
   hasMore = false,
@@ -118,7 +120,7 @@ export default function ResultGrid({
   const movieLabel = movieCount === 1 ? "movie" : "movies";
 
   return (
-    <section className="search-results" aria-label="Ranked search results">
+    <section className="search-results" aria-label={order === "chronological" ? "Scenes in source order" : "Ranked search results"}>
       <header className="result-toolbar">
         <p className="result-count" role="status" aria-live="polite">
           Showing {visibleResults.length} {sceneLabel}{" "}
@@ -128,7 +130,7 @@ export default function ResultGrid({
       <ol
         ref={gridRef}
         className="result-grid"
-        aria-label={`${visibleResults.length} of ${results.length} ranked search results shown`}
+        aria-label={`${visibleResults.length} of ${results.length} ${order === "chronological" ? "scenes in source order" : "ranked search results"} shown`}
       >
         {visibleResults.map((shot, index) => (
           <li className="result-grid-item" key={shot.unit_id}>
@@ -165,7 +167,7 @@ export default function ResultGrid({
               );
               if (remainingCount === 0 && hasMore) onRequestMore?.();
             }}
-            aria-label="Show more ranked results"
+            aria-label={order === "chronological" ? "Show more scenes" : "Show more ranked results"}
           >
             {revealDisabled && remainingCount === 0 && hasMore
               ? "Finding more…"

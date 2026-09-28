@@ -86,6 +86,7 @@ def _pipeline_mocks(
         ),
         "detect_shots": MagicMock(side_effect=tracked("shots", shots)),
         "extract_media": MagicMock(side_effect=tracked("media", None)),
+        "prepare_playback": MagicMock(side_effect=tracked("playback", None)),
         "embed_images": MagicMock(
             return_value=np.array(
                 [
@@ -111,10 +112,14 @@ def _pipeline_mocks(
     return mocks, patch.multiple("pipeline.ingest.pipeline", **mocks)
 
 
+@pytest.mark.parametrize("separate_playback", [False, True])
 def test_run_pipeline_calls_stages_in_order_and_returns_film(
     tmp_path: Path,
     config: Config,
+    separate_playback: bool,
 ) -> None:
+    if separate_playback:
+        config.paths.playback_dir = tmp_path / "playback-drive"
     film = _make_film(tmp_path)
     shots = _make_shots(film)
     film_path = tmp_path / "film.mkv"
@@ -128,7 +133,36 @@ def test_run_pipeline_calls_stages_in_order_and_returns_film(
         result = run_pipeline(film_path, config)
 
     assert result is film
-    assert call_order[:5] == ["probe", "probe", "dialogue", "shots", "media"]
+    assert call_order[:6] == ["probe", "probe", "dialogue", "shots", "media", "playback"]
+    _mocks["prepare_playback"].assert_called_once_with(film, config.paths.playback_dir)
+
+
+def test_optional_playback_failure_still_publishes(tmp_path: Path, config: Config, capsys) -> None:
+    from pipeline.ingest.playback import PlaybackPreparationError
+    from pipeline.ingest.pipeline import run_pipeline
+
+    film = _make_film(tmp_path)
+    film.path.touch()
+    mocks, context = _pipeline_mocks(film, _make_shots(film), [])
+    mocks["prepare_playback"].side_effect = PlaybackPreparationError("encoder unavailable")
+    with context:
+        assert run_pipeline(film.path, config) is film
+    mocks["publish_film_index"].assert_called_once()
+    assert "encoder unavailable; continuing ingestion" in capsys.readouterr().out
+
+
+def test_playback_source_change_stops_before_index_publication(tmp_path: Path, config: Config) -> None:
+    from pipeline.ingest.playback import PlaybackSourceChanged
+    from pipeline.ingest.pipeline import run_pipeline
+
+    film = _make_film(tmp_path)
+    film.path.touch()
+    mocks, context = _pipeline_mocks(film, _make_shots(film), [])
+    mocks["prepare_playback"].side_effect = PlaybackSourceChanged("source changed")
+    with context, pytest.raises(PlaybackSourceChanged, match="source changed"):
+        run_pipeline(film.path, config)
+    mocks["embed_images"].assert_not_called()
+    mocks["publish_film_index"].assert_not_called()
 
 
 def test_run_pipeline_rejects_source_identity_change_while_waiting(

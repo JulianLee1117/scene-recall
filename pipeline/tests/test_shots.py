@@ -181,6 +181,58 @@ def test_keyframes_non_zero_start() -> None:
     assert kf[0] == pytest.approx(5.25)
 
 
+def test_resample_short_shot_covers_edges_without_changing_boundary_identity() -> None:
+    from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE, Shot, resample_shot
+
+    original = Shot("film_0057", 100.0, 101.21, "film_0056", [100.605])
+    sampled = resample_shot(original, fps=24)
+    assert sampled.sampling_profile == SHORT_SHOT_SAMPLING_PROFILE
+    assert sampled.keyframe_times == pytest.approx([100 + 1 / 24, 100.605, 101.21 - 1 / 24])
+    assert (sampled.shot_id, sampled.parent_shot_id, sampled.t_start, sampled.t_end) == (original.shot_id, original.parent_shot_id, original.t_start, original.t_end)
+    assert original.keyframe_times == [100.605]
+    assert original.sampling_profile == ""
+
+
+def test_resample_preserves_long_shot_quartiles_and_legacy_paths() -> None:
+    from pipeline.ingest.shots import Shot, resample_shot
+
+    sampled = resample_shot(Shot("long", 10.0, 20.0, None), fps=24)
+    assert sampled.keyframe_times == [12.5, 15.0, 17.5]
+    assert sampled.sampling_profile == ""
+
+
+def test_legacy_boundary_cache_survives_sampling_threshold_change(tmp_path: Path, config: Config) -> None:
+    import json
+    from dataclasses import asdict
+    from pipeline.ingest.shots import Shot, _shot_cache_recipe, detect_shots
+
+    film = _make_film(tmp_path, duration=1.21, fps=24)
+    original = Shot("retained_0057", 0.0, 1.21, "retained-parent", [0.605])
+    legacy = {"recipe": {**_shot_cache_recipe(film, config), "keyframe_short_shot_s": 0.5}, "shots": [asdict(original)]}
+    legacy["shots"][0].pop("sampling_profile")
+    path = film.asset_dir / "shots.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    before = path.read_bytes()
+    with patch("pipeline.ingest.shots._predict_video_streaming", side_effect=AssertionError("must reuse retained boundaries")):
+        shots = detect_shots(film, config)
+    assert len(shots[0].keyframe_times) == 3
+    assert shots[0].shot_id == original.shot_id
+    assert shots[0].parent_shot_id == original.parent_shot_id
+    assert path.read_bytes() == before
+
+
+def test_boundary_cache_still_rejects_changed_detection_recipe(tmp_path: Path, config: Config) -> None:
+    import json
+    from dataclasses import asdict
+    from pipeline.ingest.shots import Shot, _load_shot_cache, _shot_cache_recipe
+
+    film = _make_film(tmp_path)
+    recipe = _shot_cache_recipe(film, config)
+    recipe["flash_min_duration"] += 0.1
+    (film.asset_dir / "shots.json").write_text(json.dumps({"recipe": recipe, "shots": [asdict(Shot("s", 0.0, 1.0, None, [0.5]))]}), encoding="utf-8")
+    assert _load_shot_cache(film, config) is None
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: _merge_flash_shots
 # ---------------------------------------------------------------------------

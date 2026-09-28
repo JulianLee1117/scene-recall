@@ -18,7 +18,7 @@ Pipeline:
      are split into equal-length sub-segments.  Sub-segments carry the
      ``parent_shot_id`` of the original (unsplit) shot.
   6. Compute ``keyframe_times``:
-       - 1 keyframe (midpoint) for shots < config.thresholds.keyframe_short_shot_s
+       - beginning / middle / end native frames for short shots
        - 3 keyframes at 25 / 50 / 75 % for longer shots
 """
 
@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import math
 import subprocess
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import BinaryIO, Optional
 from uuid import uuid4
@@ -49,6 +49,7 @@ _TRANSNET_STEP = 50
 _TRANSNET_CONTEXT = 25
 _SHOT_PROGRESS_INTERVAL = 10_000
 _SHOT_DETECTION_VERSION = 2
+SHORT_SHOT_SAMPLING_PROFILE = "short-shot-edge-middle-native-pts-v2"
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +74,8 @@ class Shot:
         this shot is a sub-segment produced by sub-segmentation.
     keyframe_times:
         Representative frame times within the shot:
-        - 1 time (midpoint) when the shot duration is < config.thresholds.keyframe_short_shot_s
+        - beginning / middle / end targets for short shots; media extraction
+          replaces these with the distinct native presentation timestamps
         - 3 times at the 25 / 50 / 75 % marks otherwise
     """
 
@@ -82,6 +84,7 @@ class Shot:
     t_end: float
     parent_shot_id: Optional[str]
     keyframe_times: list[float] = field(default_factory=list)
+    sampling_profile: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +113,7 @@ def detect_shots(film: FilmRecord, config: Config) -> list[Shot]:
     cached = _load_shot_cache(film, config)
     if cached is not None:
         print("[shots] skipped (cached)", flush=True)
-        return cached
+        return [resample_shot(shot, fps=film.fps, threshold=config.thresholds.keyframe_short_shot_s) for shot in cached]
 
     # --- 1. Run TransNetV2 ---
     from transnetv2_pytorch import TransNetV2
@@ -178,7 +181,7 @@ def detect_shots(film: FilmRecord, config: Config) -> list[Shot]:
             )
 
     _save_shot_cache(film, config, result)
-    return result
+    return [resample_shot(shot, fps=film.fps, threshold=config.thresholds.keyframe_short_shot_s) for shot in result]
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +208,6 @@ def _shot_cache_recipe(film: FilmRecord, config: Config) -> dict:
         "fps": film.fps,
         "flash_min_duration": config.thresholds.flash_min_duration,
         "subsegment_min_duration": config.thresholds.subsegment_min_duration,
-        "keyframe_short_shot_s": config.thresholds.keyframe_short_shot_s,
     }
 
 
@@ -221,9 +223,15 @@ def _load_shot_cache(
         return None
     if (
         not isinstance(payload, dict)
-        or payload.get("recipe") != _shot_cache_recipe(film, config)
+        or not isinstance(payload.get("recipe"), dict)
         or not isinstance(payload.get("shots"), list)
     ):
+        return None
+    # Legacy caches coupled sampling to detection. The threshold changes no
+    # boundaries or IDs, so retain those exact rows without rerunning TransNet.
+    recipe = dict(payload["recipe"])
+    recipe.pop("keyframe_short_shot_s", None)
+    if recipe != _shot_cache_recipe(film, config):
         return None
     try:
         shots = [Shot(**row) for row in payload["shots"]]
@@ -503,3 +511,23 @@ def _compute_keyframes(t_start: float, t_end: float, threshold: float = 2.0) -> 
         t_start + 0.50 * duration,
         t_start + 0.75 * duration,
     ]
+
+
+def resample_shot(shot: Shot, *, fps: float, threshold: float = 2.0) -> Shot:
+    """Apply current sampling to retained boundaries without changing their IDs.
+
+    Targets are proposals only. Native decoding in ``extract_media`` establishes
+    the final one-to-three distinct timestamps, including very short/VFR shots.
+    Legacy long-shot evidence retains its existing paths and quartile policy.
+    """
+    duration = shot.t_end - shot.t_start
+    if not all(math.isfinite(value) for value in (shot.t_start, shot.t_end, fps, threshold)) or shot.t_start < 0 or duration <= 0 or fps <= 0 or threshold < 0:
+        raise ValueError("Sampling requires finite positive shot timing and fps")
+    if duration >= threshold:
+        return replace(shot, keyframe_times=_compute_keyframes(shot.t_start, shot.t_end, threshold), sampling_profile="")
+    inset = min(1.0 / fps, duration / 4.0)
+    return replace(
+        shot,
+        keyframe_times=[shot.t_start + inset, shot.t_start + duration / 2.0, shot.t_end - inset],
+        sampling_profile=SHORT_SHOT_SAMPLING_PROFILE,
+    )

@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from pipeline.config import Config
+from pipeline.search.request import search_execution
 from pipeline.index.text_features import build_mood_view_text
 from pipeline.search.retrieve import (
     SemanticTextProfileUnavailable,
@@ -773,6 +774,12 @@ def _fuse_rankings(
                 base["matched_text"] = text_contributor.get("matched_text")
         debug = dict(base.get("debug") or {})
         debug["final_score"] = score
+        # Display selection must not discard another clause's semantic query
+        # policy or overwrite equally named channels from independent inputs.
+        debug["clauses"] = {
+            ranking.clause.clause_id: dict(result.get("debug") or {})
+            for _index, ranking, _rank, result in contributors
+        }
         base["debug"] = debug
         fused.append(
             (
@@ -800,6 +807,7 @@ def _annotate_single_clause_results(
     return annotated
 
 
+@search_execution
 def execute_search_recipe(
     clauses: Sequence[SearchClause],
     db: lancedb.DBConnection,
@@ -807,6 +815,7 @@ def execute_search_recipe(
     *,
     film_ids: Sequence[str] = (),
     result_limit: int | None = None,
+    _preserve_visual_alternatives: bool = False,
 ) -> SearchRecipeExecution:
     """Run a recipe and return results with its resolved source snapshot."""
     resolved_result_limit = resolve_result_limit(config, result_limit)
@@ -846,6 +855,7 @@ def execute_search_recipe(
             config,
             film_ids=normalized_film_ids,
             result_limit=resolved_result_limit,
+            **({"_preserve_visual_alternatives": True} if _preserve_visual_alternatives else {}),
         )
         return SearchRecipeExecution(
             results=_annotate_single_clause_results(only_clause, normal_results),
@@ -915,6 +925,7 @@ def execute_search_recipe(
                 for clause in clauses
             ),
             apply_film_diversity=apply_film_diversity,
+            _preserve_visual_alternatives=_preserve_visual_alternatives,
         ),
         source_evidence=source_evidence,
     )
@@ -927,6 +938,7 @@ def search_recipe(
     *,
     film_ids: Sequence[str] = (),
     result_limit: int | None = None,
+    _preserve_visual_alternatives: bool = False,
 ) -> list[dict[str, Any]]:
     """Run one to three typed clauses and return one final ranked window."""
     return execute_search_recipe(
@@ -935,6 +947,7 @@ def search_recipe(
         config,
         film_ids=film_ids,
         result_limit=result_limit,
+        _preserve_visual_alternatives=_preserve_visual_alternatives,
     ).results
 
 

@@ -1,0 +1,39 @@
+.audition { border-color: #8a7049; }
+.audition .close { display: inline-flex; align-items: center; justify-content: center; padding: 3px; width: 23px; height: 23px; min-height: 0; background: transparent; border-color: transparent; color: #b8b8b8; }
+.monitor { position: relative; display: flex; justify-content: center; background: #050505; }
+.monitor video { display: block; width: 100%; height: var(--preview-height, min(40vh, 400px)); object-fit: contain; }
+.rawMonitor { background: #050505; }
+.sourceEditor { border: 0; border-radius: 0; background: transparent; }
+.sourceLoading { pointer-events: none; }
+.cropViewport { outline-offset: -2px; touch-action: none; cursor: default; }
+.cropViewport[data-can-pan="true"] { cursor: grab; }
+.cropViewport[data-can-pan="true"]:active { cursor: grabbing; }
+.cropViewport video { pointer-events: none; }
+.cropViewport:focus-visible, .momentWindow:focus-visible { outline: 2px solid #bda270; }
+.adjustControls { display: grid; gap: 7px; padding: 10px 12px; border-top: 1px solid #303030; }
+.controlHeading { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 11px; }
+.controlHeading strong { font-weight: 550; color: #ddd; }
+.controlHeading span { color: #aaa; font-size: 10px; font-variant-numeric: tabular-nums; }
+.adjustControls button, .editorActions button, .timing button, .progress button { padding: 5px 8px; min-height: 26px; font-size: 10.5px; }
+.momentRail { position: relative; height: 32px; background: repeating-linear-gradient(90deg, #292929 0, #292929 1px, #1c1c1c 1px, #1c1c1c 5%); border: 1px solid #373737; border-radius: 4px; }
+.momentWindow { position: absolute; inset-block: -1px; min-width: 3px; display: flex; align-items: center; justify-content: center; border: 1px solid #b89b67; border-inline-width: 3px; border-radius: 4px; background: #6c593b88; color: #f2dec0; font-size: 10px; font-variant-numeric: tabular-nums; box-sizing: border-box; cursor: grab; touch-action: none; user-select: none; }
+.momentWindow:active { cursor: grabbing; }
+.momentWindow[aria-disabled="true"] { cursor: default; }
+.momentWindow span { overflow: hidden; white-space: nowrap; }
+.railLabels { display: flex; justify-content: space-between; gap: 9px; color: #929292; font-size: 9px; }
+.railLabels span:nth-child(2) { text-align: center; }
+.zoom { display: flex; align-items: center; gap: 10px; color: #aaa; font-size: 11px; }
+.zoom input { flex: 1; min-width: 40px; accent-color: #b89b67; }
+.zoom output { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+.help, .scope p, .timing p { margin: 0; color: #999; font-size: 10px; line-height: 1.5; }
+.editorActions { display: flex; justify-content: space-between; gap: 10px; padding: 9px 12px; border-top: 1px solid #303030; }
+.editorActions .use { border-color: #7f6b4c; background: #372f23; color: #ead4b1; }
+.scope { padding: 0 12px 9px; color: #bbb; font-size: 10.5px; line-height: 1.6; }
+.scope p { margin-top: 3px; }
+.timing { margin: 0 12px 10px; color: #aaa; font-size: 10.5px; }
+.timing summary { cursor: pointer; }
+.timing label { display: block; margin-top: 8px; }
+.timing output { float: right; font-variant-numeric: tabular-nums; }
+.timing input { width: 100%; margin: 5px 0; accent-color: #b89b67; }
+.timing button { margin-top: 7px; }
+.progress { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 12px; background: #24211b; color: #d3c0a0; font-size: 11px; }

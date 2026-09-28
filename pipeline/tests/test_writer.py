@@ -106,18 +106,6 @@ def test_open_db_returns_connection(config: Config) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_create_tables_creates_units_and_films(config: Config) -> None:
-    """create_tables creates 'units' and 'films' tables."""
-    from pipeline.index.writer import open_db, create_tables
-
-    db = open_db(config)
-    create_tables(db)
-
-    names = db.list_tables().tables
-    assert "units" in names
-    assert "films" in names
-
-
 def test_create_tables_is_idempotent(config: Config) -> None:
     """Table and native FTS creation can be repeated without duplication."""
     from pipeline.index.writer import (
@@ -268,8 +256,8 @@ def test_ensure_search_indexes_rebuilds_only_fts_when_rows_are_unindexed() -> No
 # ---------------------------------------------------------------------------
 
 
-def test_write_unit_round_trip_basic_fields(tmp_path: Path, config: Config) -> None:
-    """write_unit persists a unit; scalar fields can be read back accurately."""
+def test_write_unit_round_trip(tmp_path: Path, config: Config) -> None:
+    """Unit scalars, JSON fields, vectors and keyframe paths round-trip."""
     from pipeline.index.writer import open_db, create_tables, write_unit
 
     film = _make_film(tmp_path)
@@ -297,46 +285,8 @@ def test_write_unit_round_trip_basic_fields(tmp_path: Path, config: Config) -> N
     assert row["caption"] == ann["caption"]
     assert row["searchable_text"] == ann["searchable_text"]
 
-
-def test_write_unit_mood_round_trip(tmp_path: Path, config: Config) -> None:
-    """mood is stored as JSON and round-trips to a list of strings."""
-    from pipeline.index.writer import open_db, create_tables, write_unit
-
-    film = _make_film(tmp_path)
-    shot = _make_shot()
-    ann = _make_annotation()
-    img_vec = _rand_vec()
-    txt_vec = _rand_vec()
-
-    db = open_db(config)
-    create_tables(db)
-    write_unit(db, film, shot, ann, img_vec, txt_vec)
-
-    tbl = db.open_table("units")
-    rows = tbl.search().where(f"unit_id = '{shot.shot_id}'").to_list()
-    row = rows[0]
-
     mood_stored = json.loads(row["mood"])
     assert mood_stored == ann["mood"]
-
-
-def test_write_unit_vectors_round_trip(tmp_path: Path, config: Config) -> None:
-    """img_vec and txt_vec are stored and retrieved with acceptable precision."""
-    from pipeline.index.writer import open_db, create_tables, write_unit
-
-    film = _make_film(tmp_path)
-    shot = _make_shot()
-    ann = _make_annotation()
-    img_vec = _rand_vec()
-    txt_vec = _rand_vec()
-
-    db = open_db(config)
-    create_tables(db)
-    write_unit(db, film, shot, ann, img_vec, txt_vec)
-
-    tbl = db.open_table("units")
-    rows = tbl.search().where(f"unit_id = '{shot.shot_id}'").to_list()
-    row = rows[0]
 
     retrieved_img = np.array(row["img_vec"], dtype=np.float32)
     retrieved_txt = np.array(row["txt_vec"], dtype=np.float32)
@@ -345,25 +295,6 @@ def test_write_unit_vectors_round_trip(tmp_path: Path, config: Config) -> None:
     assert retrieved_txt.shape == (VEC_DIM,)
     np.testing.assert_allclose(retrieved_img, img_vec, atol=1e-5)
     np.testing.assert_allclose(retrieved_txt, txt_vec, atol=1e-5)
-
-
-def test_write_unit_keyframe_paths_stored(tmp_path: Path, config: Config) -> None:
-    """keyframe_paths is stored as JSON and contains the expected paths."""
-    from pipeline.index.writer import open_db, create_tables, write_unit
-
-    film = _make_film(tmp_path)
-    shot = _make_shot()
-    ann = _make_annotation()
-    img_vec = _rand_vec()
-    txt_vec = _rand_vec()
-
-    db = open_db(config)
-    create_tables(db)
-    write_unit(db, film, shot, ann, img_vec, txt_vec)
-
-    tbl = db.open_table("units")
-    rows = tbl.search().where(f"unit_id = '{shot.shot_id}'").to_list()
-    row = rows[0]
 
     paths = json.loads(row["keyframe_paths"])
     assert isinstance(paths, list)
@@ -948,6 +879,7 @@ def test_write_film_round_trip(tmp_path: Path, config: Config) -> None:
     assert row["title"] == film.title
     assert row["path"] == str(film.path)
     assert abs(row["duration"] - film.duration) < 1e-6
+    assert abs(row["fps"] - film.fps) < 1e-9
 
 
 def test_write_film_is_idempotent(tmp_path: Path, config: Config) -> None:
@@ -964,19 +896,6 @@ def test_write_film_is_idempotent(tmp_path: Path, config: Config) -> None:
     tbl = db.open_table("films")
     rows = tbl.search().where(f"film_id = '{film.film_id}'").to_list()
     assert len(rows) == 1, "Idempotent write must not create duplicate film rows"
-
-
-def test_write_film_stores_fps(tmp_path: Path, config: Config) -> None:
-    """fps round-trips so later clip extraction can be frame-accurate."""
-    from pipeline.index.writer import open_db, create_tables, write_film
-
-    film = _make_film(tmp_path)
-    db = open_db(config)
-    create_tables(db)
-    write_film(db, film)
-
-    row = db.open_table("films").search().to_list()[0]
-    assert abs(row["fps"] - film.fps) < 1e-9
 
 
 # ---------------------------------------------------------------------------

@@ -43,6 +43,18 @@ _MANIFEST_SCHEMA_VERSION = 2
 # identity so compatible existing view vectors can be reused during backfill.
 TEXT_VIEW_CONTRACT_VERSION = 2
 TEXT_VIEWS = ("caption", "dialogue", "ocr", "facets", "mood")
+# Query instructions never generated the stored document vectors. These exact
+# pairs identify known producer provenance, not the serving query policy. An
+# older worker can publish compatible documents while a newer API uses v2;
+# model, embedding/view contracts and complete coverage remain strict below.
+_KNOWN_QUERY_INSTRUCTION_PROVENANCE = (
+    (
+        "scene-recall-semantic-query-v1",
+        "Retrieve film-shot evidence matching the user's remembered dialogue, "
+        "visible content, cinematography, mood, or narrative moment.",
+    ),
+    (SEMANTIC_QUERY_INSTRUCTION_VERSION, SEMANTIC_QUERY_INSTRUCTION),
+)
 
 
 @dataclass(frozen=True)
@@ -430,7 +442,8 @@ def resolve_ready_text_profile(
     from pipeline.index.writer import table_names
 
     profile = configured_text_profile(config)
-    manifest = _read_manifest(manifest_path(config, profile))
+    path = manifest_path(config, profile)
+    manifest = db.read_profile_manifest(path) if getattr(db, "is_index_snapshot", False) is True else _read_manifest(path)
     if manifest is None:
         return None
     expected = {
@@ -441,12 +454,15 @@ def resolve_ready_text_profile(
         "model_revision": profile.model_revision,
         "dimension": profile.dimension,
         "embedding_contract_version": TEXT_EMBEDDING_CONTRACT_VERSION,
-        "query_instruction": SEMANTIC_QUERY_INSTRUCTION,
-        "query_instruction_version": SEMANTIC_QUERY_INSTRUCTION_VERSION,
         "view_contract_version": TEXT_VIEW_CONTRACT_VERSION,
         "views": TEXT_VIEWS,
     }
     if any(getattr(manifest, key) != value for key, value in expected.items()):
+        return None
+    if (
+        manifest.query_instruction_version,
+        manifest.query_instruction,
+    ) not in _KNOWN_QUERY_INSTRUCTION_PROVENANCE:
         return None
 
     names = table_names(db)

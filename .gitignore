@@ -1,6 +1,9 @@
 pipeline/tests/fixtures/
 __pycache__/
 .pytest_cache/
+.pytest-progress-*/
+.ruff_cache/
+.uv-cache/
 *.py[cod]
 .venv/
 .env

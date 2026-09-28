@@ -1,21 +1,19 @@
-interface NativeDragPreviewOptions {
+export interface NativeDragPreviewOptions {
   eyebrow: string;
   title: string;
   detail?: string;
   imageUrl?: string;
 }
 
-/**
- * Replace the browser's full-element drag ghost with a compact scene token.
- * The node must be rendered when setDragImage runs, but can be removed before
- * the next paint because the browser captures it synchronously.
- */
-export function setNativeDragPreview(
-  transfer: DataTransfer,
+/** Keep the cursor inside the picked-up thumbnail for either drag transport. */
+export const SCENE_DRAG_HOTSPOT = { x: 28, y: 24 } as const;
+
+/** The same recognizable scene card follows native and captured-pointer drags. */
+export function createSceneDragPreview(
   { eyebrow, title, detail, imageUrl }: NativeDragPreviewOptions,
-): void {
+): HTMLDivElement {
   const preview = document.createElement("div");
-  preview.className = `native-drag-preview${imageUrl ? " has-image" : ""}`;
+  preview.className = `scene-drag-preview${imageUrl ? " has-image" : ""}`;
   preview.setAttribute("aria-hidden", "true");
 
   if (imageUrl) {
@@ -44,10 +42,20 @@ export function setNativeDragPreview(
   }
 
   preview.append(copy);
+  return preview;
+}
+
+/** Render before setDragImage; the browser captures the card synchronously. */
+export function setNativeDragPreview(
+  transfer: DataTransfer,
+  options: NativeDragPreviewOptions,
+): void {
+  const preview = createSceneDragPreview(options);
+  preview.classList.add("native-drag-preview");
   document.body.append(preview);
 
   // Force style/layout before the browser snapshots the element.
   preview.getBoundingClientRect();
-  transfer.setDragImage(preview, imageUrl ? 28 : 18, 22);
+  transfer.setDragImage(preview, SCENE_DRAG_HOTSPOT.x, SCENE_DRAG_HOTSPOT.y);
   window.setTimeout(() => preview.remove(), 0);
 }

@@ -21,11 +21,13 @@ from pipeline.config import Config
 
 _LOGGER = logging.getLogger(__name__)
 
-SEMANTIC_QUERY_INSTRUCTION = (
-    "Retrieve film-shot evidence matching the user's remembered dialogue, "
-    "visible content, cinematography, mood, or narrative moment."
-)
-SEMANTIC_QUERY_INSTRUCTION_VERSION = "scene-recall-semantic-query-v1"
+# Task instructions affect the query vector too. Domain examples here made
+# camera/studio captions outrank red scenes for "red" (ADR-0053). Keep the
+# instruction neutral so the user's words supply the searchable concepts.
+SEMANTIC_QUERY_INSTRUCTION = "Retrieve scene descriptions matching the query."
+SEMANTIC_QUERY_INSTRUCTION_VERSION = "scene-recall-semantic-query-v2"
+# Documents have no query instruction. Recognized query-policy revisions use
+# the same complete document profile; results record the served query version.
 TEXT_EMBEDDING_CONTRACT_VERSION = 1
 _MAX_LENGTH = 8192
 _BATCH_SIZE = 16
@@ -118,11 +120,6 @@ def get_text_model_spec(config: Config) -> TextModelSpec:
             f"Unknown text_encoder {name!r}. Known models: "
             f"{sorted(_TEXT_MODELS)}"
         ) from exc
-
-
-def get_text_vector_dim(config: Config) -> int:
-    """Return the configured semantic-text dimension without loading weights."""
-    return get_text_model_spec(config).dimension
 
 
 def _load_text_model(config: Config) -> _QwenTextEncoder:

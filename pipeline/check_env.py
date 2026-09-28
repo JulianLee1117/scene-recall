@@ -4,8 +4,8 @@ Run with::
 
     python -m pipeline.check_env
 
-Asserts:
-- CUDA is visible (torch.cuda.is_available())
+Checks:
+- PyTorch is installed; reports CUDA availability or supported CPU fallback
 - ffmpeg is on PATH
 - The selected annotation provider's API key is set
 - assets_dir from config.yaml is writable
@@ -27,19 +27,15 @@ from pipeline.config import load_config
 
 
 def check_cuda() -> None:
-    """Assert that at least one CUDA device is visible."""
+    """Require PyTorch and report the local model device, including CPU fallback."""
     try:
         import torch
     except ImportError:
-        _fail("torch is not installed — run: uv add torch torchvision "
-              "--index https://download.pytorch.org/whl/cu128")
+        _fail("torch is not installed — run: uv sync --dev")
 
     if not torch.cuda.is_available():
-        _fail(
-            "CUDA not available. "
-            "Verify CUDA Toolkit 12.8 + driver are installed and that "
-            "torch was installed from the cu128 index."
-        )
+        _ok("CUDA unavailable; local models will use CPU (slower)")
+        return
     device_name = torch.cuda.get_device_name(0)
     _ok(f"CUDA: {device_name}")
 

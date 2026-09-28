@@ -26,7 +26,11 @@ from pipeline.index.writer import (
 )
 from pipeline.ingest.embed import embed_images, get_vector_dim
 from pipeline.ingest.locks import global_ingest_lock
-from pipeline.ingest.media import _KEYFRAME_START_PAD
+from pipeline.ingest.media import (
+    NATIVE_TIMESTAMP_SOURCE, _KEYFRAME_START_PAD, _media_manifest_path, _native_records_valid,
+    _read_media_manifest,
+)
+from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE, Shot
 
 
 _TIMESTAMP_SOURCE = "reconstructed_legacy_keyframe_seek_v1"
@@ -50,6 +54,7 @@ class _FrameSource:
     shot_id: str
     frame_index: int
     timestamp: float
+    timestamp_source: str
     path: Path
     is_representative: bool
     source_size: int
@@ -119,6 +124,7 @@ def _backfill_frames_locked(
             "frame_id",
             "schema_version",
             "timestamp",
+            "timestamp_source",
             "path",
             "source_size",
             "source_mtime_ns",
@@ -161,7 +167,7 @@ def _backfill_frames_locked(
             "shot_id": source.shot_id,
             "frame_index": source.frame_index,
             "timestamp": source.timestamp,
-            "timestamp_source": _TIMESTAMP_SOURCE,
+            "timestamp_source": source.timestamp_source,
             "path": str(source.path),
             "is_representative": source.is_representative,
             "quality_score": None,
@@ -241,13 +247,15 @@ def _collect_sources(
                 f"[{t_start}, {t_end}]"
             )
 
+        native_times = _native_sample_times(unit, paths)
+
         for frame_index, path_text in enumerate(paths):
             path = Path(path_text)
             if not path.is_file():
                 missing_paths.append(path)
                 continue
             stat = path.stat()
-            timestamp = _reconstruct_seek_time(
+            timestamp = native_times[frame_index] if native_times is not None else _reconstruct_seek_time(
                 t_start,
                 t_end,
                 frame_index=frame_index,
@@ -261,6 +269,7 @@ def _collect_sources(
                     shot_id=str(unit["shot_id"]),
                     frame_index=frame_index,
                     timestamp=timestamp,
+                    timestamp_source=NATIVE_TIMESTAMP_SOURCE if native_times is not None else _TIMESTAMP_SOURCE,
                     path=path,
                     is_representative=frame_index == count // 2,
                     source_size=stat.st_size,
@@ -280,6 +289,32 @@ def _collect_sources(
         sources,
         key=lambda item: (item.film_id, item.unit_id, item.frame_index),
     )
+
+
+def _native_sample_times(unit: dict, paths: list[str]) -> list[float] | None:
+    """Recover native evidence, never guess evenly spaced times for a profile."""
+    first = Path(paths[0])
+    if first.parent.name == "keyframes":
+        return None
+    if first.parent.parent.name != "keyframes":
+        raise ValueError(f"Unit {unit['unit_id']} has an unrecognized keyframe layout")
+    if first.parent.name != SHORT_SHOT_SAMPLING_PROFILE:
+        raise ValueError(f"Unit {unit['unit_id']} has an unsupported sampling profile")
+    shot = Shot(str(unit["shot_id"]), float(unit["t_start"]), float(unit["t_end"]), None, [], SHORT_SHOT_SAMPLING_PROFILE)
+    expected_paths = [first.parent / f"{shot.shot_id}_{index}.webp" for index in range(len(paths))]
+    if [Path(path) for path in paths] != expected_paths:
+        raise ValueError(f"Unit {unit['unit_id']} has inconsistent native sample paths")
+    directory = first.parent.parent.parent / "media-manifests" / SHORT_SHOT_SAMPLING_PROFILE
+    manifest = _read_media_manifest(_media_manifest_path(directory, shot.shot_id))
+    if not manifest:
+        raise ValueError(f"Unit {unit['unit_id']} is missing native sample evidence")
+    identity = manifest["identity"]
+    if identity.get("shot") != {"shot_id": shot.shot_id, "t_start": shot.t_start, "t_end": shot.t_end, "sampling_profile": shot.sampling_profile} or identity.get("source", {}).get("film_id") != unit["film_id"]:
+        raise ValueError(f"Unit {unit['unit_id']} has mismatched native sample evidence")
+    records = manifest["artifacts"].get("keyframes")
+    if not _native_records_valid(shot, first.parent, records) or len(records) != len(paths):
+        raise ValueError(f"Unit {unit['unit_id']} has invalid native sample evidence")
+    return [float(record["timestamp"]) for record in records]
 
 
 def _decode_keyframe_paths(raw: Any, unit_id: str) -> list[str]:
@@ -317,6 +352,7 @@ def _existing_frame_metadata(table: pa.Table) -> dict[str, dict[str, Any]]:
         "frame_id",
         "schema_version",
         "timestamp",
+        "timestamp_source",
         "path",
         "source_size",
         "source_mtime_ns",
@@ -344,6 +380,7 @@ def _is_current(
         and existing["path"] == str(source.path)
         and existing["source_size"] == source.source_size
         and existing["source_mtime_ns"] == source.source_mtime_ns
+        and (existing["timestamp_source"] == source.timestamp_source or source.timestamp_source == _TIMESTAMP_SOURCE and existing["timestamp_source"] == "ingest_keyframe_seek_v1")
         and math.isclose(
             float(existing["timestamp"]),
             source.timestamp,

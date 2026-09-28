@@ -12,11 +12,8 @@ Supported ``config.models.visual_encoder`` values
 ``siglip2_so400m``
     google/siglip2-so400m-patch14-384 — 1152-dim, 384 px input.
 
-Keyframe naming convention used by ``shot_embedding``
-------------------------------------------------------
-    ``{asset_dir}/keyframes/{shot.shot_id}_{i}.webp``
-
-where ``i`` runs from 0 to ``len(shot.keyframe_times) - 1``.
+``shot_embedding`` resolves retained legacy or sampling-profile keyframes
+through the same media path helper used by extraction and publication.
 """
 
 from __future__ import annotations
@@ -33,6 +30,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 from pipeline.config import Config
+from pipeline.ingest.media import keyframe_paths
 from pipeline.ingest.shots import Shot
 
 # ---------------------------------------------------------------------------
@@ -688,11 +686,8 @@ def pool_image_embeddings(embeddings: np.ndarray) -> np.ndarray:
 def shot_embedding(shot: Shot, asset_dir: Path, config: Config) -> np.ndarray:
     """Embed all keyframes for *shot* and return the mean, re-normalised.
 
-    Keyframe paths are expected at::
-
-        {asset_dir}/keyframes/{shot.shot_id}_{i}.webp
-
-    where ``i`` is 0-indexed (matching the output of ``media.py``).
+    The shot's sampling profile selects its media paths. Retained legacy
+    images are never substituted for a newer profile's indexed evidence.
 
     Parameters
     ----------
@@ -718,10 +713,7 @@ def shot_embedding(shot: Shot, asset_dir: Path, config: Config) -> np.ndarray:
             f"Shot {shot.shot_id!r} has no keyframe_times; cannot compute embedding."
         )
 
-    paths = [
-        asset_dir / "keyframes" / f"{shot.shot_id}_{i}.webp"
-        for i in range(len(shot.keyframe_times))
-    ]
+    paths = keyframe_paths(asset_dir, shot)
 
     embeddings = embed_images(paths, config)  # (K, D)
     return pool_image_embeddings(embeddings)

@@ -1,0 +1,52 @@
+.lane {
+  height: 54px;
+  position: relative;
+  background: #1b1b1b;
+  border-top: 1px solid #363636;
+  overflow: hidden;
+}
+.trackName {
+  height: 54px;
+  padding-left: 9px;
+  border-top: 1px solid #363636;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+}
+.trackName small { font-size: 8px; color: #aaaaaa; }
+.lane .cue {
+  position: absolute;
+  top: 4px;
+  height: 21px;
+  min-width: 6px;
+  max-width: 100%;
+  min-height: 0;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 44%, #242424);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 12%, #151515);
+  color: var(--fg);
+  text-align: left;
+  font: inherit;
+  font-size: 10px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.lane .lyric { top: 29px; background: color-mix(in srgb, var(--accent) 12%, #151515); border-color: color-mix(in srgb, var(--accent) 44%, #242424); color: var(--fg); }
+.cue span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.lane .cue[aria-expanded="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); z-index: 2; }
+.lane .cue:hover { filter: brightness(1.25); z-index: 3; }
+.cue:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 4; }
+.empty { display: flex; align-items: center; height: 100%; padding: 0 12px; font-size: 10px; color: #aaaaaa; }
+.detail { display: grid; gap: 12px; font-size: 11px; }
+.detailText { min-width: 0; flex: 1; }
+.detailText b { display: block; font-weight: 500; line-height: 1.45; }
+.detailText p { margin: 4px 0 0; color: #aaaaaa; line-height: 1.45; }
+.badge { display: inline-block; font-size: 9px; color: #c9c9c9; margin-bottom: 4px; }
+.detail button { justify-self: start; }
+@media (max-width: 600px) {
+  .trackName { padding-left: 5px; }
+  .empty { font-size: 9px; }
+}

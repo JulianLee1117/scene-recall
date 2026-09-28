@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-01
 - Supersedes: ADR-0014 and ADR-0022 post-ingest location clauses only
-- Superseded by: None
+- Superseded by: [ADR-0047](0047-managed-film-acquisition.md) for application-owned acquisitions only; manual releases retain this archival boundary
 
 ## Context
 

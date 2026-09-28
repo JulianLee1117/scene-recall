@@ -19,6 +19,7 @@ films whose content hash is already fully indexed.
 from __future__ import annotations
 
 import os
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -337,6 +338,114 @@ def index_text_cmd(film_id: str | None) -> None:
     )
 
 
+@cli.command("backfill-temporal")
+@click.option("--film-id", "film_ids", multiple=True, help="Scope to this published film; repeat for multiple films.")
+@click.option("--unit-id", "unit_ids", multiple=True, help="Scope to exact shots; repeat for a validation set.")
+@click.option("--project-id", help="Scope to films used by the saved project's placed clips.")
+@click.option("--apply", "apply_now", is_flag=True, help="Refresh this plan now; requires idle ingestion resources.")
+@click.option("--enqueue", is_flag=True, help="Queue bounded maintenance batches behind foreground jobs.")
+@click.option("--batch-size", type=click.IntRange(1, 128), default=32, show_default=True)
+@click.option("--output", type=click.Path(path_type=Path), help="Write the exact plan and execution/job receipt as JSON.")
+def backfill_temporal_cmd(film_ids, unit_ids, project_id, apply_now, enqueue, batch_size, output):
+    """Plan short-shot evidence upgrades; no paid work without --apply or --enqueue."""
+    from pipeline.ingest.backfill_temporal import plan_temporal_backfill, backfill_temporal
+    from pipeline.lab.store import LabStore
+
+    if apply_now and enqueue:
+        raise click.UsageError("Choose --apply or --enqueue")
+    if project_id and film_ids:
+        raise click.UsageError("Choose --project-id or --film-id")
+    try:
+        config = load_config()
+        store = LabStore(config.paths.state_dir)
+        if project_id:
+            project = store.get_project(project_id)
+            document = project["document"]
+            timeline = document.get("music_timeline")
+            placed = {slot["clip_id"] for slot in timeline["slots"] if slot.get("clip_id")} if timeline else None
+            film_ids = sorted({clip["film_id"] for clip in document["clips"]
+                               if placed is None or clip["id"] in placed})
+            if not film_ids:
+                raise ValueError("The saved project has no placed source films")
+        plan = plan_temporal_backfill(config, film_ids=list(film_ids) or None, unit_ids=list(unit_ids) or None)
+        receipt = {"plan": plan, "results": [], "jobs": []}
+        deferred_errors = []
+        click.echo(f"Temporal evidence: {plan['eligible_units']} shots to refresh across {plan['film_count']} films.")
+        for film in plan["films"]:
+            click.echo(f"  {film['title']}: {film['eligible_units']} shots")
+        # Only explicit shot IDs may retry already-published evidence. A broad
+        # film/library plan must not enqueue every current row merely to repair
+        # the independent semantic index.
+        targets = {
+            film["film_id"]: sorted(set(film["unit_ids"]) | (set(film.get("current_unit_ids", [])) if unit_ids else set()))
+            for film in plan["films"]
+        }
+        if unit_ids:
+            current_count = sum(len(film.get("current_unit_ids", [])) for film in plan["films"])
+            if current_count:
+                click.echo(f"Semantic text retry: {current_count} explicitly selected shots already have current images and descriptions.")
+        if enqueue:
+            store.initialize()
+            for film in plan["films"]:
+                jobs = store.enqueue_temporal_backfill(film["film_id"], targets[film["film_id"]],
+                                                      sampling_profile=plan["sampling_profile"], batch_size=batch_size)
+                receipt["jobs"].extend({"id": job["id"], "status": job["status"], "film_id": film["film_id"]} for job in jobs)
+            click.echo(f"Queued {len(receipt['jobs'])} maintenance batches. Inspect with `temporal-jobs`.")
+        elif apply_now:
+            _lower_own_priority()
+            for film in plan["films"]:
+                if not targets[film["film_id"]]:
+                    continue
+                result = backfill_temporal(config, film_id=film["film_id"], unit_ids=targets[film["film_id"]], batch_size=batch_size,
+                                           progress=lambda value: click.echo(json.dumps(value, ensure_ascii=True)))
+                receipt["results"].append(result)
+                if result.get("semantic_text", {}).get("status") == "deferred":
+                    deferred_errors.append(f"{film['title']}: shot evidence is preserved, but semantic text refresh was deferred. Run `uv run python -m pipeline.cli index-text --film-id {film['film_id']}` or retry the exact --unit-id selection.")
+        else:
+            click.echo("Plan only. Use --enqueue for background processing or --apply for an idle worker.")
+        if not unit_ids and not plan["eligible_units"]:
+            for film in plan["films"]:
+                if film.get("skipped_current", 0):
+                    click.echo(f"{film['title']}: temporal evidence is current. For semantic text repair, use `uv run python -m pipeline.cli index-text --film-id {film['film_id']}`.")
+        if output:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(receipt, indent=2, ensure_ascii=False), encoding="utf-8")
+            click.echo(f"Receipt: {output.resolve()}")
+        if deferred_errors:
+            raise click.ClickException("\n".join(deferred_errors))
+    except (OSError, RuntimeError, ValueError, KeyError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@cli.command("temporal-jobs")
+@click.option("--cancel", "cancel_id", help="Cancel one explicitly named temporal backfill job.")
+def temporal_jobs_cmd(cancel_id):
+    """Show targeted evidence refresh jobs and their durable progress."""
+    from pipeline.lab.store import LabStore
+    try:
+        store = LabStore(load_config().paths.state_dir)
+        if not store.path.exists():
+            if cancel_id:
+                raise ValueError("No temporal backfill jobs exist")
+            click.echo("No temporal backfill jobs.")
+            return
+        if cancel_id:
+            job = store.get_job(cancel_id)
+            if job["kind"] != "backfill-temporal":
+                raise ValueError("This command cancels temporal backfill jobs only")
+            store.cancel(cancel_id)
+        for job in store.temporal_jobs():
+            options = job["snapshot"]["temporal_backfill"]
+            status = "queued" if job["status"] == "waiting_worker" else job["status"]
+            click.echo(f"{job['id']}  {status}  {len(options['unit_ids'])} shots  {options['film_id']}")
+            if job.get("progress"):
+                click.echo(f"  {job['progress']}")
+            if job.get("error"):
+                click.echo(f"  {job['error']}")
+    except (OSError, RuntimeError, ValueError, KeyError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @cli.command("index-framing")
 @click.option(
     "--film-id",
@@ -401,6 +510,13 @@ def index_framing_cmd(film_id: str | None, batch_size: int) -> None:
         f"Profile {result.profile_id}: "
         + ("active" if result.activated else "not active (coverage incomplete)")
     )
+
+
+from pipeline.acquisition.cli import acquisition
+from pipeline.index.search_cli import search_features
+
+cli.add_command(acquisition)
+cli.add_command(search_features)
 
 
 if __name__ == "__main__":

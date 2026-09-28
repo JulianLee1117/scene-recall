@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import math
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -50,6 +51,8 @@ class PathsConfig:
     assets_dir: Path
     incoming_dir: Path
     state_dir: Path
+    # None keeps the existing per-film asset cache for older configurations.
+    playback_dir: Path | None = None
 
 
 @dataclass
@@ -91,11 +94,27 @@ class RetrievalConfig:
     candidate_limit: int
     result_window: int
     max_result_limit: int
+    optional_storage_gib: int = 64
+    composition_profile: str | None = None
 
 
 @dataclass
 class IngestConfig:
     annotation_concurrency: int = 8
+
+
+@dataclass
+class LabConfig:
+    music_provider: str = "openai"
+    music_model: str = "gpt-audio-1.5"
+    planner_model: str = "gpt-5.6-terra"
+    music_prompt_version: str = "music-feeling-v3"
+    planner_prompt_version: str = "source-timeline-v2"
+    beat_checkpoint: Path | None = None
+    beat_checkpoint_sha256: str | None = None
+    beat_device: str = "cpu"
+    footage_inspection: bool = False
+    context_profile: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +131,7 @@ class Config:
     thresholds: ThresholdsConfig
     retrieval: RetrievalConfig
     ingest: IngestConfig
+    lab: LabConfig = field(default_factory=LabConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +182,7 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         # directory.  Keep older configs working by placing it beside the
         # source library unless an explicit location is configured.
         state_dir=Path(p.get("state_dir", films_dir.parent / "state")),
+        playback_dir=Path(p["playback_dir"]) if p.get("playback_dir") else None,
     )
 
     # --- models ---
@@ -283,12 +304,21 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         raise ValueError(
             "retrieval.candidate_limit must be at least max_result_limit"
         )
+    optional_storage_gib = r.get("optional_storage_gib", 64)
+    if type(optional_storage_gib) is not int or not 1 <= optional_storage_gib <= 1024:
+        raise ValueError("retrieval.optional_storage_gib must be an integer between 1 and 1024")
+    composition_profile = r.get("composition_profile")
+    if composition_profile is not None and (not isinstance(composition_profile, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", composition_profile) is None):
+        raise ValueError("retrieval.composition_profile must be null or a simple profile identifier")
     retrieval = RetrievalConfig(
         weights=weights,
         diversity=diversity,
         candidate_limit=candidate_limit,
         result_window=result_window,
         max_result_limit=max_result_limit,
+        optional_storage_gib=optional_storage_gib,
+        composition_profile=composition_profile,
     )
 
     # --- ingest (optional section) ---
@@ -298,10 +328,56 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         raise ValueError("ingest.annotation_concurrency must be at least 1")
     ingest = IngestConfig(annotation_concurrency=annotation_concurrency)
 
+    lab_raw = raw.get("lab") or {}
+    footage_inspection = lab_raw.get("footage_inspection", False)
+    if not isinstance(footage_inspection, bool):
+        raise ValueError("lab.footage_inspection must be a boolean")
+    context_profile = lab_raw.get("context_profile")
+    if context_profile is not None and (not isinstance(context_profile, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", context_profile) is None):
+        raise ValueError("lab.context_profile must be null or a simple context profile identifier")
+    beat_path = lab_raw.get("beat_checkpoint")
+    beat_hash = lab_raw.get("beat_checkpoint_sha256")
+    if bool(beat_path) != bool(beat_hash):
+        raise ValueError("lab.beat_checkpoint and beat_checkpoint_sha256 must be configured together")
+    if beat_hash and (len(str(beat_hash)) != 64 or any(c not in "0123456789abcdef" for c in str(beat_hash))):
+        raise ValueError("lab.beat_checkpoint_sha256 must be a lowercase SHA-256 digest")
+    beat_device = str(lab_raw.get("beat_device", "cpu"))
+    if beat_device not in {"cpu", "cuda"}:
+        raise ValueError("lab.beat_device must be cpu or cuda")
+    music_model = str(lab_raw.get("music_model", "gpt-audio-1.5")).strip()
+    # Preserve older explicit Gemini configurations; never switch providers
+    # because a request failed or a different API key happens to be available.
+    music_provider = str(lab_raw.get("music_provider", "gemini" if music_model.startswith("gemini-") else "openai")).lower()
+    if music_provider not in {"openai", "gemini"}:
+        raise ValueError("lab.music_provider must be openai or gemini")
+    if not music_model or (music_provider == "gemini") != music_model.startswith("gemini-"):
+        raise ValueError("lab.music_model must match the selected music_provider")
+    if music_provider == "openai" and not music_model.startswith(("gpt-audio", "gpt-4o-audio")):
+        raise ValueError("lab.music_model must accept audio input through Chat Completions, for example gpt-audio-1.5")
+    planner_model = str(lab_raw.get("planner_model", music_model if music_provider == "gemini" else "gpt-5.6-terra")).strip()
+    if not planner_model or (music_provider == "gemini") != planner_model.startswith("gemini-"):
+        raise ValueError("lab.planner_model must match the selected music_provider")
+    if music_provider == "openai" and planner_model.startswith(("gpt-audio", "gpt-4o-audio")):
+        raise ValueError("lab.planner_model requires a text model with Structured Outputs, for example gpt-5.6-terra")
+    lab = LabConfig(
+        music_provider=music_provider,
+        music_model=music_model,
+        planner_model=planner_model,
+        music_prompt_version=str(lab_raw.get("music_prompt_version", "music-feeling-v3")),
+        planner_prompt_version=str(lab_raw.get("planner_prompt_version", "source-timeline-v2")),
+        beat_checkpoint=Path(beat_path) if beat_path else None,
+        beat_checkpoint_sha256=beat_hash,
+        beat_device=beat_device,
+        footage_inspection=footage_inspection,
+        context_profile=context_profile,
+    )
+
     return Config(
         paths=paths,
         models=models,
         thresholds=thresholds,
         retrieval=retrieval,
         ingest=ingest,
+        lab=lab,
     )

@@ -1,0 +1,46 @@
+.timeline { min-width: 0; padding: 13px 18px 11px; border: 1px solid #34352e; border-radius: 10px; background: #151612; color: #e6e8df; }
+.heading { display: flex; align-items: center; gap: 9px; min-width: 0; font-size: 11px; }
+.heading > strong { white-space: nowrap; font-size: 12px; }
+.heading > span { color: #a7aa9e; font-variant-numeric: tabular-nums; }
+.heading > div { display: flex; gap: 5px; margin-left: auto; }
+.heading button { padding: 4px 7px; border: 1px solid #3d4035; border-radius: 5px; background: transparent; color: #d1d6c6; font: inherit; white-space: nowrap; cursor: pointer; }
+.canvas { position: relative; margin: 10px 8px 0; padding-bottom: 22px; }
+.ruler { display: flex; align-items: flex-start; justify-content: space-between; position: relative; height: 25px; color: #858b7c; font-size: 9px; font-variant-numeric: tabular-nums; }
+.ruler::after { content: ""; position: absolute; bottom: 2px; left: 0; right: 0; height: 7px; background: repeating-linear-gradient(90deg, #727c614d 0 1px, transparent 1px 10%); pointer-events: none; }
+.ruler input { position: absolute; inset: 0; margin: 0; width: 100%; height: 25px; opacity: 0; cursor: ew-resize; }
+.ruler:focus-within { outline: 1px solid #d6deca; outline-offset: 3px; border-radius: 2px; }
+.track { position: relative; height: 62px; }
+.clip { position: absolute; top: 0; height: 62px; border: 1px solid #687c57; border-radius: 5px; overflow: hidden; box-sizing: border-box; background: #33442d; }
+.clipB { background: #303e47; border-color: #5c7788; }
+.clip.selected { box-shadow: inset 0 0 0 2px #e5edda; }
+.clipBody { position: absolute; top: 0; bottom: 0; display: flex; gap: 9px; align-items: center; min-width: 0; padding: 8px 13px; overflow: hidden; border: 0; background: transparent; color: #e8ede2; cursor: pointer; text-align: left; font: inherit; box-sizing: border-box; }
+.clipBody > strong { flex-shrink: 0; font-size: 12px; }
+.clipBody > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.clipBody small { display: block; margin-top: 4px; color: #c0caba; font-size: 10px; font-variant-numeric: tabular-nums; }
+.transition { position: absolute; top: 0; height: 62px; min-width: 26px; transform: translateX(-50%); border: 1px solid #b19c68; border-radius: 3px; padding: 0 2px; z-index: 2; background: repeating-linear-gradient(135deg, #625935 0 5px, #726542 5px 10px); color: #fff3cf; cursor: pointer; font-size: 10px; font-weight: 600; }
+.transition span { padding: 3px 2px; background: #2c281ccc; border-radius: 3px; }
+.hardCut { background: #4b493d; border-color: #7c7c67; min-width: 25px; width: 25px !important; }
+.trimHandle { position: absolute; z-index: 4; width: 14px; transform: translateX(-50%); border: 1px solid #d0d9c5; border-radius: 3px; padding: 0; background: #c4d1b6; color: #172015; touch-action: none; cursor: ew-resize; }
+.trimHandle::after { content: ""; display: block; width: 2px; height: 9px; border-inline: 1px solid currentColor; margin: auto; }
+.outerHandle { top: 0; bottom: 0; }
+.aOut { top: 0; height: 25px; }
+.bIn { bottom: 0; height: 25px; background: #b3c9d8; border-color: #c3d9e8; }
+.durationHandle { position: absolute; bottom: 0; height: 21px; width: 30px; padding: 0; transform: translateX(-50%); border: 1px solid #827446; border-radius: 0 0 4px 4px; background: #3a3320; color: #ddc991; font: inherit; font-size: 16px; cursor: ew-resize; touch-action: none; }
+.playhead { position: absolute; z-index: 5; top: 17px; bottom: 20px; width: 1px; background: #f4f5ed; pointer-events: none; }
+.playhead::before { content: ""; position: absolute; top: -4px; left: -4px; width: 9px; height: 6px; background: #f4f5ed; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.hint { display: flex; justify-content: space-between; gap: 8px; margin-top: 5px; color: #91988a; font-size: 10px; }
+.empty { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.empty button { display: flex; gap: 10px; align-items: center; min-height: 65px; padding: 12px; border: 1px dashed #4b5341; border-radius: 6px; background: #20251b; color: #bdc8b1; text-align: left; cursor: pointer; font: inherit; font-size: 11px; }
+.empty strong { font-size: 15px; }
+.timeline button:focus-visible { outline: 2px solid #f2f3e8; outline-offset: 2px; }
+.timeline button:disabled { opacity: .5; cursor: default; }
+@media (max-width: 500px) {
+  .timeline { padding: 11px 10px 9px; }
+  .heading { flex-wrap: wrap; gap: 5px 7px; }
+  .heading button { padding: 5px; font-size: 10px; }
+  .clipBody { gap: 5px; padding-inline: 10px; }
+  .clipBody > span { font-size: 10px; }
+  .trimHandle { width: 18px; }
+  .hint { font-size: 9px; }
+  .hint > span:last-child { white-space: nowrap; }
+}

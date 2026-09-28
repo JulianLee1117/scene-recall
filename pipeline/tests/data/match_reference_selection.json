@@ -1,0 +1,296 @@
+{
+  "description": "Small regression fixture of real retained SAM mask geometry. Expected targets visually identified from source anchor images; no imagery, optical flow or model runtime required. Development cases do not establish general semantic subject detection.",
+  "source_profile_id": "1c2ed393ae3aa96801ad4bb069ba70c1ae856ae0ee72085dd70a5a7122e6ac9f",
+  "captured_at": "2026-09-14",
+  "cases": [
+    {
+      "id": "eeaao_centered_face_and_hand",
+      "expected_track_id": "3",
+      "reason": "Centered face and hand rather than either side background.",
+      "source_unit_id": "b8988cd6e67294c141e57bdc98edf14026752742f2d7544923d430c379c2f32b_2141",
+      "anchor_time": 7298.958333333333,
+      "tracks": [
+        {
+          "id": "1",
+          "frames": [
+            {
+              "time": 7298.958333333333,
+              "end": 7299.000041666666,
+              "visible": true,
+              "quality": 0.9905425310134888,
+              "area": 0.14458092485549132,
+              "centroid": [
+                0.8715497719890054,
+                0.44542685304746477
+              ],
+              "box": {
+                "x": 0.646875,
+                "y": 0.11560693641618497,
+                "width": 0.353125,
+                "height": 0.6184971098265896
+              },
+              "picture_aspect": 1.8532818532818534
+            }
+          ]
+        },
+        {
+          "id": "2",
+          "frames": [
+            {
+              "time": 7298.958333333333,
+              "end": 7299.000041666666,
+              "visible": true,
+              "quality": 0.9948844909667969,
+              "area": 0.10932080924855492,
+              "centroid": [
+                0.11211376404494382,
+                0.4284772816706081
+              ],
+              "box": {
+                "x": 0.0,
+                "y": 0.11560693641618497,
+                "width": 0.29375,
+                "height": 0.6127167630057804
+              },
+              "picture_aspect": 1.8532818532818534
+            }
+          ]
+        },
+        {
+          "id": "3",
+          "frames": [
+            {
+              "time": 7298.958333333333,
+              "end": 7299.000041666666,
+              "visible": true,
+              "quality": 0.986161470413208,
+              "area": 0.05453395953757226,
+              "centroid": [
+                0.5316179819476649,
+                0.5299720268741133
+              ],
+              "box": {
+                "x": 0.45,
+                "y": 0.2658959537572254,
+                "width": 0.15625,
+                "height": 0.6184971098265896
+              },
+              "picture_aspect": 1.8532818532818534
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "lily_center_person",
+      "expected_track_id": "2",
+      "reason": "Central person detail rather than sky spanning the frame.",
+      "source_unit_id": "88871d747e5d97416006e4bc0fd5bfb8b15237a27c55c99a644d706163abaa43_0842",
+      "anchor_time": 4426.631,
+      "tracks": [
+        {
+          "id": "1",
+          "frames": [
+            {
+              "time": 4426.631,
+              "end": 4426.672,
+              "visible": true,
+              "quality": 0.9991475939750671,
+              "area": 0.5466332872928177,
+              "centroid": [
+                0.46975819028141874,
+                0.3114134178009057
+              ],
+              "box": {
+                "x": 0.0,
+                "y": 0.0,
+                "width": 1.0,
+                "height": 0.8397790055248618
+              },
+              "picture_aspect": 1.7694444444444444
+            }
+          ]
+        },
+        {
+          "id": "2",
+          "frames": [
+            {
+              "time": 4426.631,
+              "end": 4426.672,
+              "visible": true,
+              "quality": 0.9968553185462952,
+              "area": 0.016453729281767956,
+              "centroid": [
+                0.45231669727177337,
+                0.5399436498872419
+              ],
+              "box": {
+                "x": 0.4,
+                "y": 0.4088397790055249,
+                "width": 0.1,
+                "height": 0.2596685082872928
+              },
+              "picture_aspect": 1.7694444444444444
+            }
+          ]
+        },
+        {
+          "id": "3",
+          "frames": [
+            {
+              "time": 4426.631,
+              "end": 4426.672,
+              "visible": true,
+              "quality": 0.9814814925193787,
+              "area": 0.011049723756906077,
+              "centroid": [
+                0.2461474609375,
+                0.5687413674033149
+              ],
+              "box": {
+                "x": 0.196875,
+                "y": 0.4696132596685083,
+                "width": 0.096875,
+                "height": 0.1878453038674033
+              },
+              "picture_aspect": 1.7694444444444444
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pulp_cropped_hand",
+      "expected_track_id": "1",
+      "reason": "Preserve the cropped foreground hand.",
+      "source_unit_id": "95cf006f6e8c1e2d108e05f5897f715815ab1d74568ea3e43f4a0ca7de687af8_0250",
+      "anchor_time": 1635.4671666666666,
+      "tracks": [
+        {
+          "id": "1",
+          "frames": [
+            {
+              "time": 1635.4671666666666,
+              "end": 1635.508875,
+              "visible": true,
+              "quality": 0.9977220892906189,
+              "area": 0.08058363970588235,
+              "centroid": [
+                0.5585565476190476,
+                0.8334203441855784
+              ],
+              "box": {
+                "x": 0.41875,
+                "y": 0.5147058823529411,
+                "width": 0.296875,
+                "height": 0.4852941176470588
+              },
+              "picture_aspect": 2.3529411764705883
+            }
+          ]
+        },
+        {
+          "id": "2",
+          "frames": [
+            {
+              "time": 1635.4671666666666,
+              "end": 1635.508875,
+              "visible": true,
+              "quality": 0.9988383054733276,
+              "area": 0.6720588235294118,
+              "centroid": [
+                0.5616864828364332,
+                0.5897044745140945
+              ],
+              "box": {
+                "x": 0.0125,
+                "y": 0.0,
+                "width": 0.9875,
+                "height": 1.0
+              },
+              "picture_aspect": 2.3529411764705883
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mirror_cropped_person",
+      "expected_track_id": "1",
+      "reason": "Preserve the person despite a frame-edge crop.",
+      "source_unit_id": "45c1b6fd8a5942f1ef0534ad15287403acdcea3ef60553bac1085843177c9c78_0181",
+      "anchor_time": 2294.086,
+      "tracks": [
+        {
+          "id": "1",
+          "frames": [
+            {
+              "time": 2294.086,
+              "end": 2294.127,
+              "visible": true,
+              "quality": 0.9994741082191467,
+              "area": 0.16501736111111112,
+              "centroid": [
+                0.47603448842714363,
+                0.7115649658074698
+              ],
+              "box": {
+                "x": 0.29375,
+                "y": 0.3277777777777778,
+                "width": 0.359375,
+                "height": 0.6722222222222223
+              },
+              "picture_aspect": 1.7777777777777777
+            }
+          ]
+        },
+        {
+          "id": "2",
+          "frames": [
+            {
+              "time": 2294.086,
+              "end": 2294.127,
+              "visible": true,
+              "quality": 0.9991663098335266,
+              "area": 0.04161458333333334,
+              "centroid": [
+                0.5336677357113058,
+                0.19710633662448432
+              ],
+              "box": {
+                "x": 0.46875,
+                "y": 0.03888888888888889,
+                "width": 0.1375,
+                "height": 0.37777777777777777
+              },
+              "picture_aspect": 1.7777777777777777
+            }
+          ]
+        },
+        {
+          "id": "3",
+          "frames": [
+            {
+              "time": 2294.086,
+              "end": 2294.127,
+              "visible": true,
+              "quality": 0.9987261295318604,
+              "area": 0.013628472222222222,
+              "centroid": [
+                0.7616381369426752,
+                0.26743453644727533
+              ],
+              "box": {
+                "x": 0.74375,
+                "y": 0.0,
+                "width": 0.0375,
+                "height": 0.4888888888888889
+              },
+              "picture_aspect": 1.7777777777777777
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

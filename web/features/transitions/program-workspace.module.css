@@ -1,0 +1,32 @@
+.intro { color: #aaa79c; font-size: 12px; margin: 15px 0; }
+.program { border: 1px solid #36352f; border-radius: 8px; background: #10110f; overflow: hidden; }
+.header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #302f29; }
+.header h2 { font-size: 13px; margin: 0; font-weight: 550; color: #eeeadf; }
+.monitorTabs { display: flex; gap: 4px; }
+.monitorTabs button { font-size: 11px; border: 1px solid #3b3b33; border-radius: 4px; padding: 6px 9px; color: #bfbdaf; background: #191a16; cursor: pointer; }
+.monitorTabs button[aria-pressed="true"] { background: #373223; color: #f2d89f; border-color: #ad945f; }
+.monitorTabs button:disabled { opacity: .4; cursor: default; }
+.screen { --monitor-height: clamp(180px, 30vh, 360px); padding: 12px 14px; }
+.screen video { max-height: var(--monitor-height); object-fit: contain; }
+.screen [hidden] { display: none !important; }
+.empty { min-height: 300px; display: grid; place-content: center; text-align: center; color: #d2d1c4; padding: 20px; }
+.empty p { font-size: 12px; color: #a9a798; max-width: 380px; line-height: 1.6; }
+.emptyActions { display: flex; justify-content: center; gap: 10px; }
+.update { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 14px 10px; padding: 10px; border: 1px solid #625439; border-radius: 5px; background: #2b2519; color: #dfc68e; font-size: 11px; }
+.update button { flex-shrink: 0; border: 1px solid #bba06a; border-radius: 4px; padding: 6px 10px; background: #dac087; color: #171710; font-size: 11px; cursor: pointer; }
+.sequence { padding: 4px 14px 14px; }
+.sequenceHeader { display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin: 5px 0 8px; gap: 10px; }
+.sequenceHeader strong { color: #dedacb; }
+.sequenceHeader button { color: #bcb5a2; cursor: pointer; font-size: 10px; }
+.sequenceHeader > div { display: flex; align-items: center; gap: 14px; }
+.sequenceHeader .previewButton { border: 1px solid #ad945f; border-radius: 4px; padding: 5px 9px; color: #f1d79d; background: #373021; }
+.details { margin-top: 12px; border: 1px solid #302f28; border-radius: 6px; padding: 11px 13px; }
+.details > summary { cursor: pointer; color: #bfb9a8; font-size: 11px; }
+.details[open] > summary { margin-bottom: 12px; }
+.details h2 { font-size: 12px; margin: 0 0 10px; }
+.quickStart { border-block: 1px solid #343127; margin: 14px 0; padding: 10px 0; }
+.quickStart button { border: 1px solid #7d704e; background: #302b1f; padding: 8px 10px; border-radius: 4px; font-size: 11px; color: #e8d7ae; cursor: pointer; }
+.quickStart button:disabled { opacity: .4; cursor: default; }
+.quickStart p { font-size: 10px; line-height: 1.5; color: #a9a393; margin: 6px 0 0; }
+@media(max-width: 760px) { .header { flex-wrap: wrap; padding: 10px; } .screen { padding: 8px; } .sequence { padding-inline: 8px; } .update { margin-inline: 8px; flex-wrap: wrap; } .empty { min-height: 210px; } }
+@media(min-width: 1000px) and (max-height: 800px) { .intro { font-size: 10px; margin: 6px 0; } .header { padding-block: 8px; } .screen { --monitor-height: 23vh; padding-block: 8px; } }

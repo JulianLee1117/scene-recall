@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -9,66 +8,31 @@ import {
   useState,
 } from "react";
 import type { LibraryFilm } from "@/types/api";
+import { useSearchFilms } from "@/hooks/useSearchFilms";
+import { displayFilmTitle as displayTitle } from "@/lib/movieSuggestions";
+import DirectionIcon from "./DirectionIcon";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const SEARCH_THRESHOLD = 6;
 
 interface MovieScopeFilterProps {
   selectedFilmIds: string[];
   onChange: (filmIds: string[]) => void;
-}
-
-function displayTitle(film: LibraryFilm): string {
-  const source = film.title?.trim() || film.filename;
-  const cleaned = source
-    .replace(/\.(mkv|mp4|mov|m4v|avi|webm)$/i, "")
-    .replace(/^movie\s*[-–—]\s*/i, "")
-    .trim();
-  return cleaned || film.filename;
+  films?: LibraryFilm[];
 }
 
 export default function MovieScopeFilter({
   selectedFilmIds,
   onChange,
+  films: suppliedFilms,
 }: MovieScopeFilterProps) {
-  const [films, setFilms] = useState<LibraryFilm[]>([]);
+  const catalog = useSearchFilms(suppliedFilms === undefined);
+  const films = suppliedFilms ?? catalog;
   const [isOpen, setIsOpen] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const popoverId = useId();
-
-  const fetchFilms = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const response = await fetch(`${API_URL}/library`, { signal });
-      if (!response.ok) return;
-      const library: unknown = await response.json();
-      if (!Array.isArray(library)) return;
-      setFilms(library);
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
-        // Search remains usable if the library endpoint is temporarily offline.
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetchFilms(controller.signal);
-
-    const refresh = () => {
-      if (document.visibilityState === "visible") void fetchFilms();
-    };
-    const interval = window.setInterval(refresh, 15_000);
-    document.addEventListener("visibilitychange", refresh);
-
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", refresh);
-    };
-  }, [fetchFilms]);
 
   const indexedFilms = useMemo(
     () =>
@@ -178,18 +142,11 @@ export default function MovieScopeFilter({
           <path d="M7 5v14M17 5v14M3 9h4M17 9h4M3 15h4M17 15h4" />
         </svg>
         <span className="movie-scope-trigger-label">{scopeLabel}</span>
-        <svg
+        <DirectionIcon
+          name="chevron-down"
           className="movie-scope-chevron"
-          width="10"
-          height="10"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          aria-hidden="true"
-        >
-          <path d="m4 6 4 4 4-4" />
-        </svg>
+          size={12}
+        />
       </button>
 
       {isOpen && (

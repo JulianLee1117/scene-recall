@@ -17,6 +17,11 @@ import type {
   LibraryFilm,
   SubtitleImportDecision,
 } from "@/types/api";
+import AcquisitionPanel from "@/features/acquisition/AcquisitionPanel";
+import type { Acquisition } from "@/features/acquisition/types";
+import { belongsInLibrary } from "@/features/acquisition/model";
+import styles from "./libraryView.module.css";
+import LibraryStorage from "./LibraryStorage";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const JOB_POLL_INTERVAL_MS = 2500;
@@ -35,15 +40,6 @@ function isActiveJob(job: IngestJob): boolean {
 
 function pathKey(path: string): string {
   return path.replaceAll("\\", "/").toLowerCase();
-}
-
-function formatElapsed(startedAt: number | null, now: number): string {
-  if (startedAt === null) return "";
-  const seconds = Math.max(0, Math.floor(now / 1000 - startedAt));
-  const minutes = Math.floor(seconds / 60);
-  return minutes > 0
-    ? `${minutes}m ${seconds % 60}s elapsed`
-    : `${seconds}s elapsed`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -109,7 +105,10 @@ export default function LibraryView() {
   const [films, setFilms] = useState<LibraryFilm[]>([]);
   const [incoming, setIncoming] = useState<IncomingFilm[]>([]);
   const [jobs, setJobs] = useState<IngestJob[]>([]);
+  const [acquisitions, setAcquisitions] = useState<Acquisition[]>([]);
+  const [libraryQuery, setLibraryQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [storageRevision, setStorageRevision] = useState(0);
   const [rescanning, setRescanning] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -117,7 +116,6 @@ export default function LibraryView() {
     () => new Set(),
   );
   const [ingestErrors, setIngestErrors] = useState<Record<string, string>>({});
-  const [now, setNow] = useState(Date.now());
 
   const [selectedCandidate, setSelectedCandidate] =
     useState<IncomingFilm | null>(null);
@@ -126,16 +124,16 @@ export default function LibraryView() {
   const [edition, setEdition] = useState("");
   const [confirmedFinished, setConfirmedFinished] = useState(false);
   const [subtitleDecision, setSubtitleDecision] =
-    useState<SubtitleImportDecision | null>(null);
+    useState<SubtitleImportDecision>({ action: "auto" });
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
   const jobsRef = useRef<IngestJob[]>([]);
+  const storageCatalogRef = useRef<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const yearInputRef = useRef<HTMLInputElement>(null);
   const confirmationRef = useRef<HTMLInputElement>(null);
-  const firstSubtitleRef = useRef<HTMLInputElement>(null);
 
   const fetchLibrary = useCallback(async () => {
     const data = await getJson<LibraryFilm[]>(
@@ -174,13 +172,35 @@ export default function LibraryView() {
     setJobs(merge);
   }, []);
 
-  const refreshCatalog = useCallback(async () => {
+  const refreshCatalog = useCallback(async (forceStorage = false) => {
     const results = await Promise.allSettled([fetchIncoming(), fetchLibrary()]);
     const failure = results.find(
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failure) throw failure.reason;
+    const signature = JSON.stringify(results.map((result) =>
+      result.status === "fulfilled" ? result.value : null,
+    ));
+    // Initial acquisition reconciliation often reloads the same catalog.
+    // Preserve the storage cache until data changes or Refresh is explicit.
+    if (forceStorage || (storageCatalogRef.current !== null && storageCatalogRef.current !== signature)) {
+      setStorageRevision((revision) => revision + 1);
+    }
+    storageCatalogRef.current = signature;
   }, [fetchIncoming, fetchLibrary]);
+
+  const refreshAcquiredFilms = useCallback(async (forceStorage = false) => {
+    await Promise.all([refreshCatalog(forceStorage), fetchJobs()]);
+  }, [fetchJobs, refreshCatalog]);
+
+  const handleQueueRefresh = useCallback(async () => {
+    try {
+      await refreshAcquiredFilms(true);
+      setPageError(null);
+    } catch (error) {
+      setPageError(errorMessage(error, "Could not refresh Films. Try Refresh again."));
+    }
+  }, [refreshAcquiredFilms]);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,7 +225,6 @@ export default function LibraryView() {
   }, [fetchJobs, refreshCatalog]);
 
   const hasActiveJobs = jobs.some(isActiveJob);
-  const hasRunningJob = jobs.some((job) => job.status === "running");
 
   useEffect(() => {
     if (!hasActiveJobs) return;
@@ -255,13 +274,6 @@ export default function LibraryView() {
   }, [fetchJobs, hasActiveJobs, refreshCatalog]);
 
   useEffect(() => {
-    if (!hasRunningJob) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [hasRunningJob]);
-
-  useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
 
@@ -285,6 +297,8 @@ export default function LibraryView() {
   }).length;
 
   const activeCount = jobs.filter(isActiveJob).length;
+  const libraryFilms = films.filter((film) => belongsInLibrary(film, jobs, acquisitions));
+  const visibleFilms = libraryFilms.filter((film) => `${film.title} ${film.filename}`.toLowerCase().includes(libraryQuery.trim().toLowerCase()));
 
   const handleRescan = useCallback(async () => {
     setRescanning(true);
@@ -304,7 +318,7 @@ export default function LibraryView() {
     setYear(candidate.suggested_year?.toString() ?? "");
     setEdition(candidate.suggested_edition ?? "");
     setConfirmedFinished(false);
-    setSubtitleDecision(null);
+    setSubtitleDecision({ action: "auto" });
     setImportError(null);
   }, []);
 
@@ -354,15 +368,6 @@ export default function LibraryView() {
         return;
       }
 
-      if (
-        selectedCandidate.subtitle_review_candidates.length > 0 &&
-        subtitleDecision === null
-      ) {
-        setImportError("Choose an English subtitle, or choose none.");
-        firstSubtitleRef.current?.focus();
-        return;
-      }
-
       if (!confirmedFinished) {
         setImportError(
           "Confirm that torrenting and seeding are finished before moving this item.",
@@ -407,7 +412,7 @@ export default function LibraryView() {
         setSelectedCandidate(null);
         setNotice(
           ingest
-            ? `${importedTitle} was added and queued for ingestion.`
+            ? `${importedTitle} was added to the queue. It will become searchable automatically.`
             : `${importedTitle} was added to the library.`,
         );
 
@@ -485,7 +490,7 @@ export default function LibraryView() {
           // The accepted POST remains successful; the status refresh below can recover.
         }
         if (queuedJob) mergeJob(queuedJob);
-        setNotice(`${film.title || film.filename} was queued for ingestion.`);
+        setNotice(`${film.title || film.filename} was added to the queue.`);
 
         try {
           await fetchJobs();
@@ -516,19 +521,21 @@ export default function LibraryView() {
     : "";
   const subtitleReviewCandidates =
     selectedCandidate?.subtitle_review_candidates ?? [];
+  const incomingEmpty = !loading && incoming.length === 0;
 
   return (
-    <div className="films-page">
+    <div className={`films-page ${styles.page}`}>
       <header className="films-header">
         <div>
           <h1>Films</h1>
           <p>
-            {films.length} in library · {indexedCount} searchable
+            {films.length} films · {indexedCount} searchable
             {activeCount > 0
-              ? ` · ${activeCount} ingest${activeCount === 1 ? "" : "s"} active`
+              ? ` · ${activeCount} preparing or waiting`
               : ""}
           </p>
         </div>
+        {!loading && <LibraryStorage refreshKey={storageRevision} />}
       </header>
 
       <div className="films-messages" aria-live="polite">
@@ -540,13 +547,16 @@ export default function LibraryView() {
         {notice && <p className="films-message films-message--success">{notice}</p>}
       </div>
 
+      <AcquisitionPanel onLibraryChange={refreshAcquiredFilms} onRefresh={handleQueueRefresh} jobs={jobs} films={films} onItemsChange={setAcquisitions} />
+
       <section className="films-section" aria-labelledby="incoming-heading">
-        <div className="films-section-header">
+        <div className={`films-section-header ${incomingEmpty ? styles.incomingEmpty : ""}`}>
           <div>
-            <h2 id="incoming-heading">Ready to add</h2>
+            <h2 id="incoming-heading">From incoming{incoming.length > 0 ? ` · ${incoming.length}` : ""}</h2>
             <p>
-              Files detected in incoming. Review them after torrenting and seeding
-              finish.
+              {incomingEmpty
+                ? "No files to add. Place finished downloads in incoming, then rescan."
+                : "Downloaded a film yourself? Review it here once downloading and seeding finish."}
             </p>
           </div>
           <button
@@ -561,9 +571,7 @@ export default function LibraryView() {
 
         {loading ? (
           <p className="films-empty">Scanning incoming…</p>
-        ) : incoming.length === 0 ? (
-          <p className="films-empty">Nothing is waiting to be added.</p>
-        ) : (
+        ) : incoming.length > 0 ? (
           <div className="films-list">
             {incoming.map((candidate) => (
               <article className="film-row film-row--incoming" key={candidate.relative_path}>
@@ -593,91 +601,50 @@ export default function LibraryView() {
               </article>
             ))}
           </div>
-        )}
+        ) : null}
       </section>
 
       <section className="films-section" aria-labelledby="library-heading">
-        <div className="films-section-header">
+        <div className={`films-section-header ${styles.libraryHeader}`}>
           <div>
-            <h2 id="library-heading">Library</h2>
-            <p>Films are ingested one at a time to keep search responsive.</p>
+            <h2 id="library-heading">Library{!loading ? ` · ${libraryFilms.length}` : ""}</h2>
+            <p>Ready films are available in Search. Films being prepared appear in the queue above.</p>
           </div>
+          {!loading && libraryFilms.length > 0 && <label className={styles.filter}>
+            <span>Find in library</span>
+            <input type="search" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Film title" autoComplete="off" />
+          </label>}
         </div>
 
         {loading ? (
           <p className="films-empty">Loading library…</p>
-        ) : films.length === 0 ? (
-          <p className="films-empty">No films have been added yet.</p>
+        ) : libraryFilms.length === 0 ? (
+          <p className="films-empty">{activeCount > 0 ? "Your films will appear here when they are ready." : "No films in the library yet. Add a film above to get started."}</p>
+        ) : visibleFilms.length === 0 ? (
+          <p className="films-empty">No films match “{libraryQuery}”.</p>
         ) : (
           <div className="films-list">
-            {films.map((film) => {
+            {visibleFilms.map((film) => {
               const key = pathKey(film.path);
               const job = jobsByPath.get(key);
               const isPending = pendingIngestPaths.has(key);
-              const isQueued = job?.status === "queued" || isPending;
-              const isRunning = job?.status === "running";
               const isFailed = job?.status === "error";
               const isIndexed =
-                !isQueued &&
-                !isRunning &&
+                !isPending &&
                 !isFailed &&
                 (film.status === "indexed" || job?.status === "done");
-              const status = isQueued
-                ? "queued"
-                : isRunning
-                  ? "running"
-                  : isFailed
-                    ? "failed"
-                    : isIndexed
-                      ? "indexed"
-                      : "ready";
-              const statusLabel = isPending
-                ? "Starting…"
-                : status === "queued"
-                  ? job?.queue_position != null
-                    ? `Queued · ${job.queue_position}`
-                    : "Queued"
-                  : status === "running"
-                    ? "Ingesting…"
-                    : status === "failed"
-                      ? "Failed"
-                      : status === "indexed"
-                        ? "Indexed"
-                        : "Ready";
+              const status = isPending ? "queued" : isFailed ? "failed" : isIndexed ? "indexed" : "ready";
+              const statusLabel = isPending ? "Adding to queue…" : isFailed ? "Needs attention" : isIndexed ? "Ready to search" : "Not prepared";
               const canIngest = status === "ready" || status === "failed";
               const actionError = ingestErrors[key];
 
               return (
                 <article className={`film-row film-row--${status}`} key={film.path}>
                   <div className="film-row-copy">
-                    <h3>{film.title || film.filename}</h3>
-                    <p className="film-filename" title={film.filename}>
-                      {film.filename}
-                    </p>
+                    <h3 title={film.filename}>{film.title || film.filename}</h3>
                     <p className="film-meta">
                       {film.size_gb} GB
-                      {isQueued && !isPending && (
-                        <>
-                          <span aria-hidden="true"> · </span>
-                          {job?.queue_position === 1
-                            ? "Next in queue"
-                            : job?.queue_position != null
-                              ? `Queue position ${job.queue_position}`
-                              : "Waiting to ingest"}
-                        </>
-                      )}
-                      {isRunning && job && (
-                        <>
-                          <span aria-hidden="true"> · </span>
-                          {formatElapsed(job.started_at, now)}
-                        </>
-                      )}
                     </p>
-                    {isRunning && job?.progress && (
-                      <p className="film-progress-copy" title={job.progress}>
-                        {job.progress}
-                      </p>
-                    )}
                     {isFailed && job?.error && (
                       <p className="film-row-error" title={job.error}>
                         {job.error}
@@ -689,12 +656,6 @@ export default function LibraryView() {
                       </p>
                     )}
                   </div>
-
-                  {isRunning && (
-                    <span className="film-progress-track" aria-hidden="true">
-                      <span />
-                    </span>
-                  )}
 
                   <span
                     className={`film-status film-status--${status}`}
@@ -711,7 +672,7 @@ export default function LibraryView() {
                       onClick={() => void handleIngest(film)}
                       disabled={isPending}
                     >
-                      {isFailed ? "Retry" : "Ingest"}
+                      {isFailed ? "Try again" : "Make searchable"}
                     </button>
                   )}
                 </article>
@@ -815,20 +776,34 @@ export default function LibraryView() {
             {subtitleReviewCandidates.length > 0 && (
               <fieldset className="film-review-subtitles">
                 <legend>Subtitles</legend>
-                <p>Which track is English?</p>
+                <p>We check English, timestamps and dialogue coverage before using a track.</p>
                 <div className="film-review-subtitle-options">
+                  <label className="film-review-subtitle-option">
+                    <input
+                      type="radio"
+                      name="subtitle-decision"
+                      value="auto"
+                      checked={subtitleDecision.action === "auto"}
+                      onChange={() => setSubtitleDecision({ action: "auto" })}
+                      disabled={importing}
+                    />
+                    <span>
+                      <strong>Automatic</strong>
+                      <small>Use a validated English track when there’s one clear choice. Otherwise, use embedded subtitles or transcribe the dialogue.</small>
+                    </span>
+                  </label>
                   {subtitleReviewCandidates.map(
-                    (candidate, index) => (
+                    (candidate) => (
                       <label
                         className="film-review-subtitle-option"
                         key={candidate.relative_path}
                       >
                         <input
-                          ref={index === 0 ? firstSubtitleRef : undefined}
                           type="radio"
                           name="subtitle-decision"
+                          value={candidate.relative_path}
                           checked={
-                            subtitleDecision?.action === "use_as_english" &&
+                            subtitleDecision.action === "use_as_english" &&
                             subtitleDecision.relative_path === candidate.relative_path
                           }
                           onChange={() =>
@@ -842,6 +817,7 @@ export default function LibraryView() {
                         <span>
                           <strong>{candidate.filename}</strong>
                           <small>{candidate.excerpt}</small>
+                          {candidate.validation && <small>{candidate.validation}</small>}
                         </span>
                       </label>
                     ),
@@ -850,12 +826,14 @@ export default function LibraryView() {
                     <input
                       type="radio"
                       name="subtitle-decision"
-                      checked={subtitleDecision?.action === "skip"}
+                      value="skip"
+                      checked={subtitleDecision.action === "skip"}
                       onChange={() => setSubtitleDecision({ action: "skip" })}
                       disabled={importing}
                     />
                     <span>
                       <strong>None of these</strong>
+                      <small>Use embedded subtitles or transcribe the dialogue.</small>
                     </span>
                   </label>
                 </div>
@@ -894,7 +872,7 @@ export default function LibraryView() {
                 className="films-button films-button--primary"
                 disabled={importing}
               >
-                {importing ? "Adding…" : "Add & ingest"}
+                {importing ? "Adding…" : "Add to queue"}
               </button>
             </div>
           </form>

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from fractions import Fraction
@@ -225,16 +226,53 @@ def _has_subtitle_streams(meta: dict) -> bool:
 
 
 def _text_subtitle_stream_index(meta: dict) -> int | None:
-    """Return the first FFmpeg-convertible text subtitle stream index."""
+    """Select an unambiguous English dialogue track from container metadata.
+
+    Language tags and dispositions cannot verify the subtitle contents or sync.
+    Unknown language, partial tracks and unresolved ties use audio transcription.
+    Ordinary tracks take precedence over accessibility variants; a unique
+    default breaks a tie only within the preferred group.
+    """
+    candidates: list[tuple[int, bool, bool]] = []
     for stream in meta.get("streams", []):
-        if (
-            stream.get("codec_type") == "subtitle"
-            and stream.get("codec_name") in _TEXT_SUBTITLE_CODECS
+        if not isinstance(stream, dict) or (
+            stream.get("codec_type") != "subtitle"
+            or stream.get("codec_name") not in _TEXT_SUBTITLE_CODECS
         ):
-            index = stream.get("index")
-            if isinstance(index, int) and not isinstance(index, bool) and index >= 0:
-                return index
-    return None
+            continue
+        index = stream.get("index")
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+            continue
+        tags = stream.get("tags")
+        if not isinstance(tags, dict):
+            continue
+        language = tags.get("language")
+        if not isinstance(language, str) or language.strip().casefold() not in {"en", "eng"}:
+            continue
+        disposition = stream.get("disposition") or {}
+        if not isinstance(disposition, dict):
+            continue
+        # ffprobe normally emits integer flags; accept their string equivalents
+        # without treating a string "0" as an enabled flag.
+        def flagged(name: str) -> bool:
+            return disposition.get(name) in (1, "1", True)
+
+        title = " ".join(str(tags.get(key) or "") for key in ("title", "handler_name"))
+        if flagged("forced") or flagged("comment") or re.search(
+            r"\b(?:forced|commentary|signs|songs)\b", title, re.IGNORECASE
+        ):
+            continue
+        accessibility = flagged("hearing_impaired") or bool(re.search(
+            r"\b(?:sdh|cc|hoh|hearing[\s_-]+impaired)\b", title, re.IGNORECASE
+        ))
+        candidates.append((index, accessibility, flagged("default")))
+
+    ordinary = [candidate for candidate in candidates if not candidate[1]]
+    preferred = ordinary or candidates
+    if len(preferred) == 1:
+        return preferred[0][0]
+    defaults = [candidate for candidate in preferred if candidate[2]]
+    return defaults[0][0] if len(defaults) == 1 else None
 
 
 def _primary_audio_language_tag(meta: dict) -> str | None:

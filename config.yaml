@@ -3,6 +3,7 @@ paths:
   incoming_dir: V:/scene-recall/incoming          # completed downloads awaiting review
   state_dir: V:/scene-recall/state                # durable bookmarks and future user state
   assets_dir: C:/Users/julia/Videos/cinema-assets # derived: keyframes/, previews/, proxies/, db/
+  playback_dir: V:/scene-recall/playback         # full-length browser audio compatibility copies
 
 models:
   visual_encoder: pe_core_l14     # pe_core_l14 | siglip2_so400m
@@ -16,10 +17,20 @@ models:
 thresholds:
   subsegment_min_duration: 20     # seconds; shots longer than this get sub-segmented
   flash_min_duration: 0.5         # seconds; shots shorter than this are flash/strobe artifacts
-  keyframe_short_shot_s: 2.0      # seconds; shots shorter than this get 1 keyframe (midpoint)
+  keyframe_short_shot_s: 2.0      # seconds; short shots use beginning/middle/end native frames
 
 ingest:
   annotation_concurrency: 8      # parallel hosted annotation requests per film
+
+lab:
+  footage_inspection: false     # bounded editor pilot; enable only for evaluated runs
+  context_profile: null         # optional cached narrative context; pilot before activation
+  music_provider: openai        # openai | gemini; independent of film annotation
+  music_model: gpt-audio-1.5     # listens to actual audio, not only a transcript
+  planner_model: gpt-5.6-terra   # text-only scene choices with Structured Outputs
+  music_prompt_version: music-feeling-v3
+  planner_prompt_version: source-timeline-v2
+  beat_device: cpu              # optional Beat This! profile; see README preparation command
 
 retrieval:
   weights: {img: 0.4, txt: 0.4, lex: 0.2}

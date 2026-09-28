@@ -1,0 +1,58 @@
+.toolButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.toolButton svg {
+  flex-shrink: 0;
+}
+
+button.dropTarget[data-scene-drop-active="true"][data-accepts-scene="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+  box-shadow: inset 0 0 0 5px #1b1b1b, inset 0 0 55px color-mix(in srgb, var(--accent) 25.1%, transparent);
+  z-index: 4;
+}
+
+.previewPair {
+  position: absolute;
+  inset-block: 0;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  z-index: 4;
+  pointer-events: none;
+}
+
+.previewCut {
+  position: absolute;
+  top: 27px;
+  bottom: 7px;
+  width: 0;
+  border-left: 2px dashed #ead8b8;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.previewCut > span {
+  position: absolute;
+  top: -25px;
+  left: 4px;
+  padding: 2px 5px;
+  border: 1px solid #8a7049;
+  border-radius: 3px;
+  background: #292319;
+  color: #ead8b8;
+  font-size: 9px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.previewCut > .previewCutLabelLeft {
+  left: auto;
+  right: 6px;
+}
+.starterNotice { margin: 0; padding: 6px 12px; border-bottom: 1px solid #343434; color: #bcb5a7; font-size: 10.5px; line-height: 1.5; }

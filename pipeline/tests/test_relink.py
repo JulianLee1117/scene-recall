@@ -16,7 +16,7 @@ from pipeline.cli import cli
 from pipeline.config import Config
 from pipeline.ingest.media import _media_cache_identity, _media_manifest_path
 from pipeline.ingest.probe import FilmRecord, _content_hash
-from pipeline.ingest.shots import Shot
+from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE, Shot
 import pipeline.index.relink as relink_module
 from pipeline.index.relink import (
     FilmRelinkError,
@@ -211,6 +211,109 @@ def test_relink_dry_run_validates_without_writes(
     assert db.open_table("films").version == films_version
     assert shots_path.read_bytes() == shots_before
     assert manifest_path.read_bytes() == manifest_before
+
+
+def _add_temporal_manifest(film, shot, shots_path, legacy_path, *, retain_legacy):
+    payload = json.loads(legacy_path.read_text(encoding="utf-8"))
+    current = replace(shot, sampling_profile=SHORT_SHOT_SAMPLING_PROFILE)
+    payload["identity"] = _media_cache_identity(payload["identity"]["source"], current)
+    payload["artifacts"]["keyframes"] = [{
+        "timestamp": 1.5, "source_pts": 1.55, "timestamp_origin": 0.05,
+        "sha256": "f" * 64,
+    }]
+    path = _media_manifest_path(
+        film.asset_dir / "media-manifests" / SHORT_SHOT_SAMPLING_PROFILE,
+        shot.shot_id,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    if not retain_legacy:
+        legacy_path.unlink()
+        shots = json.loads(shots_path.read_text(encoding="utf-8"))
+        shots["shots"] = [asdict(current)]
+        shots_path.write_text(json.dumps(shots), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("retain_legacy", [False, True])
+def test_relink_updates_current_and_retained_legacy_manifest_generations(
+    config: Config, tmp_path: Path, retain_legacy: bool,
+) -> None:
+    db, film, new_path, shot, shots_path, legacy_path = _make_published_film(config, tmp_path)
+    current_path = _add_temporal_manifest(
+        film, shot, shots_path, legacy_path, retain_legacy=retain_legacy,
+    )
+    current_before = json.loads(current_path.read_text(encoding="utf-8"))
+    versions = {name: db.open_table(name).version for name in ("units", "frames")}
+    plan = plan_film_relink(db, config, new_path)
+    assert plan.media_manifest_changes == 1 + int(retain_legacy)
+    assert any(change.path == current_path for change in plan.cache_changes)
+    assert json.loads(current_path.read_text(encoding="utf-8")) == current_before
+
+    relink_film(db, config, new_path, apply=True)
+
+    current_after = json.loads(current_path.read_text(encoding="utf-8"))
+    assert current_after["identity"]["source"]["path"] == str(new_path.resolve())
+    assert current_after["identity"]["shot"]["sampling_profile"] == SHORT_SHOT_SAMPLING_PROFILE
+    assert current_after["artifacts"] == current_before["artifacts"]
+    assert current_after["unknown"] == current_before["unknown"]
+    if retain_legacy:
+        assert json.loads(legacy_path.read_text(encoding="utf-8"))["identity"]["source"]["path"] == str(new_path.resolve())
+    else:
+        assert not legacy_path.exists()
+    assert {name: db.open_table(name).version for name in versions} == versions
+    assert relink_film(db, config, new_path, apply=True).is_noop
+
+
+def test_relink_recovery_restores_both_manifest_generations(config: Config, tmp_path: Path) -> None:
+    db, film, new_path, shot, shots_path, legacy_path = _make_published_film(config, tmp_path)
+    current_path = _add_temporal_manifest(
+        film, shot, shots_path, legacy_path, retain_legacy=True,
+    )
+    plan = plan_film_relink(db, config, new_path)
+    journal = film.asset_dir / ".scene-recall-relink.json"
+    _write_relink_transaction(journal, _make_relink_transaction(plan))
+    for change in plan.cache_changes:
+        change.path.write_bytes(change.after)
+    assert recover_film_relink(db, config, film.film_id) == "old"
+    assert not journal.exists()
+    assert {change.path.read_bytes() == change.before for change in plan.cache_changes} == {True}
+    assert current_path.is_file() and legacy_path.is_file()
+
+
+@pytest.mark.parametrize("invalid_profile", [False, True])
+def test_relink_rejects_missing_or_misidentified_current_manifest(
+    config: Config, tmp_path: Path, invalid_profile: bool,
+) -> None:
+    db, film, new_path, shot, shots_path, legacy_path = _make_published_film(config, tmp_path)
+    current_path = _add_temporal_manifest(
+        film, shot, shots_path, legacy_path, retain_legacy=False,
+    )
+    if invalid_profile:
+        payload = json.loads(current_path.read_text(encoding="utf-8"))
+        payload["identity"]["shot"]["sampling_profile"] = "unrecognized-profile"
+        current_path.write_text(json.dumps(payload), encoding="utf-8")
+    else:
+        current_path.unlink()
+    before = shots_path.read_bytes()
+    with pytest.raises(FilmRelinkError, match="media manifest"):
+        relink_film(db, config, new_path, apply=True)
+    assert _film_row(db, film.film_id)["path"] == str(film.path)
+    assert shots_path.read_bytes() == before
+
+
+def test_relink_journal_rejects_unknown_nested_manifest_profile(config: Config, tmp_path: Path) -> None:
+    db, film, new_path, shot, shots_path, legacy_path = _make_published_film(config, tmp_path)
+    _add_temporal_manifest(film, shot, shots_path, legacy_path, retain_legacy=True)
+    plan = plan_film_relink(db, config, new_path)
+    transaction = _make_relink_transaction(plan)
+    entry = next(item for item in transaction["cache_changes"] if SHORT_SHOT_SAMPLING_PROFILE in item["path"])
+    entry["path"] = entry["path"].replace(SHORT_SHOT_SAMPLING_PROFILE, "unrecognized-profile")
+    journal = film.asset_dir / ".scene-recall-relink.json"
+    _write_relink_transaction(journal, transaction)
+    with pytest.raises(FilmRelinkError, match="not an allowed identity"):
+        recover_film_relink(db, config, film.film_id)
+    assert journal.is_file()
 
 
 def test_relink_rejects_destination_identity_change_after_lock_selection(

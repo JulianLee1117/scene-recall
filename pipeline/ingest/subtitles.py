@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import html
+import hashlib
+import math
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -155,3 +158,147 @@ def inspect_external_srt(path: Path) -> ExternalSrtInspection | None:
 def external_srt_is_usable(path: Path) -> bool:
     """Return whether an external SRT contains minimally useful dialogue."""
     return inspect_external_srt(path) is not None
+
+
+# Intake and versioned embedded-text checks share this stricter gate. Parsing
+# already-selected canonical external evidence retains its separate content floor.
+SUBTITLE_VALIDATION_PROFILE = "external-srt-intake-v1"
+_STRICT_TIMECODE_RE = re.compile(
+    r"(\d{2}:([0-5]\d):([0-5]\d),\d{3})\s*-->\s*"
+    r"(\d{2}:([0-5]\d):([0-5]\d),\d{3})"
+    r"(?:\s+X1:\d+\s+X2:\d+\s+Y1:\d+\s+Y2:\d+)?"
+)
+_ENGLISH_WORDS = frozenset("""
+    the and you your that this these those what where when why who which
+    would could should have has had does did don't doesn't didn't isn't aren't
+    wasn't weren't won't can't couldn't wouldn't shouldn't they're you're
+    we're we've they've i've i'll he'll she'll you'll we'll there's that's
+    it's know think want with from because about here there their them they
+    are were was been not but for just said says how very really something
+    nothing someone everything please yes let's going come back get got
+""".split())
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleValidation:
+    """Reproducible file checks, not proof of audio sync or translation accuracy."""
+
+    valid: bool
+    automatic_eligible: bool
+    reasons: tuple[str, ...]
+    sha256: str | None = None
+    cue_count: int = 0
+    word_count: int = 0
+    first_start: float | None = None
+    last_end: float | None = None
+    occupied_sections: int = 0
+    english_sections: int = 0
+    excerpt: str = ""
+    profile: str = SUBTITLE_VALIDATION_PROFILE
+
+    @property
+    def summary(self) -> str:
+        if self.automatic_eligible:
+            return "Passes English, subtitle format and film coverage checks. Audio synchronization is not verified."
+        return " ".join(self.reasons)
+
+
+def validate_external_srt(path: Path, duration: float | None = None) -> SubtitleValidation:
+    """Check the entire bounded file; uncertain evidence never auto-selects.
+
+    A missing duration is useful for cheap inventory previews, but cannot pass
+    the automatic gate. Lexical and distribution thresholds deliberately abstain
+    on sparse or mixed-language dialogue; they are not calibrated probabilities.
+    """
+    digest = None
+
+    def invalid(reason: str) -> SubtitleValidation:
+        return SubtitleValidation(False, False, (reason,), sha256=digest)
+
+    try:
+        if path.is_symlink() or not path.is_file():
+            return invalid("Subtitle is not an ordinary file.")
+        with path.open("rb") as handle:
+            data = handle.read(_MAX_EXTERNAL_SRT_BYTES + 1)
+        if not data or len(data) > _MAX_EXTERNAL_SRT_BYTES:
+            return invalid("Subtitle is empty or too large.")
+        digest = hashlib.sha256(data).hexdigest()
+        try:
+            content = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            content = data.decode("cp1252")
+    except (OSError, UnicodeError):
+        return invalid("Subtitle could not be read or decoded.")
+    if any((ord(c) < 32 and c not in "\t\r\n") or c == "\ufffd"
+           or 0x7f <= ord(c) <= 0x9f for c in content):
+        return invalid("Subtitle contains corrupt text or control characters.")
+    cues = []
+    for block in re.split(r"\n\s*\n", content.replace("\r\n", "\n").replace("\r", "\n").strip()):
+        lines = block.strip().splitlines()
+        if lines and lines[0].strip().isdigit():
+            lines = lines[1:]
+        match = _STRICT_TIMECODE_RE.fullmatch(lines[0].strip()) if lines else None
+        if match is None or len(lines) < 2 or any("-->" in line for line in lines[1:]):
+            return invalid("Subtitle contains a malformed cue or timestamp.")
+        start, end = parse_srt_timestamp(match[1]), parse_srt_timestamp(match[4])
+        if end <= start:
+            return invalid("Subtitle contains an empty or reversed time interval.")
+        # Parse only after strict validation, sharing the existing text cleaning.
+        parsed = parse_srt(block)
+        if len(parsed) != 1:
+            return invalid("Subtitle contains an empty or malformed text cue.")
+        cues.append(parsed[0])
+    if duration is not None and math.isfinite(duration) and duration > 0:
+        if any(cue.end > duration + 2.0 for cue in cues):
+            return invalid("Subtitle timestamps extend beyond the film.")
+    else:
+        duration = None
+    dialogue = [cue for cue in cues if not _PROMOTIONAL_SUBTITLE_RE.search(cue.text)]
+    words = [_SUBTITLE_WORD_RE.findall(cue.text.lower().replace("’", "'")) for cue in dialogue]
+    word_count = sum(map(len, words))
+    if len(dialogue) < _MIN_EXTERNAL_DIALOGUE_CUES or word_count < _MIN_EXTERNAL_DIALOGUE_WORDS:
+        return invalid("Subtitle contains too little dialogue after removing release advertisements.")
+    reasons = []
+    first = min(cue.start for cue in dialogue)
+    last = max(cue.end for cue in dialogue)
+    # Ordinary overlaps can be intentional. Disorder or frequent overlaps need
+    # review; a few simultaneous speakers should not disqualify a full track.
+    if any(b.start < a.start for a, b in zip(cues, cues[1:])):
+        reasons.append("Subtitle cues are out of order.")
+    if sum(b.start < a.end for a, b in zip(cues, cues[1:])) > max(3, len(cues) * .05):
+        reasons.append("Many subtitle cues overlap.")
+    if any(cue.end - cue.start > 30 for cue in dialogue):
+        reasons.append("Some dialogue cues stay on screen unusually long.")
+    normalized = {re.sub(r"\W+", " ", cue.text.casefold()).strip() for cue in dialogue}
+    if len(normalized) < len(dialogue) * .5:
+        reasons.append("Too much subtitle text repeats to select it automatically.")
+    english_sections = 0
+    # Test separate portions, not just the opening excerpt or an English label.
+    for section in range(3):
+        lo, hi = len(dialogue) * section // 3, len(dialogue) * (section + 1) // 3
+        tokens = [word for cue_words in words[lo:hi] for word in cue_words]
+        letters = [c for cue in dialogue[lo:hi] for c in cue.text if c.isalpha()]
+        latin = sum("LATIN" in unicodedata.name(c, "") for c in letters)
+        hits = [token for token in tokens if token in _ENGLISH_WORDS]
+        if (len(tokens) >= 40 and letters and latin / len(letters) >= .95
+                and len(hits) / len(tokens) >= .18 and len(set(hits)) >= 8):
+            english_sections += 1
+    if english_sections != 3:
+        reasons.append("English dialogue could not be established throughout the file.")
+    occupied = 0
+    if duration is None:
+        reasons.append("Film duration will be checked when adding the film.")
+    else:
+        occupied = len({min(9, int(cue.start / duration * 10)) for cue in dialogue})
+        if (first > duration * .15 or last < duration * .8
+                or last - first < duration * .7 or occupied < 8):
+            reasons.append("Dialogue does not cover enough of the film for automatic selection.")
+        if len(dialogue) < max(30, duration / 60) or word_count < max(120, duration / 60 * 8):
+            reasons.append("Dialogue is too sparse to rule out a partial or forced-only track.")
+    excerpt = " · ".join(cue.text for cue in dialogue[:_MAX_EXTERNAL_SRT_EXCERPT_CUES])
+    if len(excerpt) > _MAX_EXTERNAL_SRT_EXCERPT_CHARS:
+        excerpt = excerpt[:_MAX_EXTERNAL_SRT_EXCERPT_CHARS - 1].rstrip() + "…"
+    return SubtitleValidation(
+        True, not reasons, tuple(reasons), digest, len(dialogue), word_count,
+        first, last, occupied, english_sections, excerpt,
+    )

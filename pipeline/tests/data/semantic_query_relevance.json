@@ -1,0 +1,82 @@
+{
+  "description": "Development regression cases copied from indexed source evidence on 2026-09-14. Relevance labels compare the meaning of retained annotations and dialogue, not independently verified visual content. The reported camera scenes must remain findable for camera queries while losing their unrelated red-query advantage.",
+  "documents": {
+    "oppenheimer_camera": {
+      "source_unit_id": "06611258bc53e7b8591d280c158bbecf4c1f766db4c3575c33f1b862feb4698e_2224",
+      "view": "caption",
+      "text": "Medium shot inside a dim, warmly lit film studio, with a suited man beside a vintage movie camera in the foreground and two blurred figures behind him; amber practical light and deep shadows create a tense, period-cinematic atmosphere."
+    },
+    "mirror_camera": {
+      "source_unit_id": "45c1b6fd8a5942f1ef0534ad15287403acdcea3ef60553bac1085843177c9c78_0121",
+      "view": "caption",
+      "text": "A group of adults gathers in a cramped, dim interior hallway beside a large film camera, while a serious woman stands centered before a bright multi-pane window and others shift around her. Backlighting, deep shadows, and the tight composition create an intimate, tense behind-the-scenes mood."
+    },
+    "city_of_god_camera": {
+      "source_unit_id": "349ee78a5c4e83c63079faca55f9452eaaa4c9bf0ebbcfc474561ed47e4f0874_1323",
+      "view": "caption",
+      "text": "A cramped, worn interior is filmed from behind a young camera operator in a green jacket as a cameraman and crew face a woman standing near a chair; cool daylight enters through the windows, creating a shadowy documentary-like atmosphere."
+    },
+    "twin_peaks_red_suit": {
+      "source_unit_id": "a68ab0f0320801198c864bf407cea7c2be02f844fd67d559b8d9eec13442eb0d_0638",
+      "view": "caption",
+      "text": "Close-up of a man in a red suit speaking directly toward camera against a deep red curtain, lit with moody red theatrical light and framed symmetrically for an intense, uncanny effect."
+    },
+    "red_surface": {
+      "source_unit_id": "6583394b2dbf99370db6e386111f110bdd543dea11352b7bdc622443de398cd3_1237",
+      "view": "caption",
+      "text": "Abstract red-lit interior surface with a repeating checkerboard or diamond pattern, fading into deep shadow as the view shifts toward a dark wall and narrow glowing red opening; no people are visible."
+    },
+    "red_palette": {
+      "source_unit_id": "6583394b2dbf99370db6e386111f110bdd543dea11352b7bdc622443de398cd3_0513",
+      "view": "facets",
+      "text": "framing: extreme_wide; energy: static; mood: ominous, intense, minimalist; palette: saturated red"
+    },
+    "find_me_dialogue": {
+      "source_unit_id": "ec0b814dab36ef5ae7d86ef7afee54b40a91193df297de31cbef430e2564e960_0776",
+      "view": "dialogue",
+      "text": "You know how to find me"
+    },
+    "snowy_forest": {
+      "source_unit_id": "46bffe243e76ec1d779a21c2f28d51478703ac0e0692bce94d2b1ef611897b08_0930",
+      "view": "caption",
+      "text": "A snow-covered conifer forest stretches into the distance, with tall dark tree trunks framing a faint red-clad figure moving through the pale, softly falling snow; the muted overcast light creates a quiet, isolated winter atmosphere."
+    },
+    "kissing_couple": {
+      "source_unit_id": "9e6507d015eceb67e96bb80793d77bb5e3daf274298dad70b08bf936157d163a_1341",
+      "view": "caption",
+      "text": "A couple kisses closely while seated on a rumpled bed in a warmly lit bedroom, framed against white pillows and a dark headboard with a bedside lamp and table visible, creating an intimate, sensual mood."
+    }
+  },
+  "cases": [
+    {
+      "id": "red_does_not_match_camera_instruction",
+      "query": "red",
+      "positive_ids": ["twin_peaks_red_suit", "red_surface", "red_palette"],
+      "negative_ids": ["oppenheimer_camera", "mirror_camera", "city_of_god_camera"]
+    },
+    {
+      "id": "camera_evidence_remains_findable",
+      "query": "people filming with a movie camera",
+      "positive_ids": ["oppenheimer_camera", "mirror_camera", "city_of_god_camera"],
+      "negative_ids": ["red_surface", "red_palette"]
+    },
+    {
+      "id": "dialogue_paraphrase_beats_camera_description",
+      "query": "I will find you",
+      "positive_ids": ["find_me_dialogue"],
+      "negative_ids": ["oppenheimer_camera", "mirror_camera", "city_of_god_camera"]
+    },
+    {
+      "id": "snow_evidence_beats_indoor_descriptions",
+      "query": "snow",
+      "positive_ids": ["snowy_forest"],
+      "negative_ids": ["oppenheimer_camera", "mirror_camera", "city_of_god_camera", "kissing_couple"]
+    },
+    {
+      "id": "kissing_evidence_beats_unrelated_people",
+      "query": "kissing",
+      "positive_ids": ["kissing_couple"],
+      "negative_ids": ["oppenheimer_camera", "mirror_camera", "city_of_god_camera", "snowy_forest"]
+    }
+  ]
+}

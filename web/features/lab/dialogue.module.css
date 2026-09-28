@@ -1,0 +1,46 @@
+.editor { border: 1px solid var(--editor-line); border-radius: 8px; background: var(--editor-surface); padding: 14px 16px; }
+.heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.heading > div { flex: 1; display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+.heading strong, .identity strong { font-size: 12px; font-weight: 600; }
+.heading span, .hint { color: var(--editor-muted); font-size: 11px; }
+.editor button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--editor-line); border-radius: 5px; padding: 6px 9px; background: transparent; color: var(--editor-text); font-size: 11px; cursor: pointer; }
+.editor button:hover:not(:disabled) { background: var(--editor-raised); }
+.editor button:disabled { opacity: .45; cursor: default; }
+.hint { margin: 10px 0 0; }
+.controls { margin-top: 14px; border-top: 1px solid var(--editor-line); padding-top: 12px; }
+.identity { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.identity > strong { margin-right: auto; }
+.editor .identity label.voiceFocus { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; font-size: 11px; white-space: nowrap; }
+.editor .identity .voiceFocus input { width: 13px; height: 13px; margin: 0; accent-color: #82aaa1; }
+.editor .heading select.voiceSelect { max-width: 200px; margin: 0; padding: 5px 8px; font-size: 11px; background: var(--editor-bg); color: var(--editor-text); border: 1px solid var(--editor-line); border-radius: 4px; }
+.preview { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.error { color: #d9887c; font-size: 11px; max-width: 350px; }
+.fields { display: grid; align-items: start; grid-template-columns: repeat(3, minmax(80px, 1fr)) repeat(2, minmax(140px, 1.4fr)); gap: 12px; }
+.editor label { display: flex; flex-direction: column; gap: 6px; font-size: 10px; color: var(--editor-muted); min-width: 0; }
+.editor label span { color: var(--editor-text); font-variant-numeric: tabular-nums; }
+.editor input:not([type="range"]) { width: 100%; box-sizing: border-box; min-width: 0; border: 1px solid var(--editor-line); border-radius: 4px; background: var(--editor-bg); color: var(--editor-text); padding: 7px 8px; font-size: 12px; }
+.editor input[type="range"] { width: 100%; accent-color: #82aaa1; margin: 0; }
+.words { margin-top: 12px; }
+.fades { margin-top: 10px; }
+.editor summary { color: var(--editor-muted); font-size: 11px; cursor: pointer; }
+.fadeFields { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 160px)); gap: 12px; padding-top: 12px; }
+.mix { position: relative; }
+.mixFields { position: absolute; z-index: 12; right: 0; top: 25px; width: 245px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px; border: 1px solid var(--editor-line); border-radius: 7px; background: var(--editor-surface); box-shadow: 0 10px 32px #0003; }
+.mixFields > label:first-child { grid-column: 1 / -1; }
+.editor :is(.fields, .fadeFields, .mixFields) > label { position: relative; display: flex; flex-direction: column; gap: 6px; margin: 0; line-height: 14px; }
+.editor :is(.fields, .fadeFields, .mixFields) label input:not([type="range"]):not([type="checkbox"]) { height: 32px; margin-top: 0; }
+.editor :is(.fields, .mixFields) label span { position: absolute; top: 0; right: 0; }
+.editor :is(.fields, .mixFields) label input[type="range"] { height: 32px; margin-top: 0; }
+.lane, .trackName { height: 48px; box-sizing: border-box; border-top: 1px solid var(--editor-line); }
+.trackName { display: flex; align-items: center; gap: 7px; color: var(--editor-muted); font-size: 10px; padding: 0 10px; }
+.trackName b { color: #82aaa1; font-size: 9px; font-weight: 500; }
+.lane { position: relative; background: #82aaa106; }
+.lane > span { position: absolute; left: 12px; top: 17px; font-size: 10px; color: var(--editor-muted); pointer-events: none; white-space: nowrap; }
+.voiceClip { position: absolute; top: 6px; height: 35px; min-width: 5px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; overflow: hidden; gap: 2px; padding: 4px 7px; border: 1px solid #82aaa155; border-radius: 4px; background: color-mix(in srgb, var(--editor-surface) 84%, #82aaa1); color: var(--editor-text); text-align: left; cursor: pointer; }
+.voiceClip[aria-pressed="true"] { border-color: #82aaa1; box-shadow: inset 0 0 0 1px #82aaa1; }
+.voiceClip { cursor: grab; touch-action: none; user-select: none; }
+.voiceClip[data-moving="true"] { z-index: 4; cursor: grabbing; border-color: #a6c9c1; box-shadow: 0 3px 10px #0007, inset 0 0 0 1px #a6c9c1; background: #334b47; }
+.voiceClip strong, .voiceClip small { width: 100%; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 10px; line-height: 1.15; font-weight: 500; }
+.voiceClip small { opacity: .7; font-size: 9px; }
+@media (max-width: 800px) { .fields { grid-template-columns: repeat(3, minmax(0, 1fr)); } .heading > div { flex-basis: 100%; } }
+@media (max-width: 500px) { .fields { grid-template-columns: 1fr 1fr; } .editor { padding: 12px; } .heading > button { flex: 1; } .trackName { gap: 4px; padding: 0 4px; } }

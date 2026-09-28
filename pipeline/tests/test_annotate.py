@@ -14,7 +14,9 @@ Test coverage:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -26,7 +28,7 @@ from PIL import Image
 
 from pipeline.config import Config
 from pipeline.ingest.dialogue import DialogueLine
-from pipeline.ingest.shots import Shot
+from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE, Shot
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +562,169 @@ def test_openai_annotation_uses_responses_structured_output(
     assert result["mood"] == ["noir", "lonely", "rainy"]
 
 
+@pytest.mark.parametrize("provider", ["openai", "gemini"])
+@pytest.mark.parametrize("frame_count", [1, 2, 3])
+def test_temporal_sampling_selects_ordered_evidence_prompt_for_both_providers(
+    tmp_path: Path, config: Config, provider: str, frame_count: int
+) -> None:
+    """Temporal evidence keeps the one-call image cap for either provider."""
+    from pipeline.ingest.annotate import _TEMPORAL_PROMPT, annotate_shot
+
+    if provider == "openai":
+        _select_openai(config)
+    shot = replace(_make_shot(), sampling_profile=SHORT_SHOT_SAMPLING_PROFILE)
+    keyframes = [_make_jpeg(tmp_path, f"kf{i}.jpg") for i in range(frame_count)]
+    for index, path in enumerate(keyframes):
+        Image.new("RGB", (64, 64), (40 * index, 80, 160)).save(path, format="JPEG")
+    mock_client = _make_mock_client()
+    mock_client.responses.create.return_value = _openai_response()
+
+    with (
+        patch("pipeline.ingest.annotate._get_openai_client", return_value=mock_client),
+        patch("pipeline.ingest.annotate.genai.Client", return_value=mock_client),
+    ):
+        annotate_shot(shot, keyframes, [], config)
+
+    if provider == "openai":
+        mock_client.responses.create.assert_called_once()
+        request = mock_client.responses.create.call_args.kwargs
+        content = request["input"][0]["content"]
+        assert content[0]["text"] == _TEMPORAL_PROMPT
+        assert request["max_output_tokens"] == 800
+        assert [
+            base64.b64decode(part["image_url"].split(",", 1)[1])
+            for part in content[1:]
+        ] == [path.read_bytes() for path in keyframes]
+    else:
+        mock_client.models.generate_content.assert_called_once()
+        parts = mock_client.models.generate_content.call_args.kwargs["contents"]
+        assert parts[-1].text == _TEMPORAL_PROMPT
+        assert [part.inline_data.data for part in parts[:-1]] == [
+            path.read_bytes() for path in keyframes
+        ]
+
+
+def test_temporal_annotation_cache_coexists_with_unchanged_legacy_cache(
+    tmp_path: Path, config: Config
+) -> None:
+    """Same image inputs cannot reuse a legacy caption under temporal semantics."""
+    from pipeline.ingest.annotate import (
+        _PROMPT,
+        _TEMPORAL_PROMPT,
+        _TEMPORAL_PROMPT_SHA256,
+        annotate_shot,
+    )
+
+    _select_openai(config)
+    legacy_shot = _make_shot()
+    temporal_shot = replace(legacy_shot, sampling_profile=SHORT_SHOT_SAMPLING_PROFILE)
+    keyframes = [_make_jpeg(tmp_path)]
+    cache_dir = tmp_path / "annotations"
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [
+        _openai_response(caption="An empty tree."),
+        _openai_response(caption="A man is visible beside a tree, then absent."),
+    ]
+
+    with patch("pipeline.ingest.annotate._get_openai_client", return_value=mock_client):
+        legacy = annotate_shot(legacy_shot, keyframes, [], config, cache_dir=cache_dir)
+        legacy_path = next(cache_dir.glob(f"*/{legacy_shot.shot_id}.json"))
+        legacy_bytes = legacy_path.read_bytes()
+        temporal = annotate_shot(temporal_shot, keyframes, [], config, cache_dir=cache_dir)
+        assert annotate_shot(
+            temporal_shot, keyframes, [], config, cache_dir=cache_dir
+        ) == temporal
+        assert annotate_shot(
+            legacy_shot, keyframes, [], config, cache_dir=cache_dir
+        ) == legacy
+
+    assert legacy != temporal
+    assert mock_client.responses.create.call_count == 2
+    assert [
+        call.kwargs["input"][0]["content"][0]["text"]
+        for call in mock_client.responses.create.call_args_list
+    ] == [_PROMPT, _TEMPORAL_PROMPT]
+    assert legacy_path.read_bytes() == legacy_bytes
+    cache_paths = list(cache_dir.glob(f"*/{legacy_shot.shot_id}.json"))
+    assert len(cache_paths) == 2
+    payloads = [json.loads(path.read_text(encoding="utf-8")) for path in cache_paths]
+    new_identity = next(
+        payload["identity"] for payload in payloads
+        if payload["identity"].get("sampling_profile")
+    )
+    assert new_identity["sampling_profile"] == SHORT_SHOT_SAMPLING_PROFILE
+    assert new_identity["prompt_sha256"] == _TEMPORAL_PROMPT_SHA256
+    assert "sampling_profile" not in json.loads(legacy_bytes)["identity"]
+
+
+def test_sampling_revision_separates_annotation_profiles_without_global_migration(
+    tmp_path: Path, config: Config
+) -> None:
+    """Sampling lineage is explicit even when different contracts yield same pixels."""
+    from pipeline.ingest.annotate import (
+        _PROMPT_SHA256,
+        _annotation_cache_identity,
+        _annotation_profile_id,
+    )
+
+    keyframes = [_make_jpeg(tmp_path)]
+    legacy = _annotation_cache_identity(keyframes, config, "gemini")
+    assert legacy == _annotation_cache_identity(
+        keyframes, config, "gemini", sampling_profile=""
+    )
+    assert legacy["prompt_sha256"] == _PROMPT_SHA256
+    assert "sampling_profile" not in legacy
+    temporal = _annotation_cache_identity(
+        keyframes, config, "gemini", sampling_profile=SHORT_SHOT_SAMPLING_PROFILE
+    )
+    other_revision = _annotation_cache_identity(
+        keyframes, config, "gemini", sampling_profile="future-test-revision"
+    )
+    assert len({
+        _annotation_profile_id(identity)
+        for identity in (legacy, temporal, other_revision)
+    }) == 3
+
+
+@pytest.mark.parametrize("reason", ["max_output_tokens", "content_filter"])
+def test_temporal_prompt_survives_retry_and_scopes_fallback_cache(
+    tmp_path: Path, config: Config, reason: str
+) -> None:
+    """Retries retain temporal evidence semantics and do not repeat cached paid work."""
+    from pipeline.ingest.annotate import _TEMPORAL_PROMPT, annotate_shot
+
+    _select_openai(config)
+    shot = replace(_make_shot(), sampling_profile=SHORT_SHOT_SAMPLING_PROFILE)
+    keyframes = [_make_jpeg(tmp_path)]
+    cache_dir = tmp_path / "annotations"
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [
+        _openai_response(status="incomplete", incomplete_reason=reason),
+        _openai_response(),
+    ]
+    with patch("pipeline.ingest.annotate._get_openai_client", return_value=mock_client):
+        result = annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
+        assert annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir) == result
+
+    assert mock_client.responses.create.call_count == 2
+    first, second = mock_client.responses.create.call_args_list
+    assert first.kwargs["input"][0]["content"][0]["text"] == _TEMPORAL_PROMPT
+    retry_prompt = second.kwargs["input"][0]["content"][0]["text"]
+    if reason == "content_filter":
+        assert retry_prompt.startswith(_TEMPORAL_PROMPT)
+        assert "do not quote" in retry_prompt
+        assert second.kwargs["max_output_tokens"] == 800
+    else:
+        assert retry_prompt == _TEMPORAL_PROMPT
+        assert second.kwargs["max_output_tokens"] == 3000
+    cache_path = next(cache_dir.glob(f"*/{shot.shot_id}.json"))
+    identity = json.loads(cache_path.read_text(encoding="utf-8"))["identity"]
+    assert identity["sampling_profile"] == SHORT_SHOT_SAMPLING_PROFILE
+    assert identity["prompt_sha256"] == hashlib.sha256(
+        retry_prompt.encode("utf-8")
+    ).hexdigest()
+
+
 def test_openai_annotation_appends_overlapping_dialogue(
     tmp_path: Path,
     config: Config,
@@ -619,6 +784,221 @@ def test_openai_unusable_output_is_retried_once_then_succeeds(
         first.kwargs["input"][0]["content"][0]["text"]
         == second.kwargs["input"][0]["content"][0]["text"]
     )
+
+
+def test_openai_repeated_truncation_falls_back_to_no_ocr_and_caches(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """A shot that overruns even the raised budget gets one no-transcription request."""
+    from pipeline.ingest.annotate import _PROMPT, annotate_shot
+
+    _select_openai(config)
+    shot = _make_shot()
+    keyframes = [_make_jpeg(tmp_path)]
+    cache_dir = tmp_path / "annotations"
+    truncated = _openai_response(
+        status="incomplete",
+        incomplete_reason="max_output_tokens",
+        output_text='{"caption":"truncated',
+    )
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [
+        truncated,
+        truncated,
+        _openai_response(on_screen_text=""),
+    ]
+
+    with patch(
+        "pipeline.ingest.annotate._get_openai_client",
+        return_value=mock_client,
+    ):
+        result = annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
+        assert annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir) == result
+
+    assert mock_client.responses.create.call_count == 3
+    first, second, third = mock_client.responses.create.call_args_list
+    assert [c.kwargs["max_output_tokens"] for c in (first, second, third)] == [
+        800,
+        3000,
+        3000,
+    ]
+    assert first.kwargs["input"][0]["content"][0]["text"] == _PROMPT
+    assert "do not quote" in third.kwargs["input"][0]["content"][0]["text"].lower()
+    assert result["on_screen_text"] == ""
+    cache_path = next(cache_dir.glob(f"*/{shot.shot_id}.json"))
+    identity = json.loads(cache_path.read_text(encoding="utf-8"))["identity"]
+    assert identity["request_variant"] == "content_filter_no_ocr_v1"
+
+
+def test_openai_truncation_after_fallback_stops_after_three_calls(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    """Truncation is bounded to three hosted attempts and never cached."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    _select_openai(config)
+    cache_dir = tmp_path / "annotations"
+    mock_client = MagicMock()
+    mock_client.responses.create.return_value = _openai_response(
+        status="incomplete",
+        incomplete_reason="max_output_tokens",
+        output_text='{"caption":"truncated',
+    )
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="max_output_tokens"),
+    ):
+        annotate_shot(
+            _make_shot(), [_make_jpeg(tmp_path)], [], config, cache_dir=cache_dir
+        )
+
+    assert mock_client.responses.create.call_count == 3
+    assert not list(cache_dir.glob("**/*.json"))
+
+
+@pytest.mark.parametrize(
+    "invalid_fields",
+    [
+        {"mood": ["lonely"]},
+        {"mood": ["lonely", " \t"]},
+        {"caption": " \n\t"},
+    ],
+    ids=["one-mood", "blank-mood", "blank-caption"],
+)
+def test_openai_invalid_annotation_retries_then_caches_valid_output(
+    tmp_path: Path,
+    config: Config,
+    invalid_fields: dict,
+) -> None:
+    """Unusable content gets one normal-budget retry and only valid output is cached."""
+    from pipeline.ingest.annotate import annotate_shot
+
+    _select_openai(config)
+    shot = _make_shot()
+    keyframes = [_make_jpeg(tmp_path)]
+    cache_dir = tmp_path / "annotations"
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = [
+        _openai_response(**invalid_fields),
+        _openai_response(),
+    ]
+
+    with patch(
+        "pipeline.ingest.annotate._get_openai_client",
+        return_value=mock_client,
+    ):
+        result = annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
+        cached = annotate_shot(shot, keyframes, [], config, cache_dir=cache_dir)
+
+    assert result == cached
+    assert result["caption"].startswith("Two figures")
+    assert result["mood"] == ["noir", "lonely", "rainy"]
+    assert mock_client.responses.create.call_count == 2
+    first, second = mock_client.responses.create.call_args_list
+    assert first.kwargs["max_output_tokens"] == 800
+    assert second.kwargs["max_output_tokens"] == 800
+    assert first.kwargs["input"] == second.kwargs["input"]
+    cache_paths = list(cache_dir.glob(f"*/{shot.shot_id}.json"))
+    assert len(cache_paths) == 1
+    payload = json.loads(cache_paths[0].read_text(encoding="utf-8"))
+    assert payload["annotation"]["mood"] == result["mood"]
+    assert payload["annotation"]["caption"] == result["caption"]
+
+
+@pytest.mark.parametrize(
+    "invalid_fields",
+    [{"mood": ["lonely"]}, {"caption": " \n\t"}],
+    ids=["one-mood", "blank-caption"],
+)
+def test_openai_repeated_invalid_annotation_stops_without_cache(
+    tmp_path: Path,
+    config: Config,
+    invalid_fields: dict,
+) -> None:
+    """Repeated unusable content cannot create a cache or a third hosted attempt."""
+    from pipeline.ingest.annotate import AnnotationError, annotate_shot
+
+    _select_openai(config)
+    cache_dir = tmp_path / "annotations"
+    mock_client = MagicMock()
+    mock_client.responses.create.return_value = _openai_response(**invalid_fields)
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="expected 2-4|empty annotation caption"),
+    ):
+        annotate_shot(
+            _make_shot(),
+            [_make_jpeg(tmp_path)],
+            [],
+            config,
+            cache_dir=cache_dir,
+        )
+
+    assert mock_client.responses.create.call_count == 2
+    assert [
+        call.kwargs["max_output_tokens"]
+        for call in mock_client.responses.create.call_args_list
+    ] == [800, 800]
+    assert not list(cache_dir.glob("**/*.json"))
+
+
+@pytest.mark.parametrize("filtered_first", [True, False])
+def test_openai_invalid_annotation_and_content_filter_share_retry_limit(
+    tmp_path: Path,
+    config: Config,
+    filtered_first: bool,
+) -> None:
+    """Content filtering and unusable content share the same two-call budget."""
+    from pipeline.ingest.annotate import AnnotationError, _PROMPT, annotate_shot
+
+    _select_openai(config)
+    cache_dir = tmp_path / "annotations"
+    filtered = _openai_response(
+        status="incomplete",
+        incomplete_reason="content_filter",
+        output_text='{"caption":"partial',
+    )
+    invalid = _openai_response(mood=["lonely"])
+    mock_client = MagicMock()
+    mock_client.responses.create.side_effect = (
+        [filtered, invalid] if filtered_first else [invalid, filtered]
+    )
+
+    with (
+        patch(
+            "pipeline.ingest.annotate._get_openai_client",
+            return_value=mock_client,
+        ),
+        pytest.raises(AnnotationError, match="expected 2-4|content_filter"),
+    ):
+        annotate_shot(
+            _make_shot(),
+            [_make_jpeg(tmp_path)],
+            [],
+            config,
+            cache_dir=cache_dir,
+        )
+
+    assert mock_client.responses.create.call_count == 2
+    first, second = mock_client.responses.create.call_args_list
+    assert first.kwargs["max_output_tokens"] == 800
+    assert second.kwargs["max_output_tokens"] == 800
+    second_prompt = second.kwargs["input"][0]["content"][0]["text"]
+    if filtered_first:
+        assert "do not quote" in second_prompt.lower()
+    else:
+        assert second_prompt == _PROMPT
+    assert not list(cache_dir.glob("**/*.json"))
 
 
 def test_openai_content_filter_retries_once_without_ocr(

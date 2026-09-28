@@ -26,6 +26,7 @@ from collections.abc import Iterable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
 from threading import Lock
@@ -82,6 +83,7 @@ class FrameWrite:
     visual_encoder: str
     visual_vec: np.ndarray
     is_representative: bool
+    timestamp_source: str = _INGEST_TIMESTAMP_SOURCE
 
 
 def table_names(db: lancedb.DBConnection) -> set[str]:
@@ -501,14 +503,6 @@ def _incompatible_table_message(
     )
 
 
-def upsert_frames(
-    db: lancedb.DBConnection,
-    rows: Sequence[dict[str, Any]],
-) -> None:
-    """Upsert keyframe rows by stable ``frame_id``; an empty input is a no-op."""
-    upsert_frame_batches(db, (rows,))
-
-
 def upsert_frame_batches(
     db: lancedb.DBConnection,
     batches: Iterable[Sequence[dict[str, Any]]],
@@ -693,6 +687,72 @@ def _replace_frame_rows(
     _replace_film_rows(db, "frames", "frame_id", film_id, rows)
 
 
+def publish_unit_updates(
+    db: lancedb.DBConnection,
+    film: FilmRecord,
+    units: Sequence[UnitWrite],
+    frames: Sequence[FrameWrite],
+) -> None:
+    """Refresh prepared evidence for existing units without changing shot bounds.
+
+    Like whole-film publication, frames precede the final atomic unit merge.
+    Every other unit/film is retained, including its vectors and native FTS
+    content. Immutable sampling paths keep earlier evidence usable on failure.
+    """
+    if not units:
+        if frames:
+            raise ValueError("frame updates require their existing units")
+        return
+    unit_rows = [_make_unit_row(film, unit) for unit in units]
+    frame_rows = [_make_frame_row(film.film_id, frame) for frame in frames]
+    _validate_publication_rows(film.film_id, unit_rows, frame_rows)
+    ids = [row["unit_id"] for row in unit_rows]
+    condition = _film_condition(film.film_id) + " AND unit_id IN (" + ",".join(
+        "'" + identity.replace("'", "''") + "'" for identity in ids
+    ) + ")"
+    with _PUBLICATION_LOCK, _database_write_lock(db):
+        require_current_film_source(db, film)
+        encoders = {row["visual_encoder"] for row in frame_rows}
+        if len(encoders) != 1 or not next(iter(encoders), ""):
+            raise ValueError("unit frames must declare one visual encoder")
+        _require_visual_encoder_name(db, next(iter(encoders)))
+        current = {
+            row["unit_id"]: row for row in db.open_table("units").search()
+            .where(condition).select(["unit_id", "film_id", "shot_id", "parent_shot_id", "t_start", "t_end"])
+            .limit(None).to_list()
+        }
+        if set(current) != set(ids):
+            raise ValueError("targeted evidence updates require existing units in this film")
+        for row in unit_rows:
+            original = current[row["unit_id"]]
+            if any(row[key] != original[key] for key in ("film_id", "shot_id", "parent_shot_id", "t_start", "t_end")):
+                raise ValueError("targeted evidence updates cannot change shot identity or boundaries")
+            samples = sorted((frame for frame in frame_rows if frame["unit_id"] == row["unit_id"]),
+                             key=lambda frame: frame["frame_index"])
+            times = [frame["timestamp"] for frame in samples]
+            if (not times or any(not math.isfinite(t) or not row["t_start"] <= t < row["t_end"] for t in times)
+                    or any(a >= b for a, b in zip(times, times[1:]))):
+                raise ValueError("updated frames must be distinct, ordered and inside their shot")
+        # Validate vector shapes before either table is mutated.
+        for table_name, rows, fields in (("units", unit_rows, ("img_vec", "txt_vec")),
+                                         ("frames", frame_rows, ("visual_vec",))):
+            schema = db.open_table(table_name).schema
+            for row in rows:
+                for field in fields:
+                    vector = row[field]
+                    if len(vector) != schema.field(field).type.list_size or not all(math.isfinite(v) for v in vector):
+                        raise ValueError("updated vectors must match the active index dimension and be finite")
+        _merge_rows(db, "frames", "frame_id", frame_rows, delete_condition=condition)
+        _upsert_unit_rows(db, unit_rows)
+        try:
+            _ensure_search_indexes_locked(db)
+        except Exception as exc:
+            raise RuntimeError(
+                "Evidence updates were saved; search-index finalization failed. Run "
+                "`python -m pipeline.cli repair-search-index`; do not repeat annotation."
+            ) from exc
+
+
 def _replace_unit_rows(
     db: lancedb.DBConnection,
     film_id: str,
@@ -732,11 +792,9 @@ def _upsert_unit_rows(
 def _make_unit_row(film: FilmRecord, unit: UnitWrite) -> dict[str, Any]:
     """Convert one prepared unit to the stable LanceDB row contract."""
     shot = unit.shot
-    keyframe_dir = film.asset_dir / "keyframes"
-    keyframe_paths = [
-        str(keyframe_dir / f"{shot.shot_id}_{index}.webp")
-        for index in range(len(shot.keyframe_times))
-    ]
+    from pipeline.ingest.media import keyframe_paths
+
+    paths = [str(path) for path in keyframe_paths(film, shot)]
     people_count = unit.annotation.get("people_count")
     return (
         {
@@ -753,7 +811,7 @@ def _make_unit_row(film: FilmRecord, unit: UnitWrite) -> dict[str, Any]:
             "searchable_text": unit.annotation["searchable_text"],
             "mood": json.dumps(unit.annotation["mood"]),
             "dialogue": json.dumps(list(unit.dialogue)),
-            "keyframe_paths": json.dumps(keyframe_paths),
+            "keyframe_paths": json.dumps(paths),
             "framing": str(unit.annotation.get("framing") or "unknown"),
             "setting": str(unit.annotation.get("setting") or "unknown"),
             "time_of_day": str(unit.annotation.get("time_of_day") or "unknown"),
@@ -782,7 +840,7 @@ def _make_frame_row(film_id: str, frame: FrameWrite) -> dict[str, Any]:
         "shot_id": frame.shot_id,
         "frame_index": frame.frame_index,
         "timestamp": float(frame.timestamp),
-        "timestamp_source": _INGEST_TIMESTAMP_SOURCE,
+        "timestamp_source": frame.timestamp_source,
         "path": str(frame.path),
         "is_representative": frame.is_representative,
         "quality_score": None,

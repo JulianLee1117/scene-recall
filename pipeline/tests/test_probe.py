@@ -220,7 +220,10 @@ def test_text_subtitle_stream_skips_pgs_and_selects_subrip() -> None:
                 "codec_type": "subtitle",
                 "codec_name": "hdmv_pgs_subtitle",
             },
-            {"index": 3, "codec_type": "subtitle", "codec_name": "subrip"},
+            {
+                "index": 3, "codec_type": "subtitle", "codec_name": "subrip",
+                "tags": {"language": "eng"},
+            },
         ]
     }
 
@@ -303,3 +306,82 @@ def test_primary_audio_language_tag_handles_missing_or_malformed_metadata(
     from pipeline.ingest.probe import _primary_audio_language_tag
 
     assert _primary_audio_language_tag(meta) is None
+
+
+def _subtitle_stream(index: int, *, language="eng", title="", disposition=None) -> dict:
+    return {
+        "index": index, "codec_type": "subtitle", "codec_name": "subrip",
+        "tags": {"language": language, "title": title},
+        "disposition": disposition or {},
+    }
+
+
+@pytest.mark.parametrize("rejected", [
+    _subtitle_stream(2, language="fra", disposition={"default": 1}),
+    _subtitle_stream(2, disposition={"forced": 1, "default": 1}),
+    _subtitle_stream(2, disposition={"comment": 1}),
+    _subtitle_stream(2, title="English (Forced)"),
+    _subtitle_stream(2, title="Director's Commentary"),
+    _subtitle_stream(2, title="English Signs & Songs"),
+    _subtitle_stream(2, language="und", title="English"),
+    _subtitle_stream(2, language=None),
+])
+def test_text_subtitle_stream_skips_ineligible_tracks_before_full_english(rejected: dict) -> None:
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    english = _subtitle_stream(3, language=" ENG ")
+    assert _text_subtitle_stream_index({"streams": [rejected, english]}) == 3
+    assert _text_subtitle_stream_index({"streams": [rejected]}) is None
+
+
+@pytest.mark.parametrize("accessibility", [
+    _subtitle_stream(2, disposition={"hearing_impaired": 1, "default": 1}),
+    _subtitle_stream(2, title="English SDH", disposition={"default": 1}),
+    _subtitle_stream(2, title="English CC"),
+    _subtitle_stream(2, title="English HOH"),
+    _subtitle_stream(2, title="English Hearing-Impaired"),
+])
+def test_text_subtitle_stream_prefers_ordinary_but_accepts_sole_accessibility_track(
+    accessibility: dict,
+) -> None:
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    ordinary = _subtitle_stream(3)
+    assert _text_subtitle_stream_index({"streams": [accessibility, ordinary]}) == 3
+    assert _text_subtitle_stream_index({"streams": [accessibility]}) == 2
+
+
+@pytest.mark.parametrize(("streams", "expected"), [
+    ([_subtitle_stream(2), _subtitle_stream(3)], None),
+    ([_subtitle_stream(2), _subtitle_stream(3, disposition={"default": 1})], 3),
+    ([_subtitle_stream(2, disposition={"default": 1}),
+      _subtitle_stream(3, disposition={"default": 1})], None),
+    ([_subtitle_stream(2, title="SDH", disposition={"default": 1}),
+      _subtitle_stream(3), _subtitle_stream(4)], None),
+    ([_subtitle_stream(2, title="SDH"),
+      _subtitle_stream(3, title="SDH", disposition={"default": 1})], 3),
+])
+def test_text_subtitle_stream_only_uses_unique_default_within_preferred_group(
+    streams: list[dict], expected: int | None,
+) -> None:
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    assert _text_subtitle_stream_index({"streams": streams}) == expected
+    assert _text_subtitle_stream_index({"streams": list(reversed(streams))}) == expected
+
+
+def test_text_subtitle_stream_handles_string_dispositions_without_enabling_zero() -> None:
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    meta = {"streams": [
+        _subtitle_stream(2, disposition={"forced": "1"}),
+        _subtitle_stream(3, disposition={"forced": "0", "comment": "0", "default": "0"}),
+    ]}
+    assert _text_subtitle_stream_index(meta) == 3
+
+
+@pytest.mark.parametrize("index", [None, -1, True, "2"])
+def test_text_subtitle_stream_rejects_invalid_absolute_indices(index) -> None:
+    from pipeline.ingest.probe import _text_subtitle_stream_index
+
+    assert _text_subtitle_stream_index({"streams": [_subtitle_stream(index)]}) is None

@@ -470,6 +470,22 @@ def test_shot_embedding_dtype(tmp_path: Path, config: Config) -> None:
     assert result.dtype == np.float32
 
 
+def test_shot_embedding_uses_sampling_profile_paths(tmp_path: Path, config: Config) -> None:
+    from pipeline.ingest.embed import shot_embedding
+    from pipeline.ingest.media import keyframe_paths
+    from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE
+
+    shot = _make_shot("abc_0005", n_keyframes=3)
+    shot.sampling_profile = SHORT_SHOT_SAMPLING_PROFILE
+    expected_paths = keyframe_paths(tmp_path, shot)
+    vectors = np.ones((3, 1024), dtype=np.float32)
+    with patch("pipeline.ingest.embed.embed_images", return_value=vectors) as embed:
+        result = shot_embedding(shot, tmp_path, config)
+    embed.assert_called_once_with(expected_paths, config)
+    assert all(path.parent.name == SHORT_SHOT_SAMPLING_PROFILE for path in expected_paths)
+    assert result.shape == (1024,)
+
+
 # ---------------------------------------------------------------------------
 # Model cache — singleton
 # ---------------------------------------------------------------------------

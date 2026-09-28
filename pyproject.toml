@@ -5,11 +5,13 @@ description = "Source-backed semantic search over film libraries"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "av>=16,<18",
     "click>=8.4.2",
     "fastapi>=0.138.1",
     "faster-whisper>=1.2.1",
     "filelock>=3.30,<4",
     "google-genai>=2.10.0",
+    "httpx>=0.28.1,<0.29",
     # Native FTS is experimental and its 0.33 index-maintenance contract is
     # covered by integration tests. Certify newer minor releases before use.
     "lancedb[embeddings]>=0.33,<0.34",
@@ -29,8 +31,12 @@ dependencies = [
     "uvicorn[standard]>=0.49.0",
 ]
 
+[project.optional-dependencies]
+lab = ["beat-this==1.1.0", "torchaudio>=2.11.0"]
+
 [dependency-groups]
 dev = ["pytest>=9.1.1"]
+maintenance = ["pylance==9.0.0"]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
@@ -40,3 +46,4 @@ explicit = true
 [tool.uv.sources]
 torch = [{index = "pytorch-cu128"}]
 torchvision = [{index = "pytorch-cu128"}]
+torchaudio = [{index = "pytorch-cu128"}]

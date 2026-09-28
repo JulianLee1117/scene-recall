@@ -1,10 +1,61 @@
-"""Tests for provider-aware annotation credential checks."""
+"""Tests for supported local devices and provider-aware credential checks."""
 
 from __future__ import annotations
+
+import sys
+from types import SimpleNamespace
 
 import pytest
 
 from pipeline.config import Config
+
+
+def test_check_cuda_accepts_supported_cpu_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from pipeline import check_env
+
+    fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    check_env.check_cuda()
+
+    output = capsys.readouterr()
+    assert "local models will use CPU" in output.out
+    assert not output.err
+
+
+def test_check_cuda_reports_available_device(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from pipeline import check_env
+
+    fake_torch = SimpleNamespace(cuda=SimpleNamespace(
+        is_available=lambda: True,
+        get_device_name=lambda index: "Test GPU",
+    ))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    check_env.check_cuda()
+
+    assert "CUDA: Test GPU" in capsys.readouterr().out
+
+
+def test_check_cuda_requires_installed_pytorch(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from pipeline import check_env
+
+    monkeypatch.setitem(sys.modules, "torch", None)
+
+    with pytest.raises(SystemExit) as failure:
+        check_env.check_cuda()
+
+    assert failure.value.code == 1
+    assert "torch is not installed — run: uv sync --dev" in capsys.readouterr().err
 
 
 def test_check_annotator_key_accepts_selected_openai_key(
