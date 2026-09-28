@@ -1,0 +1,578 @@
+"""Hosted video understanding: scenes, per-shot story/action records and fame.
+
+Each film is split into chunks of consecutive indexed shots. A low-resolution
+proxy of each chunk is rendered with the film-wide shot number burned into the
+top-left corner, and the model returns one record per listed shot number plus
+scene groupings and iconic moments. Keying output to known shots (instead of
+asking for timestamps) is what makes the output alignable: the 2026-09-27
+probe returned all 187 shots of a Matrix chunk with every peak time inside its
+own shot.
+
+World knowledge is allowed for names and story (ADR-0093); actions must be
+described from what the clip shows. Camera labels from this pass are hints;
+measured camera motion comes from the local measurement pass.
+"""
+
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+import json
+import os
+import re
+import statistics
+import subprocess
+import tempfile
+import threading
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+from pipeline.evidence import store
+from pipeline.evidence.library import FilmRef, film_units
+
+
+PROMPT_VERSION = "shot-keyed-understanding-v1"
+CAMERA_HINTS = ["static", "pan", "tilt", "push_in", "pull_out", "tracking", "handheld", "crane", "orbit", "zoom", "unclear"]
+# USD per 1M tokens (standard tier; batch is half). Checked 2026-09-27; Flash
+# prices are introductory until 2026-12-31.
+PRICES = {
+    "gemini-3.8-flash": {"input": 0.75, "output": 3.75},
+    "gemini-3.1-pro-preview": {"input": 2.00, "output": 12.00},
+    "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50},
+}
+DEFAULTS = {
+    "model": "gemini-3.8-flash",
+    "max_shots": 160,
+    "max_seconds": 600.0,
+    "fast_median_shot_s": 3.0,
+    "fps_fast": 2.0,
+    "fps_normal": 1.0,
+    "proxy_height": 360,
+    "thinking": "low",
+    "media_resolution": "low",
+    "plot_chars": 3500,
+}
+
+
+def producer(model: str = DEFAULTS["model"]) -> store.Producer:
+    settings = {key: value for key, value in DEFAULTS.items() if key != "model"}
+    settings.update(model=model, prompt_version=PROMPT_VERSION, prompt_sha256=store.digest(_PROMPT_TEMPLATE),
+                    schema_sha256=store.digest(response_schema()))
+    return store.Producer(kind="understanding", name="gemini-shots", version=1, settings=settings)
+
+
+# ---------------------------------------------------------------------------
+# Chunk planning and proxies
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Chunk:
+    index: int
+    shots: list[dict[str, Any]]           # rows with unit_id, t_start, t_end, ordinal
+
+    @property
+    def start(self) -> float:
+        return float(self.shots[0]["t_start"])
+
+    @property
+    def end(self) -> float:
+        return float(self.shots[-1]["t_end"])
+
+    @property
+    def fps(self) -> float:
+        median = statistics.median(float(s["t_end"]) - float(s["t_start"]) for s in self.shots)
+        return DEFAULTS["fps_fast"] if median < DEFAULTS["fast_median_shot_s"] else DEFAULTS["fps_normal"]
+
+    def digest(self) -> str:
+        return store.digest([[s["unit_id"], round(float(s["t_start"]), 3), round(float(s["t_end"]), 3)] for s in self.shots])
+
+
+def plan_chunks(units: list[dict[str, Any]], *, max_shots: int = DEFAULTS["max_shots"],
+                max_seconds: float = DEFAULTS["max_seconds"]) -> list[Chunk]:
+    rows = [{**unit, "ordinal": index} for index, unit in enumerate(units, start=1)]
+    chunks: list[Chunk] = []
+    current: list[dict[str, Any]] = []
+    for row in rows:
+        if current and (len(current) >= max_shots or float(row["t_end"]) - float(current[0]["t_start"]) > max_seconds):
+            chunks.append(Chunk(len(chunks), current))
+            current = []
+        current.append(row)
+    if current:
+        chunks.append(Chunk(len(chunks), current))
+    return chunks
+
+
+def clock(seconds: float) -> str:
+    minutes, rest = divmod(max(0.0, seconds), 60)
+    return f"{int(minutes):02d}:{rest:04.1f}"
+
+
+def _srt_time(seconds: float) -> str:
+    millis = int(round(max(0.0, seconds) * 1000))
+    hours, millis = divmod(millis, 3_600_000)
+    minutes, millis = divmod(millis, 60_000)
+    secs, millis = divmod(millis, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def render_proxy(film: FilmRef, chunk: Chunk, directory: Path) -> Path:
+    """Low-res H.264 proxy of one chunk with shot numbers burned in."""
+    labels = directory / f"chunk-{chunk.index:03d}.srt"
+    lines = []
+    for number, shot in enumerate(chunk.shots, start=1):
+        start = float(shot["t_start"]) - chunk.start
+        end = float(shot["t_end"]) - chunk.start - 0.01
+        lines.append(f"{number}\n{_srt_time(start)} --> {_srt_time(max(start + 0.02, end))}\n{{\\an7}}S{shot['ordinal']}\n")
+    labels.write_text("\n".join(lines), encoding="utf-8")
+    output = directory / f"chunk-{chunk.index:03d}.mp4"
+    escaped = labels.as_posix().replace(":", "\\:")
+    style = "Fontsize=20,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,MarginL=6,MarginV=6"
+    video_filter = (f"scale=w='max(2,trunc(iw*sar/2)*2)':h=ih,setsar=1,scale=-2:{DEFAULTS['proxy_height']},"
+                    f"subtitles='{escaped}':force_style='{style}'")
+    command = ["ffmpeg", "-y", "-nostdin", "-v", "error", "-ss", f"{chunk.start:.3f}", "-to", f"{chunk.end:.3f}",
+               "-i", str(film.path), "-map", "0:v:0", "-map", "0:a:0?", "-vf", video_filter,
+               "-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "32", "-b:v", "0",
+               "-c:a", "aac", "-b:a", "64k", "-ac", "1", str(output)]
+    completed = subprocess.run(command, capture_output=True, check=False)
+    if completed.returncode != 0:
+        # Fall back to CPU encoding when NVENC sessions are exhausted or unavailable.
+        command[command.index("h264_nvenc")] = "libx264"
+        for flag in ("-rc", "-cq", "-b:v"):
+            position = command.index(flag)
+            del command[position:position + 2]
+        command[command.index("-preset") + 1] = "veryfast"
+        command[command.index("libx264") + 1:command.index("libx264") + 1] = ["-crf", "32"]
+        completed = subprocess.run(command, capture_output=True, check=False)
+    if completed.returncode != 0 or not output.is_file():
+        raise RuntimeError(f"proxy render failed: {completed.stderr.decode('utf-8', 'replace')[-400:]}")
+    return output
+
+
+# ---------------------------------------------------------------------------
+# Prompt and schema
+# ---------------------------------------------------------------------------
+
+
+_PROMPT_TEMPLATE = """You are indexing a feature film for a personal footage search and music-video editing tool.
+
+FILM: {film}
+{context}
+CLIP: film time {clip_start}-{clip_end} (part {part} of {parts}). Every frame shows the current shot number (S<n>) in the top-left corner. Shot table with clip-relative times:
+{shot_table}
+
+TIMED DIALOGUE (clip-relative, from subtitles; may be imperfect):
+{dialogue}
+
+Return JSON with:
+- scenes: consecutive groups of shots that form one dramatic scene (same place, time and action), covering every listed shot exactly once and in order. continues_previous=true only for the first scene when it continues the scene that ended the previous part. title <=8 words; summary <=40 words (what happens and why it matters in the story); setting <=8 words; characters (names); story_context <=25 words (where this sits in the plot); tone <=4 words.
+- shots: exactly one entry per listed shot number: characters visible (the film's character names; [] if none or unknown); action <=20 words describing what visibly happens; peak = clip time MM:SS.s of the most important instant inside this shot; emotion <=4 words; line = the most notable line spoken during this shot, verbatim if clear, else ""; speaker ("" if none); audio <=6 words of notable sound (music, silence, gunfire) or ""; fame 0-3 = how widely recognized this exact moment or image is in film culture (3 iconic, 2 memorable key moment, 1 notable, 0 ordinary coverage); craft 0-3 = visual and editorial strength regardless of fame (composition, light, motion, performance; 0 weak, transitional or unusable); cut_inside = true only if the numbered shot visibly contains a cut to a different camera setup; camera = best guess of the camera's own movement.
+- iconic: this clip's most famous moments (shot number, description <=15 words, why) or [] if none.
+Use your knowledge of this film for character names and story context, but describe only what the clip shows for actions. Keep every field short."""
+
+
+def response_schema() -> dict[str, Any]:
+    string = {"type": "string"}
+    return {
+        "type": "object",
+        "properties": {
+            "scenes": {"type": "array", "items": {"type": "object", "properties": {
+                "first_shot": {"type": "integer"}, "last_shot": {"type": "integer"},
+                "continues_previous": {"type": "boolean"}, "title": string, "summary": string, "setting": string,
+                "characters": {"type": "array", "items": string}, "story_context": string, "tone": string},
+                "required": ["first_shot", "last_shot", "continues_previous", "title", "summary", "setting",
+                             "characters", "story_context", "tone"]}},
+            "shots": {"type": "array", "items": {"type": "object", "properties": {
+                "shot": {"type": "integer"}, "characters": {"type": "array", "items": string}, "action": string,
+                "peak": string, "emotion": string, "line": string, "speaker": string, "audio": string,
+                "fame": {"type": "integer", "minimum": 0, "maximum": 3},
+                "craft": {"type": "integer", "minimum": 0, "maximum": 3},
+                "cut_inside": {"type": "boolean"}, "camera": {"type": "string", "enum": CAMERA_HINTS}},
+                "required": ["shot", "characters", "action", "peak", "emotion", "line", "speaker", "audio",
+                             "fame", "craft", "cut_inside", "camera"]}},
+            "iconic": {"type": "array", "items": {"type": "object", "properties": {
+                "shot": {"type": "integer"}, "description": string, "why": string},
+                "required": ["shot", "description", "why"]}},
+        },
+        "required": ["scenes", "shots", "iconic"],
+    }
+
+
+def film_context(metadata: dict[str, Any] | None, *, include_plot: bool = True) -> str:
+    if not metadata:
+        return ""
+    wiki = metadata.get("wikidata") or {}
+    parts = []
+    if wiki.get("directors"):
+        parts.append("DIRECTED BY: " + ", ".join(wiki["directors"][:3]))
+    cast = []
+    for row in (wiki.get("cast") or [])[:24]:
+        characters = [c for c in row.get("characters") or [] if c]
+        cast.append(f"{row['actor']} as {' / '.join(characters)}" if characters else row["actor"])
+    if cast:
+        parts.append("CAST: " + "; ".join(cast))
+    plot = ((metadata.get("wikipedia") or {}).get("plot") or "") if include_plot else ""
+    if plot:
+        parts.append("PLOT SUMMARY (Wikipedia; context only):\n" + plot[:DEFAULTS["plot_chars"]])
+    return "\n".join(parts) + "\n"
+
+
+def build_prompt(film: FilmRef, chunk: Chunk, parts: int, context: str, dialogue: list[dict[str, Any]]) -> str:
+    table = "\n".join(f"S{s['ordinal']}: {clock(float(s['t_start']) - chunk.start)}-{clock(float(s['t_end']) - chunk.start)}"
+                      for s in chunk.shots)
+    lines = [f"[{clock(float(d['start']) - chunk.start)}-{clock(float(d['end']) - chunk.start)}] {d['text']}"
+             for d in dialogue if float(d["end"]) > chunk.start and float(d["start"]) < chunk.end]
+    return _PROMPT_TEMPLATE.format(film=film.title, context=context, clip_start=clock(chunk.start),
+                                   clip_end=clock(chunk.end), part=chunk.index + 1, parts=parts, shot_table=table,
+                                   dialogue="\n".join(lines) if lines else "(none)")
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def _seconds(value: str) -> float | None:
+    match = re.fullmatch(r"\s*(\d+):(\d{1,2}(?:\.\d+)?)\s*", str(value or ""))
+    return int(match.group(1)) * 60 + float(match.group(2)) if match else None
+
+
+def _names(values: Any, limit: int = 8) -> list[str]:
+    out = []
+    for value in values or []:
+        text = str(value).strip()
+        if text and text.casefold() not in {v.casefold() for v in out}:
+            out.append(text[:60])
+    return out[:limit]
+
+
+def validate_chunk(chunk: Chunk, output: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Normalize one chunk response into unit-keyed records; returns issues too."""
+    issues: list[str] = []
+    by_ordinal = {s["ordinal"]: s for s in chunk.shots}
+    shots: dict[str, dict[str, Any]] = {}
+    for row in output.get("shots") or []:
+        shot = by_ordinal.get(row.get("shot"))
+        if shot is None or shot["unit_id"] in shots:
+            continue
+        peak = _seconds(row.get("peak"))
+        peak_time = None
+        if peak is not None:
+            candidate = chunk.start + peak
+            if float(shot["t_start"]) - 0.5 <= candidate <= float(shot["t_end"]) + 0.5:
+                peak_time = round(min(max(candidate, float(shot["t_start"])), float(shot["t_end"])), 3)
+        shots[shot["unit_id"]] = {
+            "characters": _names(row.get("characters")),
+            "action": str(row.get("action") or "").strip()[:300],
+            "peak_time": peak_time,
+            "emotion": str(row.get("emotion") or "").strip()[:60],
+            "line": str(row.get("line") or "").strip()[:300],
+            "speaker": str(row.get("speaker") or "").strip()[:60],
+            "audio": str(row.get("audio") or "").strip()[:80],
+            "fame": min(3, max(0, int(row.get("fame") or 0))),
+            "craft": min(3, max(0, int(row.get("craft") or 0))),
+            "cut_inside": bool(row.get("cut_inside")),
+            "camera_hint": row.get("camera") if row.get("camera") in CAMERA_HINTS else "unclear",
+        }
+    missing = [s["ordinal"] for s in chunk.shots if s["unit_id"] not in shots]
+    if missing:
+        issues.append(f"chunk {chunk.index}: {len(missing)} shots missing ({missing[:5]}...)")
+    ordinals = [s["ordinal"] for s in chunk.shots]
+    first, last = ordinals[0], ordinals[-1]
+    scenes = []
+    for row in sorted(output.get("scenes") or [], key=lambda r: int(r.get("first_shot") or 0)):
+        start = max(first, int(row.get("first_shot") or first))
+        end = min(last, int(row.get("last_shot") or start))
+        if scenes and start <= scenes[-1]["last_shot"]:
+            start = scenes[-1]["last_shot"] + 1
+        if end < start:
+            continue
+        if scenes and start > scenes[-1]["last_shot"] + 1:
+            scenes[-1]["last_shot"] = start - 1  # close gaps by extending the previous scene
+        elif not scenes and start > first:
+            start = first
+        scenes.append({
+            "first_shot": start, "last_shot": end, "continues_previous": bool(row.get("continues_previous")) and not scenes,
+            "title": str(row.get("title") or "").strip()[:120], "summary": str(row.get("summary") or "").strip()[:500],
+            "setting": str(row.get("setting") or "").strip()[:120], "characters": _names(row.get("characters"), 12),
+            "story_context": str(row.get("story_context") or "").strip()[:300], "tone": str(row.get("tone") or "").strip()[:60],
+        })
+    if not scenes:
+        issues.append(f"chunk {chunk.index}: no scenes")
+        scenes = [{"first_shot": first, "last_shot": last, "continues_previous": False, "title": "", "summary": "",
+                   "setting": "", "characters": [], "story_context": "", "tone": ""}]
+    scenes[-1]["last_shot"] = last
+    iconic = []
+    for row in output.get("iconic") or []:
+        shot = by_ordinal.get(row.get("shot"))
+        if shot is not None:
+            iconic.append({"unit_id": shot["unit_id"], "description": str(row.get("description") or "")[:200],
+                           "why": str(row.get("why") or "")[:300]})
+    return {"shots": shots, "scenes": scenes, "iconic": iconic}, issues
+
+
+def merge_chunks(units: list[dict[str, Any]], receipts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Combine validated chunk outputs into film-level scenes and shot records."""
+    ordinal_unit = {index: unit for index, unit in enumerate(units, start=1)}
+    scenes: list[dict[str, Any]] = []
+    shots: dict[str, dict[str, Any]] = {}
+    iconic: list[dict[str, Any]] = []
+    for receipt in sorted(receipts, key=lambda r: r["chunk"]):
+        result = receipt["result"]
+        for scene in result["scenes"]:
+            if scene["continues_previous"] and scenes:
+                previous = scenes[-1]
+                previous["last_shot"] = scene["last_shot"]
+                previous["characters"] = _names(previous["characters"] + scene["characters"], 12)
+                continue
+            scenes.append(dict(scene))
+        shots.update(result["shots"])
+        iconic.extend(result["iconic"])
+    for index, scene in enumerate(scenes):
+        first, last = ordinal_unit[scene["first_shot"]], ordinal_unit[scene["last_shot"]]
+        scene.update(index=index, first_unit=first["unit_id"], last_unit=last["unit_id"],
+                     t_start=float(first["t_start"]), t_end=float(last["t_end"]))
+        for ordinal in range(scene["first_shot"], scene["last_shot"] + 1):
+            record = shots.get(ordinal_unit[ordinal]["unit_id"])
+            if record is not None:
+                record["scene"] = index
+    return {"scenes": scenes, "shots": shots, "iconic": iconic}
+
+
+# ---------------------------------------------------------------------------
+# Transport
+# ---------------------------------------------------------------------------
+
+
+def _client():
+    from google import genai
+    from google.genai import types
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=900_000))
+
+
+def call_model(client: Any, model: str, video: Path, fps: float, prompt: str) -> dict[str, Any]:
+    from google.genai import types
+    started = time.perf_counter()
+    response = client.models.generate_content(
+        model=model,
+        contents=[types.Content(role="user", parts=[
+            types.Part(inline_data=types.Blob(data=video.read_bytes(), mime_type="video/mp4"),
+                       video_metadata=types.VideoMetadata(fps=fps)),
+            types.Part.from_text(text=prompt)])],
+        config=types.GenerateContentConfig(
+            media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
+            response_mime_type="application/json",
+            response_json_schema=response_schema(),
+            thinking_config=types.ThinkingConfig(thinking_level=DEFAULTS["thinking"]),
+        ),
+    )
+    usage = response.usage_metadata.model_dump(mode="json") if response.usage_metadata else {}
+    candidate = (response.candidates or [None])[0]
+    finish = str(getattr(candidate, "finish_reason", "") or "")
+    feedback = getattr(response, "prompt_feedback", None)
+    block = str(getattr(feedback, "block_reason", "") or "") if feedback is not None else ""
+    text = (response.text or "") if candidate is not None else ""
+    return {"text": text, "usage": usage, "finish_reason": finish, "block_reason": block,
+            "elapsed_s": round(time.perf_counter() - started, 1), "model_version": getattr(response, "model_version", None)}
+
+
+def cost_usd(model: str, usage: dict[str, Any], *, batch: bool = False) -> float:
+    price = PRICES.get(model)
+    if not price or not usage:
+        return 0.0
+    tokens_in = usage.get("prompt_token_count") or 0
+    tokens_out = (usage.get("candidates_token_count") or 0) + (usage.get("thoughts_token_count") or 0)
+    total = (tokens_in * price["input"] + tokens_out * price["output"]) / 1_000_000
+    return round(total * (0.5 if batch else 1.0), 6)
+
+
+# ---------------------------------------------------------------------------
+# Producer run
+# ---------------------------------------------------------------------------
+
+
+def receipt_path(config: Any, film_id: str, prod: store.Producer, chunk: Chunk) -> Path:
+    return (Path(config.paths.assets_dir) / film_id / "evidence" / prod.kind / prod.profile_id
+            / f"chunk-{chunk.index:03d}-{chunk.digest()[:10]}.json")
+
+
+@dataclass
+class Budget:
+    limit_usd: float
+    spent: float = 0.0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def admit(self, estimate: float) -> bool:
+        with self.lock:
+            if self.spent + estimate > self.limit_usd:
+                return False
+            self.spent += estimate
+            return True
+
+    def settle(self, estimate: float, actual: float) -> None:
+        with self.lock:
+            self.spent += actual - estimate
+
+
+def estimate_chunk_usd(model: str, chunk: Chunk) -> float:
+    seconds = chunk.end - chunk.start
+    tokens_in = seconds * (66 * chunk.fps + 32) + 6000
+    tokens_out = 130 * len(chunk.shots) + 800
+    return cost_usd(model, {"prompt_token_count": tokens_in, "candidates_token_count": tokens_out})
+
+
+def shots_digest(units: list[dict[str, Any]]) -> str:
+    return store.digest([[u["unit_id"], round(float(u["t_start"]), 3), round(float(u["t_end"]), 3)] for u in units])
+
+
+def _film_inputs(units, dialogue, metadata) -> dict[str, str]:
+    return {"shots": shots_digest(units), "dialogue": store.digest(dialogue), "metadata": store.digest(metadata or {})}
+
+
+def run(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFAULTS["model"], max_usd: float = 5.0,
+        concurrency: int = 6, force: bool = False, chunk_limit: int | None = None,
+        progress: Callable[[str], None] = print) -> dict[str, Any]:
+    """Process films chunk by chunk (resumable); returns counts and spend."""
+    from pipeline.evidence import metadata as metadata_module
+    prod = producer(model)
+    budget = Budget(max_usd)
+    client = _client()
+    summary = {"films_done": 0, "films_cached": 0, "chunks_done": 0, "chunks_failed": 0, "usd": 0.0}
+    jobs: list[tuple[FilmRef, list[dict[str, Any]], Chunk, int, str, list[dict[str, Any]]]] = []
+    film_plans: dict[str, tuple[FilmRef, list[dict[str, Any]], list[Chunk], dict[str, str]]] = {}
+    for film in films:
+        units = film_units(db, film.film_id)
+        if not units:
+            continue
+        from pipeline.evidence.subtitles import current_dialogue
+        dialogue = current_dialogue(config, film.film_id)
+        meta_doc = store.read_artifact(config.paths.assets_dir, film.film_id, metadata_module.PRODUCER)
+        metadata = meta_doc["data"] if meta_doc else None
+        inputs = _film_inputs(units, dialogue, metadata)
+        if not force and store.read_artifact(config.paths.assets_dir, film.film_id, prod, inputs={"shots": inputs["shots"]}):
+            summary["films_cached"] += 1
+            continue
+        chunks = plan_chunks(units)
+        film_plans[film.film_id] = (film, units, chunks, inputs)
+        context = (film_context(metadata), film_context(metadata, include_plot=False))
+        for chunk in chunks:
+            if receipt_path(config, film.film_id, prod, chunk).is_file() and not force:
+                continue
+            jobs.append((film, units, chunk, len(chunks), context, dialogue))
+    if chunk_limit is not None:
+        jobs = jobs[:chunk_limit]
+    progress(f"[understanding] {model}: {len(film_plans)} films to process, {len(jobs)} chunks pending, budget ${max_usd:.2f}")
+    lock = threading.Lock()
+
+    def work(job) -> None:
+        film, _units, chunk, parts, context, dialogue = job
+        estimate = estimate_chunk_usd(model, chunk)
+        if not budget.admit(estimate):
+            raise _BudgetStop()
+        full_context, safe_context = context
+        variant = "full"
+        with tempfile.TemporaryDirectory(prefix="sr-und-", dir=_temp_root(config)) as temporary:
+            proxy = render_proxy(film, chunk, Path(temporary))
+            try:
+                response = _call_with_retry(client, model, proxy, chunk.fps, build_prompt(film, chunk, parts, full_context, dialogue))
+            except Blocked:
+                # Some plot synopses trip non-configurable filters; the clip, cast and dialogue remain.
+                if safe_context == full_context:
+                    raise
+                variant = "no_plot"
+                response = _call_with_retry(client, model, proxy, chunk.fps, build_prompt(film, chunk, parts, safe_context, dialogue))
+        actual = cost_usd(model, response["usage"])
+        budget.settle(estimate, actual)
+        try:
+            output = json.loads(response["text"])
+        except (json.JSONDecodeError, TypeError):
+            output = None
+        if not isinstance(output, dict):
+            raise RuntimeError(f"unparseable response (finish={response['finish_reason']})")
+        result, issues = validate_chunk(chunk, output)
+        receipt = {"chunk": chunk.index, "first_ordinal": chunk.shots[0]["ordinal"], "last_ordinal": chunk.shots[-1]["ordinal"],
+                   "t_start": chunk.start, "t_end": chunk.end, "fps": chunk.fps, "model": model, "context": variant,
+                   "model_version": response["model_version"], "finish_reason": response["finish_reason"],
+                   "usage": response["usage"], "cost_usd": actual, "elapsed_s": response["elapsed_s"],
+                   "issues": issues, "result": result}
+        store.write_json(receipt_path(config, film.film_id, prod, chunk), receipt)
+        with lock:
+            summary["chunks_done"] += 1
+            summary["usd"] = round(summary["usd"] + actual, 4)
+        progress(f"[understanding] {film.title} part {chunk.index + 1}/{parts}: {len(result['shots'])}/{len(chunk.shots)} shots, "
+                 f"{len(result['scenes'])} scenes, ${actual:.3f}, {response['elapsed_s']}s"
+                 + (" (without plot)" if variant != "full" else "") + (f" issues={issues}" if issues else ""))
+
+    stopped = False
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        futures = {pool.submit(work, job): job for job in jobs}
+        for future in as_completed(futures):
+            film, _units, chunk, parts, _c, _d = futures[future]
+            try:
+                future.result()
+            except _BudgetStop:
+                stopped = True
+            except Exception as exc:  # noqa: BLE001 - one failed chunk must not stop the run
+                with lock:
+                    summary["chunks_failed"] += 1
+                progress(f"[understanding] {film.title} part {chunk.index + 1}/{parts}: failed ({str(exc)[:200]})")
+    if stopped:
+        progress(f"[understanding] budget of ${max_usd:.2f} reached; rerun to continue (completed chunks are kept)")
+    for film_id, (film, units, chunks, inputs) in film_plans.items():
+        receipts = [store.read_json(receipt_path(config, film_id, prod, chunk)) for chunk in chunks]
+        if any(receipt is None for receipt in receipts):
+            continue
+        merged = merge_chunks(units, receipts)
+        merged.update(model=model, chunks=[{key: r.get(key) for key in ("chunk", "t_start", "t_end", "fps", "context", "model_version",
+                                                                         "finish_reason", "usage", "cost_usd", "elapsed_s", "issues")}
+                                            for r in receipts],
+                      cost_usd=round(sum(r["cost_usd"] for r in receipts), 4))
+        store.write_artifact(config.paths.assets_dir, film_id, prod, merged, inputs=inputs)
+        summary["films_done"] += 1
+        progress(f"[understanding] {film.title}: complete — {len(merged['scenes'])} scenes, {len(merged['shots'])}/{len(units)} shots, "
+                 f"{len(merged['iconic'])} iconic moments, ${merged['cost_usd']:.2f}")
+    return summary
+
+
+class _BudgetStop(Exception):
+    pass
+
+
+class Blocked(RuntimeError):
+    """The prompt itself was refused (for example PROHIBITED_CONTENT); retrying unchanged cannot help."""
+
+
+def _temp_root(config: Any) -> str:
+    root = Path(config.paths.assets_dir) / ".tmp" / "understanding"
+    root.mkdir(parents=True, exist_ok=True)
+    return str(root)
+
+
+def _call_with_retry(client: Any, model: str, video: Path, fps: float, prompt: str, attempts: int = 3) -> dict[str, Any]:
+    delay = 20.0
+    for attempt in range(attempts):
+        try:
+            response = call_model(client, model, video, fps, prompt)
+            if response["text"]:
+                return response
+            if response["block_reason"]:
+                raise Blocked(response["block_reason"])
+            error = RuntimeError(f"empty response (finish={response['finish_reason']})")
+            if "SAFETY" in response["finish_reason"] or "PROHIBITED" in response["finish_reason"]:
+                raise error
+        except Blocked:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc)
+            transient = any(code in message for code in ("429", "500", "502", "503", "504", "RESOURCE_EXHAUSTED",
+                                                          "UNAVAILABLE", "DEADLINE", "timed out", "Timeout"))
+            if not transient or attempt == attempts - 1:
+                raise
+            error = exc
+        time.sleep(delay)
+        delay *= 2
+    raise error

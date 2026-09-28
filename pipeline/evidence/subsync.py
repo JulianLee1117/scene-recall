@@ -168,12 +168,11 @@ def apply_windows(cues: Sequence[Cue], windows: Sequence[tuple[float, float, flo
 def apply(cues: Sequence[Cue], result: SyncResult) -> list[Cue]:
     """Apply a sync result; cues are clipped to non-negative, strictly ordered times."""
     moved = apply_windows(_transform(cues, result.scale, result.offset), result.windows)
-    fixed, last = [], 0.0
+    fixed = []
     for start, end, text in sorted(moved, key=lambda cue: cue[0]):
         start = max(start, 0.0)
         end = max(end, start + 0.2)
         fixed.append((round(start, 3), round(end, 3), text))
-        last = end
     return fixed
 
 

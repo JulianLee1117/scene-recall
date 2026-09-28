@@ -43,11 +43,51 @@ def cmd_subtitles(args) -> int:
     return 0
 
 
+def cmd_understand(args) -> int:
+    from pipeline.evidence import understanding
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+    summary = understanding.run(config, db, films, model=args.model, max_usd=args.max_usd,
+                                concurrency=args.concurrency, force=args.force)
+    print(f"[understanding] {summary}")
+    return 0 if summary["chunks_failed"] == 0 else 1
+
+
+def cmd_measure(args) -> int:
+    from pipeline.evidence import measure
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+    counts = measure.run(config, db, films, force=args.force)
+    print(f"[measure] {counts}")
+    return 0 if counts["failed"] == 0 else 1
+
+
+def cmd_hero(args) -> int:
+    from pipeline.evidence import hero
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+    counts = hero.run(config, db, films, force=args.force)
+    print(f"[hero] {counts}")
+    return 0 if counts["failed"] == 0 else 1
+
+
+def cmd_synthesize(args) -> int:
+    from pipeline.evidence import synthesis
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+    counts = synthesis.run(config, db, films)
+    print(f"[synthesis] {counts}")
+    return 0
+
+
 def cmd_status(args) -> int:
     from pipeline.evidence import metadata, speech, store, subtitles
     config = _config(args.config)
     _db, films = _films(config, args.film)
-    producers = {"metadata": metadata.PRODUCER, "subtitles": subtitles.PRODUCER, "audio": speech.PRODUCER}
+    from pipeline.evidence import hero, measure, synthesis, understanding
+    producers = {"metadata": metadata.PRODUCER, "subtitles": subtitles.PRODUCER, "audio": speech.PRODUCER,
+                 "understanding": understanding.producer(), "measure": measure.PRODUCER, "hero": hero.PRODUCER,
+                 "synthesis": synthesis.PRODUCER}
     for kind, producer in producers.items():
         present = sum(1 for film in films if store.read_artifact(config.paths.assets_dir, film.film_id, producer))
         print(f"{kind:14s} {producer.profile_id:34s} {present}/{len(films)} films")
@@ -72,6 +112,15 @@ def main(argv: list[str] | None = None) -> int:
     subs = add("subtitles", cmd_subtitles, "download, sync and validate English subtitles for Whisper-only films")
     subs.add_argument("--max-downloads", type=int, default=20, help="download budget for this run (daily quota applies)")
     subs.add_argument("--force", action="store_true", help="reprocess films with an existing result")
+    und = add("understand", cmd_understand, "hosted video understanding: scenes, story, per-shot action, fame and craft")
+    und.add_argument("--model", default="gemini-3.8-flash")
+    und.add_argument("--max-usd", type=float, default=5.0, help="spend ceiling for this run (standard pricing)")
+    und.add_argument("--concurrency", type=int, default=6)
+    und.add_argument("--force", action="store_true")
+    mea = add("measure", cmd_measure, "local GPU pass: camera motion, hidden cuts, subjects, look and hero frames")
+    mea.add_argument("--force", action="store_true")
+    add("hero", cmd_hero, "pick and extract one hero frame per shot from measured samples")         .add_argument("--force", action="store_true")
+    add("synthesize", cmd_synthesize, "per-shot priors: fame, craft, distinctiveness, iconic and hidden-gem flags")
     add("status", cmd_status, "show evidence coverage")
     args = parser.parse_args(argv)
     return int(args.handler(args) or 0)
