@@ -159,3 +159,124 @@ def test_slow_sustained_moves_accumulate_into_a_label():
     assert measure.camera_segments(times, noise, [True] * 120, 1 / 6)["dominant"] == "static"
     series = [[t, *camera, 0.01, 1] for t, camera in zip(times, creeping)]
     assert measure.camera_from_series(series)["dominant"] == "push_in"
+
+
+class _FakeBatchClient:
+    """Just enough of the genai client for the batch transport."""
+
+    def __init__(self):
+        from types import SimpleNamespace
+        self.deleted, self.created = [], []
+        client = self
+
+        class Batches:
+            def create(self, *, model, src, config):
+                client.created.append(len(src))
+                return SimpleNamespace(name=f"batches/{len(client.created)}", state=SimpleNamespace(name="JOB_STATE_PENDING"))
+
+        class Files:
+            def delete(self, *, name):
+                client.deleted.append(name)
+
+        self.batches, self.files = Batches(), Files()
+
+
+def _batch_plan(tmp_path):
+    from pathlib import Path
+    from pipeline.evidence.library import FilmRef
+    film = FilmRef("a" * 64, "Test Film (2000)", Path(tmp_path / "film.mkv"), 100.0, 24.0)
+    chunks = u.plan_chunks(_units([2.0] * 30), max_shots=10)
+    return u.FilmPlan(film=film, units=[], chunks=chunks, inputs={}, dialogue=[], contexts=("ctx", "ctx"))
+
+
+def test_submit_batches_leaves_a_failed_chunk_pending_and_submits_the_rest(config, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    plan, client, messages = _batch_plan(tmp_path), _FakeBatchClient(), []
+    monkeypatch.setattr(u, "_client", lambda: client)
+    monkeypatch.setattr(u, "plan_films", lambda *args, **kwargs: ([plan], []))
+    monkeypatch.setattr(u, "render_proxy", lambda film, chunk, directory: (directory / f"{chunk.index}.mp4", (directory / f"{chunk.index}.mp4").write_bytes(b"x"))[0])
+
+    def upload(_client, path, key):
+        if key.endswith(f":1:{plan.chunks[1].digest()[:10]}"):
+            raise RuntimeError("upload refused: 400 INVALID_ARGUMENT")
+        return SimpleNamespace(name=f"files/{path.stem}", uri=f"uri/{path.stem}")
+
+    monkeypatch.setattr(u, "_upload", upload)
+    result = u.submit_batches(config, None, [plan.film], progress=messages.append)
+    assert result["submitted"] == 2 and client.created == [2]
+    assert any("part 2: not submitted" in message for message in messages)
+    ledger = u._read_ledger(config)
+    assert [request["chunk"] for request in ledger["jobs"][0]["requests"]] == [0, 2]
+
+
+def test_upload_retries_transient_failures_but_not_permanent_ones(monkeypatch, tmp_path):
+    from pipeline.evidence import understanding
+    calls = []
+    monkeypatch.setattr(understanding, "_UPLOAD_BACKOFF", (0.0, 0.0))
+
+    def flaky(_client, _path, _name):
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("503 UNAVAILABLE. The service is currently unavailable.")
+        return "uploaded"
+
+    monkeypatch.setattr(understanding, "_upload_once", flaky)
+    assert understanding._upload(None, tmp_path / "x.mp4", "key") == "uploaded" and len(calls) == 3
+    monkeypatch.setattr(understanding, "_upload_once", lambda *_: (_ for _ in ()).throw(ValueError("bad file")))
+    with pytest.raises(ValueError):
+        understanding._upload(None, tmp_path / "x.mp4", "key")
+
+
+def test_run_batches_survives_a_transient_cycle_failure(monkeypatch):
+    cycles, messages = [], []
+
+    def cycle(*_args, spent, **_kwargs):
+        cycles.append(1)
+        if len(cycles) == 1:
+            raise RuntimeError("503 UNAVAILABLE")
+        return spent, len(cycles) == 3
+
+    monkeypatch.setattr(u, "_batch_cycle", cycle)
+    monkeypatch.setattr(u.time, "sleep", lambda _seconds: None)
+    u.run_batches(None, None, [], progress=messages.append)
+    assert len(cycles) == 3 and "cycle failed" in messages[0]
+    monkeypatch.setattr(u, "_batch_cycle", lambda *_a, **_k: (_ for _ in ()).throw(KeyError("bug")))
+    with pytest.raises(KeyError):
+        u.run_batches(None, None, [], progress=messages.append)
+
+
+def _chunk_response(chunk, *, continues=False):
+    import json
+    first, last = chunk.shots[0]["ordinal"], chunk.shots[-1]["ordinal"]
+    output = {"shots": [{"shot": shot["ordinal"], "action": "walks"} for shot in chunk.shots],
+              "scenes": [{"first_shot": first, "last_shot": last, "title": f"S{chunk.index}",
+                          "continues_previous": continues}],
+              "iconic": []}
+    return {"text": json.dumps(output), "finish_reason": "STOP", "block_reason": None, "model_version": "m",
+            "usage": {}, "elapsed_s": 1.0}
+
+
+def test_refused_chunk_is_closed_and_the_film_still_completes(config, tmp_path):
+    from pipeline.evidence import store
+    plan = _batch_plan(tmp_path)
+    plan = u.FilmPlan(film=plan.film, units=[s for c in plan.chunks for s in c.shots], chunks=plan.chunks,
+                      inputs={}, dialogue=[], contexts=("ctx", "ctx"))
+    prod = u.producer()
+    first, refused, last = plan.chunks
+    u.write_receipt(config, plan, prod, first, _chunk_response(first), model="m", variant="full", transport="batch", proxy={})
+    u.write_refusal(config, plan, prod, refused, "PROHIBITED_CONTENT", model="m", transport="batch", proxy={})
+    u.write_receipt(config, plan, prod, last, _chunk_response(last, continues=True), model="m", variant="full",
+                    transport="batch", proxy={})
+    assert u.pending_chunks(config, plan, prod) == []
+    assert u.finalize(config, [plan], prod, "m", progress=lambda _message: None) == 1
+    data = store.read_artifact(config.paths.assets_dir, plan.film.film_id, prod)["data"]
+    assert len(data["shots"]) == 20                                  # the refused chunk's 10 shots have no records
+    assert [scene["title"] for scene in data["scenes"]] == ["S0", "S2"]   # no scene is stitched across the gap
+    assert [chunk["context"] for chunk in data["chunks"]] == ["full", "refused", "full"]
+
+
+def test_safety_finish_is_a_refusal_the_caller_can_retry_without_the_plot(monkeypatch):
+    monkeypatch.setattr(u, "call_model", lambda *_args: {"text": "", "block_reason": None,
+                                                         "finish_reason": "FinishReason.PROHIBITED_CONTENT"})
+    with pytest.raises(u.Blocked):
+        u._call_with_retry(None, "m", None, 1.0, "prompt")

@@ -140,7 +140,9 @@ def render_proxy(film: FilmRef, chunk: Chunk, directory: Path) -> Path:
     Decoding, frame-rate reduction and scaling run on the GPU (NVDEC) and only
     the small frames come back for the subtitle burn-in; codecs NVDEC cannot
     decode fall back to the same filters on the CPU. Both paths produce the
-    same frames, size and encoding.
+    same frames, size and encoding. Non-reference frames are never decoded: at
+    2-6 fps the sampled instant moves by at most a source frame, and decoding
+    (shared with the measurement pass) gets about 1.8x cheaper.
     """
     labels = directory / f"chunk-{chunk.index:03d}.srt"
     lines = []
@@ -155,7 +157,8 @@ def render_proxy(film: FilmRef, chunk: Chunk, directory: Path) -> Path:
     burn = f"subtitles='{escaped}':force_style='{style}'"
     fps = proxy_fps(chunk)
     width, height = _proxy_size(film.path)
-    window = ["-ss", f"{chunk.start:.3f}", "-to", f"{chunk.end:.3f}", "-i", str(film.path), "-map", "0:v:0", "-map", "0:a:0?"]
+    window = ["-skip_frame:v", "noref", "-ss", f"{chunk.start:.3f}", "-to", f"{chunk.end:.3f}", "-i", str(film.path),
+              "-map", "0:v:0", "-map", "0:a:0?"]
     encode = ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "32", "-b:v", "0",
               "-c:a", "aac", "-b:a", f"{DEFAULTS['proxy_audio_kbps']}k", "-ac", "1", str(output)]
     attempts = [
@@ -343,10 +346,14 @@ def merge_chunks(units: list[dict[str, Any]], receipts: list[dict[str, Any]]) ->
     scenes: list[dict[str, Any]] = []
     shots: dict[str, dict[str, Any]] = {}
     iconic: list[dict[str, Any]] = []
+    gap = False
     for receipt in sorted(receipts, key=lambda r: r["chunk"]):
+        if receipt.get("refused"):
+            gap = True
+            continue
         result = receipt["result"]
-        for scene in result["scenes"]:
-            if scene["continues_previous"] and scenes:
+        for index, scene in enumerate(result["scenes"]):
+            if scene["continues_previous"] and scenes and not (gap and index == 0):
                 previous = scenes[-1]
                 previous["last_shot"] = scene["last_shot"]
                 previous["characters"] = _names(previous["characters"] + scene["characters"], 12)
@@ -354,6 +361,7 @@ def merge_chunks(units: list[dict[str, Any]], receipts: list[dict[str, Any]]) ->
             scenes.append(dict(scene))
         shots.update(result["shots"])
         iconic.extend(result["iconic"])
+        gap = False
     for index, scene in enumerate(scenes):
         first, last = ordinal_unit[scene["first_shot"]], ordinal_unit[scene["last_shot"]]
         scene.update(index=index, first_unit=first["unit_id"], last_unit=last["unit_id"],
@@ -456,8 +464,22 @@ class Blocked(RuntimeError):
     """The prompt itself was refused (for example PROHIBITED_CONTENT); retrying unchanged cannot help."""
 
 
+def _refused_finish(finish_reason: Any) -> bool:
+    return any(marker in str(finish_reason or "") for marker in ("SAFETY", "PROHIBITED", "BLOCKLIST", "SPII"))
+
+
 class _BudgetStop(Exception):
     pass
+
+
+_TRANSIENT_MARKERS = ("429", "500", "502", "503", "504", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE",
+                      "timed out", "Timeout", "ConnectError", "RemoteProtocolError", "ReadError", "WriteError")
+
+
+def _transient(exc: BaseException) -> bool:
+    """Server-side or network failures that a later attempt can succeed at."""
+    message = f"{type(exc).__name__}: {exc}"
+    return any(marker in message for marker in _TRANSIENT_MARKERS)
 
 
 def _call_with_retry(client: Any, model: str, video: Any, fps: float, prompt: str, attempts: int = 3) -> dict[str, Any]:
@@ -471,15 +493,12 @@ def _call_with_retry(client: Any, model: str, video: Any, fps: float, prompt: st
             if response["block_reason"]:
                 raise Blocked(response["block_reason"])
             error = RuntimeError(f"empty response (finish={response['finish_reason']})")
-            if "SAFETY" in response["finish_reason"] or "PROHIBITED" in response["finish_reason"]:
-                raise error
+            if _refused_finish(response["finish_reason"]):
+                raise Blocked(response["finish_reason"])
         except Blocked:
             raise
         except Exception as exc:  # noqa: BLE001
-            message = str(exc)
-            transient = any(code in message for code in ("429", "500", "502", "503", "504", "RESOURCE_EXHAUSTED",
-                                                          "UNAVAILABLE", "DEADLINE", "timed out", "Timeout"))
-            if not transient or attempt == attempts - 1:
+            if not _transient(exc) or attempt == attempts - 1:
                 raise
             error = exc
         time.sleep(delay)
@@ -586,6 +605,25 @@ def write_receipt(config: Any, plan: FilmPlan, prod: store.Producer, chunk: Chun
     return receipt
 
 
+def write_refusal(config: Any, plan: FilmPlan, prod: store.Producer, chunk: Chunk, reason: str, *,
+                  model: str, transport: str, proxy: dict[str, Any]) -> dict[str, Any]:
+    """Persist a terminal receipt for a chunk the model refuses even without the synopsis.
+
+    Non-configurable filters (PROHIBITED_CONTENT) can refuse a clip for what it
+    shows. Resubmitting cannot help, so the chunk is closed with no records:
+    its shots get no understanding, the film still completes, and the
+    artifact lists the refused chunk so nothing is silently missing.
+    """
+    receipt = {"chunk": chunk.index, "first_ordinal": chunk.shots[0]["ordinal"], "last_ordinal": chunk.shots[-1]["ordinal"],
+               "t_start": chunk.start, "t_end": chunk.end, "fps": chunk.fps, "model": model, "context": "refused",
+               "refused": str(reason), "transport": transport, "proxy": proxy, "model_version": None,
+               "finish_reason": str(reason), "usage": {}, "cost_usd": 0.0, "elapsed_s": 0.0,
+               "issues": [f"refused by the model's content filter ({reason}); these shots have no understanding"],
+               "result": {"scenes": [], "shots": {}, "iconic": []}}
+    store.write_json(receipt_path(config, plan.film.film_id, prod, chunk), receipt)
+    return receipt
+
+
 def finalize(config: Any, plans: list[FilmPlan], prod: store.Producer, model: str,
              progress: Callable[[str], None] = print) -> int:
     """Merge every film whose chunks all have receipts into its understanding artifact."""
@@ -638,18 +676,28 @@ def run(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFAULTS["mo
         estimate = estimate_chunk_usd(model, chunk)
         if not budget.admit(estimate):
             raise _BudgetStop()
-        variant = "full"
+        variant, refusal = "full", None
         with tempfile.TemporaryDirectory(prefix="sr-und-", dir=_temp_root(config)) as temporary:
             proxy = render_proxy(plan.film, chunk, Path(temporary))
             proxy_info = {"fps": proxy_fps(chunk), "bytes": proxy.stat().st_size}
             try:
                 response = _call_with_retry(client, model, proxy, chunk.fps, plan.prompt(chunk, "full"))
-            except Blocked:
+            except Blocked as blocked:
                 # Some plot synopses trip non-configurable filters; the clip, cast and dialogue remain.
-                if plan.contexts[0] == plan.contexts[1]:
-                    raise
-                variant = "no_plot"
-                response = _call_with_retry(client, model, proxy, chunk.fps, plan.prompt(chunk, variant))
+                refusal = str(blocked)
+                if plan.contexts[0] != plan.contexts[1]:
+                    variant = "no_plot"
+                    try:
+                        response = _call_with_retry(client, model, proxy, chunk.fps, plan.prompt(chunk, variant))
+                        refusal = None
+                    except Blocked as again:
+                        refusal = str(again)
+        if refusal is not None:
+            write_refusal(config, plan, prod, chunk, refusal, model=model, transport="standard", proxy=proxy_info)
+            budget.settle(estimate, 0.0)
+            progress(f"[understanding] {plan.film.title} part {chunk.index + 1}/{len(plan.chunks)}: "
+                     f"refused by the content filter ({refusal}); closed without records")
+            return
         receipt = write_receipt(config, plan, prod, chunk, response, model=model, variant=variant,
                                 transport="standard", proxy=proxy_info)
         budget.settle(estimate, receipt["cost_usd"])
@@ -716,7 +764,22 @@ def _chunk_key(film_id: str, chunk: Chunk) -> str:
     return f"{film_id}:{chunk.index}:{chunk.digest()[:10]}"
 
 
+_UPLOAD_BACKOFF = (15.0, 60.0, 180.0)
+
+
 def _upload(client: Any, path: Path, display_name: str) -> Any:
+    """Upload one proxy, retrying transient failures (the client's own retries give up within seconds)."""
+    for delay in (*_UPLOAD_BACKOFF, None):
+        try:
+            return _upload_once(client, path, display_name)
+        except Exception as exc:  # noqa: BLE001
+            if delay is None or not _transient(exc):
+                raise
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def _upload_once(client: Any, path: Path, display_name: str) -> Any:
     """Upload one proxy and wait until the Files API has processed it."""
     uploaded = client.files.upload(file=str(path), config={"mime_type": "video/mp4", "display_name": display_name})
     deadline = time.monotonic() + 600
@@ -764,7 +827,19 @@ def submit_batches(config: Any, db: Any, films: list[FilmRef], *, model: str = D
                     "file": uploaded.name, "file_uri": uploaded.uri, "variant": "full", "bytes": size}
 
         with ThreadPoolExecutor(max_workers=max(1, uploads)) as pool:
-            requests = list(pool.map(prepare, group))
+            futures = [pool.submit(prepare, item) for item in group]
+        prepared = []
+        for item, future in zip(group, futures):
+            try:
+                prepared.append((item, future.result()))
+            except Exception as exc:  # noqa: BLE001 - render or upload failure: retry this chunk in a later wave
+                plan, chunk = item
+                progress(f"[understanding:batch] {plan.film.title} part {chunk.index + 1}: not submitted "
+                         f"({type(exc).__name__}: {str(exc)[:160]}); it stays pending")
+        if not prepared:
+            break
+        group = [item for item, _request in prepared]
+        requests = [request for _item, request in prepared]
         inline = []
         for (plan, chunk), request in zip(group, requests):
             video = types.File(name=request["file"], uri=request["file_uri"], mime_type="video/mp4")
@@ -804,7 +879,14 @@ def collect_batches(config: Any, db: Any, *, progress: Callable[[str], None] = p
     for job_record in ledger["jobs"]:
         if job_record["state"] not in _ACTIVE_STATES:
             continue
-        job = client.batches.get(name=job_record["name"])
+        try:
+            job = client.batches.get(name=job_record["name"])
+        except Exception as exc:  # noqa: BLE001 - e.g. 503: look again on the next poll
+            if not _transient(exc):
+                raise
+            counts["waiting_jobs"] += 1
+            progress(f"[understanding:batch] could not check {job_record['name']} ({str(exc)[:120]}); will retry")
+            continue
         job_record["state"] = str(job.state.name)
         if job_record["state"] in _ACTIVE_STATES:
             counts["waiting_jobs"] += 1
@@ -838,15 +920,28 @@ def collect_batches(config: Any, db: Any, *, progress: Callable[[str], None] = p
                                             proxy={"fps": proxy_fps(chunk), "bytes": request["bytes"]})
                     counts["receipts"] += 1
                     counts["usd"] = round(counts["usd"] + receipt["cost_usd"], 4)
-                elif payload is not None and payload["block_reason"] and plan.contexts[0] != plan.contexts[1]:
+                elif payload is not None and (payload["block_reason"] or _refused_finish(payload["finish_reason"])):
                     # Rare: retry at standard price, without the synopsis, against the still-uploaded clip.
-                    video = client.files.get(name=request["file"])
-                    retry = _call_with_retry(client, job_record["model"], video, chunk.fps, plan.prompt(chunk, "no_plot"))
-                    receipt = write_receipt(config, plan, prod, chunk, retry, model=job_record["model"],
-                                            variant="no_plot", transport="standard",
-                                            proxy={"fps": proxy_fps(chunk), "bytes": request["bytes"]})
-                    counts["retried"] += 1
-                    counts["usd"] = round(counts["usd"] + receipt["cost_usd"], 4)
+                    refusal = str(payload["block_reason"] or payload["finish_reason"])
+                    proxy = {"fps": proxy_fps(chunk), "bytes": request["bytes"]}
+                    if plan.contexts[0] != plan.contexts[1]:
+                        video = client.files.get(name=request["file"])
+                        try:
+                            retry = _call_with_retry(client, job_record["model"], video, chunk.fps,
+                                                     plan.prompt(chunk, "no_plot"))
+                            receipt = write_receipt(config, plan, prod, chunk, retry, model=job_record["model"],
+                                                    variant="no_plot", transport="standard", proxy=proxy)
+                            counts["retried"] += 1
+                            counts["usd"] = round(counts["usd"] + receipt["cost_usd"], 4)
+                            refusal = None
+                        except Blocked as again:
+                            refusal = str(again)
+                    if refusal is not None:
+                        write_refusal(config, plan, prod, chunk, refusal, model=job_record["model"],
+                                      transport="batch", proxy=proxy)
+                        counts["refused"] = counts.get("refused", 0) + 1
+                        progress(f"[understanding:batch] {film.title} part {chunk.index + 1}: refused by the content "
+                                 f"filter ({refusal}); closed without records")
                 else:
                     counts["failed"] += 1
                     reason = (payload or {}).get("block_reason") or (payload or {}).get("finish_reason") \
@@ -888,29 +983,53 @@ def run_batches(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFA
     prod = producer(model)
     spent = 0.0
     totals: dict[str, Any] = {"receipts": 0, "failed": 0, "usd": 0.0}
+    failures = 0
     while True:
-        collected = collect_batches(config, db, progress=progress)
-        for key in ("receipts", "failed"):
-            totals[key] += collected.get(key, 0)
-        totals["usd"] = round(totals["usd"] + collected.get("usd", 0.0), 4)
-        ledger = _read_ledger(config)
-        in_flight = sum(len(job["requests"]) for job in ledger["jobs"] if job["state"] in _ACTIVE_STATES)
-        plans, _cached = plan_films(config, db, films, prod, force=False)
-        pending = sum(len(pending_chunks(config, plan, prod)) for plan in plans)
-        waiting = pending - in_flight
-        progress(f"[understanding:batch] {in_flight} chunks in flight, {max(0, waiting)} to submit, "
-                 f"{totals['receipts']} collected (${totals['usd']:.2f})")
-        if pending == 0:
-            return totals
-        room = wave_chunks - in_flight
-        if waiting > 0 and room >= min(waiting, BATCH_REQUESTS_PER_JOB) and spent < max_usd:
-            submitted = submit_batches(config, db, films, model=model, max_usd=max_usd - spent,
-                                       max_chunks=room, progress=progress)
-            spent += submitted["estimated_usd"]
-            if submitted["submitted"] == 0 and in_flight == 0:
-                progress("[understanding:batch] nothing could be submitted and nothing is in flight; stopping")
-                return totals
-        elif in_flight == 0:
-            progress("[understanding:batch] budget reached or nothing left to submit; stopping")
+        try:
+            spent, done = _batch_cycle(config, db, films, prod, model=model, max_usd=max_usd, spent=spent,
+                                       wave_chunks=wave_chunks, totals=totals, progress=progress)
+            failures = 0
+        except Exception as exc:  # noqa: BLE001 - an outage must not end an unattended library run
+            failures += 1
+            if not _transient(exc) or failures > _MAX_FAILED_CYCLES:
+                raise
+            progress(f"[understanding:batch] cycle failed ({type(exc).__name__}: {str(exc)[:160]}); "
+                     f"retrying in {poll_seconds}s ({failures}/{_MAX_FAILED_CYCLES})")
+            done = False
+        if done:
             return totals
         time.sleep(poll_seconds)
+
+
+_MAX_FAILED_CYCLES = 12
+
+
+def _batch_cycle(config: Any, db: Any, films: list[FilmRef], prod: store.Producer, *, model: str, max_usd: float,
+                 spent: float, wave_chunks: int, totals: dict[str, Any],
+                 progress: Callable[[str], None]) -> tuple[float, bool]:
+    """One collect-and-submit round; returns the new estimated spend and whether the run is finished."""
+    collected = collect_batches(config, db, progress=progress)
+    for key in ("receipts", "failed"):
+        totals[key] += collected.get(key, 0)
+    totals["usd"] = round(totals["usd"] + collected.get("usd", 0.0), 4)
+    ledger = _read_ledger(config)
+    in_flight = sum(len(job["requests"]) for job in ledger["jobs"] if job["state"] in _ACTIVE_STATES)
+    plans, _cached = plan_films(config, db, films, prod, force=False)
+    pending = sum(len(pending_chunks(config, plan, prod)) for plan in plans)
+    waiting = pending - in_flight
+    progress(f"[understanding:batch] {in_flight} chunks in flight, {max(0, waiting)} to submit, "
+             f"{totals['receipts']} collected (${totals['usd']:.2f})")
+    if pending == 0:
+        return spent, True
+    room = wave_chunks - in_flight
+    if waiting > 0 and room >= min(waiting, BATCH_REQUESTS_PER_JOB) and spent < max_usd:
+        submitted = submit_batches(config, db, films, model=model, max_usd=max_usd - spent,
+                                   max_chunks=room, progress=progress)
+        spent += submitted["estimated_usd"]
+        if submitted["submitted"] == 0 and in_flight == 0:
+            progress("[understanding:batch] nothing could be submitted and nothing is in flight; stopping")
+            return spent, True
+    elif in_flight == 0:
+        progress("[understanding:batch] budget reached or nothing left to submit; stopping")
+        return spent, True
+    return spent, False
