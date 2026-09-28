@@ -199,6 +199,8 @@ class MusicDirection(EditorialDirection):
 class PlannerSettings(LabModel):
     pacing: Literal["patient", "balanced", "kinetic", "rapid"] = "balanced"
     lyric_treatment: Literal["ignore", "literal", "metaphorical", "counterpoint"] = "metaphorical"
+    # Recognizable <-> fresh footage; values are the search ranking presets.
+    footage: Literal["balanced", "famous", "gems"] = "balanced"
 
 
 class SuppliedLyric(LabModel):

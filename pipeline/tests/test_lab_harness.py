@@ -237,3 +237,18 @@ def test_transitions_penalize_letterbox_and_grade_jumps_between_films():
     assert "aspect" not in parts or parts["aspect"] == 0 and parts["grade"] == pytest.approx(-0.12)
     _, parts = asm.transition(first, asm.Placement(11.0, 12.0, same, 0.0, 1.0))
     assert "aspect" not in parts                                        # one film's own shots never pay for it
+
+
+def test_footage_setting_bounds_act_fame_and_reaches_editor_searches(monkeypatch):
+    from pipeline.lab import music, search_plan
+    from pipeline.lab.harness.concept import within_preference
+    from pipeline.lab.models import PlannerSettings
+    assert PlannerSettings().footage == "balanced"
+    assert within_preference("fresh", "famous") == "any" and within_preference("anchor", "gems") == "any"
+    assert within_preference("anchor", "famous") == "anchor" and within_preference("fresh", "balanced") == "fresh"
+    seen = []
+    monkeypatch.setattr(music, "retrieve_edit_candidates", lambda *args, preset="balanced": seen.append(preset) or [])
+    resolved = {"clauses": [{"kind": "text", "facet": "all", "text": "rain", "reference_id": None}], "references": []}
+    search_plan.execute_search(resolved, {"planner_settings": {"footage": "gems"}, "film_ids": []}, None, None)
+    search_plan.execute_search(resolved, {"film_ids": []}, None, None)
+    assert seen == ["gems", "balanced"]

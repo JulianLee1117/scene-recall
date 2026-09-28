@@ -42,7 +42,8 @@ Landed:
   - an optional critique loop (`lab.harness_critique`) in which Gemini watches a
     rough cut and the edit is re-assembled once.
 
-  Fill gaps also runs through v2, keeping cuts and placed shots.
+  Fill gaps also runs through v2, keeping cuts and placed shots. The Footage
+  setting (recognizable ↔ fresh) steers editor searches and v2 act fame targets.
 
   OTIO export ("Resolve timeline") works for any saved edit.
   - Blind Gemini judging of fresh regenerations, each render scored alone at
@@ -87,7 +88,6 @@ Next:
 - Phase 3 remainder:
   - lyric timing (LRCLIB) for literal lyric treatment;
   - the critique loop's evaluation;
-  - a Recognizable ↔ Fresh control on structural peaks.
 - **Phase 1 boundary audit**, measured on the pilot: hidden cuts in 0.7% of
   shots. Cut times stay evidence; assembly windows never straddle them.
   Splitting canonical units is deferred until a concrete failure.

@@ -642,6 +642,12 @@ measured and optimized.
   editor direction, song meaning and sections into one act per section: intent,
   one to four search-v2 queries, a fame target (anchor, fresh, any) and a pace.
   Sections the plan skips keep the listening suggestion.
+  - Paces stay within one step of the owner's pacing preference.
+  - Fame targets never contradict `planner_settings.footage`: `famous` allows no
+    fresh act and `gems` no anchor act.
+
+`planner_settings.footage` (`balanced` by default, or `famous`, `gems`; the UI's
+Footage control) is also the ranking preset of every editor search in v1 and v2.
 - **Pools**: each act's queries run through `search` with the preset matching the
   fame target. Candidates carry compiled shot evidence and a normalized image
   embedding; the previous edit's shots are excluded.

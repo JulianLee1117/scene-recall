@@ -591,19 +591,19 @@ def _slots(document):
     return slots
 
 
-def retrieve_edit_candidates(query, db, config, film_ids, facet="all"):
+def retrieve_edit_candidates(query, db, config, film_ids, facet="all", *, preset="balanced"):
     if facet != "all":
         from pipeline.search.recipe import SearchClause, search_recipe
         if facet not in {"scene", "words", "look", "mood"}:
             raise ValueError("Music text searches support all, scene, words, look or mood")
         return search_recipe([SearchClause("music-section", "text", facet, text=query)], db, config,
                              film_ids=film_ids or (), result_limit=min(48, config.retrieval.max_result_limit),
-                             _preserve_visual_alternatives=True)
+                             preset=preset, _preserve_visual_alternatives=True)
     from pipeline.search.retrieve import search
     return search(query, db, config, film_ids=film_ids or None,
                   result_limit=min(48, config.retrieval.max_result_limit),
                   apply_film_diversity=True, _apply_ordinary_temporal_spread=False,
-                  _preserve_visual_alternatives=True)
+                  _preserve_visual_alternatives=True, preset=preset)
 
 
 def ground_choices(choices, slots, candidates):

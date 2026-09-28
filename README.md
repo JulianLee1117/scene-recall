@@ -275,6 +275,8 @@ opt-in with `lab.harness: v2` in `config.yaml`. **Regenerate edit** then:
   accents and cuts follow continuity;
 - lets the planner swap shots once among pre-timed alternatives.
 
+**Footage** in AI direction sets the recognizable ↔ fresh balance (the search
+Famous / Balanced / Hidden gems presets) for every editor search.
 **Fill gaps** keeps your cuts and placed shots and lets the optimizer pick shots
 for the empty slots. A slot with its own written search uses that search.
 Single-shot replacement keeps the v1 path. **Resolve timeline**

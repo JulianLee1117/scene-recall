@@ -86,6 +86,8 @@ export interface EditorDirection {
 export interface PlannerSettings {
   pacing: "patient" | "balanced" | "kinetic" | "rapid";
   lyric_treatment: "ignore" | "literal" | "metaphorical" | "counterpoint";
+  /** Recognizable <-> fresh footage (search ranking preset); absent means balanced. */
+  footage?: "balanced" | "famous" | "gems";
 }
 export interface SongLyric {
   id: string;

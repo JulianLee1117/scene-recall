@@ -109,6 +109,13 @@ export default function MusicDirectionPanel(props: Props) {
             <option value="metaphorical">Suggest their meaning</option><option value="counterpoint">Create a deliberate contrast</option>
           </select>
         </label>
+        <label className={styles.field}>Footage
+          <select value={settings.footage ?? "balanced"} disabled={disabled}
+            onChange={(event) => changeSetting({ footage: event.target.value as NonNullable<PlannerSettings["footage"]> })}>
+            <option value="balanced">Mix recognizable and fresh</option><option value="famous">Recognizable moments</option>
+            <option value="gems">Fresh, lesser-known shots</option>
+          </select>
+        </label>
         <fieldset className={styles.filmScope} disabled={disabled}><legend>Source films</legend>
           <MovieScopeFilter selectedFilmIds={document.film_ids} onChange={(film_ids) => {
             if (disabled) return;

@@ -46,8 +46,9 @@ GUIDANCE = EDITORIAL_GUIDANCE + (
     "'a man counts cash in a car at night', 'backlit slow walk toward camera', 'Travis talks to himself in the mirror'. "
     "Avoid abstract feelings without imagery. Develop the queries across acts so the edit builds; motifs may recur "
     "on purpose. Queries within an act should approach its intent from different angles, not repeat one idea. "
-    "fame: anchor where the edit should land recognizable moments (typically a climax, drop or chorus, when the "
-    "direction wants recognizable footage), fresh for lesser-known footage, any otherwise. "
+    "fame: anchor where the edit should land recognizable moments, fresh for lesser-known footage, any otherwise. "
+    "Follow footage_preference: famous favours anchors throughout, gems favours fresh footage throughout, and "
+    "balanced puts anchors on structural peaks (a climax, drop or chorus) with fresh footage elsewhere. "
     "pace: the cutting speed of the section. Start from the user's pacing preference and move at most one step "
     "(patient, balanced, kinetic, rapid) when the music or the direction clearly calls for it. Cut timing itself is "
     "measured later from the audio. "
@@ -76,6 +77,7 @@ def concept_payload(document: dict[str, Any], music: MusicMap, film_titles: list
         "time_base": "seconds from the passage start",
         "editor_direction": editorial_context(document),
         "pacing_preference": settings.get("pacing", "balanced"),
+        "footage_preference": settings.get("footage", "balanced"),
         "lyric_treatment": settings.get("lyric_treatment", "metaphorical"),
         "song": {"summary": str(analysis.get("summary") or "")[:1500],
                  "meaning": {key: deepcopy(meaning.get(key)) for key in ("vocal_status", "summary", "themes", "cues")
@@ -123,6 +125,15 @@ def near_pace(pace: str, preference: str) -> str:
     return PACES[max(home - 1, min(home + 1, wanted))]
 
 
+def within_preference(fame: str, preference: str) -> str:
+    """The owner's recognizable/fresh setting bounds each act: never the opposite extreme."""
+    if preference == "famous" and fame == "fresh":
+        return "any"
+    if preference == "gems" and fame == "anchor":
+        return "any"
+    return fame
+
+
 def resolve_acts(concept: Concept, music: MusicMap, payload: dict[str, Any]) -> list[dict[str, Any]]:
     """One act per section in order; sections the plan skipped keep the listening suggestion."""
     by_section = {act.section: act for act in concept.acts}
@@ -138,5 +149,6 @@ def resolve_acts(concept: Concept, music: MusicMap, payload: dict[str, Any]) -> 
             continue
         queries = list(dict.fromkeys(query.strip() for query in act.queries if query.strip()))
         acts.append({"start": section["start"], "end": section["end"], "intent": act.intent, "queries": queries,
-                     "fame": act.fame, "pace": near_pace(act.pace, default_pace), "planned": True})
+                     "fame": within_preference(act.fame, payload.get("footage_preference", "balanced")),
+                     "pace": near_pace(act.pace, default_pace), "planned": True})
     return acts

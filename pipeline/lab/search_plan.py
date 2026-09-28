@@ -142,10 +142,13 @@ def execute_search(resolved, document, config, db):
     """Do not silently relax gates, invent motion adapters or alter film scope."""
     from pipeline.lab import music
     clauses = resolved["clauses"]
+    preset = (document.get("planner_settings") or {}).get("footage") or "balanced"   # recognizable <-> fresh
+    ranking = {} if preset == "balanced" else {"preset": preset}                      # balanced is the default
     if len(clauses) == 1 and clauses[0]["kind"] == "text":
         clause = clauses[0]
         args = (clause["text"], db, config, document.get("film_ids", []))
-        rows = music.retrieve_edit_candidates(*args) if clause["facet"] == "all" else music.retrieve_edit_candidates(*args, clause["facet"])
+        rows = (music.retrieve_edit_candidates(*args, **ranking) if clause["facet"] == "all"
+                else music.retrieve_edit_candidates(*args, clause["facet"], **ranking))
         return rows
     references = {row["reference_id"]: row for row in resolved["references"]}
     recipe = []
@@ -154,5 +157,6 @@ def execute_search(resolved, document, config, db):
         recipe.append(SearchClause(f"clause-{index + 1}", clause["kind"], clause["facet"], text=clause["text"],
                                    source=SourceReference(ref["unit_id"], ref["frame_index"]) if ref else None))
     result = execute_search_recipe(recipe, db, config, film_ids=document.get("film_ids", []),
-                                         result_limit=min(48, config.retrieval.max_result_limit), _preserve_visual_alternatives=True)
+                                   result_limit=min(48, config.retrieval.max_result_limit), preset=preset,
+                                   _preserve_visual_alternatives=True)
     return result.results

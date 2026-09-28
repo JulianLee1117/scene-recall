@@ -32,7 +32,7 @@ def _document():
 
 def test_old_documents_gain_defaults_and_track_context_is_validated():
     document = ProjectDocument()
-    assert document.planner_settings.model_dump() == {"pacing": "balanced", "lyric_treatment": "metaphorical"}
+    assert document.planner_settings.model_dump() == {"pacing": "balanced", "lyric_treatment": "metaphorical", "footage": "balanced"}
     assert document.song_context is None and document.visual_plan is None
     original = _document()
     original["song_context"] = {"track_id": "track", "lyrics": [{"id": "line", "start": 20, "end": 25, "text": "Later in the song"}]}
@@ -179,7 +179,7 @@ def test_plan_uses_settings_feedback_and_keeps_user_visual_plan(config, monkeypa
         return _answer([target])  # Even a non-null model plan may never overwrite user ownership.
     monkeypatch.setattr(music, "_hosted_json", hosted)
     result = run_direction_job(_job(document, [target]), config, object(), lambda _: None)
-    assert captured[0]["planner_settings"] == document["planner_settings"]
+    assert captured[0]["planner_settings"] == {"footage": "balanced", **document["planner_settings"]}
     assert captured[0]["feedback"][0]["feedback"] == "unfinished_action"
     assert captured[0]["measured"]["relative_rms"]["slots"]
     assert result["analysis"] == document["analysis"] and result["clips"] == document["clips"]
