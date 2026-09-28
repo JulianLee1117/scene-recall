@@ -55,7 +55,8 @@ def cmd_understand(args) -> int:
         print(f"[understanding:batch] {summary}")
         return 0 if summary["failed"] == 0 else 1
     if args.batch == "run":
-        summary = understanding.run_batches(config, db, films, model=args.model, max_usd=args.max_usd)
+        summary = understanding.run_batches(config, db, films, model=args.model, max_usd=args.max_usd,
+                                            wave_chunks=args.wave_chunks)
         print(f"[understanding:batch] {summary}")
         return 0 if summary["failed"] == 0 else 1
     if args.retry_refused:
@@ -222,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
     und.add_argument("--batch", choices=["run", "submit", "collect", "status"],
                      help="half-price batch transport: run (submit, poll and collect until done), or one step")
     und.add_argument("--max-chunks", type=int, default=None, help="with --batch submit: cap chunks this run")
+    und.add_argument("--wave-chunks", type=int, default=300,
+                     help="with --batch run: chunks in flight at once (Files API storage and enqueued-token limits)")
     und.add_argument("--retry-refused", action="store_true",
                      help="recover chunks the content filter refused by retrying quarter-size pieces (standard price)")
     mea = add("measure", cmd_measure, "local GPU pass: camera motion, hidden cuts, subjects, look and hero frames")
