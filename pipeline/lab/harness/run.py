@@ -78,6 +78,28 @@ def _resolved(query: str, duration: float) -> dict[str, Any]:
             "min_duration": duration}
 
 
+def _act_at(acts: list[dict[str, Any]], time: float) -> dict[str, Any]:
+    return next((act for act in acts if act["start"] - 1e-6 <= time < act["end"] - 1e-6), acts[-1])
+
+
+def placed_slot(placement: asm.Placement, alternatives: list[asm.Placement], previous: asm.Placement | None,
+                act: dict[str, Any], origin: float) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A new clip and the slot fields presenting it: reason, evidence, AI direction and up to five alternatives."""
+    reason = asm.reason(placement, previous)
+    clip = _clip(placement)
+    evidence = _evidence(placement.candidate, placement)
+    rows = [{"clip": deepcopy(clip), "film_title": placement.candidate.film_title[:300], "reason": reason,
+             "search_evidence": evidence}]
+    rows += [{"clip": _clip(other), "film_title": other.candidate.film_title[:300],
+              "reason": asm.reason(other, previous), "search_evidence": _evidence(other.candidate, other)}
+             for other in alternatives[:5]]
+    direction = _direction(act, placement, reason, origin)
+    return clip, {"clip_id": clip["id"], "alternatives": rows, "reason": reason, "search_error": None,
+                  "search_evidence": evidence, "direction": direction, "direction_source": "ai",
+                  "needs_direction": False,
+                  "resolved_search": _resolved(direction["query"], placement.end - placement.start)}
+
+
 def build_timeline(document: dict[str, Any], placements: list[asm.Placement], options: list[list[asm.Placement]],
                    acts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Slots and clips for the assembled edit (alternatives exclude every chosen shot)."""
@@ -87,23 +109,11 @@ def build_timeline(document: dict[str, Any], placements: list[asm.Placement], op
     slots, clips = [], []
     previous = None
     for placement, alternatives in zip(placements, options):
-        act = next((act for act in acts if act["start"] - 1e-6 <= placement.start < act["end"] - 1e-6), acts[-1])
-        reason = asm.reason(placement, previous)
-        clip = _clip(placement)
+        clip, fields = placed_slot(placement, alternatives, previous, _act_at(acts, placement.start),
+                                   document["passage"]["start"])
         clips.append(clip)
-        evidence = _evidence(placement.candidate, placement)
-        duration = placement.end - placement.start
-        direction = _direction(act, placement, reason, document["passage"]["start"])
-        rows = [{"clip": deepcopy(clip), "film_title": placement.candidate.film_title[:300], "reason": reason,
-                 "search_evidence": evidence}]
-        for other in alternatives[:5]:
-            rows.append({"clip": _clip(other), "film_title": other.candidate.film_title[:300],
-                         "reason": asm.reason(other, previous), "search_evidence": _evidence(other.candidate, other)})
         slots.append({"id": str(uuid.uuid4()), "start": placement.start, "end": placement.end,
-                      "section_index": section_for(placement.start, placement.end, segments),
-                      "clip_id": clip["id"], "alternatives": rows, "reason": reason, "search_error": None,
-                      "direction": direction, "direction_source": "ai", "needs_direction": False,
-                      "resolved_search": _resolved(direction["query"], duration), "search_evidence": evidence})
+                      "section_index": section_for(placement.start, placement.end, segments), **fields})
         previous = placement
     return slots, clips
 
@@ -261,22 +271,13 @@ def fill(document: dict[str, Any], config: Any, db: Any, progress: Callable[[str
         chosen = by_start.get(round(slot["start"], 4))
         if slot["id"] in targets and chosen is not None and not chosen[0].fixed and chosen[0].candidate.unit_id:
             placement, alternatives = chosen
-            act = next((spec for spec in planned["acts"] if spec["start"] - 1e-6 <= placement.start < spec["end"] - 1e-6),
-                       planned["acts"][-1])
-            reason = asm.reason(placement, previous)
-            clip = _clip(placement)
+            clip, fields = placed_slot(placement, alternatives, previous, _act_at(planned["acts"], placement.start),
+                                       document["passage"]["start"])
+            if _user_owned(slot):              # the user's written search stays the slot's direction
+                for key in ("direction", "direction_source", "needs_direction", "resolved_search"):
+                    fields.pop(key)
             result["clips"].append(clip)
-            evidence = _evidence(placement.candidate, placement)
-            rows = [{"clip": deepcopy(clip), "film_title": placement.candidate.film_title[:300], "reason": reason,
-                     "search_evidence": evidence}]
-            rows += [{"clip": _clip(other), "film_title": other.candidate.film_title[:300],
-                      "reason": asm.reason(other, previous), "search_evidence": _evidence(other.candidate, other)}
-                     for other in alternatives[:5]]
-            slot.update(clip_id=clip["id"], reason=reason, search_error=None, alternatives=rows, search_evidence=evidence)
-            if not _user_owned(slot):
-                direction = _direction(act, placement, reason, document["passage"]["start"])
-                slot.update(direction=direction, direction_source="ai", needs_direction=False,
-                            resolved_search=_resolved(direction["query"], placement.end - placement.start))
+            slot.update(fields)
             filled += 1
             peaks += placement.accent is not None
         previous = chosen[0] if chosen is not None else None
