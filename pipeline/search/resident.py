@@ -25,8 +25,9 @@ import numpy as np
 
 _LOGGER = logging.getLogger("uvicorn.error")
 _LOCK = threading.Lock()
-_LOADING: dict[tuple[str, str], threading.Lock] = {}
-_MATRICES: dict[tuple[str, str], "VectorMatrix"] = {}
+_LOADING: dict[tuple[str, ...], threading.Lock] = {}
+_MATRICES: dict[tuple[str, ...], "VectorMatrix"] = {}
+_ROWS: dict[tuple[str, ...], "RowTable"] = {}
 _BATCH_ROWS = 65_536
 _GPU_HEADROOM_BYTES = 2 * 1024 ** 3
 _DISABLED = False
@@ -48,6 +49,24 @@ class VectorMatrix:
     films: list[str]
     row_keys: np.ndarray         # (N,) object: feature_id / frame_id
     row_extra: dict[str, np.ndarray]   # extra scalar columns per row (frame_index, timestamp, ...)
+    _key_index: dict[str, int] | None = None
+
+    def key_index(self) -> dict[str, int]:
+        """Row of each key (built on first use)."""
+        if self._key_index is None:
+            self._key_index = {str(key): row for row, key in enumerate(self.row_keys)}
+        return self._key_index
+
+    def vectors_for(self, keys: Iterable[str]) -> dict[str, np.ndarray]:
+        """Stored (normalized) vectors of the given keys as float32 arrays."""
+        import torch
+        index = self.key_index()
+        wanted = [(key, index[key]) for key in keys if key in index]
+        if not wanted:
+            return {}
+        rows = torch.tensor([row for _key, row in wanted], dtype=torch.int64, device=self.device)
+        block = self.vectors[rows].float().cpu().numpy()
+        return {key: block[position] for position, (key, _row) in enumerate(wanted)}
 
     def allowed_rows(self, film_ids: tuple[str, ...]) -> Any | None:
         """Boolean row mask for a film scope (None when unscoped)."""
@@ -81,9 +100,8 @@ def _load(table: Any, name: str, *, vector_column: str, key_column: str, group_c
           extra_columns: tuple[str, ...], where: str | None) -> VectorMatrix:
     import torch
 
-    columns = [key_column, "unit_id", "film_id", vector_column, *extra_columns]
-    if group_column:
-        columns.append(group_column)
+    columns = list(dict.fromkeys([key_column, "unit_id", "film_id", vector_column, *extra_columns,
+                                  *([group_column] if group_column else [])]))
     total = int(table.count_rows(where) if where else table.count_rows())
     dimension = int(table.schema.field(vector_column).type.list_size)
     device = _device_for(total * dimension * 2)
@@ -139,7 +157,7 @@ def matrix(db: Any, name: str, *, vector_column: str, key_column: str, group_col
     try:
         table = db.open_table(name)
         version = int(table.version)
-        key = (str(getattr(db, "uri", "")), name)
+        key = (str(getattr(db, "uri", "")), name, vector_column)
         with _LOCK:
             cached = _MATRICES.get(key)
             if cached is not None and cached.version == version:
@@ -219,3 +237,54 @@ def top_units(resident: VectorMatrix, query: np.ndarray, *, film_ids: tuple[str,
     for row, unit in zip(candidates.tolist(), resident.row_unit[candidates].tolist()):
         first_row.setdefault(unit, row)
     return [(resident.unit_ids[unit], float(value), first_row[unit]) for unit, value in zip(units.tolist(), values.tolist())]
+
+
+@dataclass
+class RowTable:
+    """Scalar columns of one pinned table version in memory, addressable by key."""
+
+    name: str
+    version: int
+    table: Any                   # pyarrow.Table
+    index: dict[str, int]
+
+    def take(self, keys: Iterable[str]) -> list[dict[str, Any]]:
+        import pyarrow as pa
+        positions = [self.index[key] for key in dict.fromkeys(keys) if key in self.index]
+        if not positions:
+            return []
+        return self.table.take(pa.array(positions, type=pa.int64())).to_pylist()
+
+
+def rows(db: Any, name: str, *, key_column: str, columns: Iterable[str]) -> RowTable | None:
+    """The resident scalar columns of *name* at the snapshot's pinned version (loaded once per version)."""
+    if _DISABLED or getattr(db, "is_index_snapshot", False) is not True:
+        return None
+    try:
+        import pyarrow as pa
+        table = db.open_table(name)
+        version = int(table.version)
+        wanted = list(dict.fromkeys([key_column, *columns]))
+        key = (str(getattr(db, "uri", "")), name, "rows", ",".join(wanted))
+        with _LOCK:
+            cached = _ROWS.get(key)
+            if cached is not None and cached.version == version:
+                return cached
+            loading = _LOADING.setdefault(key, threading.Lock())
+        with loading:
+            with _LOCK:
+                cached = _ROWS.get(key)
+                if cached is not None and cached.version == version:
+                    return cached
+            started = time.perf_counter()
+            data = pa.Table.from_batches(list(table.to_batches(columns=wanted)))
+            loaded = RowTable(name=name, version=version, table=data,
+                              index={str(value): row for row, value in enumerate(data.column(key_column).to_pylist())})
+            with _LOCK:
+                _ROWS[key] = loaded
+            _LOGGER.info("resident_rows table=%s version=%d rows=%d mb=%.0f seconds=%.1f", name, version,
+                         data.num_rows, data.nbytes / 1e6, time.perf_counter() - started)
+            return loaded
+    except Exception as exc:  # noqa: BLE001 - acceleration only: fall back to Lance
+        _LOGGER.warning("resident rows for %s unavailable; using Lance: %s", name, exc)
+        return None

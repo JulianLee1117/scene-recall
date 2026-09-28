@@ -572,6 +572,7 @@ def _attach_image_vectors(
     ranked: list[tuple[dict[str, Any], float]],
     unit_table: Any,
     film_ids: tuple[str, ...],
+    db: Any = None,
 ) -> list[tuple[dict[str, Any], float]]:
     """Fetch ``img_vec`` for the bounded ranked rows the dedup pass will see.
 
@@ -587,19 +588,24 @@ def _attach_image_vectors(
     unit_filter = _unit_filter(unit_ids)
     if unit_filter is None:
         return ranked
-    vector_rows = filtered_rows(
-        unit_table, columns=["unit_id", "img_vec"],
-        where=_representative_filter(film_ids) & unit_filter, limit=len(unit_ids),
-    )
-    vectors = {
-        str(row["unit_id"]): row.get("img_vec")
-        for row in vector_rows
-        if row.get("unit_id")
-    }
+    resident = _resident.matrix(db, "units", vector_column="img_vec", key_column="unit_id",
+                                where="is_representative = true") if db is not None else None
+    if resident is not None:
+        vectors = resident.vectors_for(unit_ids)
+    else:
+        vector_rows = filtered_rows(
+            unit_table, columns=["unit_id", "img_vec"],
+            where=_representative_filter(film_ids) & unit_filter, limit=len(unit_ids),
+        )
+        vectors = {
+            str(row["unit_id"]): row.get("img_vec")
+            for row in vector_rows
+            if row.get("unit_id")
+        }
     attached: list[tuple[dict[str, Any], float]] = []
     for row, score in ranked:
         vector = vectors.get(_row_id(row))
-        attached.append(({**row, "img_vec": vector} if vector else row, score))
+        attached.append(({**row, "img_vec": vector} if vector is not None else row, score))
     return attached
 
 
@@ -977,7 +983,7 @@ def _frame_search_rows(
     unit_filter = _unit_filter(unit_ids)
     if unit_filter is None:
         return []
-    unit_rows = _hydrate_units(unit_table, unit_ids, film_ids)
+    unit_rows = _hydrate_units(unit_table, unit_ids, film_ids, db)
     unit_rows = _rows_in_film_scope(unit_rows, film_ids)
     return _frame_image_ranking(
         frame_rows,
@@ -1047,7 +1053,7 @@ def _semantic_text_search_rows(
         return []
     texts = _feature_texts(db, profile, [best[unit_id][1]["feature_id"] for unit_id in ordered
                                          if best[unit_id][1].get("text") is None])
-    unit_rows = _hydrate_units(unit_table, tuple(ordered), film_ids)
+    unit_rows = _hydrate_units(unit_table, tuple(ordered), film_ids, db)
     units_by_id = {_row_id(row): row for row in _rows_in_film_scope(unit_rows, film_ids) if _row_id(row)}
     ranked: list[dict[str, Any]] = []
     for unit_id in ordered:
@@ -1263,8 +1269,15 @@ def _unit_filter(unit_ids: tuple[str, ...]) -> Any | None:
     return _any_of("unit_id", unit_ids)
 
 
-def _hydrate_units(table, identities, film_ids):
+def _hydrate_units(table, identities, film_ids, db=None):
+    """Unit rows (with ``img_vec``) for *identities*: resident when the snapshot allows, else Lance."""
     from pipeline.search.request import reuse_rows
+    if db is not None:
+        with search_stage("metadata_hydration"):
+            resident = _resident_units(db, identities, film_ids)
+        if resident is not None:
+            return resident
+
     def fetch(missing):
         if not missing:
             return []
@@ -1272,6 +1285,23 @@ def _hydrate_units(table, identities, film_ids):
                 where=_representative_filter(film_ids) & _unit_filter(tuple(missing)),
                 limit=len(missing))
     return reuse_rows(("units", id(table), tuple(film_ids)), identities, fetch)
+
+
+def _resident_units(db, identities, film_ids) -> list[dict[str, Any]] | None:
+    rows = _resident.rows(db, "units", key_column="unit_id", columns=[*_LEXICAL_COLUMNS, "is_representative"])
+    vectors = _resident.matrix(db, "units", vector_column="img_vec", key_column="unit_id",
+                               where="is_representative = true")
+    if rows is None or vectors is None:
+        return None
+    scope = set(film_ids)
+    picked = [row for row in rows.take(str(identity) for identity in identities)
+              if row.pop("is_representative", True) and (not scope or row.get("film_id") in scope)]
+    image = vectors.vectors_for(row["unit_id"] for row in picked)
+    for row in picked:
+        vector = image.get(row["unit_id"])
+        if vector is not None:
+            row["img_vec"] = vector
+    return picked
 
 
 def _representative_filter(film_ids: tuple[str, ...]) -> Any:
@@ -1681,17 +1711,19 @@ def search(
 
     lexical_ranked: list[tuple[dict[str, Any], float]] = []
     if use_lexical_vote:
-        lexical_ranked = _attach_image_vectors(
-            _native_lexical_ranking(
-                query,
+        with search_stage("lexical_retrieval"):
+            lexical_ranked = _attach_image_vectors(
+                _native_lexical_ranking(
+                    query,
+                    table,
+                    representative_filter,
+                    scoped_film_ids,
+                    candidate_limit=channel_candidate_limit,
+                ),
                 table,
-                representative_filter,
                 scoped_film_ids,
-                candidate_limit=channel_candidate_limit,
-            ),
-            table,
-            scoped_film_ids,
-        )
+                db,
+            )
 
     image_rows: list[dict[str, Any]] = []
     if "img" in enabled:
@@ -1731,7 +1763,7 @@ def search(
         hit_by_unit = {hit.unit_id: hit for hit in line_hits}
         hydrated = {
             _row_id(row): row
-            for row in _rows_in_film_scope(_hydrate_units(table, tuple(hit_by_unit), scoped_film_ids), scoped_film_ids)
+            for row in _rows_in_film_scope(_hydrate_units(table, tuple(hit_by_unit), scoped_film_ids, db), scoped_film_ids)
         }
         for hit in line_hits:
             unit_row = hydrated.get(hit.unit_id)
@@ -2095,7 +2127,7 @@ def search_dialogue(
     hit_by_unit = {hit.unit_id: hit for hit in hits}
     unit_rows = {
         _row_id(row): row
-        for row in _rows_in_film_scope(_hydrate_units(db.open_table("units"), tuple(hit_by_unit), scoped_film_ids),
+        for row in _rows_in_film_scope(_hydrate_units(db.open_table("units"), tuple(hit_by_unit), scoped_film_ids, db),
                                        scoped_film_ids)
     }
     quote_rows = []

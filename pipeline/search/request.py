@@ -93,7 +93,8 @@ def search_execution(function):
                 bound = parameters.bind(*args, **kwargs)
                 db = bound.arguments["db"]
                 if isinstance(db, lancedb.DBConnection):
-                    bound.arguments["db"] = acquire_search_snapshot(bound.arguments["config"], db)
+                    with search_stage("snapshot"):
+                        bound.arguments["db"] = acquire_search_snapshot(bound.arguments["config"], db)
                     args, kwargs = bound.args, bound.kwargs
             return function(*args, **kwargs)
         finally:
