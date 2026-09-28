@@ -1753,7 +1753,7 @@ def search(
     # counts most when the query reads as a line; otherwise it only adds weak
     # candidates, because word overlap with dialogue is usually incidental.
     with search_stage("quote_retrieval"):
-        line_hits = _find_lines(db, query, film_ids=scoped_film_ids, limit=channel_candidate_limit)
+        line_hits = _find_lines(db, query, film_ids=scoped_film_ids, limit=min(channel_candidate_limit, _QUOTE_DEPTH))
     strength = quote_strength(line_hits)
     weights["quote"] = 1.2 if strength >= _STRONG_QUOTE else 0.3 * strength
     # A quote-like query keeps half-strength priors: exact lines lead, and fame
@@ -1999,6 +1999,7 @@ def _reranked(query: str, db: lancedb.DBConnection, ordered: list[dict[str, Any]
 
 
 _SIGNAL_DEPTH = 300
+_QUOTE_DEPTH = 100          # quotes are precise: deeper line lists add latency, not recall
 _SIGNAL_COLUMNS = ["framing", "time_of_day", "palette"]
 
 
