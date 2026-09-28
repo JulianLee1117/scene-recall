@@ -58,6 +58,10 @@ def cmd_understand(args) -> int:
         summary = understanding.run_batches(config, db, films, model=args.model, max_usd=args.max_usd)
         print(f"[understanding:batch] {summary}")
         return 0 if summary["failed"] == 0 else 1
+    if args.retry_refused:
+        summary = understanding.retry_refused(config, db, films, model=args.model, max_usd=args.max_usd)
+        print(f"[understanding] {summary}")
+        return 0
     if args.batch == "status":
         for job in understanding.batch_status(config):
             print(f"{job['created']}  {job['state']:26s} {job['chunks']:4d} chunks  {job['name']}")
@@ -218,6 +222,8 @@ def main(argv: list[str] | None = None) -> int:
     und.add_argument("--batch", choices=["run", "submit", "collect", "status"],
                      help="half-price batch transport: run (submit, poll and collect until done), or one step")
     und.add_argument("--max-chunks", type=int, default=None, help="with --batch submit: cap chunks this run")
+    und.add_argument("--retry-refused", action="store_true",
+                     help="recover chunks the content filter refused by retrying quarter-size pieces (standard price)")
     mea = add("measure", cmd_measure, "local GPU pass: camera motion, hidden cuts, subjects, look and hero frames")
     mea.add_argument("--force", action="store_true")
     add("hero", cmd_hero, "pick and extract one hero frame per shot from measured samples")         .add_argument("--force", action="store_true")

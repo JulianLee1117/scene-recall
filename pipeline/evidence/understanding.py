@@ -624,6 +624,123 @@ def write_refusal(config: Any, plan: FilmPlan, prod: store.Producer, chunk: Chun
     return receipt
 
 
+def split_chunk(chunk: Chunk, parts: int) -> list[Chunk]:
+    """Consecutive pieces of a chunk (same index: prompts keep the film-wide part numbering)."""
+    size = max(1, -(-len(chunk.shots) // parts))
+    return [Chunk(chunk.index, chunk.shots[start:start + size]) for start in range(0, len(chunk.shots), size)]
+
+
+def combine_results(results: list[dict[str, Any] | None]) -> dict[str, Any]:
+    """Merge piece results in order; a refused piece (None) ends any continuing scene."""
+    scenes: list[dict[str, Any]] = []
+    shots: dict[str, dict[str, Any]] = {}
+    iconic: list[dict[str, Any]] = []
+    gap = False
+    for result in results:
+        if result is None:
+            gap = True
+            continue
+        for index, scene in enumerate(result["scenes"]):
+            if index == 0 and scene["continues_previous"] and scenes and not gap:
+                scenes[-1]["last_shot"] = scene["last_shot"]
+                scenes[-1]["characters"] = _names(scenes[-1]["characters"] + scene["characters"], 12)
+                continue
+            scenes.append(dict(scene))
+        shots.update(result["shots"])
+        iconic.extend(result["iconic"])
+        gap = False
+    return {"scenes": scenes, "shots": shots, "iconic": iconic}
+
+
+def retry_refused(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFAULTS["model"], parts: int = 4,
+                  max_usd: float = 10.0, progress: Callable[[str], None] = print) -> dict[str, Any]:
+    """Recover chunks the content filter refused: retry smaller pieces at standard price.
+
+    A filter usually reacts to one scene, not a whole ten-minute clip. Each
+    piece is tried with the synopsis, then without it; pieces that are still
+    refused stay without records. The chunk's receipt becomes a ``split``
+    receipt listing what was recovered and what stayed refused, and the film
+    is merged again.
+    """
+    prod = producer(model)
+    client = _client()
+    budget = Budget(max_usd)
+    plans, _cached = plan_films(config, db, films, prod, force=True)
+    summary: dict[str, Any] = {"chunks": 0, "pieces_recovered": 0, "pieces_refused": 0, "shots_recovered": 0,
+                               "usd": 0.0, "films_done": 0}
+    for plan in plans:
+        touched = False
+        for chunk in plan.chunks:
+            path = receipt_path(config, plan.film.film_id, prod, chunk)
+            receipt = store.read_json(path)
+            if not isinstance(receipt, dict) or not receipt.get("refused"):
+                continue
+            summary["chunks"] += 1
+            results: list[dict[str, Any] | None] = []
+            refused, issues, usage, cost, elapsed = [], [], {}, 0.0, 0.0
+            for piece in split_chunk(chunk, parts):
+                estimate = estimate_chunk_usd(model, piece)
+                if not budget.admit(estimate):
+                    progress(f"[understanding] retry budget of ${max_usd:.2f} reached; rerun to continue")
+                    return summary
+                response, reason = None, None
+                with tempfile.TemporaryDirectory(prefix="sr-und-", dir=_temp_root(config)) as temporary:
+                    proxy = render_proxy(plan.film, piece, Path(temporary))
+                    for variant in ("full", "no_plot"):
+                        try:
+                            response = _call_with_retry(client, model, proxy, piece.fps, plan.prompt(piece, variant))
+                            break
+                        except Blocked as blocked:
+                            reason = str(blocked)
+                            if plan.contexts[0] == plan.contexts[1]:
+                                break
+                piece_cost = cost_usd(model, response["usage"]) if response else 0.0
+                budget.settle(estimate, piece_cost)
+                cost += piece_cost
+                if response is None:
+                    results.append(None)
+                    refused.append({"first_ordinal": piece.shots[0]["ordinal"], "last_ordinal": piece.shots[-1]["ordinal"],
+                                    "reason": reason})
+                    summary["pieces_refused"] += 1
+                    continue
+                try:
+                    output = json.loads(response["text"])
+                    result, piece_issues = validate_chunk(piece, output if isinstance(output, dict) else {})
+                except (json.JSONDecodeError, TypeError):
+                    results.append(None)
+                    refused.append({"first_ordinal": piece.shots[0]["ordinal"], "last_ordinal": piece.shots[-1]["ordinal"],
+                                    "reason": "unparseable response"})
+                    continue
+                results.append(result)
+                issues.extend(piece_issues)
+                elapsed += float(response.get("elapsed_s") or 0.0)
+                for key, value in (response.get("usage") or {}).items():
+                    if isinstance(value, (int, float)):
+                        usage[key] = usage.get(key, 0) + value
+                summary["pieces_recovered"] += 1
+                summary["shots_recovered"] += len(result["shots"])
+            if not any(result is not None for result in results):
+                progress(f"[understanding] {plan.film.title} part {chunk.index + 1}: every piece was refused again")
+                continue
+            combined = combine_results(results)
+            store.write_json(path, {**{key: receipt[key] for key in ("chunk", "first_ordinal", "last_ordinal", "t_start",
+                                                                     "t_end", "fps", "model")},
+                                    "context": "split", "refused": None, "split": {"pieces": parts, "refused": refused},
+                                    "transport": "standard", "proxy": receipt.get("proxy") or {}, "model_version": None,
+                                    "finish_reason": "STOP", "usage": usage, "cost_usd": round(receipt.get("cost_usd", 0.0) + cost, 6),
+                                    "elapsed_s": round(elapsed, 2),
+                                    "issues": issues + [f"shots S{row['first_ordinal']}-S{row['last_ordinal']} refused by the content filter"
+                                                        for row in refused],
+                                    "result": combined})
+            summary["usd"] = round(summary["usd"] + cost, 4)
+            touched = True
+            progress(f"[understanding] {plan.film.title} part {chunk.index + 1}: recovered {len(combined['shots'])}/"
+                     f"{len(chunk.shots)} shots from {len(results) - len(refused)} of {len(results)} pieces (${cost:.2f})")
+        if touched:
+            summary["films_done"] += finalize(config, [plan], prod, model, progress)
+    return summary
+
+
 def finalize(config: Any, plans: list[FilmPlan], prod: store.Producer, model: str,
              progress: Callable[[str], None] = print) -> int:
     """Merge every film whose chunks all have receipts into its understanding artifact."""

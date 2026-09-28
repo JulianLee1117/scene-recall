@@ -119,6 +119,7 @@ def shot_evidence_schema() -> pa.Schema:
         pa.field("camera_segments", pa.string()),  # JSON [[start, end, label], ...]
         pa.field("motion_energy", pa.float32()),  # residual subject motion
         pa.field("hidden_cuts", pa.string()),     # JSON list[float]
+        pa.field("dark_spans", pa.string()),      # JSON list[[start, end]]: near-black stretches (fades)
         pa.field("people", pa.float32()),         # median people per sample
         pa.field("people_max", pa.int32()),
         pa.field("subject", pa.string()),         # JSON main-subject track (content-box coordinates)

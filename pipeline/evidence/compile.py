@@ -267,6 +267,7 @@ def compile_film_evidence(config: Any, db: Any, film: FilmRef) -> dict[str, int]
             "camera_reliability": camera.get("reliability"),
             "camera_segments": _json(camera.get("segments")) if m else None,
             "motion_energy": m.get("motion_energy"), "hidden_cuts": _json(m.get("cuts")) if m else None,
+            "dark_spans": _json(measure.dark_spans(m.get("frames"))) if m else None,
             "people": subjects.get("people_median"), "people_max": subjects.get("people_max"),
             "subject": _json(subject),
             "subject_x": subject["center"][0] if subject else None, "subject_y": subject["center"][1] if subject else None,

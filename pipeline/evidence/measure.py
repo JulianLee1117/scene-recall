@@ -642,6 +642,28 @@ def measure_group(models: Models, shots: list[ShotState]) -> dict[str, dict[str,
     return results
 
 
+def dark_spans(frames: list[Any] | None, *, threshold: float = 0.03, min_seconds: float = 0.4) -> list[list[float]]:
+    """Near-black stretches (fades, black frames) inside a shot from its sampled brightness.
+
+    ``frames`` rows are ``[t, sharpness, brightness, boxes]``. A stretch is a
+    run of samples below ``threshold`` mean luma lasting at least
+    ``min_seconds``, widened by half a sample spacing on each side.
+    """
+    samples = [(float(row[0]), float(row[2])) for row in frames or [] if len(row) >= 3]
+    if len(samples) < 2:
+        return []
+    spacing = float(np.median(np.diff([t for t, _ in samples]))) if len(samples) > 1 else 0.0
+    spans, run = [], []
+    for time, brightness in samples + [(float("inf"), 1.0)]:
+        if brightness < threshold:
+            run.append(time)
+            continue
+        if run and run[-1] - run[0] + spacing >= min_seconds:
+            spans.append([round(run[0] - spacing / 2, 3), round(run[-1] + spacing / 2, 3)])
+        run = []
+    return spans
+
+
 def _box_area(box: tuple[float, float, float, float]) -> float:
     return max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
 

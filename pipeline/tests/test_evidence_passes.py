@@ -280,3 +280,22 @@ def test_safety_finish_is_a_refusal_the_caller_can_retry_without_the_plot(monkey
                                                          "finish_reason": "FinishReason.PROHIBITED_CONTENT"})
     with pytest.raises(u.Blocked):
         u._call_with_retry(None, "m", None, 1.0, "prompt")
+
+
+def test_split_retry_pieces_keep_ordinals_and_combine_around_refused_pieces():
+    chunk = u.plan_chunks(_units([2.0] * 40))[0]
+    pieces = u.split_chunk(chunk, 4)
+    assert [len(piece.shots) for piece in pieces] == [10, 10, 10, 10] and {piece.index for piece in pieces} == {0}
+    assert pieces[1].shots[0]["ordinal"] == 11
+
+    def result(piece, title, continues):
+        first, last = piece.shots[0]["ordinal"], piece.shots[-1]["ordinal"]
+        return {"shots": {shot["unit_id"]: {"action": "x"} for shot in piece.shots},
+                "scenes": [{"first_shot": first, "last_shot": last, "title": title, "continues_previous": continues,
+                            "characters": []}],
+                "iconic": []}
+
+    combined = u.combine_results([result(pieces[0], "A", False), result(pieces[1], "A2", True), None,
+                                  result(pieces[3], "C", True)])
+    assert [(s["title"], s["first_shot"], s["last_shot"]) for s in combined["scenes"]] == [("A", 1, 20), ("C", 31, 40)]
+    assert len(combined["shots"]) == 30
