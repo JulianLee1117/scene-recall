@@ -627,6 +627,75 @@ creative acceptance remains open; a formal labeling campaign is not required
 to use or polish this workflow. Source-bound and playback checks cannot certify
 artistic quality. No learning pipeline or new retrieval representation is added.
 
+#### Editor harness v2 (ADR-0096)
+
+`lab.harness: v2` (default `v1`) replaces whole-edit regeneration with
+`pipeline.lab.harness`. Language models plan meaning; the edit itself is
+measured and optimized.
+
+- **Music map** (`music-map-v1`): Beat This! beats and downbeats, a band-wise
+  spectral-flux onset envelope, accents (peaks at least 100 ms apart, marked
+  on-beat within 60 ms), per-beat loudness percentiles, and the listening
+  sections snapped to downbeats. Span intensity blends the listening section's
+  energy (65%) with relative loudness (35%).
+- **Concept** (`harness-concept-v1`): one cached planner request turns the scoped
+  editor direction, song meaning and sections into one act per section: intent,
+  one to four search-v2 queries, a fame target (anchor, fresh, any) and a pace.
+  Sections the plan skips keep the listening suggestion.
+- **Pools**: each act's queries run through `search` with the preset matching the
+  fame target. Candidates carry compiled shot evidence and a normalized image
+  embedding; the previous edit's shots are excluded.
+- **Assembly** (`beat-lattice-assembly-v1`): a deterministic lattice beam search
+  (8 states per grid point) over frame-snapped beats. Kinetic and rapid acts also
+  offer half-beats and strong accents as cut points.
+  - Screen time carries relevance, motion versus intensity, craft and the fame
+    target.
+  - Each shot adds its peak-on-accent alignment and a log-duration penalty
+    around a pace target scaled by intensity.
+  - Transitions add eye-trace and screen-direction continuity, and penalize the
+    same scene, the same film back to back and jump cuts.
+  - Variety costs cover image similarity to the last six shots, reuse of a
+    visual cluster (spherical k-means on the pool) anywhere in the edit, and
+    growing film reuse.
+  - Windows never straddle hidden cuts or overlap near-black stretches
+    (`dark_spans`: sampled luma below 0.03 for at least 0.4 s, for example
+    fades). Locked shots are fixed spans. Spans only end where the remainder
+    before the next hard boundary is empty or at least the pace minimum.
+- **Review** (`harness-sequence-review-v1`): one cached planner request sees each
+  slot with up to four alternatives already placed on its span. It may swap a
+  shot for meaning, rhymes, fit or variety. Swaps to shots used elsewhere are
+  skipped. Timing never changes.
+- **Critique** (`harness-critique-v1`, off unless `lab.harness_critique: true`):
+  the reviewed edit is rendered as a preview. Gemini watches it with its audio at
+  4 fps and returns up to 16 timestamped issues, which drive one re-assembly and
+  review:
+  - weak, repetitive or off-direction shots are banned;
+  - "too fast" or "too slow" scales the pace of the overlapping acts by 1.35;
+  - off-beat and continuity flags are recorded only.
+
+  The upload is deleted after the request.
+
+The result is an ordinary document:
+- AI slot directions with resolved text searches and up to six alternatives;
+- earlier clips kept in the bin;
+- a `timing_plan` receipt in the v1 shape, whose notes are per-act editorial
+  choices;
+- `direction_plan` recording the concept, acts, music-map summary and review.
+
+**Fill gaps** under v2 keeps every cut and placed shot:
+- placed shots are fixed neighbours, built from their index rows, or neutral
+  when unindexed;
+- the edit's v2 concept is reused when its passage matches;
+- user-directed slots get one-slot acts whose pools come from their own queries;
+- the lattice runs on the pinned slot boundaries, and `_guard_edit` still
+  rejects moved cuts or changed protected fields.
+
+Targeted replacement and next-scene suggestions keep their v1 contracts. `GET /lab/projects/{id}/timeline.otio` exports the saved edit as
+OpenTimelineIO (`scene-recall-otio-v1`). It has a video track of source-film
+clips and gaps, with frame counts from the renderer's cumulative quantization;
+the song passage; and non-overlapping dialogue clips. Crops and mix levels
+travel as clip metadata.
+
 #### Music preparation and generation
 
 The workflow handles selected audio passages up to 600 seconds (ADR-0045). FFmpeg

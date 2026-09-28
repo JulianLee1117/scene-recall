@@ -9,50 +9,82 @@ Remove this file and its AGENTS.md pointer when the plan is complete.
 
 ## Progress (2026-09-28)
 
-Landed (ADR-0093, ADR-0094):
+Landed:
+- ADR-0093 evidence v2;
+- ADR-0094 search v2;
+- ADR-0095 last complete generation;
+- ADR-0096 editor harness v2 (opt-in).
 
-- **Evidence v2**, all passes: open metadata, synced OpenSubtitles (~70 films
-  accepted so far), Gemini understanding (pilot 5 films; the library runs through
-  the half-price batch transport), local measurement, hero frames and priors.
-  Per-film tables are compiled for search, and new films run every pass after
-  ingest.
-- **Search v2**: story/scene/in-context mood views ranked per view; a quote
-  channel over 208k subtitle lines; bounded priors with Balanced / Famous /
-  Hidden gems presets; scene cards; hero thumbnails and badges; resident
-  vectors; and a cross-encoder rerank.
-  - Eval, 27 known items on the 5 pilot films: MRR 0.29 → 0.96, hit@1 4 → 26.
-  - Median latency 4.9 s → 1.7 s idle.
+- **Evidence v2**, all passes: open metadata, synced OpenSubtitles, Gemini
+  understanding, local measurement, hero frames and priors. New films run every
+  pass after ingest. Compilation serves the previous profile while a new one
+  backfills.
+  - Clips that Gemini's filter refuses get a terminal receipt instead of looping.
+    `understand --retry-refused` recovers them in quarter-size pieces.
+  - Proxies skip non-reference frames (about 1.8x cheaper NVDEC).
+  - Near-black stretches (`dark_spans`) are compiled from measured brightness.
+- **Search v2**:
+  - evidence views, a quote channel, priors and presets;
+  - scene cards, hero thumbnails, resident vectors and a cross-encoder rerank;
+  - query signals, per-film Highlights and Hidden gems browsing;
+  - interaction logging.
+
+  Search keeps its last complete snapshot while evidence publishes. The rerank
+  has a 1 s budget and rests while the GPU is full.
+  - Eval (30 known items): MRR 0.97, hit@1 29.
+  - Latency: about 0.7 s without the rerank under GPU contention, about 0.9 s
+    with it on an idle GPU.
+- **Editor harness v2** (`lab.harness: v2`, opt-in):
+  - music map, concept acts, evidence pools;
+  - beat-lattice assembly, where action peaks land on accents and variety covers
+    scenes, films, looks and recent similarity;
+  - a sequence review;
+  - an optional critique loop (`lab.harness_critique`) in which Gemini watches a
+    rough cut and the edit is re-assembled once.
+
+  Fill gaps also runs through v2, keeping cuts and placed shots.
+
+  OTIO export ("Resolve timeline") works for any saved edit.
+  - Blind Gemini judging of fresh regenerations, each render scored alone at
+    4 fps: v1 and v2 tie on `everything` and `In My Head` (6.0 each). v2 is
+    2–2.5x faster and scores higher on imagery.
+  - The side-by-side judge is position-biased, so it is not used.
 - **Cleanup**: Jev/intent experiments and the exact scanner removed; ingest no
   longer queues frozen framing preparation.
 
-Running (started 2026-09-28): the library understanding batch
-(`understand --batch run`, about $100), library measurement, and the
-dialogue-only refresh for films with accepted subtitles. `.tmp/finish-library.sh`
-waits for them, then runs `highlights`, `hero`, `synthesize`, `compile` and
+Running (started 2026-09-28):
+- the library understanding batch (`understand --batch run`, about $100);
+- library measurement.
+
+`.tmp/finish-library-v2.sh` waits for them, then runs `highlights`, `hero`,
+`synthesize`, `compile --rebuild` (new `dark_spans` column) and
 `pipeline.eval.searchset` (log: `.tmp/finish-library.log`).
 
 Afterwards:
 
 - Restart the API and ingest worker so they run the new code. The API then
   holds resident vectors (about 3 GB, GPU when free) and the reranker.
-- Run `python -m pipeline.evidence prune --apply` to drop superseded
-  profiles, such as the 360p pilot understanding.
+- `python -m pipeline.evidence understand --retry-refused` for any remaining
+  refused clips, then `highlights`, `synthesize` and `compile` for those films.
+- `python -m pipeline.evidence prune --apply` drops superseded profiles.
 - Read the library eval and discovery report.
 - Keep subtitle downloads going daily (`subtitles --max-downloads 20`, then
   `refresh-dialogue`) until no film is left.
+- Owner: compare harness v2 on your own projects (set `lab.harness: v2`, then
+  Regenerate edit; History restores the previous edit). Switch the default once
+  it wins.
 
 Next:
 
-- **Phase 2 remainder**: query parsing into soft boosts (character, scale,
-  camera, colour); Framing v2 from measured layout; per-film Highlights and
-  Hidden gems browsing; interaction logging; latency (quote and lexical stages,
-  under 1 s).
+- Phase 3 remainder:
+  - lyric timing (LRCLIB) for literal lyric treatment;
+  - the critique loop's evaluation;
+  - a Recognizable ↔ Fresh control on structural peaks.
 - **Phase 1 boundary audit**, measured on the pilot: hidden cuts in 0.7% of
-  shots (model hint 0.6%; both agree on 0.17%). Cut times stay evidence
-  (`shot_evidence.hidden_cuts`) for consumers such as editor trims to avoid;
-  splitting canonical units is deferred until a concrete failure.
-- **Then Phase 3**: the editor harness; match-cut planning after that, per the
-  owner.
+  shots. Cut times stay evidence; assembly windows never straddle them.
+  Splitting canonical units is deferred until a concrete failure.
+- Match-cut planning after that, per the owner. Measured subject layout, screen
+  direction and camera segments now exist for it.
 
 ## Goal
 

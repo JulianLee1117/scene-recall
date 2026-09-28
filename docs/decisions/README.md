@@ -154,3 +154,4 @@ The accepted boundary or behavior.
 | [0093](0093-evidence-v2.md) | Accepted | Versioned per-film evidence artifacts, open metadata with world knowledge, measured-over-guessed facts and compiled search tables |
 | [0094](0094-search-v2.md) | Accepted | Search v2: evidence views fused by rank, quote channel, bounded priors and presets, scene cards, resident vectors, cross-encoder rerank; retire the intent experiments |
 | [0095](0095-serve-last-complete-generation.md) | Accepted | Compile from the newest available profile while a new one backfills; API search keeps its last complete snapshot during publication |
+| [0096](0096-editor-harness-v2.md) | Accepted (opt-in) | Editor harness v2: measured music map, concept acts, evidence pools, beat-lattice assembly and a sequence review; OTIO export |

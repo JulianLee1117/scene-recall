@@ -26,6 +26,7 @@ uv run python -m pipeline.evidence metadata                    # Wikidata, Wikip
 uv run python -m pipeline.evidence subtitles --max-downloads 20  # OpenSubtitles daily quota; synced and validated
 uv run python -m pipeline.evidence refresh-dialogue            # re-ingest films whose accepted subtitles are not adopted yet
 uv run python -m pipeline.evidence understand --batch run --max-usd 110   # half-price Gemini batch, unattended
+uv run python -m pipeline.evidence understand --retry-refused  # recover filter-refused clips in smaller pieces
 uv run python -m pipeline.evidence measure                     # local GPU pass (~3-4 min per film)
 uv run python -m pipeline.evidence hero
 uv run python -m pipeline.evidence synthesize
@@ -265,6 +266,21 @@ playback, bookmarks and Related without dragging or a drag badge. The player
 distinguishes its retrieved frame from the current playback time.
 
 ### AI Music Video and Match Cuts
+
+**Editor harness v2** ([ADR-0096](docs/decisions/0096-editor-harness-v2.md)) is
+opt-in with `lab.harness: v2` in `config.yaml`. **Regenerate edit** then:
+- measures the song's beats, accents and loudness;
+- plans a concept with one act and a few footage queries per musical section;
+- assembles cuts, shots and source windows together, so action peaks land on
+  accents and cuts follow continuity;
+- lets the planner swap shots once among pre-timed alternatives.
+
+**Fill gaps** keeps your cuts and placed shots and lets the optimizer pick shots
+for the empty slots. A slot with its own written search uses that search.
+Single-shot replacement keeps the v1 path. **Resolve timeline**
+(or `GET /lab/projects/{id}/timeline.otio`) downloads the saved edit as an
+OpenTimelineIO timeline on the original films, song and dialogue, for finishing
+in DaVinci Resolve.
 
 AI Music Video imports an original audio file into durable `state_dir/lab/tracks`
 and starts with a 30-second passage (or the whole track when shorter). Importing
