@@ -7,6 +7,40 @@ archived verbatim in
 [history/current-work-until-2026-09-27.md](history/current-work-until-2026-09-27.md).
 Remove this file and its AGENTS.md pointer when the plan is complete.
 
+## Progress (2026-09-28)
+
+Landed (ADR-0093, ADR-0094):
+
+- **Evidence v2**, all passes: open metadata, synced OpenSubtitles (~70 films
+  accepted so far), Gemini understanding (pilot 5 films; the library runs through
+  the half-price batch transport), local measurement, hero frames and priors.
+  Per-film tables are compiled for search, and new films run every pass after
+  ingest.
+- **Search v2**: story/scene/in-context mood views ranked per view; a quote
+  channel over 208k subtitle lines; bounded priors with Balanced / Famous /
+  Hidden gems presets; scene cards; hero thumbnails and badges; resident
+  vectors; and a cross-encoder rerank.
+  - Eval, 27 known items on the 5 pilot films: MRR 0.29 → 0.96, hit@1 4 → 26.
+  - Median latency 4.9 s → 1.7 s idle.
+- **Cleanup**: Jev/intent experiments and the exact scanner removed; ingest no
+  longer queues frozen framing preparation.
+
+Running: the library understanding batch, library measurement, and dialogue
+refresh for films with accepted subtitles. After them, run
+`python -m pipeline.evidence hero`, `synthesize` and `compile`, then re-run
+`pipeline.eval.searchset`.
+
+Next:
+
+- **Phase 2 remainder**: query parsing into soft boosts (character, scale,
+  camera, colour); Framing v2 from measured layout; per-film Highlights and
+  Hidden gems browsing; interaction logging; latency (quote and lexical stages,
+  under 1 s).
+- **Phase 1 remainder**: boundary audit (split units at hidden cuts
+  cross-checked with the model's cut hint).
+- **Then Phase 3**: the editor harness; match-cut planning after that, per the
+  owner.
+
 ## Goal
 
 1. Find the moment you remember (description, dialogue, character, event).

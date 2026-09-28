@@ -10,21 +10,26 @@ choices were made but do not override this document.
 
 Scene Recall supports four related jobs:
 
-1. Find a film moment someone remembers.
-2. Discover visually related references and playable source moments.
+1. Find a film moment someone remembers (description, dialogue, character, event).
+2. Surface great footage for an idea — famous and forgotten — without junk.
 3. Save source moments for later retrieval.
 4. Assemble and revise source-backed sequences in bounded Lab experiments.
 
 Retrieval returns source-backed evidence: film identity, time range, and the
-matched frame or text. AI Music Video can interpret music and organize retrieved
-evidence, but it must not invent first-stage results or legal source ranges.
+matched frame, line or text. AI Music Video can interpret music and organize
+retrieved evidence, but it must not invent first-stage results or legal source
+ranges.
 
 ```text
-text query
-  -> PE text-to-frame candidates
-  -> semantic text-view candidates
-  -> conditional full-text candidates
-  -> rank fusion and filtering
+text query (search v2, ADR-0094)
+  -> channels: PE text-to-frame | semantic text views (each view ranked on its
+     own, fused by rank) | full text | quotes over subtitle lines
+  -> weighted reciprocal-rank fusion (quote channel weighted up for quote-like queries)
+  -> cross-encoder rerank of the fused shortlist over each shot's evidence
+  -> junk filtering and visual deduplication
+  -> bounded priors under a preset (balanced | famous | gems)
+  -> one card per dramatic scene, temporal spread, film diversity
+  -> hero thumbnails, badges, story line, scene and matched line
 
 reference image (standalone API compatibility)
   -> PE frame candidates
@@ -39,16 +44,18 @@ typed recipe (product UI; one to three total clauses)
   -> optional query-bound uploaded Look or Framing adapter
   -> one ranking per independent input and reciprocal-rank fusion
   -> mandatory uploaded-image or composition gate when present
-  -> final filtering and diversity
+  -> final filtering, priors, scene cards and diversity
 
 result
-  -> film + timestamp + matched frame/text + playable media
+  -> film + timestamp + matched frame/line/text + playable media
 ```
 
 The product calls spatial reference matching **Framing**; the standalone API
 and recipe contract retain the `composition` name for compatibility. It is
 coarse appearance and position matching, not an exact editorial Match Cut
-mode.
+mode. Framing v2 (measured subject layout, ADR-0093) will replace its 6×6
+embedding grids; until then the grids stay active and their bulk preparation
+queue stays frozen.
 
 The accepted experimental boundary is deliberately separate:
 
@@ -73,94 +80,8 @@ scene reference (explicit Lab Match search; optional local person profile)
   -> optional silhouette evidence and actual A-to-B audition
 ```
 
-## Frozen search-decision experiment
-
-ADR-0086 admits an isolated text-only comparison in
-`pipeline.experiments.search_intent`. It consumes captured ordinary API results,
-preserves their source evidence and explicit scope, and compares baseline,
-independent intent signals, bounded evidence judgments and both. Only the first
-48 candidates may be reordered; candidate membership and the remaining tail
-stay intact. Model/prompt/input identities, exact response receipts, actual cost,
-transport timing and fallback components remain inspectable. Hosted execution
-requires bounded call/cost admission; unknown cost stops further paid attempts.
-Normal search, ingestion and category semantics do not depend on this adapter.
-
-Blind review aliases hide treatment names while grades/preferences remain
-human-owned. Frame inspection, source playback and provisional text evidence
-are distinct reference statuses. Expected-window ranks and operational timings
-are diagnostics, not automatic relevance grades or production latency claims.
-This experiment cannot establish candidate-generation recall or promote new
-category routing. The [comparison protocol](experiments/search-intent-comparison.md)
-defines the follow-up interaction and quality review.
-
-ADR-0088 adds isolated follow-up probes in `pipeline.experiments.jev_probe`:
-unchanged-evidence prompt/scoring comparisons and independent query category
-judgments. Each freezes its own plan and bounded hosted accounting. These probes
-do not alter ADR-0086 receipts, source evidence, production ranking or category
-routes. Agent textual labels remain separate from source/human relevance; the
-[second-round protocol](experiments/jev-round-two.md) fixes the comparison gates.
-
-ADR-0090 retires ADR-0089's interactive personal trial. Its UI, instrumentation,
-service and routes are removed; ordinary search has no hosted Jev dependency or
-trial collection. Prior receipts remain historical evidence, including unknown
-cost, and must not be treated as a completed relevance comparison. Any future
-comparison must distinguish reordering a fixed candidate pool from generating
-additional candidates. Neither a preferred result list nor a larger union proves
-complete library recall. No replacement experiment or category redesign is
-activated by retiring the trial.
-
-## Opt-in intent-guided retrieval comparison
-
-[ADR-0091](decisions/0091-intent-guided-retrieval-comparison.md) admits an explicit
-comparison using a model-independent query-intent record and deterministic plans
-over existing evidence views. Ordinary search remains the default. The main
-search page offers **Compare Jev** after plain-text searches; ordinary, fixed
-expansion and Jev-guided lists share one pinned library snapshot, original query
-and confirmed film scope. Manual recipes and image gates remain authoritative
-and are outside this first experiment.
-
-Both expansion strategies allow a 120-candidate supplemental allocation, divided
-among available views. One half-weight baseline rank vote and one half-weight
-strongest targeted rank vote prevent repeated related routes from multiplying
-their influence. Final ordinary filtering/diversity runs once after union by
-stable unit ID. Intent confidence chooses evidence routes; it never measures
-scene relevance or becomes a hidden exclusion. Unsupported plot/action needs
-remain explicit, and no new embedding space or ingestion is introduced.
-
-The frozen API accepts validated intent without hosted calls. The separate
-hosted comparison action records bounded query-only receipts and falls back
-after a two-second interpretation deadline. Late responses are accounted for
-without changing a returned list. Exact receipt reuse is free; failures do not
-automatically retry. Interactive admission is capped at 64 attempts/$0.05 with
-a conservative reserve, and unknown cost blocks further attempts. The offline
-runner has separate explicit caps and replayable receipts. Candidate-budget
-parity is not compute parity, and novel candidates do not prove relevance.
-
-Interactive comparison has a 45-second total server deadline and a separate
-50-second browser watchdog covering both fetch and response decoding. Cancel,
-disconnect and timeout stop later retrieval stages while any active native call
-keeps the admission slot until it exits. The original result grid stays usable;
-late results are ignored and retry is explicit. Frozen offline captures retain
-their own runner limits.
-
-The explicit frozen `/search/intent/benchmark` route isolates single-strategy
-retrieval timings with the already loaded API models. Up to two rotated rounds
-run over one pinned snapshot with fresh request memos, the same admission slot,
-and at most 48 results. No hosted requests or index writes occur. The separate
-four-case runner checks loaded code identities; warm model/database caches and
-excluded interpretation/HTTP time are disclosed in its receipt.
-
-Unscoped partial semantic-view reads can use an exact sequential cosine scan
-against the pinned table version, avoiding scalar-index vector gathers. This
-physical optimization keeps filters/projections/limits unchanged and applies
-only when the optional native scanner exists and the table has no vector index.
-Otherwise use the existing query path; scoped and ordinary all-view reads retain
-their physical plans.
-
-Refine is a single disclosure with a synchronized chevron, five consistently
-laid-out category controls and a contained editor. Active refinements remain
-visible when closed. Escape/click-away dismiss the panel and examples hide while
-it is open. This presentation changes no category or source-reference semantics.
+The Jev/intent-routing comparisons (ADR-0086, 0088, 0091) are retired by
+ADR-0094; their receipts remain historical evidence only.
 
 ## Durable evidence and replaceable derivations
 
@@ -192,7 +113,36 @@ incompatible vector spaces. Preserve old profiles until a replacement is
 complete and deliberately activated; missing optional derivations must degrade
 to a known-safe baseline.
 
+### Evidence v2
+
+ADR-0093 adds `pipeline/evidence` between canonical structure (films, shots,
+frames, units) and the indexes. Each producer writes one immutable JSON artifact
+per film to `assets_dir/<film_id>/evidence/<kind>/<profile_id>.json[.gz]`. The
+profile ID hashes everything that shapes the output (model, prompt, schema,
+settings); recorded input digests make stale artifacts detectable. Producers:
+
+| Kind | Producer | Facts |
+|---|---|---|
+| `metadata` | open data | Wikidata identity, cast and characters, directors, genres; Wikipedia plot; Wikiquote quotes; IMDb votes and Wikimedia pageviews (TMDB excluded by its terms) |
+| `audio`, `subtitles` | Silero VAD, OpenSubtitles | English subtitles for Whisper-only films, synced to speech (FFT alignment, frame-rate scales, windowed shifts) and accepted by lift/prominence/text agreement; raw downloads archived |
+| `understanding` | Gemini 3.8 Flash | per chunk of ≤160 shots: 240p shot-numbered proxy + shot table + dialogue + cast/plot context → scenes, per-shot characters, action, peak time, emotion, line, sound, fame 0-3, craft 0-3, cut hint, iconic moments; resumable chunk receipts; standard or half-price batch transport; a synopsis that trips a content filter is retried without it |
+| `measure` | RAFT-small, RF-DETR | one GPU decode per film: camera flow series (labels derived at compile time, including slow drift), hidden cuts, subject boxes and main-subject track, letterbox-aware look and palette, sharpness |
+| `hero` | frame pick | the best sampled still near the understanding peak, extracted at 1280 px |
+| `synthesis` | priors | within-film and library fame, craft, distinctiveness; rare iconic and hidden-gem flags; per-film highlights and gems |
+
+Measured facts come from pixels; model estimates of measurable quantities are
+hints only. World knowledge is allowed and labelled by its producer. Search
+reads compiled tables — `film_meta`, `shot_evidence`, `scenes`, `dialogue_lines`
+(quote index: positions, no stemming, stop words kept) — which hold no primary
+data and are rebuilt by `python -m pipeline.evidence compile [--rebuild]`.
+After ingestion, `pipeline.evidence.pipeline.refresh_films` brings a new film's
+evidence up to date (`ingest.evidence`); cached passes skip and failures never
+undo publication.
+
 ### Optional source context
+
+Status: frozen. The evidence-v2 understanding pass supersedes this pilot for
+story context; the package stays until the editor harness is rebuilt.
 
 ADR-0066 admits a bounded source-context pilot above retrieved evidence. The
 `pipeline.context` package stores immutable, model/prompt/schema/input-scoped
@@ -1744,8 +1694,8 @@ The current pipeline performs:
 
 1. Content-addressed film probing.
 2. Dialogue extraction from a usable canonical English SRT sidecar, a
-   metadata-eligible English embedded text subtitle stream, or local speech transcription, in
-   that order.
+   metadata-eligible English embedded text subtitle stream, an accepted synced
+   English download (evidence v2), or local speech transcription, in that order.
 3. Shot detection and bounded subdivision of long shots.
 4. Up to three ordered keyframes per shot, with temporal coverage for short shots.
 5. Local preview generation and optional browser-audio playback preparation.
@@ -1753,6 +1703,9 @@ The current pipeline performs:
 7. One hosted structured annotation over the ordered keyframes.
 8. Publication of film, frame, and unit records.
 9. A non-blocking local semantic-text derivation.
+10. A non-blocking evidence-v2 refresh (`ingest.evidence`): metadata,
+    subtitles, understanding, measurement, hero frames, priors, compiled tables
+    and text views, each skipped when current.
 
 Hosted annotation caches are scoped by provider, requested model, prompt,
 schema, settings, ordered frame hashes and, when present, the sampling profile.
@@ -2070,87 +2023,75 @@ generation-tagged schemas or cross-table transaction support.
 
 ### Text retrieval
 
-Normal text search independently ranks:
+Normal text search (ADR-0094) independently ranks:
 
-- PE text-to-frame visual matches;
+- PE text-to-frame visual matches (each shot by its best frame);
 - the active semantic text profile;
 - native full-text matches over `searchable_text` when the broad query is
-  compound or explicitly quoted.
+  compound or explicitly quoted;
+- quotes: subtitle lines from `dialogue_lines`, matched by phrase and terms and
+  re-scored by ordered token overlap over a line and its neighbouring cues.
 
 An unquoted broad query with exactly one word token omits full-text as an
-independent fusion vote when a visual or semantic channel is active. This is a
-query-shape policy, not a vocabulary classifier: it prevents an incidental
-caption, subtitle, or OCR occurrence from promoting an otherwise weaker match
-for an open concept such as `beautiful`. Quoting the term restores explicit
-word evidence, compound broad queries retain lexical corroboration, and a
-lexical-only evaluation remains a true retrieval mode. The focused Words facet
-continues to search only dialogue and OCR semantic views.
+independent fusion vote when a visual or semantic channel is active; quoting
+the term restores explicit word evidence. The quote channel's weight follows
+the best line match: strong (≥ 0.8) makes it the leading vote, weak matches add
+little. The focused Words facet fuses quotes with the dialogue and OCR views.
 
-The semantic profile uses Qwen3-Embedding-0.6B and stores independent non-empty
-`caption`, `dialogue`, `ocr`, `facets`, and `mood` views. `facets` remains the
-broad structured document used by normal text search. The narrow `mood` view
-contains only stored mood labels and known energy, serialized as labeled text;
-it excludes setting, framing, time, camera, palette, and subjects. Matching
-views collapse to one vote per unit before weighted reciprocal-rank fusion. The
-winning view and text are returned as evidence.
+The semantic profile uses Qwen3-Embedding-0.6B with independent non-empty views
+(view contract 3): `caption`, `dialogue`, `ocr`, `facets` (framing, setting,
+time, energy, measured camera movement, mood, palette, subjects), `mood`
+(emotion, scene tone and sound from the understanding pass, else stored mood
+labels and energy), `story` (action, characters, iconic note, setting) and
+`scene` (scene title, summary, story context, tone; shared by its shots). Each
+view ranks on its own and votes by weighted reciprocal rank, because distances
+are not comparable across document styles; the view where a shot ranked best
+is returned as evidence. Stills-guessed camera movement is not searchable.
 
 Semantic queries use the neutral instruction `Retrieve scene descriptions
-matching the query.` under `scene-recall-semantic-query-v2` (ADR-0053). The user's
-input supplies the search concepts; the instruction does not add dialogue,
-cinematography, film-production, or narrative examples. Stored documents remain
-uninstructed under embedding contract 1. Manifest query-instruction fields
-record producer provenance, independently of the serving query policy. Accept
-only the exact recognized v1 or v2 text/version pair, while retaining strict
-model, revision, dimension, embedding/view contract, and complete table-generation
-checks. Unknown or mismatched instruction pairs remain invalid. A recognized
-v1 producer can publish compatible documents while the API serves v2 queries;
-query-only updates require an API restart, not an index backfill. Result debug
-and evaluation provenance record the query policy actually used. Existing
-whole-channel fallback applies whenever document readiness fails. This
-query-policy correction preserves the independent channels, facet adapters,
-fusion, candidate depths, and diversity policies below.
+matching the query.` under `scene-recall-semantic-query-v2` (ADR-0053); stored
+documents remain uninstructed under embedding contract 1. Manifests record
+producer provenance and must match the model, revision, dimension, embedding
+and view contracts and the exact table generations; otherwise the whole text
+channel falls back to the legacy PE text vector.
+
+Channels are fused by weighted reciprocal rank. When `retrieval.rerank_shortlist`
+is positive, Qwen3-Reranker-0.6B reads the query with each shortlisted shot's
+evidence (film, scene, action, visual caption, dialogue) and its judgement is
+blended with the fused rank inside the shortlist only.
 
 Deterministic filtering handles unrequested credits, logos, title cards, blank
-frames, and static artifacts using the visual caption only (ADR-0054), including
-explicitly captioned credit overlays and title graphics. Dialogue
-and combined searchable text cannot establish visual junk: talking about a
-credit card or a letter written by someone does not make the shot a credit
-roll. Explicit requests for those visual categories retain their existing
-overrides. Blank suppression requires conservative evidence that the whole
-picture is empty (ADR-0087). A black/white screen mentioned as an object or
-background, dark visible content, or a fade within a meaningful shot cannot
-alone establish blank footage. Ambiguous captions remain eligible; other junk
-categories keep their independent checks, including explicit full-screen dense
-credit typography/listings and centered title text in an opening-card
-composition. Visual deduplication suppresses near-identical
-evidence. After that hard suppression, ordinary unscoped text and unconstrained
-typed-recipe streams apply a 30-second defer-only temporal spread: nearby
-results from the same film move behind the first available result from each
-competing sequence, but remain as relevance backfill. Explicit film scopes
-preserve strict relevance order.
+frames and static artifacts using the visual caption only (ADR-0054, ADR-0087).
+Visual deduplication then suppresses near-identical evidence.
 
-Normal unscoped broad search retrieves three times the configured per-channel
-candidate depth before fusion so that a film outside a source-heavy top window
-can become eligible through cross-channel agreement. After fusion, it retains
-the configured candidate prefix plus the best deep candidate from each of at
-most one page's worth of films absent from that prefix. This bounded reserve
-prevents the deeper pool from expanding quadratic visual-deduplication work.
-This ordinary unscoped broad stream then uses the bounded repeat-rank policy:
-a film's next candidate has priority
-`original_rank + strength * repeats / (repeats + 1)`. The configured default
-strength of 32 is a measured prototype value, not a universal optimum. The
-finite penalty is deterministic, preserves every eligible result in its full
-permutation, and keeps deeper 12/48/96/200 prefixes exact. Unscoped typed
-recipes without a mandatory uploaded-image or indexed-Framing candidate gate
-apply the same final repeat-rank policy after clause fusion, filtering, visual
-deduplication, and their ordinary 30-second spread. They keep their established
-internal clause depths and do not inherit broad search's deeper channels or
-cross-film reserve. Explicit scopes on those ordinary streams remain strict.
-Unscoped mandatory visual recipes retain the existing page-wise per-film
-preference, which relevance-backfills each unfilled slot and relaxes its
-cumulative per-film target on later pages; neither policy guarantees
-representation for every film. A movie-scoped mandatory visual recipe skips
-film balancing but retains its separate 90-second reference spread.
+Priors apply after relevance (`pipeline.search.priors`): a shot's rank-derived
+relevance is multiplied by at most a small factor from its fame (library-scaled)
+and craft under the selected preset — `balanced` (default), `famous` or `gems`
+(demotes iconic shots and weak craft). Priors reorder inside the relevant pool
+and never add candidates; quote-like queries keep half-strength priors; shots
+without evidence are neutral. Shots of the same dramatic scene fold into one
+card whose other matches are listed as `scene_alternatives`.
+
+Ordinary unscoped streams then apply the 30-second defer-only temporal spread
+and the bounded film repeat-rank policy
+(`original_rank + strength * repeats / (repeats + 1)`, default strength 32).
+Normal unscoped broad search retrieves three times the per-channel depth and
+keeps a one-page cross-film reserve. Explicit film scopes preserve strict
+relevance order. Unscoped mandatory visual recipes keep their page-wise per-film
+preference; movie-scoped mandatory visual recipes keep the 90-second reference
+spread.
+
+Results carry `keyframe_url`/`keyframe_index` (the exact indexed frame used when
+a result becomes a search source) and a display-only `thumbnail_url`: the hero
+frame, unless the visual channel is what found the shot. They also carry badges
+(`iconic`, `gem`), story action and characters, peak time, scene context and the
+matched subtitle line with exact times.
+
+Text views, frames and unit metadata are searched from resident copies of the
+request's pinned snapshot (`pipeline.search.resident`): float16 matrices (GPU
+when there is room, otherwise CPU) and an Arrow metadata table, keyed by table
+and version. A table version holds exactly one vector space, so resident search
+cannot mix profiles; any load failure falls back to Lance.
 
 ### Reference and Framing retrieval
 
@@ -2421,8 +2362,19 @@ unavailable at query time, the complete dense-text channel falls back to the
 legacy PE `units.txt_vec` representation. Partial generations are never mixed.
 
 Existing films build or repair this profile with the idempotent `index-text`
-command documented in `README.md`. New ingestion attempts the same derivation
-after publication; failure leaves the film searchable through the fallback.
+command documented in `README.md` (`python -m pipeline.evidence compile` runs it
+after compiling evidence). New ingestion attempts the same derivation after
+publication; failure leaves the film searchable through the fallback.
+
+Evidence-v2 search inputs activate per film: compiled rows exist only for films
+with artifacts, and every consumer treats a missing row as "no evidence"
+(neutral prior, no story/scene view, keyframe thumbnail). Understanding and
+measurement profiles are read at their configured producer identity only;
+artifacts from other profiles stay on disk and are ignored. Resident vectors and
+metadata are accelerators: they load from the pinned snapshot's table versions
+and any failure returns the request to the Lance path. The cross-encoder rerank
+is optional (`retrieval.rerank_shortlist: 0` disables it); an unavailable model
+leaves the fused order unchanged.
 
 ADR-0082 separates acceleration from retrieval evidence. The new
 `source-hashed-spatial-cache-v2` table validates each requested frame against
@@ -2432,19 +2384,20 @@ Live and cached candidate/query grids use the identical float16 round trip.
 Cache occupancy changes neither candidate membership nor numeric scoring.
 Legacy complete caches retain ADR-0009's manifest validation during migration.
 
-Successful ingestion queues optional preparation in the existing ingest worker.
-A durable job covers one film/profile/source generation and yields every 32
-frames behind foreground work. Storage or lock pressure pauses preparation;
-explicit retry resumes the cursor. This never delays canonical film readiness.
-Compact preparation does not require retaining full spatial grids. Source and
-profile changes remain independently backfillable without re-ingesting films.
+Optional preparation runs as durable jobs in the existing ingest worker: one
+job per film/profile/source generation, yielding every 32 frames behind
+foreground work; storage or lock pressure pauses it and explicit retry resumes
+the cursor. It never delays canonical film readiness, and source and profile
+changes remain backfillable without re-ingesting films. New ingests no longer
+enqueue it (see below).
 
 ADR-0092 adds an explicit operator hold for currently pending optional
 preparation/fitting jobs. Drain active work first; `search-features pause`
 preserves descriptors and cursors in the existing ledger. Worker restart and
 duplicate enqueue cannot lift that hold; `search-features resume` releases only
-operator-held jobs. This is a hold on the existing batch, not a new global
-scheduler or a policy disabling preparation for future ingests.
+operator-held jobs. Ingestion no longer queues this preparation for new films:
+the framing representation pilot is frozen until measured subject layout
+(Framing v2) replaces it.
 
 Before further bulk preparation, an isolated 524-frame representation pilot
 compares current PE final features, one frozen intermediate layer and an
@@ -2454,8 +2407,7 @@ code, source, preprocessing and output hashes stay distinct; no pilot artifact
 is published into serving indexes. Its 90-minute compute and 2 GiB artifact
 caps, 32-frame checkpoints and existing ingest lock bound local work. The
 pilot provides screening evidence only; unjudged results cannot promote a
-model or bypass the existing coverage and human-review gates. Jev's
-query-interpretation evaluation remains independent of this visual comparison.
+model or bypass the existing coverage and human-review gates.
 
 The experimental compact composition route uses a frozen uncentered projection
 of existing PE cells, with separate 32/64-dimensional profiles and at most
@@ -2531,14 +2483,17 @@ search or replace this promotion rule.
 - Grounded Match Cut and Motion Match are not active in main search. Current Framing
   cannot reliably match pose, temporal direction, brief action, or camera
   movement.
-- Dialogue is embedded at shot level rather than as utterance rows.
+- Semantic dialogue is embedded at shot level; utterance rows serve the quote
+  channel through full text, not embeddings.
 - OCR comes from the general annotator rather than a dedicated OCR pass.
-- `scene` uses the current caption annotation and `mood` is a narrow projection
-  of current mood/energy annotations rather than an independently learned
-  representation; there is no plot retrieval representation. ADR-0066 adds only
-  optional scoped source-context artifacts for bounded editorial comparisons.
-- There are no film clip/audio, scene-summary, router or RAG indexes. Imported
-  music has bounded per-passage derivations, not a film-audio search index.
+- Story, scene and in-context mood exist only for films with an understanding
+  artifact; fame and craft are model ratings calibrated per film, not audience
+  measurements of individual shots.
+- Measured camera labels are unreliable on chaotic handheld, water, smoke and
+  very dark shots (they stay `unknown`); dolly versus zoom is not separated.
+- Hidden cuts are detected and recorded but units are not yet split.
+- There are no film clip/audio, router or RAG indexes. Imported music has
+  bounded per-passage derivations, not a film-audio search index.
 - Saved scenes are local to one configured state database; named collections
   and account synchronization are not implemented.
 

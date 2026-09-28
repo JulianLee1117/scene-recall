@@ -8,71 +8,52 @@ directions are documented in
 for material choices are indexed in
 [docs/decisions/](docs/decisions/README.md).
 
-## Source context pilot
+## Evidence and ranking
 
-An optional context layer prepares cited observations and narrative claims from
-existing timestamped evidence, independently of ingestion and search indexes
-([ADR-0066](docs/decisions/0066-source-context-pilot.md)). It is a bounded
-experiment: it does not provide complete film plots or verified action timing.
-The editor interprets possible metaphors against the music and user direction;
-those interpretations are not stored as canonical film facts.
+Search reads per-film evidence ([ADR-0093](docs/decisions/0093-evidence-v2.md)):
+open film metadata, synced subtitles, a hosted understanding pass (scenes,
+characters, actions, fame and craft per shot), local measurements (camera
+motion, subjects, look), hero frames and priors. Everything is a versioned
+artifact under `assets_dir/<film_id>/evidence/`; search tables are compiled from
+those artifacts and can be rebuilt at any time.
 
-Create a JSON plan with explicit existing film IDs and source-player seconds:
-
-```json
-{"schema_version":1,"windows":[{"film_id":"<indexed-film-id>","start":120.0,"end":240.0}]}
-```
-
-Inspect readiness first, then execute with a ceiling on uncached hosted calls:
+New films get every pass automatically after ingestion (`ingest.evidence`,
+hosted passes gated by `ingest.evidence_hosted`). For the library:
 
 ```powershell
-uv run python -m pipeline.context.build --plan context-plan.json --report context-dry.json
-uv run python -m pipeline.context.build --plan context-plan.json --execute --max-calls 1 --report context-run.json
+uv run python -m pipeline.evidence status                      # coverage per pass
+uv run python -m pipeline.evidence metadata                    # Wikidata, Wikipedia, Wikiquote, IMDb votes, pageviews
+uv run python -m pipeline.evidence subtitles --max-downloads 20  # OpenSubtitles daily quota; synced and validated
+uv run python -m pipeline.evidence refresh-dialogue            # re-ingest films whose accepted subtitles are not adopted yet
+uv run python -m pipeline.evidence understand --batch run --max-usd 110   # half-price Gemini batch, unattended
+uv run python -m pipeline.evidence measure                     # local GPU pass (~3-4 min per film)
+uv run python -m pipeline.evidence hero
+uv run python -m pipeline.evidence synthesize
+uv run python -m pipeline.evidence compile                     # search tables + semantic text views
+uv run python -m pipeline.evidence refresh --film "Title"      # every pass for chosen films
 ```
 
-Each plan permits at most three films and twenty windows of 180 seconds, with
-at most sixteen existing keyframes per request. The builder uses the configured
-OpenAI Lab planner and loads `.env`; it never listens again, runs search models,
-reingests films or changes saved projects. Timed dialogue must pass structural
-and recorded-source checks; this does not establish translation, speaker identity
-or exact synchronization. Missing or uncertain evidence remains explicit.
-Unchanged completed requests are reused; failed or uncertain provider attempts
-are not automatically retried. `--execute --max-calls 0` permits cached recovery.
-An explicit `--report` writes only that report during dry-run.
+Every command accepts `--film` (repeatable: film ID, 8+ character ID prefix or
+title substring). Hosted passes need `GEMINI_API_KEY` (understanding) and
+`OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD`
+(subtitles) in `.env`. `understand --batch status` lists submitted batch jobs;
+`--batch collect` writes their results once finished. `compile --rebuild` drops
+and recompiles the search tables after a schema change.
 
-Artifacts live under `assets_dir/context/<profile>/<film_id>/`, preserving prior
-versions. The initial producer profile is `sampled-narrative-context-v1`;
-`--profile-id` selects another explicit profile when model/prompt/settings change.
+Search ranks by relevance first, then applies a preset: **Balanced** (default)
+lets iconic and well-made shots rise a little, **Famous** favours iconic
+moments, **Hidden gems** favours well-made shots people rarely see. Shots of
+one dramatic scene fold into one card. `retrieval.rerank_shortlist` (default 40)
+sets the cross-encoder rerank of the fused shortlist; `0` disables it.
 
-`lab.context_profile: null` keeps ordinary editor behavior. For an evaluated
-private run, set it to the prepared profile in a separate config; after changing
-the service config, restart API and worker as usual. The selector reads cached
-context only after retrieval, with at most three covered films, 96 candidates,
-24 records and 24,000 characters. The character budget is shared across retained
-records, each contributing at most four locally relevant claims. Uncertainty and
-omission markers are retained when evidence excerpts or whole claims must be
-reduced; the full artifact stays available for audit. Main search and manual **Find scenes** are
-unchanged. Context has separate applicability/support ranges and cannot expand
-an offered clip. Raw-source identity is rechecked; the payload explicitly reports
-when current derived-input dependency freshness has not been rechecked.
-
-Context-enabled selections preserve a private
-`assets_dir/lab/requests/<job-id>-source-context-input.json` receipt. Compare its
-frozen candidates with and without context, without touching the project:
+Measure changes against the personal eval set:
 
 ```powershell
-uv run python -m pipeline.experiments.context_selection --input selection-input.json --out context-dry
-uv run python -m pipeline.experiments.context_selection --input selection-input.json --out context-pair --execute --allow-hosted --max-hosted-calls 2
+uv run python -m pipeline.eval.searchset [--preset famous] [--rerank 0]
 ```
 
-Each comparison uses a new output directory and at most two hosted calls. It
-records inputs, model receipts, validated source windows, timing, latency and
-claim-audit material. It does not automatically render, retrieve, listen or write
-projects. Factual and played creative grades remain pending human review; valid
-JSON and persuasive explanations do not establish a better edit. Wider context
-processing and a context retrieval index remain gated on that comparison.
-The [first pilot report](docs/experiments/source-context-pilot.md) records the
-twenty-window backfill, private rendered comparison and known factual failures.
+It reports known-item ranks (MRR, hit@1/5/12) and keeps each query's top results
+in `pipeline/eval/runs/` for a side-by-side read.
 
 ## Prerequisites
 
@@ -91,6 +72,8 @@ uv sync --dev
 # Configure the annotation provider
 cp .env.example .env
 # Add OPENAI_API_KEY to .env (or GEMINI_API_KEY if using Gemini)
+# Evidence v2: GEMINI_API_KEY (understanding) and OPENSUBTITLES_API_KEY,
+# OPENSUBTITLES_USERNAME, OPENSUBTITLES_PASSWORD (English subtitles)
 
 # Configure the web frontend
 cd web
@@ -1499,117 +1482,74 @@ only: it does not run a model, combine vector scores, invent judgments, or
 treat ungraded candidates as negatives. The initial cases are diagnostic seeds
 and must be expanded and human-graded before Match Cut activation.
 
-### Frozen search-decision comparison
+## Source context pilot (frozen)
 
-The isolated Jev comparison reorders a frozen ordinary-search result pool; it
-does not activate hosted search, alter categories or build indexes. With the
-local API already running, capture the fixture into a new run directory:
+Frozen: the evidence-v2 understanding pass supersedes this pilot for story
+context. It remains available until the editor harness is rebuilt.
 
-```powershell
-uv run python -m pipeline.experiments.capture_search_intent --queries pipeline/eval/search_intent_queries.yaml --out pipeline/eval/runs/intent-example/capture.json
-uv run python -m pipeline.experiments.search_intent --input pipeline/eval/runs/intent-example/capture.json --out pipeline/eval/runs/intent-example/plan
+An optional context layer prepares cited observations and narrative claims from
+existing timestamped evidence, independently of ingestion and search indexes
+([ADR-0066](docs/decisions/0066-source-context-pilot.md)). It is a bounded
+experiment: it does not provide complete film plots or verified action timing.
+The editor interprets possible metaphors against the music and user direction;
+those interpretations are not stored as canonical film facts.
+
+Create a JSON plan with explicit existing film IDs and source-player seconds:
+
+```json
+{"schema_version":1,"windows":[{"film_id":"<indexed-film-id>","start":120.0,"end":240.0}]}
 ```
 
-Capture makes sequential local search requests and rejects changing observed
-table versions. Partial captures cannot be replayed. The second command is a
-dry plan: it makes no hosted requests and does not read credentials. To execute
-the 25-case comparison, set the optional server-side `OPENROUTER_API_KEY` and
-explicitly admit its call/cost ceiling:
+Inspect readiness first, then execute with a ceiling on uncached hosted calls:
 
 ```powershell
-uv run python -m pipeline.experiments.search_intent --input pipeline/eval/runs/intent-example/capture.json --out pipeline/eval/runs/intent-example/comparison --execute --allow-hosted --max-calls 50 --max-usd 1
-uv run python -m pipeline.experiments.search_intent_review --input pipeline/eval/runs/intent-example/comparison/blind-review.json --out pipeline/eval/runs/intent-example/comparison/review.html --resolve-playback
+uv run python -m pipeline.context.build --plan context-plan.json --report context-dry.json
+uv run python -m pipeline.context.build --plan context-plan.json --execute --max-calls 1 --report context-run.json
 ```
 
-Every output must be new. Call/cost admission is conservative, not a
-provider-enforced billing cap. Create `comparison/STOP` to stop before another
-paid call; an in-flight request completes its receipt. Exact completed receipts
-can be reused with `--cache-dir` in a new run; failed or unpriced calls are never
-silently retried. The review page hides treatment identities and exports manual
-grades; leave `blind-key.json` closed until review is complete. See the
-[protocol and first results](docs/experiments/search-intent-comparison.md) for
-reference limitations, timing definitions and promotion gates.
+Each plan permits at most three films and twenty windows of 180 seconds, with
+at most sixteen existing keyframes per request. The builder uses the configured
+OpenAI Lab planner and loads `.env`; it never listens again, runs search models,
+reingests films or changes saved projects. Timed dialogue must pass structural
+and recorded-source checks; this does not establish translation, speaker identity
+or exact synchronization. Missing or uncertain evidence remains explicit.
+Unchanged completed requests are reused; failed or uncertain provider attempts
+are not automatically retried. `--execute --max-calls 0` permits cached recovery.
+An explicit `--report` writes only that report during dry-run.
 
-`--resolve-playback` reads each displayed film's existing local playback URL at
-page generation time, preserving the prepared browser/audio representation.
-It prepares no new media and makes no hosted calls. Keep the API/source drive
-available during review; unresolved films are explicitly unavailable. Omitting
-the flag creates an offline review page with playback unresolved. Resolution
-does not prove successful browser playback; inspect and listen before grading.
+Artifacts live under `assets_dir/context/<profile>/<film_id>/`, preserving prior
+versions. The initial producer profile is `sampled-narrative-context-v1`;
+`--profile-id` selects another explicit profile when model/prompt/settings change.
 
-The [second-round probes](docs/experiments/jev-round-two.md) use the pure builders
-in `pipeline.experiments.jev_evidence_probe` and `pipeline.experiments.jev_categories`
-to freeze request plans. Run a prepared plan with the isolated executor:
+`lab.context_profile: null` keeps ordinary editor behavior. For an evaluated
+private run, set it to the prepared profile in a separate config; after changing
+the service config, restart API and worker as usual. The selector reads cached
+context only after retrieval, with at most three covered films, 96 candidates,
+24 records and 24,000 characters. The character budget is shared across retained
+records, each contributing at most four locally relevant claims. Uncertainty and
+omission markers are retained when evidence excerpts or whole claims must be
+reduced; the full artifact stays available for audit. Main search and manual **Find scenes** are
+unchanged. Context has separate applicability/support ranges and cannot expand
+an offered clip. Raw-source identity is rechecked; the payload explicitly reports
+when current derived-input dependency freshness has not been rechecked.
+
+Context-enabled selections preserve a private
+`assets_dir/lab/requests/<job-id>-source-context-input.json` receipt. Compare its
+frozen candidates with and without context, without touching the project:
 
 ```powershell
-uv run python -m pipeline.experiments.jev_probe --input pipeline/eval/runs/search-intent-20260921-round2/evidence-plan.json --out pipeline/eval/runs/jev-example/plan
-uv run python -m pipeline.experiments.jev_probe --input pipeline/eval/runs/search-intent-20260921-round2/evidence-plan.json --out pipeline/eval/runs/jev-example/evidence --execute --allow-hosted --max-calls 12 --max-usd 0.08
+uv run python -m pipeline.experiments.context_selection --input selection-input.json --out context-dry
+uv run python -m pipeline.experiments.context_selection --input selection-input.json --out context-pair --execute --allow-hosted --max-hosted-calls 2
 ```
 
-The first command is dry and reads no credentials. Execution requires a new
-output directory, persists attempts before transport and halts on unknown cost;
-there is no automatic retry or resume. A run-local `STOP` file prevents the next
-call. Plans retain local expectations separately from provider request bodies.
-Re-execution spends a new budget; use the retained receipts for offline analysis.
-
-The interactive personal Search trial was retired at the owner's request; its
-controls and runtime integration have been removed. Normal search makes no Jev
-requests. The earlier offline tools above remain available for explicitly bounded
-experiments. See [ADR-0090](docs/decisions/0090-retire-personal-search-trial.md).
-
-### Intent-guided retrieval comparison
-
-The new [retrieval comparison](docs/experiments/intent-guided-retrieval.md) tests
-whether Jev helps retrieve additional footage. It compares ordinary search,
-fixed extra evidence searches, and query-guided extra evidence searches over the
-same pinned library snapshot. Ordinary search remains independent of Jev.
-
-After a plain-text search, **Compare Jev** opens the three playable result lists.
-The original results remain usable while it runs. **Cancel** returns immediately
-to ordinary search. A stalled comparison times out with a retry message instead
-of leaving the button loading; if its current database lookup is still finishing,
-another comparison is briefly refused. Switching completed lists makes no new
-requests. Hosted interpretation has a two-second fallback; the full interactive
-comparison has a 45-second server deadline and a 50-second browser safeguard.
-
-Prepare the 16-query fixture without hosted requests, then explicitly execute
-its query-only decisions with `OPENROUTER_API_KEY` in `.env`:
-
-```powershell
-uv run python -m pipeline.experiments.intent_retrieval --out pipeline/eval/runs/intent-retrieval-example
-uv run python -m pipeline.experiments.intent_retrieval --out pipeline/eval/runs/intent-retrieval-example --execute --decisions-only --allow-hosted --max-calls 16 --max-usd 0.05
-```
-
-With the updated local API running, capture all three result lists using those
-saved decisions. This step makes no new hosted calls and loads no local models:
-
-```powershell
-uv run python -m pipeline.experiments.intent_retrieval --out pipeline/eval/runs/intent-retrieval-example --execute --resume
-```
-
-Inspect `summary.json` and each `*-comparison.json` for source-backed results,
-plans, candidate provenance, known-window ranks and timing. A changed index
-during one comparison excludes that case and stops capture; resume later with
-the same fixture/code to reuse its decision. Completed cases are not repeated.
-Create `STOP` in the run directory to stop before the next case. An unknown-cost
-attempt blocks automatic resume; call/cost limits are cumulative and cannot be
-increased within a run. Budget admission is conservative, not a provider billing
-cap. Known-window ranks and newly retrieved candidates do not establish human
-relevance or exhaustive recall.
-
-To measure individual retrieval strategies using four saved decisions and the
-running API's loaded models, use the bounded latency diagnostic. It makes no
-hosted calls and writes no indexes; omitting `--execute` only prepares a receipt.
-Use a new output filename for each invocation:
-
-```powershell
-uv run python -m pipeline.experiments.intent_latency --source pipeline/eval/runs/intent-retrieval-20260921 --out pipeline/eval/runs/intent-latency-example.json --execute
-```
-
-Each case runs two rotated rounds over one pinned library snapshot, with fresh
-query memos and a 48-result limit. Timings exclude interpretation and HTTP
-serialization; warm model/database caches and this small sample preclude a
-production latency or relevance claim.
+Each comparison uses a new output directory and at most two hosted calls. It
+records inputs, model receipts, validated source windows, timing, latency and
+claim-audit material. It does not automatically render, retrieve, listen or write
+projects. Factual and played creative grades remain pending human review; valid
+JSON and persuasive explanations do not establish a better edit. Wider context
+processing and a context retrieval index remain gated on that comparison.
+The [first pilot report](docs/experiments/source-context-pilot.md) records the
+twenty-window backfill, private rendered comparison and known factual failures.
 
 ## Scene-based Match search
 
