@@ -40,6 +40,7 @@ from pipeline.evidence.library import FilmRef, film_units
 
 ANALYSIS_WIDTH = 640
 FLOW_WIDTH = 320
+FLOW_MIN_HEIGHT = 128          # RAFT's correlation pyramid needs feature maps of at least 16 px (input / 8)
 ANALYSIS_FPS = 6.0
 DETECT_EVERY = 3                      # every 3rd analysis frame -> 2 fps
 RAFT_ITERATIONS = 12
@@ -129,6 +130,17 @@ def stream_frames(path: Path, *, fps: float = ANALYSIS_FPS, width: int = ANALYSI
 # ---------------------------------------------------------------------------
 
 
+def flow_size(height: int, width: int) -> tuple[int, int]:
+    """Flow input size: FLOW_WIDTH wide, but never under FLOW_MIN_HEIGHT tall.
+
+    Ultra-wide frames (2.76:1) would be 112 px tall at 320 px wide, below what
+    RAFT accepts; they scale up to 128 px tall instead, keeping their aspect.
+    Other frames are unchanged. Both sides are multiples of 8.
+    """
+    scale = max(FLOW_WIDTH / width, FLOW_MIN_HEIGHT / height)
+    return (max(FLOW_MIN_HEIGHT, int(round(height * scale / 8)) * 8), max(8, int(round(width * scale / 8)) * 8))
+
+
 class Models:
     """Lazily loaded GPU models shared across films."""
 
@@ -176,8 +188,7 @@ class Models:
         torch = self.torch
         a = torch.from_numpy(first).to(self.device).permute(0, 3, 1, 2).float()
         b = torch.from_numpy(second).to(self.device).permute(0, 3, 1, 2).float()
-        height = max(64, int(round(a.shape[2] * FLOW_WIDTH / a.shape[3] / 8)) * 8)
-        size = (height, FLOW_WIDTH)
+        size = flow_size(a.shape[2], a.shape[3])
         a = torch.nn.functional.interpolate(a, size=size, mode="bilinear", align_corners=False) / 127.5 - 1
         b = torch.nn.functional.interpolate(b, size=size, mode="bilinear", align_corners=False) / 127.5 - 1
         with torch.inference_mode():

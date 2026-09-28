@@ -299,3 +299,10 @@ def test_split_retry_pieces_keep_ordinals_and_combine_around_refused_pieces():
                                   result(pieces[3], "C", True)])
     assert [(s["title"], s["first_shot"], s["last_shot"]) for s in combined["scenes"]] == [("A", 1, 20), ("C", 31, 40)]
     assert len(combined["shots"]) == 30
+
+
+def test_flow_size_keeps_raft_minimum_height_for_ultra_wide_frames():
+    assert measure.flow_size(1080, 1920) == (176, 320)                 # ordinary frames: unchanged
+    assert measure.flow_size(800, 1920) == (136, 320)
+    height, width = measure.flow_size(672, 1920)                        # 2.86:1 would be 112 px tall
+    assert height == measure.FLOW_MIN_HEIGHT and width % 8 == 0 and abs(width / height - 1920 / 672) < 0.1
