@@ -86,6 +86,15 @@ def cmd_hero(args) -> int:
     return 0 if counts["failed"] == 0 else 1
 
 
+def cmd_highlights(args) -> int:
+    from pipeline.evidence import highlights
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+    counts = highlights.run(config, db, films, force=args.force)
+    print(f"[highlights] {counts}")
+    return 0 if counts["failed"] == 0 else 1
+
+
 def cmd_synthesize(args) -> int:
     from pipeline.evidence import synthesis
     config = _config(args.config)
@@ -170,10 +179,10 @@ def cmd_status(args) -> int:
     from pipeline.evidence import metadata, speech, store, subtitles
     config = _config(args.config)
     _db, films = _films(config, args.film)
-    from pipeline.evidence import hero, measure, synthesis, understanding
+    from pipeline.evidence import hero, highlights, measure, synthesis, understanding
     producers = {"metadata": metadata.PRODUCER, "subtitles": subtitles.PRODUCER, "audio": speech.PRODUCER,
-                 "understanding": understanding.producer(), "measure": measure.PRODUCER, "hero": hero.PRODUCER,
-                 "synthesis": synthesis.PRODUCER}
+                 "understanding": understanding.producer(), "highlights": highlights.producer(),
+                 "measure": measure.PRODUCER, "hero": hero.PRODUCER, "synthesis": synthesis.PRODUCER}
     for kind, producer in producers.items():
         present = sum(1 for film in films if store.read_artifact(config.paths.assets_dir, film.film_id, producer))
         print(f"{kind:14s} {producer.profile_id:34s} {present}/{len(films)} films")
@@ -212,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     mea = add("measure", cmd_measure, "local GPU pass: camera motion, hidden cuts, subjects, look and hero frames")
     mea.add_argument("--force", action="store_true")
     add("hero", cmd_hero, "pick and extract one hero frame per shot from measured samples")         .add_argument("--force", action="store_true")
+    add("highlights", cmd_highlights, "rank each film's iconic moments by recognizability (one text call per film)")         .add_argument("--force", action="store_true")
     add("synthesize", cmd_synthesize, "per-shot priors: fame, craft, distinctiveness, iconic and hidden-gem flags")
     add("compile", cmd_compile, "rebuild search tables (film_meta, shot_evidence, scenes, dialogue_lines) and text views")         .add_argument("--no-text", action="store_true", help="skip the semantic text-view refresh")
     parsers["compile"].add_argument("--rebuild", action="store_true",

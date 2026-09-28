@@ -21,9 +21,10 @@ _PROFILE = re.compile(r"^(?P<profile>[a-z0-9][a-z0-9-]*-v\d+-[0-9a-f]{10})(?P<re
 
 
 def current_profiles() -> dict[str, str]:
-    from pipeline.evidence import hero, measure, metadata, speech, subtitles, synthesis, understanding
+    from pipeline.evidence import hero, highlights, measure, metadata, speech, subtitles, synthesis, understanding
     return {"metadata": metadata.PRODUCER.profile_id, "audio": speech.PRODUCER.profile_id,
             "subtitles": subtitles.PRODUCER.profile_id, "understanding": understanding.producer().profile_id,
+            "highlights": highlights.producer().profile_id,
             "measure": measure.PRODUCER.profile_id, "hero": hero.PRODUCER.profile_id,
             "synthesis": synthesis.PRODUCER.profile_id}
 

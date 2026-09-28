@@ -22,7 +22,7 @@ FILM_UNDERSTANDING_MAX_USD = 3.0
 def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = True, measure_pass: bool = True,
                   holding_ingest_lock: bool = False, progress: Callable[[str], None] = print) -> dict[str, Any]:
     """Run every evidence pass for *films*; returns per-step summaries. Failures are reported, not raised."""
-    from pipeline.evidence import compile as compiler, hero, measure, metadata, subtitles, synthesis, understanding
+    from pipeline.evidence import compile as compiler, hero, highlights, measure, metadata, subtitles, synthesis, understanding
     from pipeline.evidence.library import list_films
 
     summary: dict[str, Any] = {}
@@ -39,6 +39,7 @@ def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = 
         step("subtitles", lambda: subtitles.run(config, films, max_downloads=len(films)))
         step("understanding", lambda: understanding.run(
             config, db, films, max_usd=FILM_UNDERSTANDING_MAX_USD * len(films), concurrency=4, progress=progress))
+        step("highlights", lambda: highlights.run(config, db, films, progress=progress))
     if measure_pass:
         step("measure", lambda: measure.run(config, db, films, lock_films=not holding_ingest_lock, progress=progress))
     step("hero", lambda: hero.run(config, db, films, progress=progress))

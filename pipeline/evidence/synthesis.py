@@ -35,9 +35,10 @@ CRAFT_LEVELS = (0.0, 0.3, 0.6, 0.9)      # model craft 0..3 (1 = ordinary)
 PRODUCER = store.Producer(
     kind="synthesis",
     name="priors",
-    version=2,
-    settings={"fame_levels": FAME_LEVELS, "craft_levels": CRAFT_LEVELS, "iconic_pick_bonus": 0.2,
-              "quote_bonus": 0.15, "quote_min_score": 0.72, "iconic_quote_score": 0.85, "craft_model_weight": 0.8,
+    version=3,
+    settings={"fame_levels": FAME_LEVELS, "craft_levels": CRAFT_LEVELS, "iconic_pick_bonus": 0.1,
+              "quote_bonus": 0.1, "unranked_fame_cap": 0.9, "ranked_moment_fame": "0.9+0.01*score-0.002*(rank-1)",
+              "quote_min_score": 0.72, "iconic_quote_score": 0.85, "craft_model_weight": 0.8,
               "gem_share": 0.03, "gem_min_craft_level": 2, "gem_max_fame_level": 1, "neighbors": 10,
               "library_fame": "fame*(0.35+0.65*popularity)", "highlights": 24},
 )
@@ -97,7 +98,7 @@ def technical_quality(measured: dict[str, dict[str, Any]], unit_ids: list[str]) 
 
 def synthesize_film(db: Any, film: FilmRef, *, understanding: dict[str, Any] | None, measure: dict[str, Any] | None,
                     metadata: dict[str, Any] | None, film_popularity: float | None,
-                    dialogue: list[dict[str, Any]]) -> dict[str, Any]:
+                    dialogue: list[dict[str, Any]], highlights: dict[str, Any] | None = None) -> dict[str, Any]:
     settings = PRODUCER.settings
     units = film_units(db, film.film_id, columns=["unit_id", "t_start", "t_end", "img_vec"])
     unit_ids = [unit["unit_id"] for unit in units]
@@ -110,6 +111,14 @@ def synthesize_film(db: Any, film: FilmRef, *, understanding: dict[str, Any] | N
     distinct = distinctiveness(vectors, settings["neighbors"]) if len(vectors) else np.zeros(0)
     technical = technical_quality(measured, unit_ids)
     popularity = 0.5 if film_popularity is None else float(film_popularity)
+    # Film-level ranking of iconic moments (pipeline.evidence.highlights): ranked
+    # moments sit above every unranked shot, ordered by recognizability.
+    moment_score: dict[str, int] = {}
+    moment_rank: dict[str, int] = {}
+    for moment in (highlights or {}).get("moments") or []:
+        for unit_id in moment["units"]:
+            moment_score.setdefault(unit_id, int(moment["score"]))
+            moment_rank.setdefault(unit_id, int(moment["rank"]))
     records: dict[str, dict[str, Any]] = {}
     for position, unit in enumerate(units):
         unit_id = unit["unit_id"]
@@ -120,9 +129,11 @@ def synthesize_film(db: Any, film: FilmRef, *, understanding: dict[str, Any] | N
         fame = None
         if shot:
             fame = FAME_LEVELS[shot["fame"]] + (settings["iconic_pick_bonus"] if unit_id in picks else 0.0)
-            fame = min(1.0, fame + (settings["quote_bonus"] * quote["score"] if quote else 0.0))
+            fame = min(settings["unranked_fame_cap"], fame + (settings["quote_bonus"] * quote["score"] if quote else 0.0))
         elif quote:
-            fame = min(1.0, 0.5 + settings["quote_bonus"] * quote["score"])
+            fame = min(settings["unranked_fame_cap"], 0.5 + settings["quote_bonus"] * quote["score"])
+        if unit_id in moment_score:          # score orders fame; rank breaks ties between equal scores
+            fame = round(0.9 + 0.01 * moment_score[unit_id] - 0.002 * (moment_rank[unit_id] - 1), 4)
         craft = None
         if shot:
             model = CRAFT_LEVELS[shot["craft"]]
@@ -139,9 +150,10 @@ def synthesize_film(db: Any, film: FilmRef, *, understanding: dict[str, Any] | N
             "craft": None if craft is None else round(craft, 4),
             "technical": None if unit_id not in technical else round(technical[unit_id], 4),
             "distinctiveness": round(float(distinct[position]), 4) if len(distinct) else None,
-            "iconic": iconic,
+            "iconic": iconic or unit_id in moment_score,
             "gem": False,
             "famous_line": quote["quote"] if quote else None,
+            "moment_rank": moment_rank.get(unit_id),
         }
 
     # Hidden gems: per film, the best well-crafted little-known shots.
@@ -161,14 +173,21 @@ def synthesize_film(db: Any, film: FilmRef, *, understanding: dict[str, Any] | N
         record = records[unit_id]
         return (record["fame"] or 0.0) + 0.3 * (record["craft"] or 0.0) + (0.3 if record["iconic"] else 0.0)
 
-    highlights = sorted(records, key=highlight_score, reverse=True)[:settings["highlights"]]
+    ranked_moments = [moment for moment in (highlights or {}).get("moments") or []]
+    top: list[str] = []
+    for moment in ranked_moments:                 # one shot per ranked moment: its best-crafted shot
+        best = max(moment["units"], key=lambda unit_id: (records.get(unit_id) or {}).get("craft") or 0.0)
+        if best in records:
+            top.append(best)
+    top += [unit_id for unit_id in sorted(records, key=highlight_score, reverse=True) if unit_id not in top]
+    highlight_ids = top[:settings["highlights"]]
     gems = [unit_id for _score, unit_id in candidates if records[unit_id]["gem"]][:settings["highlights"]]
-    return {"shots": records, "highlights": highlights, "gems": gems, "quotes_matched": len(quote_hits),
-            "film_popularity": film_popularity}
+    return {"shots": records, "highlights": highlight_ids, "gems": gems, "quotes_matched": len(quote_hits),
+            "film_popularity": film_popularity, "motifs": (highlights or {}).get("motifs") or []}
 
 
 def run(config: Any, db: Any, films: list[FilmRef], *, progress: Callable[[str], None] = print) -> dict[str, int]:
-    from pipeline.evidence import measure, metadata as metadata_module, understanding
+    from pipeline.evidence import highlights as highlights_module, measure, metadata as metadata_module, understanding
     from pipeline.evidence.compile import film_popularity
     from pipeline.evidence.library import list_films
     from pipeline.evidence.subtitles import current_dialogue
@@ -186,14 +205,17 @@ def run(config: Any, db: Any, films: list[FilmRef], *, progress: Callable[[str],
     for film in films:
         story = store.read_artifact(assets, film.film_id, story_producer)
         measured = store.read_artifact(assets, film.film_id, measure.PRODUCER)
+        ranked = store.read_artifact(assets, film.film_id, highlights_module.producer())
         if story is None and measured is None:
             counts["skipped"] += 1
             continue
         data = synthesize_film(db, film, understanding=(story or {}).get("data"), measure=(measured or {}).get("data"),
                                metadata=documents.get(film.film_id), film_popularity=popularity.get(film.film_id),
-                               dialogue=current_dialogue(config, film.film_id))
+                               dialogue=current_dialogue(config, film.film_id),
+                               highlights=(ranked or {}).get("data"))
         inputs = {"understanding": f"{story['profile_id']}@{story['created_at']}" if story else "",
                   "measure": f"{measured['profile_id']}@{measured['created_at']}" if measured else "",
+                  "highlights": f"{ranked['profile_id']}@{ranked['created_at']}" if ranked else "",
                   "popularity": str(popularity.get(film.film_id))}
         store.write_artifact(assets, film.film_id, PRODUCER, data, inputs=inputs)
         counts["done"] += 1
