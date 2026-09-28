@@ -118,6 +118,8 @@ class LabConfig:
     beat_device: str = "cpu"
     footage_inspection: bool = False
     context_profile: str | None = None
+    harness: str = "v1"              # v1: LLM timing and selection; v2: measured music + beat-lattice assembly
+    harness_critique: bool = False   # v2: watch a rough cut (Gemini) and re-assemble once around flagged issues
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +142,13 @@ class Config:
 # ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
+
+
+def _harness(value: object) -> str:
+    harness = str(value).strip().lower()
+    if harness not in {"v1", "v2"}:
+        raise ValueError("lab.harness must be v1 or v2")
+    return harness
 
 
 def load_config(path: Optional[Path | str] = None) -> Config:
@@ -383,6 +392,8 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         beat_device=beat_device,
         footage_inspection=footage_inspection,
         context_profile=context_profile,
+        harness=_harness(lab_raw.get("harness", "v1")),
+        harness_critique=bool(lab_raw.get("harness_critique", False)),
     )
 
     return Config(

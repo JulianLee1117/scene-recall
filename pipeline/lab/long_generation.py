@@ -96,6 +96,29 @@ def _merge_fixed(document, result, left, right):
         slot["section_index"] = section_for(slot["start"], slot["end"], document["analysis"]["segments"])
 
 
+def _harness_regenerate(original, document, config, db, progress, job, stages):
+    """Whole-edit regeneration with harness v2: measured music, concept, pools and assembly."""
+    from pipeline.lab.harness.run import HARNESS_CONTRACT, regenerate
+
+    previous = {clip["unit_id"] for clip in _placed(original) if clip.get("unit_id")}
+    document.update(clips=[], music_timeline=None, direction_plan=None)
+    proposed, diagnostics = regenerate(document, config, db, progress, job["id"], previous_units=previous)
+    stages.append("harness")
+    # Earlier footage stays in the bin, as with v1 regeneration.
+    proposed["clips"] = deepcopy(original["clips"]) + proposed["clips"]
+    if len(proposed["clips"]) > MAX_SAVED_CLIPS:
+        raise ValueError(f"Regeneration would exceed {MAX_SAVED_CLIPS} saved clips. Clear unused Saved clips first; the current edit is unchanged")
+    progress("Checking the complete edit before saving one revision")
+    proposed = ProjectDocument.model_validate(proposed).model_dump(mode="json")
+    slots = proposed["music_timeline"]["slots"]
+    return proposed, {"message": "Your edit is ready to play.", "contract": HARNESS_CONTRACT, "generation_mode": "regenerate",
+                      "stages": stages, "timing_mode": "measured-assembly",
+                      "timing_plan": proposed["direction_plan"]["timing_plan"],
+                      "requested_slot_ids": [slot["id"] for slot in slots], "selected_count": len(slots),
+                      "candidate_count": diagnostics["candidate_count"], "harness": diagnostics,
+                      "remaining_gaps": 0, "failed_slots": []}
+
+
 def run_long_generate_job(job, config, db, progress):
     from pipeline.lab.generation import (_PROTECTED_FIELDS, _analysis_is_current, _guard_edit, _inspect_generation, _needs_plan, _regeneration_document, _user_direction,
                                          _stage_job, validate_generate_request)
@@ -150,6 +173,8 @@ def run_long_generate_job(job, config, db, progress):
     inspection = None
     review_contexts = [] if config.lab.footage_inspection else None
     inspection_options = {"review_contexts": review_contexts} if review_contexts is not None else {}
+    if whole and getattr(config.lab, "harness", "v1") == "v2":
+        return _harness_regenerate(original, document, config, db, progress, job, stages)
     if whole:
         from pipeline.lab.long_audio import analysis_for_passage
 
@@ -216,6 +241,9 @@ def run_long_generate_job(job, config, db, progress):
         ensure_timeline(document)
         document["music_timeline"]["provisional_timing"] = None
         _, targets = validate_generate_request(document, job.get("snapshot", {}).get("generate"), job.get("snapshot", {}).get("slot_ids"))
+        if mode == "fill" and getattr(config.lab, "harness", "v1") == "v2":
+            from pipeline.lab.generation import harness_fill
+            return harness_fill(original, document, config, db, progress, job, [slot["id"] for slot in targets], stages)
         windows = _fixed_windows(document, targets)
         for index, (left, right, target_ids) in enumerate(windows):
             view_slots = deepcopy(document["music_timeline"]["slots"][left:right + 1])

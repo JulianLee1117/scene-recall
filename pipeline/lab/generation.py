@@ -9,7 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from pipeline.lab.models import GenerateOptions, ProjectDocument
-from pipeline.lab.limits import MAX_MODEL_SHOTS
+from pipeline.lab.limits import MAX_MODEL_SHOTS, MAX_SAVED_CLIPS
 from pipeline.lab.timeline import draft_targets, ensure_timeline, require_replan_unlocked
 from pipeline.lab.pacing import uses_bounded_generation
 
@@ -147,6 +147,28 @@ def _inspect_generation(document, config, db, progress, job_id, contexts, *, ori
     return proposed, diagnostic
 
 
+def harness_fill(original, document, config, db, progress, job, target_ids, stages):
+    """Fill gaps with harness v2: existing cuts and placed shots stay, the optimizer picks the rest."""
+    from pipeline.lab.harness.run import HARNESS_CONTRACT, fill
+
+    proposed, diagnostics = fill(document, config, db, progress, job["id"], target_ids)
+    stages.append("harness")
+    if len(proposed["clips"]) > MAX_SAVED_CLIPS:
+        raise ValueError(f"These slots would exceed the project's {MAX_SAVED_CLIPS} saved clips, including its bin. Remove unused saved clips before finding more scenes; the saved edit is unchanged")
+    progress("Checking the complete edit before saving one revision")
+    proposed = ProjectDocument.model_validate(proposed).model_dump(mode="json")
+    _guard_edit(original, proposed, "fill", set(target_ids))
+    slots = proposed["music_timeline"]["slots"]
+    remaining = sum(not slot.get("clip_id") for slot in slots)
+    failed = [{"slot_id": slot["id"], "error": slot.get("search_error") or "No fitting scene found"}
+              for slot in slots if slot["id"] in set(target_ids) and not slot.get("clip_id")]
+    return proposed, {"message": f"Edit ready with {remaining} unfilled shots." if remaining else "Your edit is ready to play.",
+                      "contract": HARNESS_CONTRACT, "generation_mode": "fill", "stages": stages, "timing_mode": "fixed",
+                      "requested_slot_ids": list(target_ids), "selected_count": diagnostics["filled"],
+                      "candidate_count": diagnostics["candidate_count"], "harness": diagnostics,
+                      "remaining_gaps": remaining, "failed_slots": failed}
+
+
 def run_generate_job(job, config, db, progress):
     from pipeline.lab.direction_planner import run_direction_job
     from pipeline.lab.music import content_hash, run_music_job
@@ -204,6 +226,8 @@ def run_generate_job(job, config, db, progress):
         progress("Every shot is already filled; existing choices are unchanged")
         return None, {"unchanged": True, "message": "Every shot is already filled.", "stages": stages}
     target_ids = [slot["id"] for slot in targets]
+    if mode == "fill" and getattr(config.lab, "harness", "v1") == "v2":
+        return harness_fill(original, document, config, db, progress, job, target_ids, stages)
     plan_ids = target_ids if mode == "improve" else [slot["id"] for slot in targets
         if _needs_plan(slot, refresh_ai=document.get("editor_direction") is not None)]
     if plan_ids:
