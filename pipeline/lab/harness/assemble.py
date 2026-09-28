@@ -40,7 +40,7 @@ PACE = {"patient": (2.0, 5.0, 12.0), "balanced": (1.0, 2.6, 6.0), "kinetic": (0.
 # Per second of screen time (relative to the pace target), so the number of cuts never inflates quality.
 QUALITY = {"relevance": 1.0, "motion": 0.25, "craft": 0.1}
 # Once per shot: events at the cut and the rhythm of durations.
-ALIGNMENT, PACE_PENALTY = 0.45, 0.35
+ALIGNMENT, PACE_PENALTY = 0.45, 0.6
 _BEAM = 8
 _PER_SPAN = 12
 _ACCENT_WINDOW_S = 0.3
@@ -49,7 +49,8 @@ _CUT_GUARD_S = 0.08            # an accent at the cut itself belongs to the cut,
 # Visual variety: image similarity to the last few shots above the library's usual level costs score.
 _SIMILAR_FROM, _SIMILAR_SCALE, _SIMILAR_COST = 0.62, 0.2, 0.5
 _RECENCY = (1.0, 0.7, 0.5, 0.35, 0.25, 0.2)
-_CLUSTER_REUSE = 0.12          # per earlier shot of the same look anywhere in the edit
+_CLUSTER_REUSE = 0.12          # per earlier shot of the same look, per target-length of screen time
+_FILM_REUSE = 0.08             # per earlier shot of the same film, per target-length of screen time
 
 
 @dataclass
@@ -342,6 +343,7 @@ def assemble(music: MusicMap, acts: list[Act], *, fixed: Iterable[Fixed] = (), f
             continue
         spans = _spans(points, index, acts[act_at(node)], fixed_at, blocked, boundaries is not None)
         for end, fixed_shot in spans:
+            span_act = acts[act_at(node)]
             if fixed_shot is not None:
                 options = [Placement(node, end, fixed_shot.candidate, fixed_shot.source_start, 0.0, {}, None, True)]
             else:
@@ -351,6 +353,7 @@ def assemble(music: MusicMap, acts: list[Act], *, fixed: Iterable[Fixed] = (), f
                 special = overrides.get((round(node, 4), round(end, 4)))
                 if special is not None:
                     act, rank = special, override_ranks[(round(node, 4), round(end, 4))]
+                span_act = act
                 options = []
                 context = contexts.get((node, end))
                 if context is None:
@@ -374,9 +377,12 @@ def assemble(music: MusicMap, acts: list[Act], *, fixed: Iterable[Fixed] = (), f
                     step, _ = transition(state.placement, option)
                     scene = option.candidate.scene_id
                     reuse = -0.3 * state.scenes.get(scene, 0) if scene else 0.0
-                    overuse = -0.08 * state.films.get(option.candidate.film_id, 0)
+                    # Film and look reuse are about screen time, so they scale with duration:
+                    # otherwise every extra cut costs more and the search drifts to fewer, longer shots.
+                    share = (end - node) / PACE.get(span_act.pace, PACE["balanced"])[1]
+                    overuse = -_FILM_REUSE * state.films.get(option.candidate.film_id, 0) * share
                     look = look_of.get(unit)
-                    repeat = -_CLUSTER_REUSE * state.looks.get(look, 0) if look is not None else 0.0
+                    repeat = -_CLUSTER_REUSE * state.looks.get(look, 0) * share if look is not None else 0.0
                     total = (state.score + option.score + step + reuse + overuse + repeat
                              + similarity_penalty(state, option))
                     bucket = states.setdefault(end, [])

@@ -113,7 +113,7 @@ def test_pools_merge_queries_by_best_rank_and_attach_evidence():
             return []
 
     pools = gather(NoTables(), None, [{"queries": ["night", "rain"], "fame": "fresh"}], search=search)
-    assert calls == [("night", "gems"), ("rain", "gems")]
+    assert sorted(calls) == [("night", "gems"), ("rain", "gems")]
     assert [c.unit_id for c in pools[0]] == ["y", "x"] and pools[0][1].relevance == 1.0
     assert pools[0][0].relevance > 1.0                             # found by both queries
     assert pools[0][0].queries == ["night", "rain"]

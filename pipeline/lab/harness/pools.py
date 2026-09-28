@@ -181,35 +181,47 @@ def load_vectors(db: Any, candidates: dict[str, Candidate]) -> int:
 def gather(db: Any, config: Any, acts: list[dict[str, Any]], *, film_ids: list[str] | None = None,
            per_query: int = 48, exclude_units: set[str] | None = None,
            search: Callable[..., list[dict[str, Any]]] | None = None,
-           progress: Callable[[str], None] = lambda _message: None) -> list[list[Candidate]]:
+           progress: Callable[[str], None] = lambda _message: None, workers: int = 3) -> list[list[Candidate]]:
     """One candidate list per act, best relevance first, with evidence attached."""
     if search is None:
         from pipeline.search.retrieve import search as search_v2
         search = search_v2
     exclude = exclude_units or set()
+    jobs = [(index, query, PRESET_FOR_FAME.get(str(act.get("fame") or "any"), "balanced"))
+            for index, act in enumerate(acts) for query in act.get("queries") or []]
+
+    def run(job: tuple[int, str, str]) -> list[dict[str, Any]]:
+        _index, query, preset = job
+        return search(query, db, config, film_ids=film_ids or None, result_limit=per_query, preset=preset)
+
+    # Searches are independent; a few run at once (search is thread-safe, as the API serves in parallel).
+    # Progress is reported from this thread (job callbacks may not be thread-safe), and results merge
+    # in job order, so pools are identical to a sequential run.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results: list[list[dict[str, Any]]] = [[] for _ in jobs]
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs) or 1))) as pool:
+        futures = {pool.submit(run, job): index for index, job in enumerate(jobs)}
+        for done, future in enumerate(as_completed(futures), start=1):
+            results[futures[future]] = future.result()
+            progress(f"Finding footage: {done} of {len(jobs)} searches")
     everything: dict[str, Candidate] = {}
-    relevance: list[dict[str, list[float]]] = []
-    for index, act in enumerate(acts):
-        preset = PRESET_FOR_FAME.get(str(act.get("fame") or "any"), "balanced")
-        scores: dict[str, list[float]] = {}
-        for query in act.get("queries") or []:
-            progress(f"Finding footage for act {index + 1} of {len(acts)}: {query[:80]}")
-            rows = search(query, db, config, film_ids=film_ids or None, result_limit=per_query, preset=preset)
-            for rank, row in enumerate(rows, start=1):
-                unit_id = str(row.get("unit_id") or "")
-                start, end = row.get("t_start"), row.get("t_end")
-                if not unit_id or unit_id in exclude or not all(
-                        isinstance(v, (int, float)) and math.isfinite(v) for v in (start, end)) or end <= start:
-                    continue
-                candidate = everything.get(unit_id)
-                if candidate is None:
-                    candidate = everything[unit_id] = Candidate(
-                        unit_id=unit_id, film_id=str(row["film_id"]), film_title=str(row.get("film_title") or row["film_id"]),
-                        t_start=float(start), t_end=float(end), caption=str(row.get("caption") or ""))
-                scores.setdefault(unit_id, []).append((_RRF_K + 1) / (_RRF_K + rank))
-                if query not in candidate.queries:
-                    candidate.queries.append(query)
-        relevance.append(scores)
+    relevance: list[dict[str, list[float]]] = [{} for _ in acts]
+    for (index, query, _preset), rows in zip(jobs, results):
+        scores = relevance[index]
+        for rank, row in enumerate(rows, start=1):
+            unit_id = str(row.get("unit_id") or "")
+            start, end = row.get("t_start"), row.get("t_end")
+            if not unit_id or unit_id in exclude or not all(
+                    isinstance(v, (int, float)) and math.isfinite(v) for v in (start, end)) or end <= start:
+                continue
+            candidate = everything.get(unit_id)
+            if candidate is None:
+                candidate = everything[unit_id] = Candidate(
+                    unit_id=unit_id, film_id=str(row["film_id"]), film_title=str(row.get("film_title") or row["film_id"]),
+                    t_start=float(start), t_end=float(end), caption=str(row.get("caption") or ""))
+            scores.setdefault(unit_id, []).append((_RRF_K + 1) / (_RRF_K + rank))
+            if query not in candidate.queries:
+                candidate.queries.append(query)
     load_evidence(db, everything)
     load_vectors(db, everything)
     titles = _film_titles(db)
