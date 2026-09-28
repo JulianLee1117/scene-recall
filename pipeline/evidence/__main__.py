@@ -143,6 +143,9 @@ def cmd_refresh_dialogue(args) -> int:
 
     stale = [film for film in films if not adopted(film)]
     print(f"[dialogue] {len(stale)} of {len(films)} films have an accepted synced subtitle to adopt")
+    # Library-scale passes (batch understanding, measure) run separately; only
+    # the dialogue-dependent derivations refresh here.
+    config.ingest.evidence = False
     failed = 0
     for number, film in enumerate(stale, start=1):
         try:
