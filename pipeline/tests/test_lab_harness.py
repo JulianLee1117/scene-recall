@@ -223,3 +223,17 @@ def test_fill_keeps_placed_neighbours_and_gives_user_searches_their_own_pool():
     assert kept.fixed and kept.candidate.unit_id == "placed" and kept.source_start == 900.5
     assert result[3].candidate.unit_id.startswith("user")            # the slot's own search, not the act pool
     assert all(not p.candidate.unit_id.startswith("user") for i, p in enumerate(result) if i != 3)
+
+
+def test_transitions_penalize_letterbox_and_grade_jumps_between_films():
+    scope = _candidate("scope", film="a", aspect=2.39, grade=(0.3, 0.4, 0.05))
+    academy = _candidate("academy", film="b", aspect=1.33, grade=(0.3, 0.4, 0.05))
+    graded = _candidate("graded", film="c", aspect=2.39, grade=(0.6, 0.1, -0.1))
+    same = _candidate("same", film="a", aspect=1.33)
+    first = asm.Placement(10.0, 11.0, scope, 0.0, 1.0)
+    _, parts = asm.transition(first, asm.Placement(11.0, 12.0, academy, 0.0, 1.0))
+    assert parts["aspect"] == pytest.approx(-0.12) and "grade" in parts and parts["grade"] == 0
+    _, parts = asm.transition(first, asm.Placement(11.0, 12.0, graded, 0.0, 1.0))
+    assert "aspect" not in parts or parts["aspect"] == 0 and parts["grade"] == pytest.approx(-0.12)
+    _, parts = asm.transition(first, asm.Placement(11.0, 12.0, same, 0.0, 1.0))
+    assert "aspect" not in parts                                        # one film's own shots never pay for it

@@ -242,6 +242,12 @@ def transition(previous: Placement | None, following: Placement) -> tuple[float,
     after = _direction(b, following.source_start, following.source_end, at_end=False)
     if before and after:
         parts["direction"] = 0.1 if before == after else -0.05
+    if a.aspect and b.aspect and a.film_id != b.film_id:
+        # Letterbox jumps (2.39:1 next to 4:3) read as a change of film stock.
+        parts["aspect"] = -0.12 * min(1.0, abs(math.log(a.aspect / b.aspect)) / math.log(2.39 / 1.33))
+    if a.grade and b.grade and a.film_id != b.film_id:
+        jump = abs(a.grade[0] - b.grade[0]) / 0.3 + abs(a.grade[1] - b.grade[1]) / 0.3 + abs(a.grade[2] - b.grade[2]) / 0.15
+        parts["grade"] = -0.04 * min(jump, 3.0)
     return sum(parts.values()), parts
 
 

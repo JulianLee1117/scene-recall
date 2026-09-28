@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 _RRF_K = 10
 _EVIDENCE_COLUMNS = ["unit_id", "scene_id", "action", "characters", "peak_time", "camera", "camera_reliability",
+                     "brightness", "saturation", "warmth",
                      "camera_segments", "motion_energy", "hidden_cuts", "dark_spans", "subject", "subject_size", "fame_library",
                      "craft", "iconic", "gem", "sharpness", "hero_time", "famous_line"]
 # Detector classes that make a reliable main subject for continuity.
@@ -57,6 +58,8 @@ class Candidate:
     scene_id: str | None = None
     famous_line: str | None = None
     vector: Any = field(default=None, repr=False, compare=False)   # unit-normalized image embedding
+    aspect: float | None = None             # the film's display aspect ratio (width / height)
+    grade: tuple[float, float, float] | None = None   # measured brightness, saturation, warmth
 
     @property
     def duration(self) -> float:
@@ -125,6 +128,9 @@ def apply_evidence(candidate: Candidate, row: dict[str, Any]) -> None:
     hero = row.get("hero_time")
     candidate.hero_time = float(hero) if isinstance(hero, (int, float)) else None
     candidate.famous_line = row.get("famous_line")
+    look = [row.get(key) for key in ("brightness", "saturation", "warmth")]
+    if all(isinstance(value, (int, float)) for value in look):
+        candidate.grade = (float(look[0]), float(look[1]), float(look[2]))
 
 
 def load_evidence(db: Any, candidates: dict[str, Candidate]) -> int:
@@ -225,8 +231,10 @@ def gather(db: Any, config: Any, acts: list[dict[str, Any]], *, film_ids: list[s
     load_evidence(db, everything)
     load_vectors(db, everything)
     titles = _film_titles(db)
+    aspects = film_aspects(db, {candidate.film_id for candidate in everything.values()})
     for candidate in everything.values():
         candidate.film_title = titles.get(candidate.film_id, candidate.film_title)
+        candidate.aspect = aspects.get(candidate.film_id)
     # Best rank, plus a little for each other query of the act that also found the shot.
     return [sorted((replace(everything[unit_id], relevance=max(values) + 0.15 * (sum(values) - max(values)),
                             rank=round((_RRF_K + 1) / max(values) - _RRF_K))
@@ -252,9 +260,48 @@ def placed_candidates(db: Any, clips: list[dict[str, Any]]) -> dict[str, Candida
     load_evidence(db, by_unit)
     load_vectors(db, by_unit)
     titles = _film_titles(db)
+    aspects = film_aspects(db, {candidate.film_id for candidate in by_unit.values()})
     for candidate in by_unit.values():
         candidate.film_title = titles.get(candidate.film_id, candidate.film_title)
+        candidate.aspect = aspects.get(candidate.film_id)
     return {clip["id"]: by_unit[clip["unit_id"]] for clip in clips if clip.get("unit_id") in by_unit}
+
+
+_ASPECTS: dict[tuple[str, int, int], float | None] = {}
+
+
+def film_aspects(db: Any, film_ids: set[str]) -> dict[str, float]:
+    """Display aspect ratio per film from its video stream (probed once per file version)."""
+    import subprocess
+
+    try:
+        from pipeline.evidence.library import list_films
+        films = {film.film_id: film for film in list_films(db) if film.film_id in film_ids}
+    except Exception:  # noqa: BLE001 - optional continuity evidence
+        return {}
+    result: dict[str, float] = {}
+    for film_id, film in films.items():
+        try:
+            stat = film.path.stat()
+        except OSError:
+            continue
+        key = (str(film.path), int(stat.st_size), int(stat.st_mtime))
+        if key not in _ASPECTS:
+            probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                    "stream=width,height,sample_aspect_ratio", "-of", "csv=p=0", str(film.path)],
+                                   capture_output=True, text=True, check=False)
+            aspect = None
+            try:
+                width, height, *rest = probe.stdout.strip().splitlines()[0].split(",")
+                sar = rest[0] if rest and ":" in rest[0] else "1:1"
+                num, den = (int(value) for value in sar.split(":"))
+                aspect = int(width) * (num / den if num and den else 1.0) / int(height)
+            except (IndexError, ValueError, ZeroDivisionError):
+                aspect = None
+            _ASPECTS[key] = aspect
+        if _ASPECTS[key]:
+            result[film_id] = _ASPECTS[key]
+    return result
 
 
 def _film_titles(db: Any) -> dict[str, str]:
