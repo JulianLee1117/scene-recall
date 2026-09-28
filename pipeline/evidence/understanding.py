@@ -123,8 +123,25 @@ def _srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
+def _proxy_size(path: Path) -> tuple[int, int]:
+    """Proxy width and height at ``proxy_height``, honouring non-square pixels."""
+    import av
+    with av.open(str(path)) as container:
+        stream = container.streams.video[0]
+        display_width = stream.codec_context.width * float(stream.sample_aspect_ratio or 1)
+        height = stream.codec_context.height
+    target = DEFAULTS["proxy_height"]
+    return max(2, int(round(target * display_width / height / 2)) * 2), target
+
+
 def render_proxy(film: FilmRef, chunk: Chunk, directory: Path) -> Path:
-    """Low-res H.264 proxy of one chunk with shot numbers burned in."""
+    """Low-res H.264 proxy of one chunk with shot numbers burned in.
+
+    Decoding, frame-rate reduction and scaling run on the GPU (NVDEC) and only
+    the small frames come back for the subtitle burn-in; codecs NVDEC cannot
+    decode fall back to the same filters on the CPU. Both paths produce the
+    same frames, size and encoding.
+    """
     labels = directory / f"chunk-{chunk.index:03d}.srt"
     lines = []
     for number, shot in enumerate(chunk.shots, start=1):
@@ -135,25 +152,27 @@ def render_proxy(film: FilmRef, chunk: Chunk, directory: Path) -> Path:
     output = directory / f"chunk-{chunk.index:03d}.mp4"
     escaped = labels.as_posix().replace(":", "\\:")
     style = "Fontsize=20,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,MarginL=6,MarginV=6"
-    video_filter = (f"scale=w='max(2,trunc(iw*sar/2)*2)':h=ih,setsar=1,scale=-2:{DEFAULTS['proxy_height']},"
-                    f"subtitles='{escaped}':force_style='{style}'")
-    command = ["ffmpeg", "-y", "-nostdin", "-v", "error", "-ss", f"{chunk.start:.3f}", "-to", f"{chunk.end:.3f}",
-               "-i", str(film.path), "-map", "0:v:0", "-map", "0:a:0?", "-vf", video_filter, "-r", str(proxy_fps(chunk)),
-               "-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "32", "-b:v", "0",
-               "-c:a", "aac", "-b:a", f"{DEFAULTS['proxy_audio_kbps']}k", "-ac", "1", str(output)]
-    completed = subprocess.run(command, capture_output=True, check=False)
-    if completed.returncode != 0:
-        # Fall back to CPU encoding when NVENC sessions are exhausted or unavailable.
-        command[command.index("h264_nvenc")] = "libx264"
-        for flag in ("-rc", "-cq", "-b:v"):
-            position = command.index(flag)
-            del command[position:position + 2]
-        command[command.index("-preset") + 1] = "veryfast"
-        command[command.index("libx264") + 1:command.index("libx264") + 1] = ["-crf", "32"]
+    burn = f"subtitles='{escaped}':force_style='{style}'"
+    fps = proxy_fps(chunk)
+    width, height = _proxy_size(film.path)
+    window = ["-ss", f"{chunk.start:.3f}", "-to", f"{chunk.end:.3f}", "-i", str(film.path), "-map", "0:v:0", "-map", "0:a:0?"]
+    encode = ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "32", "-b:v", "0",
+              "-c:a", "aac", "-b:a", f"{DEFAULTS['proxy_audio_kbps']}k", "-ac", "1", str(output)]
+    attempts = [
+        ["ffmpeg", "-y", "-nostdin", "-v", "error", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", *window,
+         "-vf", f"fps={fps},scale_cuda={width}:{height}:format=nv12,hwdownload,format=nv12,format=yuv420p,{burn}", *encode],
+        ["ffmpeg", "-y", "-nostdin", "-v", "error", *window,
+         "-vf", f"fps={fps},scale={width}:{height},setsar=1,{burn}", *encode],
+        ["ffmpeg", "-y", "-nostdin", "-v", "error", *window,
+         "-vf", f"fps={fps},scale={width}:{height},setsar=1,{burn}",
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "32", *encode[encode.index("-c:a"):]],
+    ]
+    completed = None
+    for command in attempts:
         completed = subprocess.run(command, capture_output=True, check=False)
-    if completed.returncode != 0 or not output.is_file():
-        raise RuntimeError(f"proxy render failed: {completed.stderr.decode('utf-8', 'replace')[-400:]}")
-    return output
+        if completed.returncode == 0 and output.is_file():
+            return output
+    raise RuntimeError(f"proxy render failed: {completed.stderr.decode('utf-8', 'replace')[-400:]}")
 
 
 # ---------------------------------------------------------------------------
