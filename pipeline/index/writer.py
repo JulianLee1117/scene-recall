@@ -687,6 +687,40 @@ def _replace_frame_rows(
     _replace_film_rows(db, "frames", "frame_id", film_id, rows)
 
 
+def publish_dialogue_updates(
+    db: lancedb.DBConnection,
+    film: FilmRecord,
+    updates: dict[str, dict[str, Any]],
+) -> int:
+    """Replace only dialogue-derived unit fields after a film's dialogue source changed.
+
+    ``updates`` maps unit IDs to ``dialogue`` (list of line texts),
+    ``searchable_text`` and ``txt_vec``. Shot bounds, captions, frames and image
+    vectors are untouched, so no media or annotation work is repeated. Native
+    FTS is resynchronized before returning, like whole-film publication.
+    """
+    if not updates:
+        return 0
+    with _PUBLICATION_LOCK, _database_write_lock(db):
+        require_current_film_source(db, film)
+        rows = db.open_table("units").search().where(_film_condition(film.film_id)).limit(None).to_list()
+        changed = []
+        for row in rows:
+            update = updates.get(str(row.get("unit_id") or ""))
+            if update is None:
+                continue
+            row = {key: value for key, value in row.items() if not key.startswith("_")}
+            row["dialogue"] = json.dumps(list(update["dialogue"]))
+            row["searchable_text"] = update["searchable_text"]
+            row["txt_vec"] = np.asarray(update["txt_vec"], dtype=np.float32).tolist()
+            changed.append(row)
+        if len(changed) != len(updates):
+            raise ValueError("dialogue updates must name existing units of this film")
+        _merge_rows(db, "units", "unit_id", changed)
+        _ensure_search_indexes_locked(db)
+    return len(changed)
+
+
 def publish_unit_updates(
     db: lancedb.DBConnection,
     film: FilmRecord,

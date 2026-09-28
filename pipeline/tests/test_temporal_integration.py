@@ -258,3 +258,27 @@ def test_worker_retains_publication_receipt_when_semantic_refresh_needs_attentio
     assert result["status"] == "failed"
     assert result["result"] == completed
     assert "index-text --film-id film" in result["error"]
+
+
+def test_dialogue_updates_rewrite_only_dialogue_fields_of_named_units(publication):
+    from pipeline.index.writer import publish_dialogue_updates
+
+    db, film, _prepared = publication
+    before = {row["unit_id"]: row for row in rows(db, "units")}
+    target = f"{film.film_id}_0"
+    count = publish_dialogue_updates(db, film, {target: {
+        "dialogue": ["Who's there?"], "searchable_text": "An empty tree Who's there?",
+        "txt_vec": np.array([0, 1, 0, 0], dtype=np.float32)}})
+    after = {row["unit_id"]: row for row in rows(db, "units")}
+    assert count == 1
+    assert json.loads(after[target]["dialogue"]) == ["Who's there?"]
+    assert after[target]["searchable_text"] == "An empty tree Who's there?"
+    assert list(after[target]["txt_vec"]) == [0, 1, 0, 0]
+    for key in ("caption", "t_start", "t_end", "keyframe_paths"):
+        assert after[target][key] == before[target][key]
+    assert list(after[target]["img_vec"]) == list(before[target]["img_vec"])
+    for unit_id, row in before.items():
+        if unit_id != target:
+            assert after[unit_id]["dialogue"] == row["dialogue"]
+    with pytest.raises(ValueError):
+        publish_dialogue_updates(db, film, {"film-b_0": {"dialogue": [], "searchable_text": "", "txt_vec": [0, 0, 0, 1]}})

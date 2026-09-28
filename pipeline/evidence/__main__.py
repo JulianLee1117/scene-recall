@@ -120,43 +120,28 @@ def cmd_compile(args) -> int:
 
 
 def cmd_refresh_dialogue(args) -> int:
-    """Re-ingest films with an accepted synced subtitle that their published dialogue does not use yet."""
-    import json
-    from pathlib import Path
-
+    """Adopt accepted synced subtitles in published dialogue (no media or annotation work)."""
     from pipeline.evidence import compile as compiler
     from pipeline.evidence.subtitles import accepted_download
-    from pipeline.ingest.pipeline import run_pipeline
+    from pipeline.ingest.refresh_dialogue import refresh_dialogue
     config = _config(args.config)
     db, films = _films(config, args.film)
-
-    def adopted(film) -> bool:
-        download = accepted_download(config, film.film_id)
-        if download is None:
-            return True
-        path = Path(config.paths.assets_dir) / film.film_id / "dialogue.manifest.json"
+    candidates = [film for film in films if accepted_download(config, film.film_id) is not None]
+    print(f"[dialogue] {len(candidates)} of {len(films)} films have an accepted synced subtitle")
+    failed = changed = 0
+    for number, film in enumerate(candidates, start=1):
         try:
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return False
-        return manifest.get("kind") == "downloaded_srt" and manifest.get("sha256") == download["synced_sha256"]
-
-    stale = [film for film in films if not adopted(film)]
-    print(f"[dialogue] {len(stale)} of {len(films)} films have an accepted synced subtitle to adopt")
-    # Library-scale passes (batch understanding, measure) run separately; only
-    # the dialogue-dependent derivations refresh here.
-    config.ingest.evidence = False
-    failed = 0
-    for number, film in enumerate(stale, start=1):
-        try:
-            # Shots, keyframes and captions are cached; dialogue, embeddings and text views refresh.
-            run_pipeline(film.path, config)
-            print(f"[dialogue] {number}/{len(stale)} {film.title}: re-ingested", flush=True)
+            result = refresh_dialogue(config, film.path)
         except Exception as exc:  # noqa: BLE001 - one film must not stop the batch
             failed += 1
-            print(f"[dialogue] {number}/{len(stale)} {film.title}: failed ({str(exc)[:300]})", flush=True)
-    if stale:
-        compiler.compile_films(config, db, stale)
+            print(f"[dialogue] {number}/{len(candidates)} {film.title}: failed ({str(exc)[:300]})", flush=True)
+            continue
+        changed += result["units_updated"] > 0
+        print(f"[dialogue] {number}/{len(candidates)} {film.title}: {result['units_updated']} shots updated, "
+              f"{result['text_views_embedded']} text views embedded", flush=True)
+    if candidates:
+        compiler.compile_films(config, db, candidates)
+    print(f"[dialogue] {changed} films changed, {failed} failed")
     return 0 if failed == 0 else 1
 
 
@@ -232,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     parsers["compile"].add_argument("--rebuild", action="store_true",
                                     help="drop compiled tables and recompile every film (after a schema change)")
     add("refresh-dialogue", cmd_refresh_dialogue,
-        "re-ingest films with an accepted synced subtitle their dialogue does not use yet")
+        "adopt accepted synced subtitles in published dialogue (only changed shots are rewritten)")
     ref = add("refresh", cmd_refresh, "run every evidence pass for the selected films (cached passes skip)")
     ref.add_argument("--local-only", action="store_true", help="skip hosted passes (metadata, subtitles, understanding)")
     ref.add_argument("--skip-measure", action="store_true", help="skip the GPU measurement pass")
