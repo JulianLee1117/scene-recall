@@ -84,8 +84,25 @@ on the original media.
   regenerates in about 100 s instead of about 250 s.
 - The same inputs always give the same assembly. Receipts record the concept, the
   review's swaps, the music-map summary and the assembly contract.
-- Early blind judging (Gemini watching renders with audio) scores v2 level with
-  fresh v1 regenerations; its notes credit actions landing on accents. v2 stays
-  opt-in until the owner has compared edits on their own projects.
+- Blind judging on 2026-09-28: Gemini watched each render alone with audio at
+  4 fps and scored it 1–10, twice. Fresh v1 against v2 on three of the owner's
+  projects (overall):
+
+  | Project | v1 | v2 |
+  |---|---|---|
+  | `everything` | 6.0 | 6.0 |
+  | `In My Head` | 6.0 | 6.5 |
+  | `101` | 6.0 | 6.0 |
+
+  v2 regenerates 2–4x faster (a 109 s rap passage: 169 s against 661 s).
+  - The judge credits actions landing on accents and stronger imagery.
+  - Both versions draw notes on mixing film stocks and aspect ratios; later
+    continuity terms address this.
+  - The critique loop re-assembled every edit but gained nothing measurable, so
+    it stays off by default.
+  - A side-by-side judge preferred whichever edit it saw first, so it is not
+    used.
+
+  v2 stays opt-in until the owner has compared edits on their own projects.
 - Shots without evidence stay usable with neutral values, so the harness works
   during and after the library backfill.

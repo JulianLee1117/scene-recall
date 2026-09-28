@@ -46,8 +46,16 @@ Landed:
 
   OTIO export ("Resolve timeline") works for any saved edit.
   - Blind Gemini judging of fresh regenerations, each render scored alone at
-    4 fps: v1 and v2 tie on `everything` and `In My Head` (6.0 each). v2 is
-    2–2.5x faster and scores higher on imagery.
+    4 fps (overall):
+
+    | Project | v1 | v2 |
+    |---|---|---|
+    | `everything` | 6.0 | 6.0 |
+    | `In My Head` | 6.0 | 6.5 |
+    | `101` | 6.0 | 6.0 |
+
+    v2 is 2–4x faster. The critique loop showed no measurable gain and stays
+    off. Renders are in `assets_dir/lab/renders/eval-*`.
   - The side-by-side judge is position-biased, so it is not used.
 - **Cleanup**: Jev/intent experiments and the exact scanner removed; ingest no
   longer queues frozen framing preparation.
