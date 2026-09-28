@@ -3,14 +3,14 @@ from pipeline.index.text_features import resolve_ready_text_profile
 from pipeline.index.writer import require_visual_encoder_profile, table_names
 
 
-CAPABILITY_VERSION = "existing-search-adapters-v1"
+CAPABILITY_VERSION = "search-v2-adapters-v1"
 LABELS = {"all": "All signals", "scene": "Scene", "words": "Dialogue & text", "look": "Look", "mood": "Mood", "composition": "Framing"}
 DESCRIPTIONS = {
-    "all": "Hybrid visual, semantic text and lexical ranking; mixed clues are preferences, not hard predicates",
-    "scene": "Caption meaning only: visible subjects/actions described by sparse still-image annotations",
-    "words": "Dialogue/OCR meaning at shot level; not guaranteed exact quotation or line timing",
+    "all": "Hybrid ranking over frames, story and scene text, visual captions, dialogue lines and keywords, reranked with fame/craft priors; mixed clues are preferences, not hard predicates",
+    "scene": "What happens and what is visible: each shot's action and characters in story context, its scene summary, and a visual caption",
+    "words": "Spoken lines and on-screen text; a remembered quote matches the exact subtitle line and its time",
     "look": "Global paired-encoder frame appearance; color, subject and scene semantics are not disentangled",
-    "mood": "Stored mood labels and energy only; does not search subjects, lighting or plot",
+    "mood": "Each shot's emotional beat, its scene's tone and its sound, read in story context; not subjects or lighting",
     "composition": "Framing from an offered indexed image: spatial layout, not pose or movement",
 }
 

@@ -125,7 +125,8 @@ settings); recorded input digests make stale artifacts detectable. Producers:
 |---|---|---|
 | `metadata` | open data | Wikidata identity, cast and characters, directors, genres; Wikipedia plot; Wikiquote quotes; IMDb votes and Wikimedia pageviews (TMDB excluded by its terms) |
 | `audio`, `subtitles` | Silero VAD, OpenSubtitles | English subtitles for Whisper-only films, synced to speech (FFT alignment, frame-rate scales, windowed shifts) and accepted by lift/prominence/text agreement; raw downloads archived |
-| `understanding` | Gemini 3.8 Flash | per chunk of ≤160 shots: 240p shot-numbered proxy + shot table + dialogue + cast/plot context → scenes, per-shot characters, action, peak time, emotion, line, sound, fame 0-3, craft 0-3, cut hint, iconic moments; resumable chunk receipts; standard or half-price batch transport; a synopsis that trips a content filter is retried without it |
+| `understanding` | Gemini 3.8 Flash | per chunk of ≤160 shots: 240p shot-numbered proxy + shot table + dialogue + cast/plot context → scenes, per-shot characters, action, peak time, emotion, line, sound, fame 0-3, craft 0-3, cut hint, iconic moments; resumable chunk receipts; standard or half-price batch transport; a synopsis that trips a content filter is retried without it; a clip refused even without it is closed with no records and listed in the artifact |
+| `highlights` | Gemini 3.8 Flash (text) | one call per film: merges the understanding pass's iconic flags into the film's best-known moments, ranked by recognizability (with Wikiquote quotes), plus visual motifs |
 | `measure` | RAFT-small, RF-DETR | one GPU decode per film: camera flow series (labels derived at compile time, including slow drift), hidden cuts, subject boxes and main-subject track, letterbox-aware look and palette, sharpness |
 | `hero` | frame pick | the best sampled still near the understanding peak, extracted at 1280 px |
 | `synthesis` | priors | within-film and library fame, craft, distinctiveness; rare iconic and hidden-gem flags; per-film highlights and gems |
@@ -135,6 +136,11 @@ hints only. World knowledge is allowed and labelled by its producer. Search
 reads compiled tables — `film_meta`, `shot_evidence`, `scenes`, `dialogue_lines`
 (quote index: positions, no stemming, stop words kept) — which hold no primary
 data and are rebuilt by `python -m pipeline.evidence compile [--rebuild]`.
+Compilation serves each kind's current profile, else the newest earlier profile
+of the same producer, so a settings change never blanks evidence while its new
+profile is backfilled; each row's `sources` names the profiles that served it.
+Producers read only current-profile inputs and recompute once those exist.
+`prune` removes a superseded profile only after its replacement exists.
 After ingestion, `pipeline.evidence.pipeline.refresh_films` brings a new film's
 evidence up to date (`ingest.evidence`); cached passes skip and failures never
 undo publication.
@@ -445,8 +451,11 @@ Final source checks use the current canonical index. The snapshot freezes index
 rows and readiness, not arbitrary derived image files overwritten by legacy
 reingestion. API search retains its independent model runtime and uses the same
 read-only snapshot primitive for one whole request, including nested recipe
-clauses. A publication in progress can reuse its previous snapshot; a fresh API
-without one returns retryable HTTP 503. Capture does not make a multi-table
+clauses. It pins the latest complete generation: while a writer holds the lock,
+or units are published ahead of their semantic text features, a request reuses
+the process's last complete snapshot without waiting. A fresh API without one
+returns retryable HTTP 503 under the lock and otherwise serves the incomplete
+library as published, never retaining it. Capture does not make a multi-table
 publication crash-atomic. Request-local query vectors and metadata hydration
 are shared within a 4 MiB budget, with stage timings, never across requests.
 Managed scalar lookups preserve still-valid feature coverage across controlled
@@ -2058,7 +2067,10 @@ channel falls back to the legacy PE text vector.
 Channels are fused by weighted reciprocal rank. When `retrieval.rerank_shortlist`
 is positive, Qwen3-Reranker-0.6B reads the query with each shortlisted shot's
 evidence (film, scene, action, visual caption, dialogue) and its judgement is
-blended with the fused rank inside the shortlist only.
+blended with the fused rank inside the shortlist only. The rerank has a
+one-second budget. It is skipped while the GPU is nearly full (another process
+such as ingest measurement), and abandoned between batches once over budget;
+either case rests it for a minute. The fused order stands meanwhile.
 
 Deterministic filtering handles unrequested credits, logos, title cards, blank
 frames and static artifacts using the visual caption only (ADR-0054, ADR-0087).
