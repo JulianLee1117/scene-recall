@@ -71,9 +71,8 @@ def _plan(db: Any, config: Config, film_id: str, expected_path: Path):
     tables = []
     for name in sorted(table_names(db)):
         # Authored records live outside these canonical/derived index tables.
-        if name not in {"films", "units", "frames"} and not name.startswith(
-            ("unit_text_", "frame_framing_")
-        ):
+        # Compiled evidence tables are derived too (artifacts stay on disk).
+        if name not in {"films", "units", "frames", "film_meta", "shot_evidence", "scenes", "dialogue_lines"}                 and not name.startswith(("unit_text_", "frame_framing_")):
             continue
         table = db.open_table(name)
         if "film_id" not in table.schema.names:
