@@ -10,6 +10,13 @@ text cannot describe keep their place.
 
 Model: Qwen3-Reranker-0.6B (Apache-2.0), scored as p("yes") following the
 model card. Enabled by ``retrieval.rerank_shortlist`` (0 disables it).
+
+The rerank is an optional refinement with a time budget. When another process
+fills the GPU (ingest measurement, embedding backfills), VRAM oversubscription
+makes every kernel crawl: a 40-shot rerank that takes 0.25 s alone took 30 s.
+So it is skipped while the GPU has little free memory, abandoned mid-shortlist
+once it exceeds its budget, and then rested for a minute, keeping the fused
+order meanwhile.
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from typing import Any
 
 _LOGGER = logging.getLogger("uvicorn.error")
@@ -28,8 +36,12 @@ _PREFIX = ("<|im_start|>system\nJudge whether the Document meets the requirement
 _SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 _MAX_TOKENS = 384
 _BLEND = 0.6                 # weight of the cross-encoder vs the fused rank inside the shortlist
+_BUDGET_S = 1.0              # abandon a rerank that runs longer (the fused order stands)
+_REST_S = 60.0               # after an overrun or a full GPU, skip reranking this long
+_MIN_FREE_BYTES = 768 << 20  # below this much free VRAM, kernels risk paging
 _LOCK = threading.Lock()
 _MODEL: dict[str, Any] = {}
+_RESTING = {"until": 0.0}
 
 
 def _load() -> dict[str, Any] | None:
@@ -56,12 +68,17 @@ def _load() -> dict[str, Any] | None:
 
 
 def score(query: str, documents: list[str], *, batch_size: int = 16) -> list[float] | None:
-    """p(relevant) for each document, or None when the model is unavailable or inference fails."""
+    """p(relevant) for each document, or None when unavailable, resting, over budget or failing."""
+    if not documents or time.monotonic() < _RESTING["until"]:
+        return None
     state = _load()
-    if state is None or not documents:
+    if state is None:
+        return None
+    if state["device"] == "cuda" and _free_bytes(state) < _MIN_FREE_BYTES:
+        _rest("GPU memory is nearly full")
         return None
     try:
-        return _score(state, query, documents, batch_size)
+        scores = _score(state, query, documents, batch_size, deadline=time.monotonic() + _BUDGET_S)
     except Exception as exc:  # noqa: BLE001 - e.g. CUDA out of memory: keep the fused order
         _LOGGER.warning("rerank skipped for this query: %s", str(exc)[:200])
         try:
@@ -69,14 +86,32 @@ def score(query: str, documents: list[str], *, batch_size: int = 16) -> list[flo
         except Exception:  # noqa: BLE001
             pass
         return None
+    if scores is None:
+        _rest(f"over its {_BUDGET_S:.1f} s budget")
+    return scores
 
 
-def _score(state: dict[str, Any], query: str, documents: list[str], batch_size: int) -> list[float]:
+def _free_bytes(state: dict[str, Any]) -> int:
+    try:
+        return int(state["torch"].cuda.mem_get_info()[0])
+    except Exception:  # noqa: BLE001 - unknown: assume there is room
+        return _MIN_FREE_BYTES
+
+
+def _rest(reason: str) -> None:
+    _RESTING["until"] = time.monotonic() + _REST_S
+    _LOGGER.warning("rerank resting for %.0f s (%s); keeping the fused order", _REST_S, reason)
+
+
+def _score(state: dict[str, Any], query: str, documents: list[str], batch_size: int, *,
+           deadline: float) -> list[float] | None:
     torch, tokenizer, model = state["torch"], state["tokenizer"], state["model"]
     scores: list[float] = []
     budget = _MAX_TOKENS - len(state["prefix"]) - len(state["suffix"])
     with torch.inference_mode():
         for start in range(0, len(documents), batch_size):
+            if start and time.monotonic() > deadline:
+                return None
             texts = [f"<Instruct>: {INSTRUCTION}\n<Query>: {query}\n<Document>: {document}"
                      for document in documents[start:start + batch_size]]
             encoded = tokenizer(texts, padding=False, truncation="longest_first", max_length=budget,
