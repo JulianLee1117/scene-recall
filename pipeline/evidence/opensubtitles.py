@@ -17,6 +17,8 @@ from typing import Any
 
 import httpx
 
+from pipeline.evidence.http import ipv4_transport
+
 
 API_ROOT = "https://api.opensubtitles.com/api/v1"
 USER_AGENT = "SceneRecall v1.0"
@@ -143,7 +145,7 @@ class Client:
         self._username, self._password = username, password
         self._root = API_ROOT
         self._token: str | None = None
-        transport = transport or httpx.HTTPTransport(local_address="0.0.0.0")
+        transport = transport or ipv4_transport(retries=0)
         self._http = httpx.Client(timeout=60.0, follow_redirects=True, transport=transport,
                                   headers={"Api-Key": api_key, "User-Agent": USER_AGENT,
                                            "Accept": "application/json", "Content-Type": "application/json"})

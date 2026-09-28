@@ -15,14 +15,21 @@ class HttpError(RuntimeError):
     pass
 
 
+def ipv4_transport(retries: int = 2) -> httpx.HTTPTransport:
+    """An httpx transport bound to IPv4.
+
+    This host's IPv6 route stalls each new connection for ~20 s before falling
+    back, which made hosted uploads crawl at ~0.2 Mbps instead of ~35 Mbps.
+    """
+    return httpx.HTTPTransport(local_address="0.0.0.0", retries=retries)
+
+
 class JsonClient:
     """Small wrapper with a descriptive User-Agent, spacing and bounded retries."""
 
     def __init__(self, *, user_agent: str = USER_AGENT, min_interval: float = 0.2,
                  timeout: float = 30.0, retries: int = 3, transport: httpx.BaseTransport | None = None):
-        # httpx has no "happy eyeballs": on networks with broken IPv6 every new
-        # connection first waits ~20 s for the IPv6 attempt. Bind IPv4 instead.
-        transport = transport or httpx.HTTPTransport(local_address="0.0.0.0")
+        transport = transport or ipv4_transport(retries=0)
         self._client = httpx.Client(headers={"User-Agent": user_agent, "Accept": "application/json"},
                                     timeout=timeout, follow_redirects=True, transport=transport)
         self._min_interval = min_interval

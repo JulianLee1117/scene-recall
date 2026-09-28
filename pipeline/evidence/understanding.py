@@ -357,7 +357,9 @@ def _client():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
-    return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=900_000))
+    from pipeline.evidence.http import ipv4_transport
+    return genai.Client(api_key=api_key, http_options=types.HttpOptions(
+        timeout=900_000, client_args={"transport": ipv4_transport()}))
 
 
 def _openapi_schema(node: dict[str, Any]) -> Any:
