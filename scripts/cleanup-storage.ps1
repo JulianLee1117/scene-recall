@@ -18,6 +18,11 @@
 #   4. Superseded evidence profiles (python -m pipeline.evidence prune) and
 #      orphaned Lab job files (python -m pipeline.lab.cleanup).
 #
+# Deep test folders beyond Windows' 260-character path limit are removed with
+# long-path syntax. Folders left by old sandboxed test runs can deny your own
+# account; run the script once from an elevated PowerShell ("Run as
+# administrator") to take ownership of just those folders and remove them.
+#
 # Database rollback history (about 10 GB) needs the API and workers stopped:
 # run scripts\restart-scene-recall.ps1 -WaitForJobs -MaintainDatabase once no
 # pipeline.evidence run is active.
@@ -44,6 +49,26 @@ function Get-EntryStats([string]$Path) {
         if ($newest -gt $touched) { $touched = $newest }
     }
     return [pscustomobject]@{ Bytes = $bytes; Touched = $touched }
+}
+
+$script:Elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+
+function Remove-Entry([string]$Path) {
+    # Returns 'removed', or 'locked' when the folder denies this account (needs an elevated run).
+    try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop; return 'removed' } catch { }
+    $long = '\\?\' + $Path                         # beyond the 260-character path limit
+    $isDirectory = Test-Path -LiteralPath $Path -PathType Container
+    if ($isDirectory) { cmd.exe /d /c "rd /s /q `"$long`"" 2>$null | Out-Null }
+    else { cmd.exe /d /c "del /f /q `"$long`"" 2>$null | Out-Null }
+    if (-not (Test-Path -LiteralPath $Path)) { return 'removed' }
+    if (-not $script:Elevated) { return 'locked' }
+    # Elevated: take ownership of just this entry, reset it to inherited permissions, then remove it.
+    takeown.exe /F $long /R /D Y 2>$null | Out-Null
+    icacls.exe $long /reset /T /C /Q 2>$null | Out-Null
+    if ($isDirectory) { cmd.exe /d /c "rd /s /q `"$long`"" 2>$null | Out-Null }
+    else { cmd.exe /d /c "del /f /q `"$long`"" 2>$null | Out-Null }
+    if (Test-Path -LiteralPath $Path) { return 'locked' } else { return 'removed' }
 }
 
 $script:Plan = New-Object 'System.Collections.Generic.List[object]'
@@ -114,16 +139,19 @@ print(json.dumps({"assets": str(load_config().paths.assets_dir)}))
     Write-Host ("  {0,-30} {1,5} item(s)  {2,8:N2} GB" -f 'total', $script:Plan.Count, ($total / 1GB))
 
     if ($Apply) {
-        $failed = 0
+        $locked = New-Object 'System.Collections.Generic.List[string]'
         $done = 0
         foreach ($item in $script:Plan) {
-            try { Remove-Item -LiteralPath $item.Path -Recurse -Force -ErrorAction Stop }
-            catch { $failed++; Write-Warning "Could not remove $($item.Path): $($_.Exception.Message)" }
+            if ((Remove-Entry $item.Path) -eq 'locked') { $locked.Add($item.Path) }
             $done++
-            if ($done % 50 -eq 0) { Write-Host "  removed $done of $($script:Plan.Count)" }
+            if ($done % 50 -eq 0) { Write-Host "  processed $done of $($script:Plan.Count)" }
         }
-        Write-Host "Removed $($done - $failed) of $($script:Plan.Count) item(s)."
-        if ($failed) { Write-Warning "$failed item(s) could not be removed (in use?); rerun later." }
+        Write-Host "Removed $($script:Plan.Count - $locked.Count) of $($script:Plan.Count) item(s)."
+        if ($locked.Count) {
+            Write-Warning ("$($locked.Count) folder(s) deny your account (left by old sandboxed test runs), for example " +
+                           "$(Split-Path -Leaf $locked[0]). Rerun this script once from an elevated PowerShell " +
+                           "(Run as administrator) to take ownership of just those folders and remove them.")
+        }
     }
 
     # 4. The project's own lifecycle commands (each is a dry run without -Apply).
