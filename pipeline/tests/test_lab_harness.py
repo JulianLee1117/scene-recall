@@ -263,3 +263,35 @@ def test_editor_windows_stay_on_the_picture_the_evidence_describes():
     row = _candidate("row", start=100.0, length=12.0)
     apply_evidence(row, {"focus_start": 99.0, "focus_end": 106.5})
     assert row.focus == (100.0, 106.5)                       # clamped to the shot
+
+
+class _Matcher:
+    """A stand-in for ``matchcuts.CutMatcher``: every cut into ``favourite`` matches perfectly."""
+
+    strength = 1.0
+
+    def __init__(self, favourite):
+        self.favourite = favourite
+        self.calls = 0
+
+    def row(self, unit_id, time):
+        return unit_id
+
+    def scores(self, out_row, in_rows):
+        self.calls += 1
+        return np.array([1.0 if row == self.favourite else 0.0 for row in in_rows])
+
+
+def test_a_measured_match_cut_wins_the_following_span():
+    m = _map()
+    pool = _pool(12)
+    plain = asm.assemble(m, [asm.Act(10.0, 18.0, pool, pace="kinetic")], boundaries=[10.0, 12.0, 14.0, 16.0, 18.0])
+    favourite = next(unit for unit in (c.unit_id for c in pool) if unit not in {p.candidate.unit_id for p in plain})
+    matcher = _Matcher(favourite)
+    matched = asm.assemble(m, [asm.Act(10.0, 18.0, pool, pace="kinetic")], boundaries=[10.0, 12.0, 14.0, 16.0, 18.0],
+                           matcher=matcher)
+    assert matcher.calls > 0 and favourite in [p.candidate.unit_id for p in matched[1:]]
+    index = [p.candidate.unit_id for p in matched].index(favourite)
+    _, parts = asm.transition(matched[index - 1], matched[index], 1.0, matcher.strength)
+    assert parts["match"] == 1.0 and "eye_trace" not in parts
+    assert "matches the previous shot" in asm.reason(matched[index], matched[index - 1], matcher)

@@ -18,6 +18,7 @@ from typing import Any, Callable
 from pipeline.lab.harness import assemble as asm
 from pipeline.lab.harness import music_map
 from pipeline.lab.harness.concept import plan_concept
+from pipeline.lab.harness.matchcuts import CutMatcher
 from pipeline.lab.harness.pools import Candidate, gather
 from pipeline.lab.harness.review import review
 
@@ -83,15 +84,15 @@ def _act_at(acts: list[dict[str, Any]], time: float) -> dict[str, Any]:
 
 
 def placed_slot(placement: asm.Placement, alternatives: list[asm.Placement], previous: asm.Placement | None,
-                act: dict[str, Any], origin: float) -> tuple[dict[str, Any], dict[str, Any]]:
+                act: dict[str, Any], origin: float, matcher: CutMatcher | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """A new clip and the slot fields presenting it: reason, evidence, AI direction and up to five alternatives."""
-    reason = asm.reason(placement, previous)
+    reason = asm.reason(placement, previous, matcher)
     clip = _clip(placement)
     evidence = _evidence(placement.candidate, placement)
     rows = [{"clip": deepcopy(clip), "film_title": placement.candidate.film_title[:300], "reason": reason,
              "search_evidence": evidence}]
     rows += [{"clip": _clip(other), "film_title": other.candidate.film_title[:300],
-              "reason": asm.reason(other, previous), "search_evidence": _evidence(other.candidate, other)}
+              "reason": asm.reason(other, previous, matcher), "search_evidence": _evidence(other.candidate, other)}
              for other in alternatives[:5]]
     direction = _direction(act, placement, reason, origin)
     return clip, {"clip_id": clip["id"], "alternatives": rows, "reason": reason, "search_error": None,
@@ -101,7 +102,7 @@ def placed_slot(placement: asm.Placement, alternatives: list[asm.Placement], pre
 
 
 def build_timeline(document: dict[str, Any], placements: list[asm.Placement], options: list[list[asm.Placement]],
-                   acts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                   acts: list[dict[str, Any]], matcher: CutMatcher | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Slots and clips for the assembled edit (alternatives exclude every chosen shot)."""
     from pipeline.lab.timeline import section_for
 
@@ -110,7 +111,7 @@ def build_timeline(document: dict[str, Any], placements: list[asm.Placement], op
     previous = None
     for placement, alternatives in zip(placements, options):
         clip, fields = placed_slot(placement, alternatives, previous, _act_at(acts, placement.start),
-                                   document["passage"]["start"])
+                                   document["passage"]["start"], matcher)
         clips.append(clip)
         slots.append({"id": str(uuid.uuid4()), "start": placement.start, "end": placement.end,
                       "section_index": section_for(placement.start, placement.end, segments), **fields})
@@ -143,10 +144,10 @@ def timing_receipt(document: dict[str, Any], slots: list[dict[str, Any]], acts: 
 
 def _document(document: dict[str, Any], planned: dict[str, Any], music: music_map.MusicMap,
               placements: list[asm.Placement], options: list[list[asm.Placement]],
-              extra: dict[str, Any]) -> dict[str, Any]:
+              extra: dict[str, Any], matcher: CutMatcher | None = None) -> dict[str, Any]:
     from pipeline.lab.music import digest
 
-    slots, clips = build_timeline(document, placements, options, planned["acts"])
+    slots, clips = build_timeline(document, placements, options, planned["acts"], matcher)
     artifact_id = digest({"concept": planned["artifact_id"], "map": music.summary(),
                           "edit": [(p.candidate.unit_id, p.start, p.end, p.source_start) for p in placements]})
     result = deepcopy(document)
@@ -167,17 +168,27 @@ def _document(document: dict[str, Any], planned: dict[str, Any], music: music_ma
     return result
 
 
-def _assemble_and_review(document, planned, music, acts, config, job_id, progress, exclude=()):
+def _matcher(document: dict[str, Any], config: Any, progress: Callable[[str], None]) -> CutMatcher | None:
+    """The edit's match-cut scorer (None when the setting is off or no moment index is built)."""
+    setting = (document.get("planner_settings") or {}).get("match_cuts", "some")
+    matcher = CutMatcher.load(config, setting)
+    if matcher is not None:
+        progress("Matching every cut on its actual frames")
+    return matcher
+
+
+def _assemble_and_review(document, planned, music, acts, config, job_id, progress, exclude=(), matcher=None):
     progress("Assembling cuts, shots and source windows to the beat")
-    placements = asm.assemble(music, acts, exclude_units=exclude)
-    options = asm.alternatives(placements, acts, music)
+    placements = asm.assemble(music, acts, exclude_units=exclude, matcher=matcher)
+    options = asm.alternatives(placements, acts, music, matcher=matcher)
     placements, reviewed = review(document, planned, placements, options, config, job_id, progress)
     if reviewed["applied"]:
-        options = asm.alternatives(placements, acts, music)
+        options = asm.alternatives(placements, acts, music, matcher=matcher)
     return placements, options, reviewed
 
 
-def _critique_round(document, planned, music, acts, placements, options, config, db, job_id, progress, exclude):
+def _critique_round(document, planned, music, acts, placements, options, config, db, job_id, progress, exclude,
+                    matcher=None):
     """Render the rough cut, have it watched, and re-assemble once around the flagged issues."""
     from dataclasses import replace
 
@@ -185,7 +196,7 @@ def _critique_round(document, planned, music, acts, placements, options, config,
     from pipeline.lab.media import render_from_manifest, render_manifest
     from pipeline.lab.store import LabStore
 
-    draft = _document(document, planned, music, placements, options, {})
+    draft = _document(document, planned, music, placements, options, {}, matcher)
     store = LabStore(config.paths.state_dir)
     identity = f"{job_id}-rough-cut"
     progress("Rendering a rough cut to watch")
@@ -202,7 +213,7 @@ def _critique_round(document, planned, music, acts, placements, options, config,
     progress(f"Re-assembling around {len(watched.issues)} flagged issues")
     acts = [replace(act, pace_scale=scale) for act, scale in zip(acts, rules["pace_scales"])]
     placements, options, reviewed = _assemble_and_review(document, planned, music, acts, config, f"{job_id}-r2", progress,
-                                                         exclude=set(exclude) | set(rules["banned"]))
+                                                         exclude=set(exclude) | set(rules["banned"]), matcher=matcher)
     return placements, options, reviewed, receipt
 
 
@@ -259,10 +270,11 @@ def fill(document: dict[str, Any], config: Any, db: Any, progress: Callable[[str
             t_start=clip["source_start"], t_end=clip["source_end"])
         fixed.append(asm.Fixed(slot["start"], slot["end"], neighbour, clip["source_start"]))
     boundaries = [slot["start"] for slot in slots] + [slots[-1]["end"]]
+    matcher = _matcher(document, config, progress)
     progress("Choosing shots and source windows for the empty slots")
     placements = asm.assemble(music, acts, fixed=fixed, boundaries=boundaries, exclude_units=used_units,
-                              overrides=overrides)
-    options = asm.alternatives(placements, acts, music)
+                              overrides=overrides, matcher=matcher)
+    options = asm.alternatives(placements, acts, music, matcher=matcher)
     result = deepcopy(document)
     by_start = {round(p.start, 4): (p, o) for p, o in zip(placements, options)}
     filled, peaks = 0, 0
@@ -272,7 +284,7 @@ def fill(document: dict[str, Any], config: Any, db: Any, progress: Callable[[str
         if slot["id"] in targets and chosen is not None and not chosen[0].fixed and chosen[0].candidate.unit_id:
             placement, alternatives = chosen
             clip, fields = placed_slot(placement, alternatives, previous, _act_at(planned["acts"], placement.start),
-                                       document["passage"]["start"])
+                                       document["passage"]["start"], matcher)
             if _user_owned(slot):              # the user's written search stays the slot's direction
                 for key in ("direction", "direction_source", "needs_direction", "resolved_search"):
                     fields.pop(key)
@@ -304,16 +316,24 @@ def regenerate(document: dict[str, Any], config: Any, db: Any, progress: Callabl
         raise ValueError("No footage matched this concept; widen the film scope or the direction")
     acts = [asm.Act(spec["start"], spec["end"], pool, pace=spec["pace"], fame=spec["fame"], intent=spec["intent"])
             for spec, pool in zip(planned["acts"], pools)]
-    placements, options, reviewed = _assemble_and_review(document, planned, music, acts, config, job_id, progress)
+    matcher = _matcher(document, config, progress)
+    placements, options, reviewed = _assemble_and_review(document, planned, music, acts, config, job_id, progress,
+                                                         matcher=matcher)
     extra: dict[str, Any] = {"review": reviewed}
     if getattr(config.lab, "harness_critique", False):
         placements, options, second, watched = _critique_round(document, planned, music, acts, placements, options,
-                                                               config, db, job_id, progress, previous_units or set())
+                                                               config, db, job_id, progress, previous_units or set(),
+                                                               matcher)
         extra["critique"] = watched
         if second is not None:
             extra["review_after_critique"] = second
-    result = _document(document, planned, music, placements, options, extra)
+    result = _document(document, planned, music, placements, options, extra, matcher)
     peaks = sum(p.accent is not None for p in placements)
+    matched = 0
+    if matcher is not None:
+        for previous, placement in zip(placements, placements[1:]):
+            score = asm.cut_matches(matcher, previous, [placement])
+            matched += score is not None and float(score[0]) >= 0.6
     with_evidence = sum(c.peak_time is not None or bool(c.camera_segments) for pool in pools for c in pool)
     diagnostics = {"contract": HARNESS_CONTRACT, "assembly_contract": asm.ASSEMBLY_CONTRACT,
                    "concept_artifact": planned["artifact_id"], "shots": len(placements),
@@ -321,6 +341,8 @@ def regenerate(document: dict[str, Any], config: Any, db: Any, progress: Callabl
                    "pool_sizes": [len(pool) for pool in pools], "pool_evidence": with_evidence,
                    "previous_excluded": len(previous_units or ()), "review_swaps": len(reviewed["applied"]),
                    "critique_issues": len((extra.get("critique") or {}).get("issues") or []),
+                   "match_cuts": {"setting": (document.get("planner_settings") or {}).get("match_cuts", "some"),
+                                  "index": matcher.index.id if matcher is not None else None, "matched_cuts": matched},
                    "candidate_count": sum(len(pool) for pool in pools), "selected_count": len(placements),
                    "unfilled_slot_ids": []}
     slots = result["music_timeline"]["slots"]

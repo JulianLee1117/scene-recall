@@ -88,6 +88,8 @@ export interface PlannerSettings {
   lyric_treatment: "ignore" | "literal" | "metaphorical" | "counterpoint";
   /** Recognizable <-> fresh footage (search ranking preset); absent means balanced. */
   footage?: "balanced" | "famous" | "gems";
+  /** How strongly cuts prefer frames that match across the cut; absent means some. */
+  match_cuts?: "off" | "some" | "many";
 }
 export interface SongLyric {
   id: string;

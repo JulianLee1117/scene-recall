@@ -16,8 +16,11 @@ A placement is scored on its own:
 - the act's fame target (anchors or fresh footage).
 
 A transition from the previous shot adds eye-trace and screen-direction
-continuity. It penalises the same scene, the same film back to back, and
-near-identical framing from the same film (a jump cut).
+continuity. With a moment index (Match Cuts), eye trace becomes a measured
+match between the outgoing shot's last frame and the incoming shot's first
+(subject, eyes, pose, light, motion; ``matchcuts``), weighted by the edit's
+match-cut setting. It penalises the same scene, the same film back to back,
+and near-identical framing from the same film (a jump cut).
 
 Locked shots are fixed spans the search must pass through. Nothing here calls
 a model; the same inputs always give the same edit.
@@ -226,7 +229,9 @@ def _direction(candidate: Candidate, left: float, right: float, *, at_end: bool)
     return 0.0
 
 
-def transition(previous: Placement | None, following: Placement) -> tuple[float, dict[str, float]]:
+def transition(previous: Placement | None, following: Placement, match: float | None = None,
+               match_weight: float = 0.0) -> tuple[float, dict[str, float]]:
+    """Cut quality from ``previous`` into ``following``; ``match`` is a measured match-cut score in [0, 1]."""
     if previous is None:
         return 0.0, {}
     a, b = previous.candidate, following.candidate
@@ -237,7 +242,9 @@ def transition(previous: Placement | None, following: Placement) -> tuple[float,
         parts["same_film"] = -0.15
         if a.subject_size and b.subject_size and abs(math.log(a.subject_size / b.subject_size)) < 0.3:
             parts["jump_cut"] = -0.05
-    if a.subject_end and b.subject_start:
+    if match is not None:
+        parts["match"] = match_weight * match
+    elif a.subject_end and b.subject_start:
         distance = math.dist(a.subject_end, b.subject_start)
         parts["eye_trace"] = 0.12 * max(0.0, 1.0 - distance / 0.4)
     before = _direction(a, previous.source_start, previous.source_end, at_end=True)
@@ -310,12 +317,13 @@ def _motion_ranks(pool: Iterable[Candidate]) -> dict[str, float]:
 def assemble(music: MusicMap, acts: list[Act], *, fixed: Iterable[Fixed] = (), fps: int = 24,
              exclude_units: Iterable[str] = (), beam: int = _BEAM, per_span: int = _PER_SPAN,
              boundaries: list[float] | None = None,
-             overrides: dict[tuple[float, float], Act] | None = None) -> list[Placement]:
+             overrides: dict[tuple[float, float], Act] | None = None, matcher: Any = None) -> list[Placement]:
     """Best edit over the passage as consecutive placements (fixed shots included).
 
     ``boundaries`` pins every cut (fill mode): each span between consecutive
     boundaries takes exactly one shot and pace bounds are not applied.
     ``overrides`` gives one pinned span its own act (a slot with its own search).
+    ``matcher`` (``matchcuts.CutMatcher``) scores every cut on its actual frames.
     """
     fixed = sorted(fixed, key=lambda item: item.start)
     acts = sorted(acts, key=lambda act: act.start)
@@ -378,11 +386,13 @@ def assemble(music: MusicMap, acts: list[Act], *, fixed: Iterable[Fixed] = (), f
                 options = options[:per_span * 3]
             for state in frontier:
                 taken = 0
-                for option in options:
+                matches = cut_matches(matcher, state.placement, options, fps)
+                for position, option in enumerate(options):
                     unit = option.candidate.unit_id
                     if unit in state.units and not option.fixed:
                         continue
-                    step, _ = transition(state.placement, option)
+                    step, _ = transition(state.placement, option, matches[position] if matches is not None else None,
+                                         matcher.strength if matcher is not None else 0.0)
                     scene = option.candidate.scene_id
                     reuse = -0.3 * state.scenes.get(scene, 0) if scene else 0.0
                     # Film and look reuse are about screen time, so they scale with duration:
@@ -415,6 +425,16 @@ def assemble(music: MusicMap, acts: list[Act], *, fixed: Iterable[Fixed] = (), f
     if not finals:
         raise ValueError("No complete edit fits these acts; widen the searches or the pace")
     return max(finals, key=lambda state: state.score).path()
+
+
+def cut_matches(matcher: Any, previous: Placement | None, options: list[Placement], fps: int = 24) -> np.ndarray | None:
+    """Measured match of the previous shot's last frame against each option's first frame (None without a matcher)."""
+    if matcher is None or previous is None:
+        return None
+    out_row = matcher.row(previous.candidate.unit_id, previous.source_end - 1.0 / fps)
+    if out_row is None:
+        return None
+    return matcher.scores(out_row, [matcher.row(option.candidate.unit_id, option.source_start) for option in options])
 
 
 def _spans(points: list[float], index: int, act: Act, fixed_at: dict[float, Fixed], blocked: list[tuple[float, float]],
@@ -463,7 +483,8 @@ def _push(bucket: list[_State], state: _State, beam: int) -> None:
         del bucket[beam:]
 
 
-def alternatives(result: list[Placement], acts: list[Act], music: MusicMap, *, count: int = 5) -> list[list[Placement]]:
+def alternatives(result: list[Placement], acts: list[Act], music: MusicMap, *, count: int = 5,
+                 matcher: Any = None) -> list[list[Placement]]:
     """For each placement, the best other candidates for the same span given its neighbours."""
     used = {p.candidate.unit_id for p in result}
     options: list[list[Placement]] = []
@@ -484,9 +505,12 @@ def alternatives(result: list[Placement], acts: list[Act], music: MusicMap, *, c
             placement = place(candidate, chosen.start, chosen.end, act, ranks, context)
             if placement is None:
                 continue
-            total = placement.score + transition(previous, placement)[0]
+            weight = matcher.strength if matcher is not None else 0.0
+            into = cut_matches(matcher, previous, [placement])
+            total = placement.score + transition(previous, placement, None if into is None else float(into[0]), weight)[0]
             if following is not None:
-                total += transition(placement, following)[0]
+                out = cut_matches(matcher, placement, [following])
+                total += transition(placement, following, None if out is None else float(out[0]), weight)[0]
             total += _neighbour_similarity(placement, result, index)
             scored.append((total, placement))
         scored.sort(key=lambda item: -item[0])
@@ -509,7 +533,7 @@ def _neighbour_similarity(placement: Placement, result: list[Placement], index: 
     return -_SIMILAR_COST * total
 
 
-def reason(placement: Placement, previous: Placement | None) -> str:
+def reason(placement: Placement, previous: Placement | None, matcher: Any = None) -> str:
     """A short, factual explanation of why this shot sits here."""
     c = placement.candidate
     text = []
@@ -521,8 +545,11 @@ def reason(placement: Placement, previous: Placement | None) -> str:
     if placement.parts.get("motion", 0) >= 0.8:
         text.append("Its movement matches the music's intensity here.")
     if previous is not None:
-        _, parts = transition(previous, placement)
-        if parts.get("eye_trace", 0) >= 0.08:
+        match = cut_matches(matcher, previous, [placement])
+        _, parts = transition(previous, placement, None if match is None else float(match[0]), 1.0)
+        if parts.get("match", 0) >= 0.6:
+            text.append("It cuts in on a frame that matches the previous shot's last one.")
+        elif parts.get("eye_trace", 0) >= 0.08:
             text.append("The subject continues from where the previous shot left the eye.")
         if parts.get("direction", 0) > 0:
             text.append("Screen direction continues across the cut.")

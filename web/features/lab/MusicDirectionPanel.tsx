@@ -92,7 +92,7 @@ export default function MusicDirectionPanel(props: Props) {
             <EditorIcon name="plus" size={12} /> {example.label}
           </button>)}
         </div></details>
-        <p className={styles.capabilities}>Themes, colors and visual motifs guide scene search. Exact match cuts aren’t guaranteed.</p>
+        <p className={styles.capabilities}>Themes, colors and visual motifs guide scene search. Cuts can land on frames that match across the cut.</p>
       </div>
       <div className={styles.preferences}>
         <fieldset className={styles.pacing} disabled={disabled}>
@@ -114,6 +114,13 @@ export default function MusicDirectionPanel(props: Props) {
             onChange={(event) => changeSetting({ footage: event.target.value as NonNullable<PlannerSettings["footage"]> })}>
             <option value="balanced">Mix recognizable and fresh</option><option value="famous">Recognizable moments</option>
             <option value="gems">Fresh, lesser-known shots</option>
+          </select>
+        </label>
+        <label className={styles.field}>Match cuts
+          <select value={settings.match_cuts ?? "some"} disabled={disabled}
+            onChange={(event) => changeSetting({ match_cuts: event.target.value as NonNullable<PlannerSettings["match_cuts"]> })}>
+            <option value="some">Where they fit</option><option value="many">As often as possible</option>
+            <option value="off">Plain cuts</option>
           </select>
         </label>
         <fieldset className={styles.filmScope} disabled={disabled}><legend>Source films</legend>

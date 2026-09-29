@@ -201,6 +201,8 @@ class PlannerSettings(LabModel):
     lyric_treatment: Literal["ignore", "literal", "metaphorical", "counterpoint"] = "metaphorical"
     # Recognizable <-> fresh footage; values are the search ranking presets.
     footage: Literal["balanced", "famous", "gems"] = "balanced"
+    # How strongly cuts prefer frames that match across the cut (harness v2 with a moment index).
+    match_cuts: Literal["off", "some", "many"] = "some"
 
 
 class SuppliedLyric(LabModel):
