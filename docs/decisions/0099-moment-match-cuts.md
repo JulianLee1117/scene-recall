@@ -112,9 +112,9 @@ Measured on a 12-film pilot (RTX 5070 Ti, while other GPU work ran):
   9 h for the 339 h library. Decoding skips non-reference frames on NVDEC.
   Keypoints are decoded in one batched GPU step, because the library's
   per-image post-processing cost as much as the model.
-- **Search cost.** About 0.3-0.5 s on a pilot index of 64k-239k instants.
-  Coarse retrieval takes under 10 ms; the rest is exact scoring of 2.5k-4k
-  instants.
+- **Search cost.** 0.3-0.9 s on pilot indexes of 64k-361k instants, with
+  other GPU and CPU work running. Coarse retrieval takes under 40 ms; the rest
+  is exact scoring of 2.5k-4k instants.
 - **Known item.** The 2001 bone-to-satellite cut is not found. Its luma
   polarity flips (a dark bone on bright sky, a bright satellite on black), the
   detector names both objects inconsistently, and the cut is a conceptual
