@@ -179,7 +179,9 @@ export default function MatchCuts() {
             </button>
             <div className={styles.cardBody}>
               <div className={styles.cardTitle}><h3>{match.film_title}</h3><time>{seconds(match.time)}</time></div>
-              <div className={styles.reasons}>{match.reasons.slice(0, 3).map((reason) => <span key={reason.code} title={`${percent(reason.strength)} above chance`}>{reason.label}</span>)}</div>
+              <div className={styles.reasons}>{match.reasons.length ? match.reasons.slice(0, 3).map((reason) =>
+                <span key={reason.code} title={`Stronger than ${percent(0.9 + reason.strength / 10)} of random cuts`}>{reason.label}</span>)
+                : <span className={styles.loose} title="Nothing clearly lines up; the closest the library has">Loose match</span>}</div>
             </div>
           </article>)}</div>
       </section>

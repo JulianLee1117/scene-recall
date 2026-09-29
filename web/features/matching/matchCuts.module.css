@@ -62,6 +62,7 @@
 .cardTitle { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .cardTitle h3 { margin: 0; font-size: 12px; font-weight: 540; color: #dde0e6; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reasons { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.reasons .loose { color: #7d828d; background: transparent; border-style: dashed; }
 .reasons span { color: #aeb6c4; background: #1d2027; border: 1px solid #2f343d; padding: 0 5px; border-radius: 3px; font-size: 10px; line-height: 1.7; }
 
 .chain { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 20px; border-top: 1px solid var(--line); background: #0f1012f2; backdrop-filter: blur(6px); }
