@@ -32,7 +32,8 @@ def _document():
 
 def test_old_documents_gain_defaults_and_track_context_is_validated():
     document = ProjectDocument()
-    assert document.planner_settings.model_dump() == {"pacing": "balanced", "lyric_treatment": "metaphorical", "footage": "balanced"}
+    assert document.planner_settings.model_dump() == {"pacing": "balanced", "lyric_treatment": "metaphorical", "footage": "balanced",
+                                                      "match_cuts": "some"}
     assert document.song_context is None and document.visual_plan is None
     original = _document()
     original["song_context"] = {"track_id": "track", "lyrics": [{"id": "line", "start": 20, "end": 25, "text": "Later in the song"}]}

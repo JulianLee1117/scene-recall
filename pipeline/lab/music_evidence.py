@@ -169,7 +169,8 @@ def music_evidence(document, *, include_analysis=True):
     return {"contract": EVIDENCE_CONTRACT, "track_id": track_id, "passage": deepcopy(passage),
             "time_base": "source-track-seconds", "measured": measured, "audio_interpretation": interpretation,
             "audio_observations": observations, "song_meaning": meaning, "song_context": supplied,
-            "planner_settings": PlannerSettings.model_validate(document.get("planner_settings") or {}).model_dump(),
+            # match_cuts steers harness v2 assembly only; keeping it out leaves v1 planning requests unchanged.
+            "planner_settings": PlannerSettings.model_validate(document.get("planner_settings") or {}).model_dump(exclude={"match_cuts"}),
             "visual_plan": visual_plan_context(document), "editor_direction": editorial_context(document),
             "feedback": [{"slot_id": slot["id"], "start": slot["start"], "end": slot["end"], "feedback": slot["feedback"]}
                          for slot in slots if slot.get("feedback")]}
