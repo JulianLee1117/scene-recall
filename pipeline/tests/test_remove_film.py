@@ -175,6 +175,98 @@ def test_manifest_failure_restores_all_rows_and_profile_readiness(config, librar
     assert resolve_ready_framing_profile(config, db) == framing
 
 
+REJECTED = b"rejected release"
+
+
+def _identify(monkeypatch):
+    # Film IDs are content hashes; the fixture's IDs stand in for real ones.
+    monkeypatch.setattr(removal, "_content_hash",
+                        lambda path: TARGET if path.read_bytes() == REJECTED else "f" * 64)
+
+
+def test_delete_files_dry_run_lists_targets_and_changes_nothing(config, library, monkeypatch):
+    db, _, _, path = library
+    path.write_bytes(REJECTED)
+    _identify(monkeypatch)
+    before = _versions(db)
+    report = removal.remove_film_index(config, TARGET, path, delete_files=True)
+    targets = {target["kind"]: target for target in report["files"]}
+    assert targets["source"]["delete"] and targets["assets"]["delete"] and targets["assets"]["files"] == 1
+    assert "source media" not in report["preserved"]
+    assert path.exists() and (config.paths.assets_dir / TARGET).is_dir()
+    assert _versions(db) == before
+
+
+def test_delete_files_rejects_the_release_and_keeps_everything_else(config, library, tmp_path, monkeypatch):
+    db, _, _, path = library
+    playback = tmp_path / "playback"
+    config.paths.playback_dir = playback
+    (playback / TARGET / "video-copy").mkdir(parents=True)
+    (playback / TARGET / "video-copy" / "video.mp4").write_bytes(b"copy")
+    (playback / OTHER).mkdir()
+    (playback / OTHER / "video.mp4").write_bytes(b"other copy")
+    path.write_bytes(REJECTED)
+    other_source = tmp_path / f"{OTHER}.mkv"
+    other_source.write_bytes(b"other film")
+    _identify(monkeypatch)
+    receipt = tmp_path / "reject.json"
+    report = removal.remove_film_index(config, TARGET, path, apply=True, receipt=receipt, delete_files=True)
+    assert report["status"] == json.loads(receipt.read_text())["status"] == "complete"
+    assert not path.exists()
+    assert not (config.paths.assets_dir / TARGET).exists() and not (playback / TARGET).exists()
+    assert other_source.read_bytes() == b"other film"
+    assert (config.paths.assets_dir / OTHER / "keyframes" / "b_0000_0.webp").read_bytes() == b"frame evidence"
+    assert (playback / OTHER / "video.mp4").read_bytes() == b"other copy"
+    assert db.open_table("films").count_rows(f"film_id = '{TARGET}'") == 0
+    assert db.open_table("bookmarks").count_rows() == 1
+
+
+def test_delete_files_keeps_a_replacement_with_the_same_filename(config, library, tmp_path, monkeypatch):
+    _, _, _, path = library
+    path.write_bytes(b"better copy")
+    _identify(monkeypatch)
+    report = removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "r.json", delete_files=True)
+    source = next(target for target in report["files"] if target["kind"] == "source")
+    assert not source["delete"] and "kept" in source["reason"]
+    assert path.read_bytes() == b"better copy"
+    assert not (config.paths.assets_dir / TARGET).exists()
+
+
+def test_delete_files_finishes_a_film_already_out_of_the_index(config, library, tmp_path, monkeypatch):
+    _, _, _, path = library
+    path.write_bytes(REJECTED)
+    _identify(monkeypatch)
+    removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "index-only.json")
+    assert path.exists() and (config.paths.assets_dir / TARGET).is_dir()
+    with pytest.raises(ValueError, match="found 0"):
+        removal.remove_film_index(config, TARGET, path)
+    report = removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "files.json", delete_files=True)
+    assert report["film"] is None and report["status"] == "complete"
+    assert not path.exists() and not (config.paths.assets_dir / TARGET).exists()
+
+
+def test_a_locked_file_leaves_files_pending_for_a_rerun(config, library, tmp_path, monkeypatch):
+    db, _, _, path = library
+    path.write_bytes(REJECTED)
+    _identify(monkeypatch)
+    remove = removal._remove
+
+    def in_use(target, root):
+        if target.name == "keyframes":
+            raise PermissionError("file in use")
+        return remove(target, root)
+
+    monkeypatch.setattr(removal, "_remove", in_use)
+    receipt = tmp_path / "pending.json"
+    with pytest.raises(PermissionError):
+        removal.remove_film_index(config, TARGET, path, apply=True, receipt=receipt, delete_files=True)
+    assert json.loads(receipt.read_text())["status"] == "files_pending"
+    assert db.open_table("films").count_rows(f"film_id = '{TARGET}'") == 0
+    monkeypatch.setattr(removal, "_remove", remove)
+    report = removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "retry.json", delete_files=True)
+    assert report["status"] == "complete" and not (config.paths.assets_dir / TARGET).exists()
+
+
 def test_final_film_removal_keeps_empty_text_profile_valid(config, library, tmp_path):
     db, text, _, path = library
     removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "first.json")

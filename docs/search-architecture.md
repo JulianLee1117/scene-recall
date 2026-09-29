@@ -16,7 +16,7 @@ records.
 | Area | Contract section | Code | Decisions in force |
 |---|---|---|---|
 | Evidence: per-film artifacts, compiled tables | Evidence v2 | `pipeline/evidence/` | 0001, 0093, 0095, 0098, 0099 |
-| Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080 |
+| Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080, 0102 |
 | Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, with 0002-0021 and 0082-0087 where not superseded |
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
@@ -339,8 +339,19 @@ source path. Under ingestion, film and publication locks, it removes only that
 film's canonical and model-scoped rows, repairs full-text coverage and republishes
 only profiles that were already complete. An audit receipt records pre/post table
 versions and readiness; recoverable failures restore the retained original table
-versions. Source files, assets, jobs and authored state remain separate. Replacing
+versions. Jobs, download records and authored state remain separate. Replacing
 a source filename cannot cause this operation to remove the replacement's bytes.
+
+Rejected releases are deleted, not archived (ADR-0102). With `--delete-files`,
+after the index rows are removed, the same operation deletes:
+- the source video, only while its content hash still equals the film ID;
+- the film's asset folder, emptied under the film lock and removed after it is
+  released while the global ingestion lock is still held;
+- its playback copy.
+
+Deletion refuses links and paths outside the configured roots. A failure leaves
+the index withdrawal in place with a `files_pending` receipt, and rerunning
+finishes an already withdrawn film. Without the flag, files are untouched.
 
 The Lab is a registry-driven experiment directory with a separate recent-project
 list. The explicit registry owns each entry `route`, saved-edit `project_route`

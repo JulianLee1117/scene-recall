@@ -1095,21 +1095,31 @@ current rows and indexes and never runs the general `optimize()` compaction
 path. It removes database rollback history, not current search evidence.
 Maintenance is explicit; ingestion and ordinary API requests never prune history.
 
-To withdraw a known bad release from search before importing a replacement,
-the index-only command requires its exact film ID and indexed source path:
+Rejected releases (watermarked, duplicate or wrong cut) are deleted, not
+archived. One command withdraws the film from search and deletes its files; it
+requires the exact film ID and indexed source path:
 
 ```powershell
-python -m pipeline.index.remove_film <film-id> --expected-path "V:/scene-recall/films/Film (Year).mkv"
-python -m pipeline.index.remove_film <film-id> --expected-path "V:/scene-recall/films/Film (Year).mkv" --apply --receipt removal-receipt.json
+python -m pipeline.index.remove_film <film-id> --expected-path "V:/scene-recall/films/Film (Year).mkv" --delete-files
+python -m pipeline.index.remove_film <film-id> --expected-path "V:/scene-recall/films/Film (Year).mkv" --delete-files --apply --receipt removal-receipt.json
 ```
 
-The first command previews affected rows. Apply requires a new receipt, excludes
-ingestion/backfill publication and removes only that film's canonical and derived
-index rows. Previously ready profiles remain ready for the remaining library;
-incomplete profiles remain inactive. Files, download records, jobs, bookmarks and
-projects are separate and are not removed by this command. A replacement at the
-same filename is never touched. Complete this operation before pruning versions;
-a receipt marked `applying` or `recovery_required` requires recovery first.
+The first command previews affected rows and files. Apply requires a new
+receipt, excludes ingestion/backfill publication and removes only that film's
+canonical and derived index rows. Previously ready profiles remain ready for the
+remaining library; incomplete profiles remain inactive. `--delete-files` then
+deletes the source video, the film's asset folder and its playback copy.
+- The source is deleted only while its content still matches the film ID, so a
+  replacement at the same filename is kept.
+- Without `--delete-files`, only index rows go and every file stays.
+- Download records, jobs, bookmarks and projects are never removed; clips that
+  used the film show as unavailable.
+- A receipt marked `files_pending` (for example, a file in use) is finished by
+  running the same command again; it also cleans up a film that is already out
+  of the index.
+
+Complete this operation before pruning versions; a receipt marked `applying` or
+`recovery_required` requires recovery first.
 
 Hosted annotation requests run concurrently within a film; tune
 `ingest.annotation_concurrency` in `config.yaml` (default 8).
