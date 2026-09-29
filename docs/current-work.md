@@ -97,6 +97,40 @@ Next:
 - Match-cut planning after that, per the owner. Measured subject layout, screen
   direction and camera segments now exist for it.
 
+### Match cuts: starting context (2026-09-28)
+
+The owner asked for a plan first (keep it lightweight), then the build. A Jev
+test comes after match cutting.
+
+- **Existing work.** Match Cuts is its own Lab workspace (ADR-0067); code is in
+  `pipeline/matching/` and `web/features/matching/`.
+  - Architecture contract: "Match Cuts audition and shadow research", "Match
+    Cut shadow profile", "Exact-frame refinement and Motion Match",
+    "Scene-based Match search" and "Bounded Match Cuts Lab".
+  - Decisions: ADR-0008, 0027, 0038, 0040, 0046, 0048 and 0067.
+- **New per-shot evidence** (compiled `shot_evidence`, ADR-0093), all newer
+  than that work:
+  - `peak_time`;
+  - `camera`, `camera_segments` (JSON), `camera_slow`, `camera_moving` and
+    `camera_reliability`;
+  - `motion_energy`;
+  - `subject` (a JSON main-subject track), `subject_x`, `subject_y` and
+    `subject_size`;
+  - `hidden_cuts`, `dark_spans`, `palette`, `brightness`, `hero_time` and
+    `scene_id`;
+  - story fields: `action`, `characters`, `emotion` and `iconic`.
+
+  Search v2 (ADR-0094, ADR-0097) can supply candidates.
+- **Known gap, in progress in another session.** Dissolves and fades inside a
+  shot are not yet recorded. Top Gun: Maverick has a beach-to-motorcycle
+  dissolve inside one shot. Transition evidence and clean spans per shot will
+  land as ADR-0098. A cut point should come from a clean span.
+- **Coordination.** Two sessions push to master:
+  - pull before pushing;
+  - take ADR numbers from 0099 up;
+  - leave the pre-existing uncommitted edits in `pipeline/ingest/media.py`
+    and `pipeline/tests/test_media.py` alone.
+
 ## Goal
 
 1. Find the moment you remember (description, dialogue, character, event).
