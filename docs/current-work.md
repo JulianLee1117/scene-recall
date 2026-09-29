@@ -98,7 +98,7 @@ Next:
 
 ### Match cuts (ADR-0099, 2026-09-28)
 
-Landed on the branch, library backfill pending:
+Landed on master, with the library backfilled:
 
 - a `moments` evidence pass: every instant at 4 fps, with masks, keypoints,
   light, edges and colour;
@@ -108,13 +108,11 @@ Landed on the branch, library backfill pending:
 - harness v2 transitions scored on actual cut frames, set by
   `planner_settings.match_cuts`.
 
-The pilot covers 12 films.
 
 Next:
 
-- Run `python -m pipeline.evidence moments` over the library. It takes about
-  9 h on the GPU; start it when the GPU is free overnight. Then run
-  `python -m pipeline.matching.moments index`.
+- Done 2026-09-29: the library moments pass (158 films, 9.4 h) and the index
+  (4.82M instants, 6.3 GB).
 - Restart the API and the editor worker so they load the new code.
 - Owner review, playing the cuts:
   - about 12 references: people walking or standing, dance or pose, close-ups,
