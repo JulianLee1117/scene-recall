@@ -1666,6 +1666,33 @@ def test_search_deduplicates_channels_and_near_identical_images(
     ]
 
 
+def test_search_folds_a_near_identical_shot_of_the_same_film_into_its_card(
+    config: Config,
+) -> None:
+    """A recurring set-up or reverse angle stays reachable inside the card it resembles."""
+    from pipeline.search.retrieve import _duplicate_keepers, search
+
+    first = _make_unit_row("first", "film_one", caption="A river at dusk", searchable_text="river dusk water",
+                           t_start=0.0, t_end=4.0, img_vec=_basis_vec(0), _distance=0.01)
+    again = _make_unit_row("again", "film_one", caption="The river at dusk again", searchable_text="river dusk water",
+                           t_start=900.0, t_end=904.0, img_vec=_basis_vec(0), _distance=0.02)
+    distinct = _make_unit_row("distinct", "film_two", caption="A blue truck", searchable_text="blue truck water",
+                              t_start=200.0, t_end=202.0, img_vec=_basis_vec(1), _distance=0.03)
+    assert _duplicate_keepers([first, again, distinct]) == [None, 0, None]
+    db = _make_hybrid_mock_db(
+        image_rows=[first, again, distinct],
+        text_rows=[first, again, distinct],
+        lexical_rows=[first, again, distinct],
+    )
+
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+        results = search("river", db, config)
+
+    cards = {result["unit_id"]: result for result in results}
+    assert "again" not in cards                                   # no repeated image in the grid
+    assert [alternative["unit_id"] for alternative in cards["first"]["scene_alternatives"]] == ["again"]
+
+
 def test_search_keeps_temporally_adjacent_visually_distinct_results(
     config: Config,
 ) -> None:

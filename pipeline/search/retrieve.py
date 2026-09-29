@@ -694,9 +694,15 @@ def _temporally_close_within(
 
 
 def _duplicate_flags(rows: list[dict[str, Any]]) -> list[bool]:
-    """Vectorized ``_is_duplicate(row, kept_so_far)`` over rows in order.
+    """Whether each row, in order, repeats an earlier kept row (see :func:`_duplicate_keepers`)."""
+    return [keeper is not None for keeper in _duplicate_keepers(rows)]
 
-    Same rules: cosine >= ``_VISUAL_DUP_COSINE`` against any kept row, or >=
+
+def _duplicate_keepers(rows: list[dict[str, Any]]) -> list[int | None]:
+    """For each row in order, the index of the most similar earlier kept row it repeats, else None.
+
+    Same rules as ``_is_duplicate(row, kept_so_far)``: cosine >=
+    ``_VISUAL_DUP_COSINE`` against any kept row, or >=
     ``_TEMPORAL_VISUAL_DUP_COSINE`` against a kept row of the same film within
     the temporal window; rows without a usable vector are never duplicates.
     One matrix product replaces a Python loop of pairwise dot products.
@@ -712,7 +718,7 @@ def _duplicate_flags(rows: list[dict[str, Any]]) -> list[bool]:
             dimension = vector.shape[0]
         vectors.append(vector)
     if dimension is None:
-        return [False] * count
+        return [None] * count
     matrix = np.zeros((count, dimension), dtype=np.float32)
     valid = np.zeros(count, dtype=bool)
     for index, vector in enumerate(vectors):
@@ -730,23 +736,21 @@ def _duplicate_flags(rows: list[dict[str, Any]]) -> list[bool]:
             midpoints[index] = (float(row["t_start"]) + float(row["t_end"])) / 2.0
         except (KeyError, TypeError, ValueError):
             pass
-    flags: list[bool] = []
+    keepers: list[int | None] = []
     kept: list[int] = []
     for index in range(count):
         if valid[index] and kept:
             prior = np.asarray(kept)
             scores = similarity[index, prior]
             usable = valid[prior]
-            if np.any(usable & (scores >= _VISUAL_DUP_COSINE)):
-                flags.append(True)
-                continue
             close = (films[prior] == films[index]) & (np.abs(midpoints[prior] - midpoints[index]) <= _TEMPORAL_WINDOW_SECONDS)
-            if np.any(usable & (scores >= _TEMPORAL_VISUAL_DUP_COSINE) & close):
-                flags.append(True)
+            repeats = usable & ((scores >= _VISUAL_DUP_COSINE) | ((scores >= _TEMPORAL_VISUAL_DUP_COSINE) & close))
+            if np.any(repeats):
+                keepers.append(int(prior[repeats][np.argmax(scores[repeats])]))
                 continue
-        flags.append(False)
+        keepers.append(None)
         kept.append(index)
-    return flags
+    return keepers
 
 
 def _is_duplicate(
@@ -1967,8 +1971,17 @@ def search(
                     if not _is_unrequested_junk(candidate["row"], query, requested_junk)]
         if not _preserve_visual_alternatives:
             with search_stage("deduplication"):
-                duplicates = _duplicate_flags([candidate["row"] for candidate in eligible])
-            eligible = [candidate for candidate, duplicate in zip(eligible, duplicates) if not duplicate]
+                keepers = _duplicate_keepers([candidate["row"] for candidate in eligible])
+            # A near-identical shot of the same film (a reverse angle, a recurring
+            # set-up) folds into the card it resembles instead of vanishing: the
+            # grid stays free of repeats and the exact moment stays one click away.
+            kept_candidates = []
+            for candidate, keeper in zip(eligible, keepers):
+                if keeper is None:
+                    kept_candidates.append(candidate)
+                elif eligible[keeper]["row"].get("film_id") == candidate["row"].get("film_id"):
+                    _attach_scene_alternative(eligible[keeper], candidate)
+            eligible = kept_candidates
 
     # Priors scale relevance inside the relevant pool; one card per dramatic scene.
     evidence: dict[str, dict[str, Any]] = {}
@@ -2166,9 +2179,11 @@ def _candidate_unit_id(candidate: dict[str, Any]) -> str:
 
 
 def _attach_scene_alternative(representative: dict[str, Any], other: dict[str, Any]) -> None:
+    """Fold *other* (and whatever was already folded into it) into *representative*'s card."""
     alternatives = representative.setdefault("scene_alternatives", [])
-    if len(alternatives) < _priors.MAX_SCENE_ALTERNATIVES:
-        alternatives.append(other)
+    for item in [other, *other.pop("scene_alternatives", [])]:
+        if len(alternatives) < _priors.MAX_SCENE_ALTERNATIVES:
+            alternatives.append(item)
 
 
 def _scene_alternative(candidate: dict[str, Any], shot_evidence: dict[str, Any] | None) -> dict[str, Any]:

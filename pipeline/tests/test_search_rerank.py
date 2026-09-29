@@ -59,12 +59,14 @@ def test_rerank_rests_when_the_gpu_is_full_or_repeatedly_overruns(monkeypatch):
 
 
 def test_quality_evaluations_can_disable_the_budget(monkeypatch):
-    monkeypatch.setattr(rerank, "_load", lambda: {"device": "cpu"})
+    monkeypatch.setattr(rerank, "_load", lambda: {"device": "cuda"})
+    monkeypatch.setattr(rerank, "_free_bytes", lambda _state: 0)     # another process fills the GPU
     deadlines = []
     monkeypatch.setattr(rerank, "_score", lambda *_args, deadline, **_kwargs: deadlines.append(deadline) or [0.5])
     rerank.set_budget(None)
     try:
-        assert rerank.score("q", ["doc"]) == [0.5] and deadlines[-1] == float("inf")
+        assert rerank.score("q", ["doc"]) == [0.5] and deadlines[-1] == float("inf")   # measured regardless
+        assert rerank._RESTING["until"] == 0.0
     finally:
         rerank.set_budget(1.0)
 

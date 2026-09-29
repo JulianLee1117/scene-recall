@@ -219,7 +219,7 @@ export default function ShotCard({
           {sceneMore > 0 && (
             <span
               className="scene-more"
-              title={`${sceneMore} more matching shot${sceneMore === 1 ? "" : "s"} in this scene`}
+              title={`${sceneMore} more matching shot${sceneMore === 1 ? "" : "s"} from this film`}
             >
               +{sceneMore}
             </span>

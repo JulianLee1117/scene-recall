@@ -282,8 +282,8 @@ export default function VideoModal({
             </div>
           )}
           {(shot.scene_alternatives?.length ?? 0) > 0 && (
-            <div className="modal-scene-alternatives" aria-label="More matching shots in this scene">
-              <span>More in this scene</span>
+            <div className="modal-scene-alternatives" aria-label="More matching shots from this film">
+              <span>More matching shots</span>
               <div>
                 {shot.scene_alternatives?.map((alternative) => (
                   <button

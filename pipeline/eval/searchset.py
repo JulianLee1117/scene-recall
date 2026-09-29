@@ -130,12 +130,18 @@ def run(preset: str, films: list[str] | None, out: Path | None, rerank: int | No
         entry["seconds"] = round(time.perf_counter() - started, 2)
         if film_id is not None and at is not None:
             tolerance = float(item.get("tolerance", 15))
-            rank = next((index for index, result in enumerate(results, start=1)
-                         if any(_hit(result, film_id, target, tolerance)
-                                or any(_hit({**alt, "film_id": result["film_id"]}, film_id, target, tolerance)
-                                       for alt in result.get("scene_alternatives") or [])
-                                for target in at)), None)
+            rank, via = None, None
+            for index, result in enumerate(results, start=1):
+                if any(_hit(result, film_id, target, tolerance) for target in at):
+                    rank, via = index, "card"
+                elif any(_hit({**alt, "film_id": result["film_id"]}, film_id, target, tolerance)
+                         for alt in result.get("scene_alternatives") or [] for target in at):
+                    rank, via = index, "inside the card"   # reachable in the card's shot list, not its thumbnail
+                if rank is not None:
+                    break
             entry["rank"] = rank
+            if via:
+                entry["via"] = via
             ranks.append(rank)
         entry["top"] = [{
             "film": titles.get(result["film_id"], result["film_id"])[:40],
@@ -156,6 +162,7 @@ def run(preset: str, films: list[str] | None, out: Path | None, rerank: int | No
         "hit@5": sum(1 for rank in known if rank and rank <= 5),
         "hit@12": sum(1 for rank in known if rank and rank <= 12),
         "missed": sum(1 for rank in known if not rank),
+        "found_inside_card": sum(1 for q in report["queries"] if q.get("via") == "inside the card"),
         "median_seconds": round(statistics.median(q["seconds"] for q in report["queries"] if "seconds" in q), 2),
         **degraded,
     }

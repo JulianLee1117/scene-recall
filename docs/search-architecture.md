@@ -2175,7 +2175,9 @@ contradicts; unknown evidence is neutral.
 
 Deterministic filtering handles unrequested credits, logos, title cards, blank
 frames and static artifacts using the visual caption only (ADR-0054, ADR-0087).
-Visual deduplication then suppresses near-identical evidence.
+Visual deduplication then folds a near-identical shot of the same film (a reverse angle, a
+recurring set-up) into the card it resembles, among its other matching shots, and drops
+near-identical shots of other films (ADR-0101).
 
 Priors apply after relevance (`pipeline.search.priors`): a shot's relevance
 score is multiplied by a bounded factor from its fame (library-scaled) and craft

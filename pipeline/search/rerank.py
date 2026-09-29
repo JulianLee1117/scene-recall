@@ -84,7 +84,7 @@ def score(query: str, documents: list[str], *, batch_size: int = 16) -> list[flo
     state = _load()
     if state is None:
         return None
-    if state["device"] == "cuda" and _free_bytes(state) < _MIN_FREE_BYTES:
+    if _BUDGET_S is not None and state["device"] == "cuda" and _free_bytes(state) < _MIN_FREE_BYTES:
         _rest("GPU memory is nearly full")
         return None
     try:
@@ -116,7 +116,11 @@ def _free_bytes(state: dict[str, Any]) -> int:
 
 
 def set_budget(seconds: float | None) -> None:
-    """Change the per-query time budget; None disables it (quality evaluations, not serving)."""
+    """Change the per-query time budget; None disables it and the full-GPU rest (quality evaluations, not serving).
+
+    An evaluation measures ranking, not the machine's load: with no budget the
+    judge always runs, however busy the GPU, and only a real failure skips it.
+    """
     global _BUDGET_S
     _BUDGET_S = seconds
 
