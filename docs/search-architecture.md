@@ -25,10 +25,12 @@ text query (search v2, ADR-0094)
   -> channels: PE text-to-frame | semantic text views (each view ranked on its
      own, fused by rank) | full text | quotes over subtitle lines
   -> weighted reciprocal-rank fusion (quote channel weighted up for quote-like queries)
-  -> cross-encoder rerank of the fused shortlist over each shot's evidence
+  -> one relevance score per candidate (ADR-0097): fused evidence, then the
+     cross-encoder's verdict on the fused shortlist plus every retriever's
+     best matches, then bounded factors for query signals
   -> junk filtering and visual deduplication
-  -> bounded priors under a preset (balanced | famous | gems)
-  -> one card per dramatic scene, temporal spread, film diversity
+  -> bounded prior factors under a preset (balanced | famous | gems)
+  -> one card per dramatic scene, temporal spread, film diversity (named films exempt)
   -> hero thumbnails, badges, story line, scene and matched line
 
 reference image (standalone API compatibility)
@@ -2132,7 +2134,9 @@ labels and energy), `story` (action, characters, iconic note, setting) and
 `scene` (scene title, summary, story context, tone; shared by its shots). Each
 view ranks on its own and votes by weighted reciprocal rank, because distances
 are not comparable across document styles; the view where a shot ranked best
-is returned as evidence. Stills-guessed camera movement is not searchable.
+is returned as evidence. Identical documents tie (a scene summary shared by its
+shots gives them one rank), so the shots' own views decide between them.
+Stills-guessed camera movement is not searchable.
 
 Semantic queries use the neutral instruction `Retrieve scene descriptions
 matching the query.` under `scene-recall-semantic-query-v2` (ADR-0053); stored
@@ -2141,29 +2145,50 @@ producer provenance and must match the model, revision, dimension, embedding
 and view contracts and the exact table generations; otherwise the whole text
 channel falls back to the legacy PE text vector.
 
-Channels are fused by weighted reciprocal rank. When `retrieval.rerank_shortlist`
-is positive, Qwen3-Reranker-0.6B reads the query with each shortlisted shot's
-evidence (film, scene, action, visual caption, dialogue) and its judgement is
-blended with the fused rank inside the shortlist only. The rerank has a
-one-second budget. It is skipped while the GPU is nearly full (another process
-such as ingest measurement), and abandoned between batches once over budget;
-either case rests it for a minute. The fused order stands meanwhile.
+Channels are fused by weighted reciprocal rank. From there each candidate
+carries one relevance score through ordering (ADR-0097), starting from its
+fused score relative to the best candidate's; later stages scale that score by
+bounded factors rather than shifting ranks, so they settle near-ties but cannot
+overrule a clearly stronger match.
+
+When `retrieval.rerank_shortlist` is positive, Qwen3-Reranker-0.6B judges the
+fused shortlist plus the three best matches of every channel and of each precise
+text view (caption, story, dialogue, scene; a document shared by several shots
+sends its three best-evidenced shots). It reads the query with each shot's
+evidence (film, scene, action, known moment, visual caption, dialogue) and
+returns log-odds. The verdict is read on a fixed scale linear in log-odds
+(saturating at p 0.001 and 0.999), because probabilities hide the difference
+between near-certain judgements, and is blended 0.6/0.4 with the fused score.
+Unjudged candidates keep only their fused evidence. The judge has a one-second
+budget. It is skipped while the GPU is nearly full (another process such as
+ingest measurement), and abandoned between batches once over budget; two
+overruns in a row or a full GPU rest it for a minute. Fused evidence alone
+orders results meanwhile.
+
+Query signals (`pipeline.search.signals`) then scale relevance by bounded
+factors when the query names a character, actor or film, a shot scale, a camera
+move, a time of day or a colour that a candidate's evidence satisfies or
+contradicts; unknown evidence is neutral.
 
 Deterministic filtering handles unrequested credits, logos, title cards, blank
 frames and static artifacts using the visual caption only (ADR-0054, ADR-0087).
 Visual deduplication then suppresses near-identical evidence.
 
-Priors apply after relevance (`pipeline.search.priors`): a shot's rank-derived
-relevance is multiplied by at most a small factor from its fame (library-scaled)
-and craft under the selected preset — `balanced` (default), `famous` or `gems`
-(demotes iconic shots and weak craft). Priors reorder inside the relevant pool
-and never add candidates; quote-like queries keep half-strength priors; shots
-without evidence are neutral. Shots of the same dramatic scene fold into one
+Priors apply after relevance (`pipeline.search.priors`): a shot's relevance
+score is multiplied by a bounded factor from its fame (library-scaled) and craft
+under the selected preset — `balanced` (default), `famous` or `gems` (demotes
+iconic shots and weak craft). Between equally good matches the prior decides; it
+cannot overturn a clearly stronger one. Recipe results, which carry no relevance
+score, apply the same factor to a rank-derived relevance. Priors reorder inside
+the relevant pool and never add candidates; quote-like queries keep
+half-strength priors; shots without evidence are neutral. Shots of the same dramatic scene fold into one
 card whose other matches are listed as `scene_alternatives`.
 
 Ordinary unscoped streams then apply the 30-second defer-only temporal spread
 and the bounded film repeat-rank policy
 (`original_rank + strength * repeats / (repeats + 1)`, default strength 32).
+Films the query names by title, character or actor are exempt: a named film is
+an implicit scope.
 Normal unscoped broad search retrieves three times the per-channel depth and
 keeps a one-page cross-film reserve. Explicit film scopes preserve strict
 relevance order. Unscoped mandatory visual recipes keep their page-wise per-film
@@ -2574,6 +2599,10 @@ search or replace this promotion rule.
   movement.
 - Semantic dialogue is embedded at shot level; utterance rows serve the quote
   channel through full text, not embeddings.
+- Full text covers visual captions and dialogue, not the understanding pass's
+  story and scene text, so a shot described precisely only by its story line
+  can rank below hundreds of loosely similar shots and never reach the judge
+  ("a face slowly rising from the dark basement stairs" ranks 228th in its view).
 - OCR comes from the general annotator rather than a dedicated OCR pass.
 - Story, scene and in-context mood exist only for films with an understanding
   artifact; fame and craft are model ratings calibrated per film, not audience

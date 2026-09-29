@@ -1,4 +1,4 @@
-"""Cross-encoder rerank: blending, documents, and its time budget (no model download)."""
+"""Cross-encoder judge: verdict scale, relevance, documents, and its time budget (no model download)."""
 
 from __future__ import annotations
 
@@ -16,9 +16,18 @@ def awake(monkeypatch):
     monkeypatch.setattr(rerank, "_BUDGET_S", 1.0)
 
 
-def test_blend_lets_a_confident_judgement_overtake_the_fused_rank_within_the_shortlist():
-    assert rerank.blend(["a", "b", "c"], [0.1, 0.2, 0.99]) == ["c", "a", "b"]
-    assert rerank.blend(["a", "b"], [0.5, 0.5]) == ["a", "b"]
+def test_verdicts_read_log_odds_so_near_certain_judgements_stay_apart():
+    assert rerank.judged(0.0) == 0.5 and rerank.judged(99.0) == 1.0 and rerank.judged(-99.0) == 0.0
+    # p 0.998 vs 0.968 look alike as probabilities; twentyfold in odds they must not.
+    assert rerank.judged(6.2) - rerank.judged(3.4) > 0.15
+
+
+def test_relevance_lets_a_confident_verdict_overtake_better_fused_evidence():
+    assert rerank.relevance(0.8, 6.9) > rerank.relevance(1.0, 3.4)          # the judge is sure; fusion only led
+    assert rerank.relevance(1.0, 3.4) > rerank.relevance(0.9, 3.4)          # equal verdicts: fusion decides
+    # Unjudged candidates keep only their fused evidence, in fused proportion, below a positive verdict.
+    assert rerank.relevance(0.5, None) == pytest.approx(2 * rerank.relevance(0.25, None))
+    assert rerank.relevance(0.3, 0.0) > rerank.relevance(0.6, None)
 
 
 def test_document_reads_scene_action_caption_and_the_matched_line():
@@ -86,4 +95,4 @@ def test_rerank_abandons_the_rest_of_the_shortlist_after_its_deadline():
     assert rerank._score(state, "q", ["doc"] * 40, 16, deadline=time.monotonic() - 1) is None
     assert Model.calls == 1                                   # the first batch ran, the rest were abandoned
     scores = rerank._score(state, "q", ["doc"] * 40, 16, deadline=time.monotonic() + 60)
-    assert len(scores) == 40 and scores[0] == pytest.approx(0.5)
+    assert len(scores) == 40 and scores[0] == pytest.approx(0.0)       # equal yes/no logits: undecided

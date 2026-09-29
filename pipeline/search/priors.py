@@ -1,10 +1,13 @@
 """Ordering after relevance: presets, bounded prior re-rank, scene grouping and presentation.
 
 Relevance decides the candidate pool; priors only reorder inside it. A prior
-can lift a shot by a bounded factor of its relevance (roughly: from rank 20 to
-rank 5, never from rank 200 to rank 1), so an iconic but unrelated shot cannot
-displace a relevant one. Quote-like queries switch priors off: the remembered
-line is the answer, famous or not.
+scales a shot's relevance score by a bounded factor (:func:`multiplier`), so it
+settles near-ties (two equally good matches: the iconic one first) but cannot
+overrule a clearly stronger match, and an iconic but unrelated shot cannot
+displace a relevant one. Where no relevance score exists (recipe results), the
+same factor scales a rank-based relevance instead (roughly: from rank 20 to
+rank 5, never from rank 200 to rank 1). Quote-like queries weaken priors: the
+remembered line is the answer, famous or not.
 
 Presets (docs/current-work.md, "Balancing famous and forgotten"):
 
@@ -94,17 +97,22 @@ def prior(evidence: dict[str, Any] | None, preset: str) -> float:
     return value - (0.5 if craft < 0.2 else 0.0)
 
 
+def multiplier(evidence: dict[str, Any] | None, *, preset: str, specificity: float) -> float:
+    """Bounded relevance factor for one shot under *preset*; 1.0 without evidence or for a fully specific query."""
+    strength = _STRENGTH[preset] * max(0.0, 1.0 - specificity)
+    return max(_MIN_MULTIPLIER, 1.0 + strength * prior(evidence, preset))
+
+
 def rerank(items: list[T], evidence: dict[str, dict[str, Any]], *, preset: str, specificity: float,
            unit_id: Callable[[T], str]) -> list[T]:
-    """Reorder relevance-ranked *items* by bounded priors; stable for ties and missing evidence."""
-    strength = _STRENGTH[preset] * max(0.0, 1.0 - specificity)
-    if strength <= 0.0 or not evidence:
+    """Reorder rank-ordered *items* (no relevance scores) by bounded priors; stable for ties and missing evidence."""
+    if _STRENGTH[preset] * max(0.0, 1.0 - specificity) <= 0.0 or not evidence:
         return list(items)
     scored = []
     for position, item in enumerate(items):
         relevance = 1.0 / (_RANK_OFFSET + position + 1)
-        multiplier = max(_MIN_MULTIPLIER, 1.0 + strength * prior(evidence.get(unit_id(item)), preset))
-        scored.append((-relevance * multiplier, position, item))
+        factor = multiplier(evidence.get(unit_id(item)), preset=preset, specificity=specificity)
+        scored.append((-relevance * factor, position, item))
     scored.sort(key=lambda entry: (entry[0], entry[1]))
     return [item for _score, _position, item in scored]
 

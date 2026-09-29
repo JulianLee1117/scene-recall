@@ -155,3 +155,4 @@ The accepted boundary or behavior.
 | [0094](0094-search-v2.md) | Accepted | Search v2: evidence views fused by rank, quote channel, bounded priors and presets, scene cards, resident vectors, cross-encoder rerank; retire the intent experiments |
 | [0095](0095-serve-last-complete-generation.md) | Accepted | Compile from the newest available profile while a new one backfills; API search keeps its last complete snapshot during publication |
 | [0096](0096-editor-harness-v2.md) | Accepted (opt-in) | Editor harness v2: measured music map, concept acts, evidence pools, beat-lattice assembly and a sequence review; OTIO export |
+| [0097](0097-relevance-is-one-score.md) | Accepted | One relevance score through ordering: log-odds judge verdicts on the shortlist plus every retriever's best matches, bounded signal and prior factors, named films exempt from film diversity |

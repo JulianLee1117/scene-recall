@@ -1091,6 +1091,73 @@ def test_bounded_film_repeat_rerank_is_soft_deterministic_and_prefix_stable() ->
     assert sum(
         item["row"]["film_id"] == "film-a" for item in complete[:5]
     ) >= 3
+    # A film the query names ("neo stops the bullets") is what was asked for.
+    named = _bounded_film_repeat_rerank(
+        candidates,
+        result_limit=12,
+        strength=32,
+        exempt=frozenset({"film-a"}),
+    )
+    assert named == candidates[:12]
+
+
+def test_identical_view_documents_tie_and_their_best_evidenced_shot_is_judged(monkeypatch) -> None:
+    from pipeline.index.text_features import TextIndexProfile
+    from pipeline.search import retrieve
+
+    def feature(unit_id: str, view: str, distance: float) -> dict:
+        return {"unit_id": unit_id, "feature_id": f"{unit_id}::{view}", "view": view, "_distance": distance}
+
+    # One scene summary embedded for four shots; only s2's own story also matches.
+    per_view = {"scene": [feature("s1", "scene", 0.3), feature("s2", "scene", 0.3), feature("s3", "scene", 0.3),
+                          feature("s4", "scene", 0.3), feature("x", "scene", 0.4)],
+                "story": [feature("y", "story", 0.2), feature("s2", "story", 0.25)]}
+    monkeypatch.setattr(retrieve, "_semantic_view_rankings", lambda *_args, **_kwargs: per_view)
+    monkeypatch.setattr(retrieve, "_feature_texts", lambda *_args: {})
+    monkeypatch.setattr(retrieve, "_hydrate_units",
+                        lambda _table, ids, _films, _db=None: [{"unit_id": unit_id, "film_id": "f"} for unit_id in ids])
+    profile = TextIndexProfile(profile_id="p", table_name="t", model_id="m", model_revision="r", dimension=3)
+    rows = {row["unit_id"]: row for row in retrieve._semantic_text_search_rows(
+        np.zeros(3, dtype=np.float32), None, None, profile, (), candidate_limit=10)}
+
+    assert rows["s1"]["_text_score"] == rows["s4"]["_text_score"] < rows["s2"]["_text_score"]   # a shared rank
+    # The judge reads each view's best documents; a shared one sends its best-evidenced three shots.
+    assert {unit_id for unit_id, row in rows.items() if row.get("_view_head")} == {"s2", "s1", "s3", "x", "y"}
+
+
+def test_judge_reads_every_retrievers_best_matches_and_folds_verdicts_into_relevance(monkeypatch) -> None:
+    from pipeline.search import retrieve
+
+    def candidate(unit_id: str, score: float, **channels: int) -> dict:
+        return {"row": {"unit_id": unit_id, "film_id": "f"}, "final_score": score,
+                "channels": {name: {"rank": rank} for name, rank in channels.items()}}
+
+    fused = [candidate("a", 0.020, img=1, txt=1), candidate("b", 0.015, img=2),
+             candidate("c", 0.010, img=9), candidate("d", 0.009, lex=40)]
+    scene_match = candidate("deep", 0.004, txt=101)
+    scene_match["row"]["_view_head"] = True        # a precise view (the scene summary) ranks it first
+    everything = [*fused, scene_match]
+    retrieve._seed_relevance(everything)
+    judged_documents: list[str] = []
+    monkeypatch.setattr(retrieve._priors, "load_evidence", lambda _db, _ids: {})
+    monkeypatch.setattr(retrieve._priors, "load_scenes", lambda _db, _ids: {})
+    monkeypatch.setattr(retrieve, "_film_titles", lambda _db: {})
+    monkeypatch.setattr(retrieve._rerank, "document", lambda row, *_args: row["unit_id"])
+    verdicts = {"a": -4.0, "b": 0.0, "deep": 6.9}   # fusion's best is rejected, the next undecided, the deep one sure
+
+    def score(_query, documents):
+        judged_documents.extend(documents)
+        return [verdicts[document] for document in documents]
+
+    monkeypatch.setattr(retrieve._rerank, "score", score)
+    ordered = retrieve._judged("q", None, fused, everything, shortlist=2)
+
+    assert judged_documents == ["a", "b", "deep"]  # the shortlist, plus a view's best match past the fused cutoff
+    assert [item["row"]["unit_id"] for item in ordered] == ["deep", "b", "a", "c", "d"]
+    assert ordered[3]["relevance"] > ordered[4]["relevance"]      # unjudged keep their fused order
+    monkeypatch.setattr(retrieve._rerank, "score", lambda _query, _documents: None)
+    retrieve._seed_relevance(everything)
+    assert retrieve._judged("q", None, fused, everything, shortlist=2) == fused   # resting judge: fused order
 
 
 def test_search_soft_film_diversity_backfills_by_relevance(config: Config) -> None:
@@ -1727,7 +1794,7 @@ def test_search_uses_middle_keyframe_and_serializable_debug(
 
     assert result["keyframe_url"] == f"/media/keyframe/{shot_id}/1"
     assert result["rank"] == 1
-    assert set(result["debug"]) == {"final_score", "channels"}
+    assert set(result["debug"]) == {"final_score", "relevance", "channels"}
     assert set(result["debug"]["channels"]) == {"img", "txt", "lex"}
     assert result["debug"]["channels"]["img"]["distance"] == pytest.approx(0.1)
     assert result["debug"]["channels"]["lex"]["distance"] is None

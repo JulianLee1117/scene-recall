@@ -30,10 +30,12 @@ Landed:
   - interaction logging.
 
   Search keeps its last complete snapshot while evidence publishes. The rerank
-  has a 1 s budget and rests while the GPU is full.
-  - Eval (30 known items): MRR 0.97, hit@1 29.
-  - Latency: about 0.7 s without the rerank under GPU contention, about 0.9 s
-    with it on an idle GPU.
+  has a 1 s budget and rests while the GPU is full. Relevance is one score
+  through ordering, so priors and signals settle near-ties but cannot overrule
+  the judge, and named films are exempt from film diversity (ADR-0097).
+  - Eval on the whole library (55 known items: 30 on the pilot films, 25 held
+    out on 23 others): MRR 0.956, 52 at #1, 1 missed (was 0.868, 46, 3).
+  - Latency: about 1.0 s median on the whole library with the rerank.
 - **Editor harness v2** (`lab.harness: v2`, opt-in):
   - music map, concept acts, evidence pools;
   - beat-lattice assembly, where action peaks land on accents and variety covers

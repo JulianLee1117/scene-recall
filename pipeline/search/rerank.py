@@ -1,15 +1,19 @@
-"""Cross-encoder rerank of the fused shortlist, reading each shot's text evidence.
+"""Cross-encoder judgement of the fused shortlist, reading each shot's text evidence.
 
 Retrieval channels vote by rank, so a shot that one precise document describes
 exactly (a story line such as "a face slowly rises from the dark basement
 stairs") can lose to shots that several loose channels half-match. A
 cross-encoder reads the query and each candidate's evidence together and judges
-relevance directly. It runs only on the fused shortlist and its judgement is
-blended with the fused rank, never substituted for it, so visual matches that
-text cannot describe keep their place.
+relevance directly. It reads the fused shortlist plus each retriever's own best
+matches, and its verdict is blended with the fused evidence into one relevance
+score (:func:`relevance`), never substituted for it, so visual matches that text
+cannot describe keep their place.
 
-Model: Qwen3-Reranker-0.6B (Apache-2.0), scored as p("yes") following the
-model card. Enabled by ``retrieval.rerank_shortlist`` (0 disables it).
+Model: Qwen3-Reranker-0.6B (Apache-2.0), scored as the log-odds of "yes" over
+"no" following the model card. Probabilities saturate near certainty (0.998 and
+0.968 look alike but differ twentyfold in odds), so verdicts are read on a
+fixed log-odds scale (:func:`judged`). Enabled by ``retrieval.rerank_shortlist``
+(0 disables it).
 
 The rerank is an optional refinement with a time budget. When another process
 fills the GPU (ingest measurement, embedding backfills), VRAM oversubscription
@@ -35,7 +39,8 @@ _PREFIX = ("<|im_start|>system\nJudge whether the Document meets the requirement
            "Instruct provided. Note that the answer can only be \"yes\" or \"no\".<|im_end|>\n<|im_start|>user\n")
 _SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 _MAX_TOKENS = 384
-_BLEND = 0.6                 # weight of the cross-encoder vs the fused rank inside the shortlist
+_BLEND = 0.6                 # weight of the judge's verdict vs the fused evidence in a candidate's relevance
+_LOG_ODDS_SPAN = 7.0         # verdicts saturate beyond p 0.001 and 0.999
 _BUDGET_S = 1.0              # abandon a rerank that runs longer (the fused order stands)
 _REST_S = 60.0               # after an overrun or a full GPU, skip reranking this long
 _MIN_FREE_BYTES = 768 << 20  # below this much free VRAM, kernels risk paging
@@ -73,7 +78,7 @@ def _load() -> dict[str, Any] | None:
 
 
 def score(query: str, documents: list[str], *, batch_size: int = 16) -> list[float] | None:
-    """p(relevant) for each document, or None when unavailable, resting, over budget or failing."""
+    """Log-odds that each document is relevant, or None when unavailable, resting, over budget or failing."""
     if not documents or time.monotonic() < _RESTING["until"]:
         return None
     state = _load()
@@ -137,9 +142,8 @@ def _score(state: dict[str, Any], query: str, documents: list[str], batch_size: 
                                 return_attention_mask=False, add_special_tokens=False)
             ids = [state["prefix"] + item + state["suffix"] for item in encoded["input_ids"]]
             batch = tokenizer.pad({"input_ids": ids}, padding=True, return_tensors="pt").to(state["device"])
-            logits = model(**batch).logits[:, -1, :]
-            pair = torch.stack([logits[:, state["no"]], logits[:, state["yes"]]], dim=1).float()
-            scores.extend(torch.softmax(pair, dim=1)[:, 1].tolist())
+            logits = model(**batch).logits[:, -1, :].float()
+            scores.extend((logits[:, state["yes"]] - logits[:, state["no"]]).tolist())
     return scores
 
 
@@ -175,12 +179,17 @@ def document(row: dict[str, Any], evidence: dict[str, Any] | None, scene: dict[s
     return "\n".join(parts)
 
 
-def blend(order: list[Any], relevance: list[float]) -> list[Any]:
-    """Reorder a shortlist by the cross-encoder, tempered by the fused rank."""
-    count = len(order)
-    scored = []
-    for position, (item, value) in enumerate(zip(order, relevance)):
-        fused = 1.0 - position / max(1, count)
-        scored.append((-(_BLEND * value + (1 - _BLEND) * fused), position, item))
-    scored.sort(key=lambda entry: (entry[0], entry[1]))
-    return [item for _score, _position, item in scored]
+def judged(log_odds: float) -> float:
+    """The judge's verdict on a fixed [0, 1] scale, linear in log-odds (0.5 is undecided)."""
+    return min(1.0, max(0.0, 0.5 + log_odds / (2 * _LOG_ODDS_SPAN)))
+
+
+def relevance(fused: float, log_odds: float | None) -> float:
+    """A candidate's relevance in [0, 1]: the judge's verdict tempered by its fused evidence.
+
+    ``fused`` is the candidate's fused score relative to the best candidate's.
+    A candidate the judge did not read keeps only its fused evidence, so
+    unjudged candidates order among themselves exactly as fusion ranked them.
+    """
+    verdict = judged(log_odds) if log_odds is not None else 0.0
+    return _BLEND * verdict + (1.0 - _BLEND) * fused

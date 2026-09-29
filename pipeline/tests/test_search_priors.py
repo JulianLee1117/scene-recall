@@ -31,6 +31,17 @@ def test_balanced_priors_lift_iconic_shots_only_within_a_bounded_window():
     assert ranked.index("u55") > 20
 
 
+def test_priors_settle_near_ties_but_cannot_overrule_a_clearly_stronger_match():
+    ordinary, iconic = _evidence(0.44, 0.7), _evidence(0.89, 0.85, iconic=True)
+    lift = lambda relevance, evidence: relevance * priors.multiplier(evidence, preset="balanced", specificity=0.0)
+    # The judge clearly prefers the ordinary shot: fame must not reverse that ...
+    assert lift(0.97, ordinary) > lift(0.75, iconic)
+    # ... but between two equally good matches, the iconic one leads.
+    assert lift(0.95, iconic) > lift(0.97, ordinary)
+    assert priors.multiplier(None, preset="famous", specificity=0.0) == 1.0
+    assert priors.multiplier(iconic, preset="famous", specificity=1.0) == 1.0
+
+
 def test_specific_queries_ignore_priors_and_gems_demote_iconic_shots():
     items = ["a", "b", "c"]
     evidence = {"a": _evidence(0.1, 0.3), "b": _evidence(0.2, 0.9), "c": _evidence(1.0, 0.9, iconic=True)}
@@ -96,4 +107,4 @@ def test_query_signals_lift_satisfying_evidence_and_leave_unknowns_neutral():
     assert signals.multiplier(parsed, units["b"], evidence["b"]) > 2.0
     assert signals.multiplier(parsed, units["a"], None) < 1.0
     assert signals.multiplier(parsed, units["c"], None) == 1.0
-    assert signals.reorder(["a", "c", "b"], parsed, units, evidence, unit_id=str)[0] == "b"
+    assert parsed.named_films() == {"matrix"}                               # a character names its film

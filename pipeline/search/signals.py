@@ -4,8 +4,10 @@ Embeddings match descriptions loosely; names and measured facts are exact. A
 query that names a character ("trinity kicks the cop"), an actor, a film, a
 shot scale ("close-up"), a camera move ("slow push in"), a time of day or a
 colour lifts candidates whose evidence satisfies it, and slightly lowers those
-whose known evidence contradicts it. Signals only reorder the retrieved pool,
-like priors, and unknown evidence is neutral.
+whose known evidence contradicts it. Signals only scale relevance inside the
+retrieved pool, like priors, and unknown evidence is neutral. Films the query
+names also keep all their matches: film diversity does not spread away from
+them.
 """
 
 from __future__ import annotations
@@ -14,12 +16,11 @@ from dataclasses import dataclass, field
 import json
 import re
 import threading
-from typing import Any, Callable, TypeVar
+from typing import Any
 
 from pipeline.evidence.tables import FILM_META, SHOT_EVIDENCE
 from pipeline.evidence.textnorm import normalize_line
 
-T = TypeVar("T")
 
 _SCALE = [
     ("extreme close up", "extreme_close_up"), ("extreme closeup", "extreme_close_up"), ("macro shot", "extreme_close_up"),
@@ -56,6 +57,10 @@ class Signals:
     def __bool__(self) -> bool:
         return bool(self.characters or self.films or self.scale or self.camera or self.time or self.colours
                     or self.black_and_white)
+
+    def named_films(self) -> frozenset[str]:
+        """Films the query names: by title, or by one of their characters or actors."""
+        return frozenset(self.films | {film_id for film_id, _character in self.characters})
 
 
 @dataclass
@@ -215,14 +220,3 @@ def multiplier(signals: Signals, unit: dict[str, Any], evidence: dict[str, Any] 
             factor *= 1.2
     return factor
 
-
-def reorder(items: list[T], signals: Signals, units: dict[str, dict[str, Any]], evidence: dict[str, dict[str, Any]],
-            *, unit_id: Callable[[T], str], offset: int = 20) -> list[T]:
-    """Stable, bounded reorder of relevance-ranked items by their signal multipliers."""
-    scored = []
-    for position, item in enumerate(items):
-        key = unit_id(item)
-        factor = multiplier(signals, units.get(key) or {}, evidence.get(key))
-        scored.append((-(factor / (offset + position + 1)), position, item))
-    scored.sort(key=lambda entry: (entry[0], entry[1]))
-    return [item for _score, _position, item in scored]

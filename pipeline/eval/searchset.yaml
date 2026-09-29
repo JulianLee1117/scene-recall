@@ -15,13 +15,15 @@ queries:
   - {query: "guns, lots of guns", film: "The Matrix", line: "Guns. Lots of guns."}
   - {query: "lobby shootout", film: "The Matrix", at: "1:42:30", tolerance: 90}
   - {query: "trinity frozen mid-air kicking a cop", film: "The Matrix", at: "0:03:02"}
-  - {query: "agent smith says mr anderson", film: "The Matrix", at: "1:54:24", tolerance: 30}
+  # Smith says it in the interrogation and in the finale; any of his lines answers (subtitles checked).
+  - {query: "agent smith says mr anderson", film: "The Matrix", at: ["0:17:48", "0:18:44", "0:20:02", "0:20:16", "0:20:58", "1:54:24", "1:55:46", "1:57:56", "1:58:09", "2:03:46"], tolerance: 30}
   # In the Mood for Love
   - {query: "they pass each other in slow motion in the rain", film: "In the Mood for Love", at: "0:24:31"}
   - {query: "whispering a secret into a hole in the temple wall", film: "In the Mood for Love", at: "1:30:16"}
   - {query: "woman in a red coat walking down a red hotel corridor", film: "In the Mood for Love", at: ["0:55:39", "0:52:22"]}
   - {query: "we won't be like them", film: "In the Mood for Love", line: "We won't be like them."}
-  - {query: "sheltering from the rain under the eaves", film: "In the Mood for Love", at: "1:08:32", tolerance: 30}
+  # The shelter scene opens at 1:07:44 on the wide shot of the two under the eaves (frames checked).
+  - {query: "sheltering from the rain under the eaves", film: "In the Mood for Love", at: ["1:07:44", "1:08:32"], tolerance: 30}
   - {query: "chow whispers into a hole at angkor wat", film: "In the Mood for Love", at: "1:30:16"}
   # Parasite
   - {query: "jessica only child illinois chicago", film: "Parasite", at: "0:20:42", tolerance: 20}
@@ -38,6 +40,34 @@ queries:
   - {query: "not quite my tempo", film: "Whiplash", line: "Not quite my tempo."}
   - {query: "were you rushing or were you dragging", film: "Whiplash", line: "Were you rushing or were you dragging?"}
   - {query: "no two words more harmful than good job", film: "Whiplash", line: "There are no two words in the English language more harmful than \"good job\"."}
+  # Held out: other films, phrased from memory rather than from their evidence, added
+  # before the relevance-score change (ADR-0097) so ranking changes are checked beyond
+  # the films they were diagnosed on. Targets located in the evidence, frames checked.
+  - {query: "creepy twin girls standing at the end of the hallway", film: "The Shining", at: "0:49:55", tolerance: 20}
+  - {query: "movie producer wakes up with a horse's head in his bed", film: "The Godfather", at: "0:34:05", tolerance: 20}
+  - {query: "ape smashing bones in slow motion", film: "2001 - A Space Odyssey", at: "0:16:25"}
+  - {query: "gene kelly hanging off a lamppost singing in the downpour", film: "Singin in the Rain", at: "1:08:35"}
+  - {query: "the delorean vanishes leaving two trails of fire", film: "Back to the Future", at: "0:21:57"}
+  - {query: "a killer makes a gas station owner call a coin toss", film: "No Country for Old Men", at: "0:24:10", tolerance: 40}
+  - {query: "pulling teeth out with a claw hammer", film: "Oldboy", at: "0:41:43"}
+  - {query: "the streets of paris fold up over their heads", film: "Inception", at: "0:30:13"}
+  - {query: "a guy playing a flamethrower guitar on the front of a truck", film: "Mad Max", at: ["0:17:10", "1:29:30", "1:41:00"], tolerance: 25}
+  - {query: "lawrence blows out a match and it cuts to the desert sunrise", film: "Lawrence of Arabia", at: "0:17:40"}
+  - {query: "little girl in a red coat in a black and white crowd", film: "Schindlers List", at: "1:08:30", tolerance: 20}
+  - {query: "finding a severed ear in the grass", film: "Blue Velvet", at: "0:06:25"}
+  - {query: "a man teaching a boy to swim in the ocean", film: "Moonlight", at: "0:18:40", tolerance: 30}
+  - {query: "old man on a playground swing in the snow", film: "Ikiru", at: "2:17:30", tolerance: 40}
+  - {query: "her dress catches fire at the bonfire", film: "Portrait of a Lady on Fire", at: "1:18:30"}
+  - {query: "photographing sunlight through the trees on his lunch break", film: "Perfect Days", at: "0:16:00", tolerance: 20}
+  - {query: "rehearsing lines with a cassette tape while driving the red saab", film: "Drive My Car", at: ["0:18:30", "0:32:30"], tolerance: 25}
+  - {query: "a boy takes photos of the backs of people's heads", film: "Yi Yi", at: ["2:26:25", "2:31:03"], tolerance: 20}
+  - {query: "running and dancing down the street to modern love", film: "Frances Ha", at: "0:22:50"}
+  - {query: "girl dancing behind a snack bar counter to california dreamin", film: "Chungking Express", at: ["0:42:25", "0:54:35"], tolerance: 30}
+  - {query: "running through times square in his underwear", film: "Birdman", at: "1:14:30"}
+  - {query: "lying together on the frozen river", film: "Eternal Sunshine", at: ["0:15:25", "0:53:40"], tolerance: 20}
+  - {query: "soldiers stop shooting as the baby is carried out", film: "Children of Men", at: "1:32:45", tolerance: 20}
+  - {query: "i drink your milkshake", film: "There Will Be Blood", line: "I drink your milkshake!"}
+  - {query: "you're gonna need a bigger boat", film: "Jaws", line: "You're gonna need a bigger boat."}
   # Discovery (whole library)
   - {query: "rain at night"}
   - {query: "slow motion"}

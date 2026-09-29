@@ -1085,6 +1085,11 @@ def _semantic_text_search_rows(
     sit closer to almost any query than a terse story line that says exactly
     what was asked. Each view therefore votes by rank (weighted reciprocal
     rank), and a shot matched by several views gains from their agreement.
+
+    Identical documents tie: every shot of a scene shares its summary, so the
+    scene view ranks them alike and the shots' own views decide between them.
+    Each precise view's few best documents are marked ``_view_head`` for the
+    judge; a document shared by several shots sends its best-evidenced few.
     """
     requested_views = _validated_semantic_views(allowed_views)
     with search_stage("semantic_retrieval"):
@@ -1092,19 +1097,30 @@ def _semantic_text_search_rows(
                                            candidate_limit=candidate_limit)
     scores: dict[str, float] = {}
     best: dict[str, tuple[tuple[int, float], dict[str, Any]]] = {}
+    tied_heads: list[list[str]] = []        # per precise view, each of its best documents' shots
     for view, rows in per_view.items():
         weight = _VIEW_WEIGHTS.get(view, 0.5)
         seen: set[str] = set()
-        for rank, row in enumerate(rows, start=1):
+        rank, previous, document = 0, None, 0
+        groups: dict[int, list[str]] = {}       # the view's best documents, each with the shots that share it
+        for position, row in enumerate(rows, start=1):
             unit_id = str(row.get("unit_id") or "")
+            distance = float(row.get("_distance", 1.0))
+            if previous is None or distance - previous > _TIE_DISTANCE:
+                rank, previous, document = position, distance, document + 1
             if not unit_id or unit_id in seen:
                 continue
             seen.add(unit_id)
             scores[unit_id] = scores.get(unit_id, 0.0) + weight / (_RRF_K + rank)
+            if view in _JUDGED_VIEWS and document <= _JUDGE_RESERVE:
+                groups.setdefault(document, []).append(unit_id)
             # Evidence shown for the shot: the view where it ranked best.
-            order = (rank, float(row.get("_distance", 1.0)))
+            order = (rank, distance)
             if unit_id not in best or order < best[unit_id][0]:
                 best[unit_id] = (order, row)
+        tied_heads.extend(groups.values())
+    heads = {unit_id for members in tied_heads
+             for unit_id in sorted(members, key=lambda unit_id: (-scores[unit_id], unit_id))[:_JUDGE_RESERVE]}
     ordered = sorted(scores, key=lambda unit_id: (-scores[unit_id], unit_id))[:candidate_limit]
     if not ordered:
         return []
@@ -1121,6 +1137,8 @@ def _semantic_text_search_rows(
         row = dict(unit)
         row["_distance"] = float(feature.get("_distance", 1.0))
         row["_text_score"] = scores[unit_id]
+        if unit_id in heads:
+            row["_view_head"] = True
         row["_matched_text"] = {
             "feature_id": feature.get("feature_id"),
             "view": feature.get("view"),
@@ -1136,6 +1154,12 @@ def _semantic_text_search_rows(
 # lead; scene summaries are shared by every shot of a scene; mood, facets and
 # on-screen text are narrow supporting evidence.
 _VIEW_WEIGHTS = {"caption": 1.0, "story": 1.0, "dialogue": 0.8, "scene": 0.6, "mood": 0.4, "facets": 0.35, "ocr": 0.35}
+_TIE_DISTANCE = 1e-6        # the same document embedded for several shots
+# The judge reads the fused shortlist plus the few best matches of every single
+# retriever: a shot that one precise view ranks first (a scene summary that is
+# exactly the query) can sit far down a fusion that rewards agreement.
+_JUDGE_RESERVE = 3
+_JUDGED_VIEWS = frozenset({"caption", "story", "dialogue", "scene"})   # mood, facets, OCR only support
 
 
 def _semantic_view_rankings(
@@ -1490,6 +1514,7 @@ def _bounded_film_repeat_rerank(
     *,
     result_limit: int,
     strength: float,
+    exempt: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Softly defer film repeats with a bounded, saturating rank penalty.
 
@@ -1497,7 +1522,8 @@ def _bounded_film_repeat_rerank(
     ``original_rank + strength * n / (n + 1)``, where ``n`` is the number of
     already-selected rows from that film. The penalty approaches ``strength``
     but never exceeds it, so several excellent matches from one film remain
-    competitive and every candidate survives in the full permutation.
+    competitive and every candidate survives in the full permutation. Films in
+    ``exempt`` (those the query names) keep their relevance order unpenalised.
 
     Only each film queue's head can win next, yielding ``O(N log F)`` work for
     ``N`` selected candidates and ``F`` represented films. Original rank and
@@ -1540,7 +1566,8 @@ def _bounded_film_repeat_rerank(
             continue
         next_rank, next_candidate = queues[queue_key][next_index]
         repeats = selected_per_film[queue_key]
-        penalty = strength * repeats / (repeats + 1)
+        # A film the query names is what was asked for, not a repeat to spread away from.
+        penalty = 0.0 if queue_key in exempt else strength * repeats / (repeats + 1)
         identity = str(next_candidate["row"].get("unit_id") or next_rank)
         heapq.heappush(
             heap,
@@ -1918,11 +1945,19 @@ def search(
             candidate_limit=candidate_limit,
             reserve_limit=int(config.retrieval.diversity.page_size),
         )
-    shortlist = int(getattr(config.retrieval, "rerank_shortlist", 0) or 0)
-    if shortlist and ordered and not _defer_result_preferences:
-        ordered = _reranked(query, db, ordered, shortlist)
+    # From here on relevance is a score, not only a position: fused evidence,
+    # then the judge's verdict, then bounded factors for query signals and
+    # priors. A later stage can settle a near-tie but cannot overrule a clearly
+    # stronger match, because it scales the score instead of shifting ranks.
+    signals: _signals.Signals | None = None
     if ordered and not _defer_result_preferences:
-        ordered = _with_query_signals(query, db, ordered)
+        _seed_relevance(fused.values())
+        shortlist = int(getattr(config.retrieval, "rerank_shortlist", 0) or 0)
+        if shortlist:
+            ordered = _judged(query, db, ordered, list(fused.values()), shortlist)
+        signals = _query_signals(query, db)
+        if signals:
+            ordered = _with_query_signals(signals, db, ordered)
 
     if _defer_result_preferences:
         eligible = ordered
@@ -1935,20 +1970,23 @@ def search(
                 duplicates = _duplicate_flags([candidate["row"] for candidate in eligible])
             eligible = [candidate for candidate, duplicate in zip(eligible, duplicates) if not duplicate]
 
-    # Priors reorder inside the relevant pool; one card per dramatic scene.
+    # Priors scale relevance inside the relevant pool; one card per dramatic scene.
     evidence: dict[str, dict[str, Any]] = {}
     if not _defer_result_preferences:
         with search_stage("priors"):
             evidence = _priors.load_evidence(db, (_candidate_unit_id(candidate) for candidate in eligible))
-            eligible = _priors.rerank(eligible, evidence, preset=preset, specificity=specificity,
-                                      unit_id=_candidate_unit_id)
+            for candidate in eligible:
+                candidate["relevance"] *= _priors.multiplier(
+                    evidence.get(_candidate_unit_id(candidate)), preset=preset, specificity=specificity)
+            eligible = _by_relevance(eligible)
             eligible = _priors.group_by_scene(eligible, evidence, unit_id=_candidate_unit_id,
                                               attach=_attach_scene_alternative)
 
     # A selected movie is an explicit relevance constraint, so film balancing
     # is disabled. Ordinary unscoped browsing gets a bounded diminishing-return
-    # rerank; internal recipe rankings defer their product-level policy until
-    # every independent clause has been fused.
+    # rerank that spares the films the query names (a character, actor or
+    # title is an implicit film scope); internal recipe rankings defer their
+    # product-level policy until every independent clause has been fused.
     if _defer_result_preferences:
         apply_film_diversity = False
     elif apply_film_diversity is None:
@@ -1966,6 +2004,7 @@ def search(
             strength=float(
                 config.retrieval.diversity.film_repeat_rank_strength
             ),
+            exempt=signals.named_films() if signals else frozenset(),
         )
         if apply_film_diversity
         else eligible[:result_limit]
@@ -2003,6 +2042,7 @@ def search(
             "rank": result_rank,
             "debug": {
                 "final_score": float(candidate["final_score"]),
+                "relevance": candidate.get("relevance"),
                 "channels": candidate["channels"],
             },
         }
@@ -2029,9 +2069,37 @@ def search(
     return selected
 
 
-def _reranked(query: str, db: lancedb.DBConnection, ordered: list[dict[str, Any]], shortlist: int) -> list[dict[str, Any]]:
-    """Cross-encoder pass over the fused shortlist (see :mod:`pipeline.search.rerank`)."""
+def _seed_relevance(candidates: Iterable[dict[str, Any]]) -> None:
+    """Each candidate's fused score relative to the best one, and the relevance that fused evidence alone gives."""
+    candidates = list(candidates)
+    top = max((float(candidate["final_score"]) for candidate in candidates), default=0.0)
+    for candidate in candidates:
+        candidate["fused"] = float(candidate["final_score"]) / top if top > 0.0 else 0.0
+        candidate["relevance"] = _rerank.relevance(candidate["fused"], None)
+
+
+def _by_relevance(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Stable order by relevance score: equal scores keep their previous order."""
+    return [candidate for _position, candidate in sorted(
+        enumerate(candidates), key=lambda entry: (-float(entry[1]["relevance"]), entry[0]))]
+
+
+def _retriever_head(candidate: dict[str, Any]) -> bool:
+    """Whether some channel, or some precise text view, ranks this candidate among its own best."""
+    if any(int(channel.get("rank") or _JUDGE_RESERVE + 1) <= _JUDGE_RESERVE
+           for name, channel in candidate["channels"].items() if name != "rerank"):
+        return True
+    return bool(candidate["row"].get("_view_head"))
+
+
+def _judged(query: str, db: lancedb.DBConnection, ordered: list[dict[str, Any]],
+            candidates: list[dict[str, Any]], shortlist: int) -> list[dict[str, Any]]:
+    """Cross-encoder verdicts on the shortlist, folded into relevance (see :mod:`pipeline.search.rerank`)."""
     head = ordered[:shortlist]
+    chosen = {id(candidate) for candidate in head}
+    reserve = [candidate for candidate in sorted(candidates, key=lambda c: -float(c["final_score"]))
+               if id(candidate) not in chosen and _retriever_head(candidate)]
+    head += reserve
     with search_stage("rerank"):
         evidence = _priors.load_evidence(db, (_candidate_unit_id(candidate) for candidate in head))
         scenes = _priors.load_scenes(db, (row.get("scene_id") for row in evidence.values()))
@@ -2042,12 +2110,15 @@ def _reranked(query: str, db: lancedb.DBConnection, ordered: list[dict[str, Any]
                              titles.get(str(candidate["row"].get("film_id") or "")))
             for candidate in head
         ]
-        relevance = _rerank.score(query, documents)
-    if relevance is None:
+        verdicts = _rerank.score(query, documents)
+    if verdicts is None:
         return ordered
-    for candidate, value in zip(head, relevance):
-        candidate["channels"]["rerank"] = {"score": round(float(value), 4)}
-    return _rerank.blend(head, relevance) + ordered[shortlist:]
+    for candidate, log_odds in zip(head, verdicts):
+        candidate["relevance"] = _rerank.relevance(candidate["fused"], log_odds)
+        candidate["channels"]["rerank"] = {"log_odds": round(float(log_odds), 3),
+                                           "verdict": round(_rerank.judged(log_odds), 4)}
+    present = {id(candidate) for candidate in ordered}
+    return _by_relevance(ordered + [candidate for candidate in reserve if id(candidate) not in present])
 
 
 _SIGNAL_DEPTH = 300
@@ -2055,16 +2126,19 @@ _QUOTE_DEPTH = 100          # quotes are precise: deeper line lists add latency,
 _SIGNAL_COLUMNS = ["framing", "time_of_day", "palette"]
 
 
-def _with_query_signals(query: str, db: lancedb.DBConnection, ordered: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Lift candidates whose evidence satisfies names, scale, camera, time or colour in the query."""
+def _query_signals(query: str, db: lancedb.DBConnection) -> _signals.Signals | None:
+    """Names, scale, camera, time and colour the query asks for (None when the vocabulary is unavailable)."""
+    try:
+        return _signals.parse(query, _signals.vocabulary(db))
+    except Exception as exc:  # noqa: BLE001 - signals are optional
+        _LOGGER.warning("query signals unavailable: %s", exc)
+        return None
+
+
+def _with_query_signals(signals: _signals.Signals, db: lancedb.DBConnection,
+                        ordered: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Scale the relevance of candidates whose evidence satisfies (or contradicts) the query's signals."""
     with search_stage("query_signals"):
-        try:
-            signals = _signals.parse(query, _signals.vocabulary(db))
-        except Exception as exc:  # noqa: BLE001 - signals are optional
-            _LOGGER.warning("query signals unavailable: %s", exc)
-            return ordered
-        if not signals:
-            return ordered
         head = ordered[:_SIGNAL_DEPTH]
         ids = [_candidate_unit_id(candidate) for candidate in head]
         resident = _resident.rows(db, "units", key_column="unit_id", columns=_SIGNAL_COLUMNS)
@@ -2075,7 +2149,9 @@ def _with_query_signals(query: str, db: lancedb.DBConnection, ordered: list[dict
                 db.open_table("units"), columns=["unit_id", *_SIGNAL_COLUMNS], where=_unit_filter(tuple(ids)),
                 limit=len(ids))}
         evidence = _priors.load_evidence(db, ids)
-        return _signals.reorder(head, signals, units, evidence, unit_id=_candidate_unit_id) + ordered[_SIGNAL_DEPTH:]
+        for candidate, key in zip(head, ids):
+            candidate["relevance"] *= _signals.multiplier(signals, units.get(key) or {}, evidence.get(key))
+        return _by_relevance(ordered)
 
 
 def _film_titles(db: lancedb.DBConnection) -> dict[str, str]:
