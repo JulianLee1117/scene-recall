@@ -1,6 +1,6 @@
 import { Suspense } from "react";
-import MatchSearch from "@/features/matching/MatchSearch";
+import MatchCuts from "@/features/matching/MatchCuts";
 
 export default function Page() {
-  return <Suspense fallback={<main style={{ padding: 32 }}>Opening match cuts…</main>}><MatchSearch /></Suspense>;
+  return <Suspense fallback={<main style={{ padding: 32 }}>Opening match cuts…</main>}><MatchCuts /></Suspense>;
 }

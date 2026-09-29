@@ -17,7 +17,7 @@ EXPERIMENTS = (
         "route": "/match",
         "project_route": "/lab/visual-rhymes",
         "persistence": "session",
-        "description": "Choose a reference, find matching movement, and compare the cuts.",
+        "description": "Pick any frame; find frames across the library that cut from it seamlessly, and chain them.",
         "capabilities": ["search", "matching", "reels", "reframing"],
         "status": "experimental",
     },
