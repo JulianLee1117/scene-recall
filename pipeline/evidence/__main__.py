@@ -82,6 +82,15 @@ def cmd_measure(args) -> int:
     return 0 if counts["failed"] == 0 else 1
 
 
+def cmd_moments(args) -> int:
+    from pipeline.evidence import moments
+    config = _config(args.config)
+    db, films = _films(config, args.film)
+    counts = moments.run(config, db, films, force=args.force)
+    print(f"[moments] {counts}")
+    return 0 if counts["failed"] == 0 else 1
+
+
 def cmd_hero(args) -> int:
     from pipeline.evidence import hero
     config = _config(args.config)
@@ -184,10 +193,10 @@ def cmd_status(args) -> int:
     from pipeline.evidence import metadata, speech, store, subtitles
     config = _config(args.config)
     _db, films = _films(config, args.film)
-    from pipeline.evidence import hero, highlights, measure, synthesis, understanding
+    from pipeline.evidence import hero, highlights, measure, moments, synthesis, understanding
     producers = {"metadata": metadata.PRODUCER, "subtitles": subtitles.PRODUCER, "audio": speech.PRODUCER,
                  "understanding": understanding.producer(), "highlights": highlights.producer(),
-                 "measure": measure.PRODUCER, "hero": hero.PRODUCER, "synthesis": synthesis.PRODUCER}
+                 "measure": measure.PRODUCER, "moments": moments.PRODUCER, "hero": hero.PRODUCER, "synthesis": synthesis.PRODUCER}
     for kind, producer in producers.items():
         present = sum(1 for film in films if store.read_artifact(config.paths.assets_dir, film.film_id, producer))
         print(f"{kind:14s} {producer.profile_id:34s} {present}/{len(films)} films")
@@ -229,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
                      help="recover chunks the content filter refused by retrying quarter-size pieces (standard price)")
     mea = add("measure", cmd_measure, "local GPU pass: camera motion, hidden cuts, subjects, look and hero frames")
     mea.add_argument("--force", action="store_true")
+    add("moments", cmd_moments, "local GPU pass for match cuts: masks, light, edges and colour of every instant (4 fps)")         .add_argument("--force", action="store_true")
     add("hero", cmd_hero, "pick and extract one hero frame per shot from measured samples")         .add_argument("--force", action="store_true")
     add("highlights", cmd_highlights, "rank each film's iconic moments by recognizability (one text call per film)")         .add_argument("--force", action="store_true")
     add("synthesize", cmd_synthesize, "per-shot priors: fame, craft, distinctiveness, iconic and hidden-gem flags")
