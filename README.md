@@ -29,6 +29,8 @@ uv run python -m pipeline.evidence understand --batch run --max-usd 110 [--wave-
 uv run python -m pipeline.evidence understand --retry-refused  # recover filter-refused clips in smaller pieces
 uv run python -m pipeline.evidence measure                     # local GPU pass (~3-4 min per film)
 uv run python -m pipeline.evidence hero
+uv run python -m pipeline.evidence moments                     # match-cut GPU pass, every instant at 4 fps (~4 min per film)
+uv run python -m pipeline.matching.moments index               # rebuild the library match-cut index afterwards
 uv run python -m pipeline.evidence synthesize
 uv run python -m pipeline.evidence compile                     # search tables + semantic text views
 uv run python -m pipeline.evidence refresh --film "Title"      # every pass for chosen films
@@ -294,7 +296,10 @@ opt-in with `lab.harness: v2` in `config.yaml`. **Regenerate edit** then:
 - lets the planner swap shots once among pre-timed alternatives.
 
 **Footage** in AI direction sets the recognizable ↔ fresh balance (the search
-Famous / Balanced / Hidden gems presets) for every editor search.
+Famous / Balanced / Hidden gems presets) for every editor search. **Match cuts**
+(*Where they fit* by default, *As often as possible*, *Plain cuts*) sets how
+strongly v2 prefers cuts whose frames match across the cut, measured on the
+actual frames once the Match Cuts index is built (see Match Cuts below).
 **Fill gaps** keeps your cuts and placed shots and lets the optimizer pick shots
 for the empty slots. A slot with its own written search uses that search.
 Single-shot replacement keeps the v1 path. **Resolve timeline**
@@ -1588,97 +1593,62 @@ processing and a context retrieval index remain gated on that comparison.
 The [first pilot report](docs/experiments/source-context-pilot.md) records the
 twenty-window backfill, private rendered comparison and known factual failures.
 
-## Scene-based Match search
+## Match Cuts
 
-Open **Labs → Match Cuts**, then choose a reference scene in the independent
-`/match` workspace to search for potential next clips. This experimental workflow
-is available through Labs; ordinary search results, Saved scenes and the main
-scene player do not offer Match Cuts actions. With the optional person detector
-prepared, discovery
-searches the existing keyframe index across available published films, then
-checks shortlisted scenes at actual source frames. This searches indexed
-moments and nearby footage, not every frame of every film.
+Open **Labs → Match Cuts** (`/match`) and choose a shot. Every instant of every
+indexed film is compared against the frame you cut from, and results arrive in
+under a second ([ADR-0099](docs/decisions/0099-moment-match-cuts.md)).
 
-When the detector identifies prominent people, results must preserve their count
-and broadly match each person's placement, height and the group's spacing.
-For example, two foreground dancers require two prominent people in a candidate;
-similar camera movement cannot replace the missing partner. **Similar subject
-arrangement** describes that geometry. **Similar silhouette** appears only when
-the people's outlines also support it. Neither label verifies the same dance
-step, pose or movement. Groups larger than three produce an explained unsupported
-result; the matcher does not silently select a smaller group. Choose **Preview
-cut** to judge the actual transition.
+- **Cut from**: scrub to the last frame before the cut. It snaps to the four
+  indexed instants per second.
+- **Format**: 16:9 keeps the whole picture. 9:16 and 1:1 crop a window of that
+  shape around each subject.
+- **Match on**: *Best match*, *Subject*, *Shape & pose*, *Motion*,
+  *Composition* or *Colour*.
+- **Reframe to align** zooms the next shot up to 1.5x so its subject (a
+  person's eyes) lands on the same spot.
+- **Other scenes of this film** allows same-film results, never from the same
+  scene.
 
-Picking a scene starts one search automatically.
-After adjusting the reference moment, subject or filters, press **Find match cuts**.
-A compact status line distinguishes waiting in the shared job queue,
-active matching, completion, cancellation and failure, with elapsed time.
-Ingestion or another GPU Match search can delay queued searches. Music generation
-runs on the separate editor worker. The reference stays
-beside the results; **Adjust reference** opens the precise source controls.
-**Search scope** shows the available indexed films, or the smaller prepared
-sample when library discovery is unavailable. The source film is excluded by
-default; **Include source film** allows other non-overlapping shots from it.
-The reference shows the detected foreground count. Results explain their
-supported connections, including whether a pair is closer together or farther
-apart. **Labs** returns to the experiment directory; the workspace has no
-navigation back to Scene Search.
+Each result shows the incoming frame through its crop, with reasons such as
+*Same pose*, *Eye line carries over* or *Movement continues left*. Hover to lay
+the outgoing frame over it. Click to audition: the cut plays in the browser
+(outgoing 1.5 s, incoming 2 s, looped), with an **Overlay** view and ±1 frame /
+±¼ s nudges for the incoming first frame.
 
-The first verified cut can be played while remaining matches are checked.
-The list settles into its final order when matching completes; the final three
-leading cuts are prepared automatically, with other previews available on demand.
-The search URL preserves its job so refreshing restores progress and results.
+**Add to chain & continue** keeps the cut and searches onward from the new
+shot, so you can build a match-cut sequence. **Play chain** plays it back to
+back. **Undo last** steps back. The chain lives in this browser session. Nothing
+here creates a project.
 
-There is one search action. Older searches with a specific focus remain
-viewable and are labeled. The source controls let you change the moment or
-subject and pin an exact frame. An explicit subject point or box, or a reference
-without detected people, uses the existing region and motion checks after
-library recall. Without the optional person profile, automatic searches keep
-using the prepared subset described below. Explicit API focus modes retain
-that prepared subset. Position alone never establishes silhouette or movement.
-Finding and previewing create no project or timeline edits. Original framing
-and speed are preserved. The existing standalone worker executes these jobs.
-
-Bounded library discovery still requires a ready existing Match cohort and its
-compatible SAM/RAFT evidence for generic references. The optional person profile
-adds library discovery to that existing setup; it does not replace those
-prerequisites. Prepare it explicitly:
+New films get the moments pass after ingestion, and the index rebuilds when
+one ran. For the existing library, or after a producer change:
 
 ```powershell
-uv run python -m pipeline.matching.people prepare
+uv run python -m pipeline.evidence moments [--film "Title"]   # GPU, ~4 min per film; skips current films
+uv run python -m pipeline.matching.moments index              # a few minutes; the API picks it up on the next search
+uv run python -m pipeline.matching.moments search <unit_id> <seconds> [--focus subject|shape|motion|composition|color] [--reframe] [--same-film]
 ```
 
-This explicit command downloads the official Mask R-CNN ResNet-50 FPN v2 COCO
-checkpoint (about 177 MiB), verifies its pinned SHA-256 and writes an independent
-profile under `assets_dir/matching/models/people-maskrcnn-v2`. Inference never
-downloads weights. `--device cpu` selects a CPU profile instead of automatic
-CUDA selection when preparing a new profile. A changed checkpoint, device or
-runtime requires a separate compatible profile; existing manifests are not
-silently replaced. Person descriptions are cached by exact image pixels and
-profile. No library-wide detection backfill or new search index is created.
+The API boundary is `/matching/moments`:
+- `GET /status`;
+- `GET /shot?unit_id=` (bounds and indexed instants);
+- `POST /search` (reference, direction, focus, output, reframe, outgoing crop,
+  film scope, same-film, excluded shots, minimum footage);
+- `GET /frame` (cached stills of the content picture).
 
-Each library search retrieves at most 600 indexed frame candidates, keeps at
-most 200 distinct shots, checks up to 48 stills, then refines at most ten source
-windows. A people match checks up to four native frames in each window. These
-bounds limit cost but can miss a useful scene or a brief alignment. Empty results
-mean no supported match survived the checked candidates, not that the library
-contains no possible match cut.
-
-The API boundary is `/matching`: `GET /cohorts`, `/reference`, `/frames`,
-`POST /searches`, `GET /searches/{id}`, `POST /searches/{id}/cancel`, and candidate
-frame/preview routes. Requests accept an indexed reference/time, focus, timing,
-film scope, same-film inclusion and minimum incoming footage. Profiles are
-validated and frozen by the server; callers cannot supply candidate footage.
-The portable engine is ready for future editor adapters, but timeline placement
-is not part of this search feature. See ADR-0040 and ADR-0048 for the boundaries
-and limits. Diagnostic examples and passing tests do not establish editorial
-usefulness across the library.
+Limits:
+- Cut points are exact to a quarter second. The browser audition can be a
+  frame off; renders use exact source times.
+- Conceptual rhymes, such as 2001's bone into satellite, are not found by
+  geometry.
 
 ## Match Cuts Lab experiment
 
 Existing Match Cuts projects open the saved Lab editor. The direct
 `/lab/visual-rhymes` route also remains available for edit and baseline
-comparisons; new discovery from the Lab card opens `/match`.
+comparisons; new discovery from the Lab card opens `/match` (above). This
+prepared-cohort editor is frozen.
 In the Lab editor, one workspace contains the source,
 A→B preview and three suggestions. **Find matches** starts in Automatic mode,
 using the prepared evidence shown below the controls. **Match focus** optionally

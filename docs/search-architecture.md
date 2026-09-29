@@ -75,11 +75,11 @@ short source window (Lab-only motion experiment; no main-search activation)
   -> independent temporal candidates and window reranking
   -> separate action-heavy evaluation and activation
 
-scene reference (explicit Lab Match search; optional local person profile)
-  -> bounded existing-library PE keyframe proposals
-  -> on-demand foreground-person screening
-  -> complete group arrangement at bounded native cut frames
-  -> optional silhouette evidence and actual A-to-B audition
+any instant of any shot (Lab Match Cuts and editor transitions; ADR-0099)
+  -> library moment index: every usable 4 fps instant (masks, keypoints, light,
+     edges, colour, measured motion)
+  -> coarse part-weighted retrieval, exact calibrated pair scoring
+  -> optional crop (vertical formats, reframing) and browser audition
 ```
 
 The Jev/intent-routing comparisons (ADR-0086, 0088, 0091) are retired by
@@ -381,8 +381,8 @@ uses one waveform in a focused dialog; trimming remains local until Use this
 section. Cancelling an uploaded replacement restores the opening revision
 and pre-picker Undo history. Whole generation remains explicit; filling gaps or
 replacing a chosen shot preserves the existing timeline.
-Match Cuts separates reference selection from comparison, with one selected
-transition preview. Experiment screens remain isolated under
+Match Cuts is one screen: an outgoing cut point, a results grid of incoming
+instants and an in-browser audition (ADR-0099). Experiment screens remain isolated under
 `web/features/lab` and call shared Python project, source, job and render
 services under `pipeline/lab`; no generic plugin system or second search engine
 is required.
@@ -663,7 +663,9 @@ Footage control) is also the ranking preset of every editor search in v1 and v2.
   - Each shot adds its peak-on-accent alignment and a log-duration penalty
     around a pace target scaled by intensity.
   - Transitions add eye-trace and screen-direction continuity, and penalize the
-    same scene, the same film back to back and jump cuts.
+    same scene, the same film back to back and jump cuts. With a moment index,
+    the eye-trace term becomes a measured match between the actual cut frames,
+    weighted by `planner_settings.match_cuts` (ADR-0099).
   - Variety costs cover image similarity to the last six shots, reuse of a
     visual cluster (spherical k-means on the pool) anywhere in the edit, and
     growing film reuse.
@@ -2696,159 +2698,138 @@ and verification work is tracked in [current-work.md](current-work.md).
 Historical rationale is recorded in
 [`docs/decisions/`](decisions/README.md).
 
-## Scene-based Match search
+## Moment-level Match Cuts (ADR-0099)
 
-ADR-0067 confines experimental Match Cuts entry to the independent Lab workspace,
-opened through **Labs → Match Cuts** at `/match`. Ordinary search results,
-Saved scenes and the main scene player do not expose Match Cuts actions.
-Ordinary descriptive search does not route into this engine. ADR-0040's engine,
-projectless job and exact-pair evidence contracts remain in force.
-The interface shows a reference, one search action,
-candidate rows labeling the measured connections, and an actual A-to-B preview.
-New UI requests always use automatic focus; existing focused jobs remain
-viewable with their scope disclosed. API focus constraints remain available for
-diagnostics and other explicit callers. Discovery and audition create
-durable jobs without creating or changing an edit project. The workspace links
-back to Labs, not to ordinary Scene Search. Picking a reference starts one
-search; adjusting the source or scope requires the explicit search action.
+Match Cuts matches instants, not shots, across the whole library. It stays a
+Lab workspace and an editor transition score. Ordinary search does not route
+into it (ADR-0008's gate still holds for a "find match cuts" search option).
 
-`pipeline.matching.contracts.SearchRequest` is the portable request boundary:
-indexed reference/time, optional subject point or region, fixed/nearby timing,
-automatic or position/shape/subject/camera focus, film scope, same-film inclusion
-and minimum incoming footage. New requests exclude the source film by default;
-explicit inclusion admits other non-overlapping shots. `pipeline.matching.search`
-validates compatible profiles and freezes the selected discovery boundary.
-Every supporting cue is evaluated on the same proposed native last-A/first-B
-timestamps. Explanations describe measurements rather than an uncalibrated
-overall percentage or inferred subject identity.
+**Evidence.** The `moments` producer (`match` v1) decodes each film once,
+skipping non-reference frames on NVDEC. It describes every instant on the
+film's 4 fps grid inside every shot, at least 0.04 s from its cuts, in content
+coordinates (the film's letterbox bars, from `measure`, are cropped away):
 
-ADR-0048 versions automatic scene search as
-`scene-match-library-people-exact-pair-v4`. Preparing the independent local
-person detector opts this Lab entry into bounded recall across available
-published films. A ready existing cohort and compatible SAM/RAFT evidence remain
-required for the generic-reference path; library metadata extends that existing
-cohort entry rather than creating a detector-only mode. `library_retrieval`
-freezes the existing visual-encoder
-identity, frames/units/films table generations and available film scope. The
-nearest retained reference keyframe supplies a vector in that existing PE
-space. Film filters and source-film exclusion apply before a query of at most
-600 indexed frames; hydration keeps at most 200 unique eligible shots. Indexed
-times are seek proposals, never final cut PTS. This adapter creates no new
-embedding, ANN service or every-frame index, and raw vector scores never become
-geometric evidence.
+- RF-DETR segmentation (COCO): at most six objects above 0.35, by area x
+  score, each with a box and a 16x16 silhouette inside it;
+- RF-DETR keypoints (COCO 17) for the four largest people (by keypoint extent,
+  person probability 0.5), on instants whose segmentation found a person;
+- a 32x18 luma thumbnail, a 16x9 doubled-angle edge field with edge energy,
+  8x5 mean colour, sharpness and brightness.
 
-`people.py` uses official torchvision Mask R-CNN ResNet-50 FPN v2 COCO person
-detections. Explicit preparation downloads and verifies the pinned checkpoint;
-runtime builds without pretrained model or backbone downloads and loads only
-the verified local weights. Its independent manifest records the full SHA-256,
-runtime versions, device, float32 inference, resize/preprocessing, label and
-threshold policy, descriptor and salience rules. Full-source coordinates and
-picture aspect are preserved. Keep detections with person score at least 0.7
-and sufficient foreground mask area. Retain the complete salient group whose
-mask area is at least one quarter of the largest person's, ordered by area,
-within the detector's 100-detection bound. Keep other detections as diagnostics.
-Only groups of one to three are supported for matching; more than three causes
-explicit abstention, never truncation or camera fallback. The v2 detector
-profile/cache lineage records this complete-group policy independently of the
-earlier three-person selection diagnostic. This separates foreground dancers
-from a small background audience without claiming perfect person counting.
+Arrays go in `<profile>.npz` beside the JSON artifact, which records their
+SHA-256. Readers reject a mismatched pair.
 
-When an automatic reference has selected people, `library_search` screens at
-most 48 indexed stills and refines at most ten candidate windows, initially
-five and continuing only when fewer than three candidates survive. Still
-screening requires the same foreground count but uses loose placement/height
-support to retain nearby alignment opportunities. Final verification samples
-at most four native frames per incoming window against at most four outgoing
-instants within the existing nearby/fixed timing contract. Nearby references
-must preserve the anchor's selected person count.
+**Index.** `pipeline.matching.moments.index` compiles every film's serving
+`moments` profile (the newest earlier profile while a new one backfills),
+joined with `measure` (camera motion averaged within 0.25 s, hidden cuts) and
+`hero` pictures (ADR-0098). The result goes into one memory-mapped directory,
+`assets_dir/matching/moments/<id>`, published atomically with `current.json`.
+It is derived and rebuildable, and the manifest records every film's profiles.
+A per-film evidence refresh (after ingest) runs `moments` after `measure` and
+rebuilds the index when a moments pass ran. Readers memory-map every column,
+including the coarse matrix, so a process that never searches pays nothing.
 
-Every final people match must preserve the complete selected group of one to
-three people. Assignment handles detector ordering only; it cannot discard a
-missing partner or select a convenient pair from a three-person candidate.
-Each matched center must be within 0.15 normalized picture units and each
-person's smaller/larger height ratio must be at least 0.60. A mask-area ratio
-of at least 0.25 rejects gross size differences. Every pair's spacing vector
-must differ by at most 0.15, with smaller/larger spacing at least 0.50. Strength
-is the weakest center, height or spacing agreement. Physical aspect and area
-remain measurements; arm width and outline are not arrangement requirements.
-Silhouette is additional evidence only when every matched person's outline
-passes the independent shape check; it does not raise arrangement rank.
-Descriptions disclose closer or wider pair spacing. People evidence establishes
-no pose, dance phase, action identity or temporal movement, and camera motion
-cannot substitute for a failed people arrangement. A failed final arrangement
-returns no people candidate rather than weakening that requirement.
+- An instant is a usable cut point when:
+  - something in it is lit (a thumbnail cell reaches luma 0.1), so a satellite
+    in space counts and a fade does not;
+  - it sits at least 0.3 s from a hidden cut;
+  - it falls inside one of its shot's pictures.
+- Main-subject travel comes from the neighbouring instants of the same shot.
+- Coarse vectors cover every other instant (0.5 s). They hold separately
+  normalized, PCA-reduced parts: layout, light, lines, main silhouette, main
+  pose, colour and motion.
+- `calibration.json` holds each reward's p50/p90/p99/p99.9 over random pairs
+  of usable instants.
 
-An explicit point/region, or an automatic reference without detected people,
-uses existing region/shape/movement checks after the same broad recall. Without
-the optional person manifest, automatic search retains the prepared-cohort
-path. Explicit nonautomatic API focus modes also retain prepared coverage.
-Corrupt or incompatible prepared manifests fail validation instead of silently
-changing the queued search. The existing SAM/RAFT profiles remain independent
-and continue to support these paths; person preparation does not rewrite them.
+**Scoring** (`pipeline.matching.moments.score`). A pair is an outgoing and an
+incoming instant, each seen through a crop in content fractions; everything is
+compared in output coordinates.
 
-The prepared and generic-region paths retain ADR-0046's evidence policy after
-inspected background-region and repeated-candidate failures. They select the
-automatic reference among the retained SAM tracks, modestly penalizing picture
-border contact in addition to the existing full-span penalty. An explicit point
-or box remains authoritative. This is geometric salience, not person detection.
-Search-only silhouette evidence requires agreement on both foreground and
-negative space, restores physical aspect ratio, and excludes centroid position
-from shape strength. Two near-solid interior shapes can match; clipped solid
-edge regions cannot establish a complete silhouette.
+- **Rewards**, each calibrated to 0 at chance and 0.4, 0.8 and 1 at p90, p99
+  and p99.9:
+  - `subject`: soft instance IoU after greedy assignment of the prominent
+    groups (a quarter of the largest instance's area x score, at most four);
+    class families discount (person-animal 0.8, others 0.55-0.7);
+  - `eyes`: the eye-trace point. A person's eyes come from keypoints (else
+    nose, else ears); a person with no face shown has none. Other subjects use
+    the box centre;
+  - `pose`: object keypoint similarity over prominent people, with parts shown
+    in either frame as the denominator;
+  - `shape`: silhouettes inside their own boxes, times aspect agreement;
+  - `light`: Pearson correlation of blurred luma;
+  - `lines`: cosine of the edge fields;
+  - `colour`: the colour layout;
+  - `motion`: continuation of camera, push and subject velocity, with still
+    into still neutral.
+- **Penalties**: a brightness jump and 0.12 per unit of zoom.
+- **Weights** follow a focus (auto, subject, shape, motion, composition,
+  colour). A flat outgoing picture moves its light and lines weight to the
+  subject, or to motion when it has no subject.
+- **Outputs** are 16:9 (the whole picture, letterboxed), 9:16 or 1:1. The last
+  two crop a full-height window of their shape around the subject.
+  - Reframing zooms the incoming crop up to `zoom_max` (default 1.5) and moves
+    it so its eye point meets the outgoing one.
+  - Scale follows height, or width when either subject is cut off at the
+    bottom.
+  - Crops never leave the picture.
+  - A chain keeps its outgoing clip's crop while the format stays the same.
 
-Automatic position strength contributes at most 0.25. Shape/position share one
-static family; subject/camera flow share one temporal family. The strongest
-family plus 0.1 times the weaker family orders proposals. Supporting evidence is
-strength-weighted, with no bonus for correlated cues or merely passing a gate.
-Prepared-cohort coarse selection uses that exact-pair policy and deduplicates each shot at
-its strongest seed; different regions/times cannot combine retrieval votes.
-Generic library recall remains appearance-based; only native refinement
-establishes its final region or movement cues.
-Explicit API focus ranks only its requested cue. These are documented ordering
-heuristics, not probabilities or a passed editorial-quality gate. Prepared
-model profiles and legacy Lab scoring remain unchanged; frozen search identities
-prevent queued requests from silently switching policies. Position is
-independently useful on these paths and never implies shape or movement.
+**Search** (`pipeline.matching.moments.find`):
 
-`pipeline.matching.api` freezes validated requests and profile identities under
-`/matching`. `pipeline.matching.jobs` adapts the engine to the existing ledger:
-GPU searches use the ingestion role and previews use the editor role. Search and preview jobs have
-no project/revision and cannot apply documents. Active identical requests are
-deduplicated; previews resolve saved candidates and inherit parent cancellation.
-Library jobs also freeze the published table generations, visual space,
-available film scope and person-detector profile. Publication or model changes
-invalidate a queued search instead of mixing generations; a running search
-rechecks the library generation before publishing and returning results. Source
-content identities are checked before native refinement; returned cues and
-previews retain the actual decoded cut PTS and legal source handles. Person
-descriptions are replaceable cached derivations keyed by detector profile and
-the exact RGB pixels plus dimensions, with checksummed cached results. This
-cache can be rebuilt independently and never modifies raw films or SAM/RAFT
-profiles.
+- The reference is the usable instant nearest the requested time.
+- One float32 pass over the float16 coarse matrix yields the top 6,000
+  instants and the best 360 shots, keeping at most three hits per shot.
+- Every usable instant within 0.8 s of a hit is scored exactly, if it leaves
+  `min_seconds` (default 1) of footage after the cut (`next`) or before it
+  (`previous`).
+- Soft frames lose up to 0.04 against their film's median sharpness.
+- Results keep one instant per shot, one shot per scene and three per film,
+  backfilling capped films last.
+- The source film is excluded by default; including it still skips the
+  reference's scene. Chains exclude their own shots.
 
-Preview cache reuse requires the same exact proposal, current render manifest,
-successful boundary PTS checks, unchanged MP4 SHA-256 and current source identities.
-The first supported cut is previewed while remaining refinement runs; final
-ranking reuses that render only for the identical pair. Final top-three previews
-are eager, costing at most four encodes including the early candidate. Remaining
-previews are on demand.
+**API** (`/matching/moments`), synchronous and projectless:
+- `GET /status`;
+- `GET /shot` (bounds and grid instants);
+- `POST /search`;
+- `GET /frame`: content-cropped JPEG stills, decoded on demand and cached under
+  `assets_dir/matching/frames`.
 
-Coverage explicitly distinguishes indexed-library recall from the prepared
-sample. Library recall spans available published films within the requested
-scope, not every decoded frame. The prepared fallback remains at most 200
-shots and 80 motion windows. Both paths refine five unique candidate windows
-initially, expanding only within the ten-window bound when too few candidates
-survive. Incoming-duration eligibility is separate from the short audition's
-trims. Original framing and playback speed remain unchanged. ADR-0048 admits
-one separately prepared local person model and bounded on-demand derivation;
-it adds no ANN index, full-library preparation, hosted call or main-search
-activation. Existing saved results remain viewable under their frozen evidence.
+**Workspace** (`/match`, a session per ADR-0051):
+- The cut-point scrubber snaps to usable instants. Format, focus, reframing and
+  same-film settings live in the URL.
+- A results grid shows each incoming frame through its crop, with an
+  onion-skin overlay of the outgoing frame on hover.
+- The audition plays the outgoing 1.5 s and incoming 2 s in the browser. Two
+  alternating video elements through CSS crops each seek ahead to their next
+  window, with frame nudges and an overlay view.
+- **Add to chain & continue** appends the shot and searches from its
+  out-point. A chain lives in the session and plays back to back.
 
-A future editor adapter can supply the last clip and required duration to this
-engine, then preview and explicitly place a candidate under the editor's own
-revision, lock and timeline rules. That integration is deferred. Short audition
-windows are not automatic timeline placement instructions. Human played-cut
-usefulness and measured latency remain the gates for expanding this experiment.
+**Editor** (harness v2, `pipeline.lab.harness.matchcuts`):
+- With a built index, the assembly scores each transition from the previous
+  placement's last frame into the option's first frame. It uses the
+  identity-crop form of the same components, weights and calibration, with
+  features cached per instant and scored per (state, span) batch.
+- `planner_settings.match_cuts` (`off`, `some` default, `many`) sets the
+  weight: 0.35 or 1.0 in beam-score units. The score replaces the shot-level
+  eye-trace term; screen direction, scene, film and grade terms stay.
+- Reasons say when a shot cuts in on a matching frame. The v2 diagnostics
+  count matched cuts (at least 0.6).
+
+**Limits.**
+- Cut points are exact to the grid (+-0.125 s), plus up to two frames from
+  skipped decoding. Renders use exact source times; the browser audition can be
+  a frame off.
+- Conceptual rhymes and non-COCO shapes rest on light and lines.
+- Detector classes flicker.
+- Native-frame refinement, a dense semantic channel, editor pool injection and
+  an ordinary-search option wait for played-cut evidence (ADR-0099).
+
+The former scene-based search (ADR-0040/0046/0048: prepared cohorts, keyframe
+recall, on-demand Mask R-CNN and SAM, durable search and preview jobs) no
+longer backs `/match`. The contracts below remain only for saved Match Cuts
+projects at `/lab/visual-rhymes`, which are frozen.
 
 ## Bounded Match Cuts Lab
 

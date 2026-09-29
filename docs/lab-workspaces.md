@@ -65,9 +65,10 @@ mount, an empty project followed by an immediate update, or a second local
 persistence layer. Existing explicitly created projects and revisions remain
 valid; do not silently delete or hide older projects because they appear empty.
 
-Match Cuts at `/match` uses the session lifecycle: reference selection and
-searching can produce a durable query job, with progress restored by its job URL,
-but they do not create an edit project. Sharing navigation does not imply that
+Match Cuts at `/match` uses the session lifecycle: searches are synchronous
+reads of the moment index, the reference and settings live in the URL, and a
+match-cut chain stays in the browser session. Nothing creates a job or an edit
+project (ADR-0099). Sharing navigation does not imply that
 every experiment needs Save, a name or a project history.
 
 Transitions at `/lab/transitions` follows the same projectless boundary. A render

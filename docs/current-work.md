@@ -94,43 +94,39 @@ Next:
 - **Phase 1 boundary audit**, measured on the pilot: hidden cuts in 0.7% of
   shots. Cut times stay evidence; assembly windows never straddle them.
   Splitting canonical units is deferred until a concrete failure.
-- Match-cut planning after that, per the owner. Measured subject layout, screen
-  direction and camera segments now exist for it.
+- Match cuts: see below (ADR-0099).
 
-### Match cuts: starting context (2026-09-28)
+### Match cuts (ADR-0099, 2026-09-28)
 
-The owner asked for a plan first (keep it lightweight), then the build. A Jev
-test comes after match cutting.
+Landed on the branch, library backfill pending:
 
-- **Existing work.** Match Cuts is its own Lab workspace (ADR-0067); code is in
-  `pipeline/matching/` and `web/features/matching/`.
-  - Architecture contract: "Match Cuts audition and shadow research", "Match
-    Cut shadow profile", "Exact-frame refinement and Motion Match",
-    "Scene-based Match search" and "Bounded Match Cuts Lab".
-  - Decisions: ADR-0008, 0027, 0038, 0040, 0046, 0048 and 0067.
-- **New per-shot evidence** (compiled `shot_evidence`, ADR-0093), all newer
-  than that work:
-  - `peak_time`;
-  - `camera`, `camera_segments` (JSON), `camera_slow`, `camera_moving` and
-    `camera_reliability`;
-  - `motion_energy`;
-  - `subject` (a JSON main-subject track), `subject_x`, `subject_y` and
-    `subject_size`;
-  - `hidden_cuts`, `dark_spans`, `palette`, `brightness`, `hero_time` and
-    `scene_id`;
-  - story fields: `action`, `characters`, `emotion` and `iconic`.
+- a `moments` evidence pass: every instant at 4 fps, with masks, keypoints,
+  light, edges and colour;
+- a memory-mapped library index with calibrated pair scoring, crops (9:16, 1:1
+  and reframe-to-align) and sub-second search;
+- a one-screen `/match` workspace with in-browser audition, overlay and chains;
+- harness v2 transitions scored on actual cut frames, set by
+  `planner_settings.match_cuts`.
 
-  Search v2 (ADR-0094, ADR-0097) can supply candidates.
-- **Focus spans (ADR-0098).** A shot can hold more than one picture: a
-  dissolve, a fade or a missed cut. `focus_start`/`focus_end` in
-  `shot_evidence` bound the picture holding the action peak. The hero artifact
-  also lists every picture of a multi-picture shot. A cut point should come from
-  a focus span or a picture, never from the gap between two.
-- **Coordination.** Two sessions push to master:
-  - pull before pushing;
-  - take ADR numbers from 0099 up;
-  - leave the pre-existing uncommitted edits in `pipeline/ingest/media.py`
-    and `pipeline/tests/test_media.py` alone.
+The pilot covers 12 films.
+
+Next:
+
+- Run `python -m pipeline.evidence moments` over the library. It takes about
+  9 h on the GPU; start it when the GPU is free overnight. Then run
+  `python -m pipeline.matching.moments index`.
+- Restart the API and the editor worker so they load the new code.
+- Owner review, playing the cuts:
+  - about 12 references: people walking or standing, dance or pose, close-ups,
+    action or motion, graphic, vertical;
+  - note useful top-5 results and what was missing.
+  - Tune focus weights from those notes only.
+- Owner comparison of harness v2 with **Match cuts** on *Where they fit* versus
+  *Plain cuts* on your projects (blind, one render at a time, as ADR-0096).
+- Deferred until played cuts show the need: native-frame refinement, a dense
+  semantic channel for conceptual rhymes, match-cut candidates in editor pools,
+  a "Find match cuts" option in ordinary search, and removing the frozen
+  cohort, SAM and Mask R-CNN search code.
 
 ## Goal
 

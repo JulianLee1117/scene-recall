@@ -157,3 +157,4 @@ The accepted boundary or behavior.
 | [0096](0096-editor-harness-v2.md) | Accepted (opt-in) | Editor harness v2: measured music map, concept acts, evidence pools, beat-lattice assembly and a sequence review; OTIO export |
 | [0097](0097-relevance-is-one-score.md) | Accepted | One relevance score through ordering: log-odds judge verdicts on the shortlist plus every retriever's best matches, bounded signal and prior factors, named films exempt from film diversity |
 | [0098](0098-focus-span.md) | Accepted | Show each shot's action: pictures from keyframe similarity, a focus span around the peak, hero frames and hover previews inside it, editor windows bounded by it |
+| [0099](0099-moment-match-cuts.md) | Accepted | Moment-level match cuts: a library-wide 4 fps moments pass (masks, keypoints, light, edges), a calibrated pair scorer with crops, a one-screen Lab workspace with in-browser audition and chains, and measured match cuts in editor transitions |
