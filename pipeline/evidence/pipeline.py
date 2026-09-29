@@ -1,6 +1,7 @@
 """Bring one film's evidence up to date: every pass in order, each skipped when current.
 
-    metadata -> subtitles -> understanding -> measure -> hero -> synthesis -> compile -> text views
+    metadata -> subtitles -> understanding -> measure -> moments -> hero -> synthesis -> compile
+      -> text views -> match-cut index (when a moments pass ran)
 
 Used after ingest for new films and by ``python -m pipeline.evidence refresh``.
 Each step is independently cached by its producer profile and inputs, so a
@@ -22,7 +23,7 @@ FILM_UNDERSTANDING_MAX_USD = 3.0
 def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = True, measure_pass: bool = True,
                   holding_ingest_lock: bool = False, progress: Callable[[str], None] = print) -> dict[str, Any]:
     """Run every evidence pass for *films*; returns per-step summaries. Failures are reported, not raised."""
-    from pipeline.evidence import compile as compiler, hero, highlights, measure, metadata, subtitles, synthesis, understanding
+    from pipeline.evidence import compile as compiler, hero, highlights, measure, metadata, moments, subtitles, synthesis, understanding
     from pipeline.evidence.library import list_films
 
     summary: dict[str, Any] = {}
@@ -42,6 +43,7 @@ def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = 
         step("highlights", lambda: highlights.run(config, db, films, progress=progress))
     if measure_pass:
         step("measure", lambda: measure.run(config, db, films, lock_films=not holding_ingest_lock, progress=progress))
+        step("moments", lambda: moments.run(config, db, films, lock_films=not holding_ingest_lock, progress=progress))
     step("hero", lambda: hero.run(config, db, films, progress=progress))
     step("synthesis", lambda: synthesis.run(config, db, films, progress=progress))
     step("compile", lambda: (compiler.compile_film_meta(config, db, list_films(db), progress=progress),
@@ -55,4 +57,8 @@ def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = 
                 "active": all(result.activated for result in results)}
 
     step("text_views", text_views)
+    if isinstance(summary.get("moments"), dict) and summary["moments"].get("done"):
+        # A new film's instants join the library match-cut index (ADR-0099).
+        from pipeline.matching.moments import index as moment_index
+        step("match_index", lambda: moment_index.build(config, db, progress=progress).name)
     return summary
