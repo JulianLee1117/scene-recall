@@ -10,6 +10,10 @@
 - A material architecture change must update the architecture contract and add
   or supersede an accepted ADR in the same work. Update the README only when
   runnable behavior or commands change.
+- Keep the contract current-only. When a decision supersedes or freezes
+  something, shrink its contract and README sections to a short pointer, and
+  update the contract's Map and the status column of the decision index. The
+  detail lives in the ADRs.
 - Preserve raw films and timestamped evidence. Derived annotations, embeddings,
   and indexes must be independently backfillable and model/version scoped.
   Never silently mix incompatible vector spaces.

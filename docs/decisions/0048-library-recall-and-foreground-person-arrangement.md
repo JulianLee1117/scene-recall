@@ -1,6 +1,6 @@
 # ADR-0048: Library recall and foreground person arrangement in Match search
 
-- Status: Accepted
+- Status: Superseded by ADR-0099
 - Date: 2026-09-13
 - Extends: ADR-0008 and ADR-0027 only for bounded, explicit Lab experimentation
 - Supersedes: ADR-0040 and ADR-0046 only for automatic scene-search recall scope and detected-person evidence

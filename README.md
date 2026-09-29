@@ -1507,91 +1507,15 @@ the configured 200-result ceiling when deeper recall is the subject of the
 evaluation. This controls the recorded ranking independently of the UI's
 viewport-responsive display batches.
 
-To score a Match Cut matcher after it has written a gate-by-gate ranked-results
-document, run:
-
-```bash
-uv run python -m pipeline.eval.match_cut score \
-  --cases pipeline/eval/match_cut_cases.yaml \
-  --rankings pipeline/eval/runs/match-cut-shadow.json \
-  --output pipeline/eval/runs/match-cut-shadow-score.json
-```
-
-The scorer validates matcher, corpus, profile, vector-space, and gate lineage,
-then reports known-positive recall, hard-negative retrieval, criterion-specific
-ordering, and positives lost or gained between gates. It consumes rankings
-only: it does not run a model, combine vector scores, invent judgments, or
-treat ungraded candidates as negatives. The initial cases are diagnostic seeds
-and must be expanded and human-graded before Match Cut activation.
+The frozen shadow Match Cut scorer (`pipeline.eval.match_cut`) is described in
+ADR-0008; Match Cuts itself is judged by playing cuts (ADR-0099).
 
 ## Source context pilot (frozen)
 
-Frozen: the evidence-v2 understanding pass supersedes this pilot for story
-context. It remains available until the editor harness is rebuilt.
-
-An optional context layer prepares cited observations and narrative claims from
-existing timestamped evidence, independently of ingestion and search indexes
-([ADR-0066](docs/decisions/0066-source-context-pilot.md)). It is a bounded
-experiment: it does not provide complete film plots or verified action timing.
-The editor interprets possible metaphors against the music and user direction;
-those interpretations are not stored as canonical film facts.
-
-Create a JSON plan with explicit existing film IDs and source-player seconds:
-
-```json
-{"schema_version":1,"windows":[{"film_id":"<indexed-film-id>","start":120.0,"end":240.0}]}
-```
-
-Inspect readiness first, then execute with a ceiling on uncached hosted calls:
-
-```powershell
-uv run python -m pipeline.context.build --plan context-plan.json --report context-dry.json
-uv run python -m pipeline.context.build --plan context-plan.json --execute --max-calls 1 --report context-run.json
-```
-
-Each plan permits at most three films and twenty windows of 180 seconds, with
-at most sixteen existing keyframes per request. The builder uses the configured
-OpenAI Lab planner and loads `.env`; it never listens again, runs search models,
-reingests films or changes saved projects. Timed dialogue must pass structural
-and recorded-source checks; this does not establish translation, speaker identity
-or exact synchronization. Missing or uncertain evidence remains explicit.
-Unchanged completed requests are reused; failed or uncertain provider attempts
-are not automatically retried. `--execute --max-calls 0` permits cached recovery.
-An explicit `--report` writes only that report during dry-run.
-
-Artifacts live under `assets_dir/context/<profile>/<film_id>/`, preserving prior
-versions. The initial producer profile is `sampled-narrative-context-v1`;
-`--profile-id` selects another explicit profile when model/prompt/settings change.
-
-`lab.context_profile: null` keeps ordinary editor behavior. For an evaluated
-private run, set it to the prepared profile in a separate config; after changing
-the service config, restart API and worker as usual. The selector reads cached
-context only after retrieval, with at most three covered films, 96 candidates,
-24 records and 24,000 characters. The character budget is shared across retained
-records, each contributing at most four locally relevant claims. Uncertainty and
-omission markers are retained when evidence excerpts or whole claims must be
-reduced; the full artifact stays available for audit. Main search and manual **Find scenes** are
-unchanged. Context has separate applicability/support ranges and cannot expand
-an offered clip. Raw-source identity is rechecked; the payload explicitly reports
-when current derived-input dependency freshness has not been rechecked.
-
-Context-enabled selections preserve a private
-`assets_dir/lab/requests/<job-id>-source-context-input.json` receipt. Compare its
-frozen candidates with and without context, without touching the project:
-
-```powershell
-uv run python -m pipeline.experiments.context_selection --input selection-input.json --out context-dry
-uv run python -m pipeline.experiments.context_selection --input selection-input.json --out context-pair --execute --allow-hosted --max-hosted-calls 2
-```
-
-Each comparison uses a new output directory and at most two hosted calls. It
-records inputs, model receipts, validated source windows, timing, latency and
-claim-audit material. It does not automatically render, retrieve, listen or write
-projects. Factual and played creative grades remain pending human review; valid
-JSON and persuasive explanations do not establish a better edit. Wider context
-processing and a context retrieval index remain gated on that comparison.
-The [first pilot report](docs/experiments/source-context-pilot.md) records the
-twenty-window backfill, private rendered comparison and known factual failures.
+The understanding pass supersedes this pilot for story context. Its build
+(`python -m pipeline.context.build`, a dry run unless `--execute`) and
+`lab.context_profile` still work; read ADR-0066 and this section's Git history
+before using them.
 
 ## Match Cuts
 
@@ -1643,76 +1567,10 @@ Limits:
 - Conceptual rhymes, such as 2001's bone into satellite, are not found by
   geometry.
 
-## Match Cuts Lab experiment
+## Saved Match Cuts projects (frozen)
 
-Existing Match Cuts projects open the saved Lab editor. The direct
-`/lab/visual-rhymes` route also remains available for edit and baseline
-comparisons; new discovery from the Lab card opens `/match` (above). This
-prepared-cohort editor is frozen.
-In the Lab editor, one workspace contains the source,
-A→B preview and three suggestions. **Find matches** starts in Automatic mode,
-using the prepared evidence shown below the controls. **Match focus** optionally
-selects Subject movement, Camera movement, or Shape & composition. Automatic
-subject focus follows a salient tracked region; click the picture to choose
-another subject. Selection does not crop the picture.
+Older Match Cuts projects open the frozen prepared-cohort editor at
+`/lab/visual-rhymes` (ADR-0027, ADR-0038). Its preparation commands live in
+`pipeline/matching/prepare.py` and `pipeline/matching/prepare_subjects.py`. New
+work uses `/match` (above).
 
-The selected moment starts a nearby search within one second either side.
-**Pin this frame** fixes the outgoing frame instead. The scrubber can explore the
-whole indexed shot, including moments between ingestion keyframes; frame buttons
-use decoded source timestamps. Choose a suggestion to play its actual A→B cut
-in the same monitor. Previews arrive as they are prepared. **Adjust timing**
-changes either cut point and prepares a separate preview before **Keep cut**.
-Keeping applies one revision in place; Undo restores the previous edit. Original
-speed and framing remain the defaults, with optional crop/resize under More.
-
-Prepare the bounded local subset explicitly:
-
-```powershell
-uv run --extra lab python -m pipeline.matching.prepare cohort
-uv run --extra lab python -m pipeline.matching.prepare motion --cohort <cohort-id> --device cuda
-uv run --extra lab python -m pipeline.matching.prepare visual --cohort <cohort-id> --checkpoint <approved-local-dinov3-directory> --device cuda
-uv run --extra lab python -m pipeline.matching.prepare status
-uv run --extra lab python -m pipeline.lab.worker
-```
-
-Prepare tracked subjects explicitly after motion preparation. Use a dedicated
-checkpoint directory; inference never downloads models:
-
-```powershell
-uv run python -m pipeline.matching.prepare_subjects checkpoint --checkpoint <local-sam2-directory>
-uv run python -m pipeline.matching.prepare_subjects cohort --cohort <cohort-id> --checkpoint <local-sam2-directory> --device cuda
-```
-
-This downloads the pinned official SAM 2.1 Small checkpoint. Preparation resumes
-complete per-window rows and publishes the subject profile only when all 80
-cohort windows have rows, including windows without reliable subjects. The same
-mask profile supports subject position/scale/silhouette matching; optional
-DINOv3 remains an independent dense visual channel. Prepared coverage is shown
-explicitly. Masks and flow do not verify subject identity or action completion.
-
-For reproducible feature-effectiveness comparisons:
-
-```powershell
-uv run python -m pipeline.experiments.match_effectiveness draft --cohort <cohort-id> --out <cases.json>
-uv run python -m pipeline.experiments.match_effectiveness run --cases <cases.json> --out <new-run-directory> --case motion-01
-```
-
-Inspect source references and approve a frozen study before grading. The harness
-keeps legacy/fixed/nearby variants, actual played-preview hashes, timings and
-blank human judgments separate. `score --run <run.json> --review <review.json>
---out <scores.json>` imports completed playback judgments. Diagnostic runs do not
-pass the editorial acceptance gate. See ADR-0038 and the experiment status report.
-
-Motion preparation downloads the official RAFT Small C_T_V2 checkpoint and pins
-its SHA-256. Visual preparation requires an approved local Transformers-format
-DINOv3 ViT-S/16 checkpoint; it never downloads gated weights implicitly. Both
-profiles are separate from the main search indexes. The UI reports unprepared
-modes and the searched subset. A changed checkpoint/runtime or source generation
-requires profile preparation again. GPU jobs can contend with ordinary search.
-
-Matching considers at most four outgoing instants within nearby timing; a
-pinned reference stays fixed. At most ten incoming windows are refined across
-all ready channels. Three previews are prepared first; choosing a remaining
-suggestion prepares its preview without changing the edit. These are experimental
-candidates. See `docs/experiments/match-finder-status.md` for measured effectiveness
-and the remaining playback judgments.

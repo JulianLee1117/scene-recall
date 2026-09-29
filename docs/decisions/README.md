@@ -7,6 +7,9 @@ accepted. It is historical rationale, not a second specification.
 - [`docs/search-architecture.md`](../search-architecture.md) is the current
   architecture contract.
 - ADRs explain decisions but never override that contract.
+- The contract's **Map** lists, per area, the section, the code and the
+  decisions in force. Here, *Superseded* and *Frozen* (kept runnable, no new
+  investment) mark records that no longer describe current work.
 
 ## When to add an ADR
 
@@ -84,8 +87,8 @@ The accepted boundary or behavior.
 | [0023](0023-operator-archive-imported-releases.md) | Accepted | Allow intact imported releases to move into operator-managed evidence storage |
 | [0024](0024-source-backed-lab-and-music-sketch.md) | Accepted | Add durable Lab projects and bounded audio-to-source edit planning |
 | [0025](0025-durable-standalone-job-worker.md) | Accepted | Execute durable ingestion and Lab jobs in a standalone local worker |
-| [0026](0026-region-aware-visual-rhymes-research.md) | Accepted | Evaluate within-shot instants and whole-picture region alignment in shadow |
-| [0027](0027-bounded-lab-match-finder.md) | Accepted | Admit bounded image and movement matching in Visual Rhymes before production promotion |
+| [0026](0026-region-aware-visual-rhymes-research.md) | Frozen | Evaluate within-shot instants and whole-picture region alignment in shadow |
+| [0027](0027-bounded-lab-match-finder.md) | Frozen (saved Match Cuts projects) | Admit bounded image and movement matching in Visual Rhymes before production promotion |
 | [0028](0028-explicit-music-audio-provider-and-progress.md) | Accepted | Select the music audio provider explicitly, persist progress and apply passage-relative fade-in |
 | [0029](0029-authoritative-music-timeline-and-gap-filling.md) | Accepted | Make music cuts authoritative and fill or replace explicit slots with whole-sequence context |
 | [0030](0030-song-specific-moments-and-clip-directions.md) | Accepted | Plan song-specific moments, keep directions per clip, and make timing regeneration explicit |
@@ -96,17 +99,17 @@ The accepted boundary or behavior.
 | [0035](0035-local-timing-and-editor-lifecycle.md) | Accepted | Prepare local timing before creative generation, browse scenes in the editor, and manage project deletion and exit |
 | [0036](0036-next-scene-proposals-and-pair-audition.md) | Accepted | Audition bounded next-scene proposals with original music, explicit application and optional sampled-frame inspection |
 | [0037](0037-manual-moment-and-crop-in-pair-preview.md) | Accepted | Adjust a suggested scene's source moment and framing in the pair preview with exact crop proof |
-| [0038](0038-played-match-cuts-and-tracked-subjects.md) | Accepted | Simplify played match cuts, track subjects, and compare boundary timing with explicit effectiveness gates |
+| [0038](0038-played-match-cuts-and-tracked-subjects.md) | Frozen (saved Match Cuts projects) | Simplify played match cuts, track subjects, and compare boundary timing with explicit effectiveness gates |
 | [0039](0039-song-informed-first-edit-timing.md) | Accepted | Let untouched rhythm starters acquire song-informed first-edit timing while preserving manual work |
-| [0040](0040-scene-based-match-search.md) | Accepted; entry partially superseded by 0067 | Discover next clips from a scene with projectless jobs and independent cues measured at one exact cut |
+| [0040](0040-scene-based-match-search.md) | Superseded by 0099 | Discover next clips from a scene with projectless jobs and independent cues measured at one exact cut |
 | [0041](0041-simple-editor-and-source-aware-first-cuts.md) | Accepted | Simplify the editor, expose real progress and choose bounded first-edit cuts with available footage and explicit abstention |
 | [0042](0042-explicit-whole-edit-regeneration.md) | Accepted | Rebuild the entire music edit explicitly from current settings while retaining the previous revision |
 | [0043](0043-song-meaning-edit-density-and-fresh-footage.md) | Accepted | Separate heard meaning from atmosphere, enforce whole-edit pace density and prevent automatic footage reuse |
 | [0044](0044-scoped-scene-selection-and-compact-evidence.md) | Accepted | Bind scene choices and cuts to each shot, compact repeated model evidence and preserve failed-job offer diagnostics |
 | [0045](0045-bounded-full-length-music-video.md) | Accepted | Support ten-minute music videos with bounded analysis and generation sections inside one atomic edit |
-| [0046](0046-distinctive-match-evidence-and-reference-selection.md) | Accepted | Correct background reference selection, require outline evidence and bound common-position ranking |
+| [0046](0046-distinctive-match-evidence-and-reference-selection.md) | Superseded by 0099 | Correct background reference selection, require outline evidence and bound common-position ranking |
 | [0047](0047-managed-film-acquisition.md) | Accepted | Manage download, validation, canonical import and intact evidence archival with explicit client ownership |
-| [0048](0048-library-recall-and-foreground-person-arrangement.md) | Accepted | Recall existing library frames and verify complete foreground-person arrangements in bounded Match search |
+| [0048](0048-library-recall-and-foreground-person-arrangement.md) | Superseded by 0099 | Recall existing library frames and verify complete foreground-person arrangements in bounded Match search |
 | [0049](0049-stop-managed-torrents-after-download.md) | Accepted | Stop completed managed downloads through per-torrent client limits while preserving verified import and intact evidence archival |
 | [0050](0050-rapid-pacing-and-inspectable-edit-evidence.md) | Accepted | Add bounded Rapid pacing and expose recorded shot intentions, neighboring footage and source evidence |
 | [0051](0051-shared-lab-navigation-and-unsaved-drafts.md) | Accepted | Share Lab entry and return navigation, keep untouched editors unsaved and create complete projects on first save |
@@ -119,22 +122,22 @@ The accepted boundary or behavior.
 | [0058](0058-joint-source-and-cut-feasibility.md) | Accepted | Resolve provisional cut preferences and selected source durations together within existing timing offers |
 | [0059](0059-independent-editor-and-library-workers.md) | Accepted | Separate CPU editor work from GPU library jobs with one launcher, scoped ownership and visible graceful controls |
 | [0060](0060-music-led-whole-passage-timing.md) | Accepted | Plan musical timing across the passage before batching footage work, using soft pace preferences and reusable listening evidence |
-| [0061](0061-targeted-footage-inspection-and-frozen-comparisons.md) | Accepted | Inspect at most two flagged montage positions using reusable bounded source observations and compare frozen timing/selection evidence |
+| [0061](0061-targeted-footage-inspection-and-frozen-comparisons.md) | Frozen | Inspect at most two flagged montage positions using reusable bounded source observations and compare frozen timing/selection evidence |
 | [0062](0062-source-preserving-browser-audio-playback.md) | Accepted | Prepare optional browser audio repair without changing source films, evidence timelines or active byte-range representations |
 | [0063](0063-idle-editor-search-warmup.md) | Accepted | Prepare editor search models while idle and omit unused source-reference reads from text searches |
 | [0064](0064-scoped-editor-direction-and-two-tab-workspace.md) | Accepted | Keep canonical global/range direction separate from listening in one AI direction/Edit workspace |
-| [0066](0066-source-context-pilot.md) | Accepted | Build independently versioned source context for bounded editorial comparisons, preserving retrieval and trim authority |
-| [0065](0065-private-discovery-and-flexible-assembly.md) | Accepted | Compare fixed slots, joint assembly and bounded discovery expansion using private frozen evidence |
-| [0067](0067-match-cuts-lab-only-entry.md) | Accepted | Keep experimental Match Cuts in its independent Lab workspace without actions in ordinary search or the main scene player |
+| [0066](0066-source-context-pilot.md) | Frozen; superseded for story context by 0093 | Build independently versioned source context for bounded editorial comparisons, preserving retrieval and trim authority |
+| [0065](0065-private-discovery-and-flexible-assembly.md) | Frozen | Compare fixed slots, joint assembly and bounded discovery expansion using private frozen evidence |
+| [0067](0067-match-cuts-lab-only-entry.md) | Accepted; workspace superseded by 0099 | Keep experimental Match Cuts in its independent Lab workspace without actions in ordinary search or the main scene player |
 | [0068](0068-lab-artifact-lifecycle.md) | Accepted | Clean owned job artifacts on project deletion, retry durably and reclaim disposable render/audio leftovers in the existing worker |
 | [0069](0069-tiered-playback-and-idle-database-maintenance.md) | Accepted | Separate full-length playback storage and prune database history only under idle reader and writer guards |
-| [0070](0070-projectless-transition-recipes.md) | Accepted | Compare durable local transition recipes in a projectless Lab, with manual endpoint-frame handoff for external AI experiments |
-| [0071](0071-rgb-transition-lab-and-durable-bridge-imports.md) | Accepted | Expand bounded RGB recipes, music audition, durable imports and explicitly quoted Runway bridge jobs; keep editor promotion gated |
-| [0072](0072-native-time-speed-ramps-and-interpolation.md) | Accepted | Add source-preserving local speed ramps, optional within-shot interpolation and marked experiments; retain the separate AI temporal and editor-promotion gates |
-| [0073](0073-compact-transition-edit-assets-and-playback.md) | Accepted | Reuse verified local renders, expose retained bytes, bound scratch and synchronize playback; add explicit compact 1080p edit assets |
-| [0074](0074-model-aware-ai-transition-experiments.md) | Accepted | Add model-specific H3 Max and WAN 3 endpoint bridges, preserved custom direction drafts and a focused generate/import flow |
-| [0075](0075-smooth-transition-motion-and-direct-manipulation.md) | Accepted | Smooth frame-timed whip/zoom and native-time endpoint sampling; add direct trim/framing and distinct local/AI workflows |
-| [0076](0076-camera-whip-and-program-monitor-timeline.md) | Accepted | Version whole-frame Camera whip and use one program/source monitor with a continuous pair timeline and explicit saved-preview state |
+| [0070](0070-projectless-transition-recipes.md) | Frozen | Compare durable local transition recipes in a projectless Lab, with manual endpoint-frame handoff for external AI experiments |
+| [0071](0071-rgb-transition-lab-and-durable-bridge-imports.md) | Frozen | Expand bounded RGB recipes, music audition, durable imports and explicitly quoted Runway bridge jobs; keep editor promotion gated |
+| [0072](0072-native-time-speed-ramps-and-interpolation.md) | Frozen | Add source-preserving local speed ramps, optional within-shot interpolation and marked experiments; retain the separate AI temporal and editor-promotion gates |
+| [0073](0073-compact-transition-edit-assets-and-playback.md) | Frozen | Reuse verified local renders, expose retained bytes, bound scratch and synchronize playback; add explicit compact 1080p edit assets |
+| [0074](0074-model-aware-ai-transition-experiments.md) | Frozen | Add model-specific H3 Max and WAN 3 endpoint bridges, preserved custom direction drafts and a focused generate/import flow |
+| [0075](0075-smooth-transition-motion-and-direct-manipulation.md) | Frozen | Smooth frame-timed whip/zoom and native-time endpoint sampling; add direct trim/framing and distinct local/AI workflows |
+| [0076](0076-camera-whip-and-program-monitor-timeline.md) | Frozen | Version whole-frame Camera whip and use one program/source monitor with a continuous pair timeline and explicit saved-preview state |
 | [0077](0077-independent-source-dialogue-clips.md) | Accepted | Mix independent original-source dialogue clips on the song clock with durable levels, fades and music ducking |
 | [0078](0078-shared-voice-focus-audio-and-overlapping-dialogue.md) | Accepted | Share source-window PCM across audition/export, focus declared surround centers, and allow overlapping dialogue with editable duck timings |
 | [0079](0079-validate-extracted-embedded-dialogue.md) | Accepted | Validate extracted embedded subtitle content, preserve rejected evidence and record cacheable audio-transcription fallback lineage |
@@ -150,7 +153,7 @@ The accepted boundary or behavior.
 | [0089](0089-personal-search-assistance-trial.md) | Superseded by 0090 | Historical personal category-assistance trial |
 | [0090](0090-retire-personal-search-trial.md) | Accepted | Remove the interactive trial and distinguish candidate coverage from ranking before another search experiment |
 | [0091](0091-intent-guided-retrieval-comparison.md) | Superseded by 0094 | Compare ordinary, fixed expansion and Jev-guided evidence retrieval with frozen playable result lists |
-| [0092](0092-bounded-framing-representation-pilot.md) | Accepted for evaluation | Hold the optional bulk batch and compare frozen framing representations independently of Jev |
+| [0092](0092-bounded-framing-representation-pilot.md) | Frozen | Hold the optional bulk batch and compare frozen framing representations independently of Jev |
 | [0093](0093-evidence-v2.md) | Accepted | Versioned per-film evidence artifacts, open metadata with world knowledge, measured-over-guessed facts and compiled search tables |
 | [0094](0094-search-v2.md) | Accepted | Search v2: evidence views fused by rank, quote channel, bounded priors and presets, scene cards, resident vectors, cross-encoder rerank; retire the intent experiments |
 | [0095](0095-serve-last-complete-generation.md) | Accepted | Compile from the newest available profile while a new one backfills; API search keeps its last complete snapshot during publication |

@@ -1,6 +1,6 @@
 # ADR-0040: Scene-based Match search with exact-pair evidence
 
-- Status: Accepted
+- Status: Superseded by ADR-0099
 - Date: 2026-09-13
 - Extends: ADR-0038 through an explicit search action
 - Superseded by: ADR-0067 for entry from ordinary search results and the main source player only

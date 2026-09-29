@@ -1,6 +1,6 @@
 # ADR-0046: Distinctive Match evidence and automatic reference selection
 
-- Status: Accepted
+- Status: Superseded by ADR-0099
 - Date: 2026-09-13
 - Supersedes: ADR-0040's cue-rank fusion and strongest-cue automatic ordering
 

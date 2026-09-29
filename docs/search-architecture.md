@@ -6,6 +6,36 @@ Status: current architecture contract.
 current system boundaries. Records in `docs/decisions/` explain why material
 choices were made but do not override this document.
 
+## Map
+
+Where to read and what to change. Each row names the contract section, the
+code, and the decisions in force. The decision log's index
+([`decisions/README.md`](decisions/README.md)) marks superseded and frozen
+records.
+
+| Area | Contract section | Code | Decisions in force |
+|---|---|---|---|
+| Evidence: per-film artifacts, compiled tables | Evidence v2 | `pipeline/evidence/` | 0001, 0093, 0095, 0098, 0099 |
+| Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080 |
+| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, with 0002-0021 and 0082-0087 where not superseded |
+| Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
+| Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068 |
+| AI Music Video v1 (default) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
+| Editor harness v2 (opt-in) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099 |
+| Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
+| Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067 |
+
+Frozen: kept runnable, with no new investment. Their decision records hold the
+detail.
+- Transitions Lab: 0070-0076.
+- The saved-project Match Cuts editor: 0026, 0027, 0038.
+- Source context: 0066.
+- Targeted footage inspection: 0061.
+- Flexible-assembly comparison: 0065.
+- Framing representation pilot: 0092.
+
+Retired: Jev and intent routing (0086-0091, by 0094).
+
 ## Product contract
 
 Scene Recall supports four related jobs:
@@ -59,22 +89,9 @@ mode. Framing v2 (measured subject layout, ADR-0093) will replace its 6×6
 embedding grids; until then the grids stay active and their bulk preparation
 queue stays frozen.
 
-The accepted experimental boundary is deliberately separate:
+Match cuts are deliberately separate from ordinary search:
 
 ```text
-indexed reference frame (shadow Match Cut; not product-active)
-  -> independent grounded-layout candidates + PE candidates
-  -> union by stable frame identity, never by mixing vector scores
-  -> exact grounded-layout reranking
-  -> human promotion gate and complete profile manifest
-  -> bounded source-backed refinement inside top shots
-  -> actual decoded timestamp for the proposed cut instant
-
-short source window (Lab-only motion experiment; no main-search activation)
-  -> camera motion + subject/object residual trajectories
-  -> independent temporal candidates and window reranking
-  -> separate action-heavy evaluation and activation
-
 any instant of any shot (Lab Match Cuts and editor transitions; ADR-0099)
   -> library moment index: every usable 4 fps instant (masks, keypoints, light,
      edges, colour, measured motion)
@@ -151,49 +168,13 @@ undo publication.
 
 ### Optional source context
 
-Status: frozen. The evidence-v2 understanding pass supersedes this pilot for
-story context; the package stays until the editor harness is rebuilt.
+Status: frozen. The understanding pass (ADR-0093) supersedes it for story
+context.
 
-ADR-0066 admits a bounded source-context pilot above retrieved evidence. The
-`pipeline.context` package stores immutable, model/prompt/schema/input-scoped
-artifacts and per-film profile manifests outside the PE/Qwen indexes. Records
-have film, sequence or local scope with explicit applicability intervals;
-supporting evidence may cover different source intervals. Existing film identity,
-fingerprint and source-player timestamps anchor the records. Shot IDs do not
-become durable narrative identities, and context never enlarges legal clip ranges.
-
-An explicit resumable backfill uses ordered stored captions, validated timed
-dialogue and up to sixteen sampled frames per window, at most twenty windows
-of 180 seconds across three films. It defaults to dry-run and requires a hosted
-request ceiling for execution. Sparse evidence cannot establish complete plot,
-character continuity or exact action timing; unknowns remain explicit. Claims
-retain citations and distinguish observations from narrative interpretation.
-Song-specific metaphors belong to the editor, not to canonical source facts.
-
-`lab.context_profile` defaults to null. When explicitly selected, AI scene
-selection reads bounded cached context after retrieval and freezes the supplied
-artifact identities/content in its private input receipt. This does not invoke
-an analyzer, alter source offers or change manual Find scenes/main-search
-ranking. Reads distinguish missing, unavailable, stale and uncertain evidence;
-no-context candidates receive no mechanical penalty. Partial pilot coverage and
-input-dependency freshness are reported rather than presented as complete.
-The editor packet is capped at three covered films, 96 source aliases, 24 records
-and 24,000 characters. Each record contributes up to four claims, preserving an
-unlinked uncertainty statement and nearby narrative/observed evidence. Distance
-to the offered source ranges selects claims within a record; it does not rerank
-footage. Packing considers one record per candidate before additional records
-and shares the character budget across retained records. Under pressure it
-shortens or omits evidence excerpts and duplicated hashes before dropping whole
-claims, retaining uncertainty. Omission counts remain explicit; artifact and
-evidence IDs resolve full provenance in the immutable store. This packing does not
-establish that every statement applies to every shot within a sequence window.
-
-Frozen context-off/on comparisons preserve candidate lists, music, source and
-timing authority, issue at most two hosted calls per pair, and never change saved
-projects. Human factual and played creative acceptance remain separate from
-mechanical validation. Wider processing or context retrieval requires the
-existing evaluation and activation gates; the pilot adds no scene graph or
-context vector index.
+`pipeline.context` (ADR-0066) keeps immutable, scoped context artifacts from a
+twenty-window pilot. With `lab.context_profile` set (default null), v1 scene
+selection reads them after retrieval, read-only. They never change retrieval,
+ranking or legal clip ranges. Details are in ADR-0066.
 
 ## Durable user state
 
@@ -1404,380 +1385,33 @@ under `assets_dir/lab`; user originals and revisions remain durable.
 
 ### Transitions Lab
 
-ADR-0070 establishes the independent projectless `/lab/transitions` session;
-ADR-0071 extends its renderer and admits durable external-result imports and
-explicitly quoted provider generation; ADR-0072 adds bounded native-time local
-retiming and optional interpolation. ADR-0073 adds verified local result reuse,
-storage visibility, synchronized buffering and explicit compact 1080p export.
-ADR-0074 adds model-aware endpoint generation and a focused AI direction flow.
-ADR-0075 improves local motion and native endpoint sampling; ADR-0076 versions the
-whole-frame Camera whip and centers editing on one monitor and pair timeline. The
-music project schema, editor renderer and automatic capability catalog remain
-unchanged. Browsing and controls create no job. Explicit local renders create
-`transition-render` jobs; explicit returned-video imports create
-`transition-bridge` jobs. Explicit reviewed Runway requests create
-`transition-generate` jobs. All use the existing editor worker and ledger, frozen
-requests, progress, cancellation and restorable history.
+Status: frozen. The workspace runs, but finishing now happens in Resolve
+(OTIO export).
 
-Two windows identify indexed films, source-player start/end seconds and optional
-unit hints. Each is 0.2–12 seconds. Server-side resolution freezes private raw
-source identity, size and modification time and verifies them before and after
-rendering. Identity uses the indexed first/last-4-MiB digest, not a claimed
-full-file hash. Clients cannot choose raw paths. Sources additionally record
-Fit/Fill, normalized position anchors and zoom. Comparison identity includes
-both source windows and their framing.
+`/lab/transitions` is a projectless session (ADR-0070) for comparing a cut
+between two source windows. Each window is 0.2-12 s, with Fit or Fill, an
+anchor and a zoom. Browsing creates no job; explicit actions create durable
+jobs on the editor worker:
+- `transition-render` renders a local recipe;
+- `transition-bridge` imports an externally generated video;
+- `transition-generate` sends an explicitly quoted Runway request, at most 300
+  credits (ADR-0071, ADR-0074).
 
-The `transitions-rgb-v9` profile uses FFmpeg for bounded source normalization
-and PyAV/NumPy for streaming linear-Rec.709 seam compositing. It provides fifteen
-versioned recipes: camera whip, anchored crash zoom, highlight bloom, organic
-edge burn, prismatic lens sweep, shutter double hit, afterimage flash, soft wipe,
-luma reveal, clean exposure flash, dip to black, linear-light dissolve and hard
-cut, plus experimental defocus and prismatic push. Typed catalog controls and defaults bound geometry, luma order/source,
-light attack/peak/decay, picture-change phase, texture seed and other supported
-parameters. Compositor motion blur remains a spatial shutter approximation;
-the experimental lenses operate on flat images. There is no depth estimation
-or subject segmentation.
+Local renders use `transitions-rgb-v9`. It has fifteen versioned recipes
+(whip, crash zoom, light and lens effects, wipes, dissolves, hard cut),
+optional speed ramps that keep the native endpoint frames, and optional
+interpolation (ADR-0072, ADR-0075, ADR-0076). Output is compact H.264
+(ADR-0073).
 
-RGB-v4 retains that boundary while correcting moving-light direction and vertical
-afterimage color displacement. Burn texture uses seeded multiscale smooth random
-fields held fixed through time; a localized edge replaces the earlier uniform
-shadow lift. Lens streaks have softer geometry and rotation-consistent aspect.
-More restrained light defaults and shorter picture crossovers are starting points,
-not automatic footage-dependent decisions. Earlier completed profiles remain
-available for explicit comparison.
+Jobs freeze:
+- source identity (the indexed first/last 4 MiB digest);
+- windows and framing;
+- every recipe parameter.
 
-RGB-v5 introduced `retime`: Off, Rush, Slow hit and Pulse, with an actual
-source-speed multiplier, 0.1–2-second source span, smooth/snappy curve and
-nearest/blend/flow sampling. Rush/Pulse accept 1–4×; Slow hit accepts 0.25–1×.
-Off requires 1× and nearest sampling. The span must fit both selected windows.
-A 2048-interval reciprocal-speed integral maps monotonically from output time to
-source time; output counts round to 30 fps separately. Source windows never
-expand. Receipts distinguish requested edge/peak speed from the map's speed and
-source times at the composited picture change, which can hide a source-edge peak.
-
-RGB-v6 (retained by RGB-v7) sampled the inverse map at actual output timestamps
-`i / 30`, under `output-frame-time-inverse-speed-integral-fixed30fps-v2`.
-The first and last samples explicitly lock to the first and last native frames
-inside the selected window; these are boundary exceptions, not a stretch of the
-entire output clock. This supersedes RGB-v5's endpoint-inclusive sampling grid,
-which could drop or duplicate interior frames even at nominal 1×. Completed
-RGB-v5 test artifacts remain immutable and available for explicit comparison.
-
-RGB-v8 retains the same reciprocal-speed integral, source windows, rounded output
-count and 30-fps clock. `output-frame-time-inverse-speed-integral-fixed30fps-v3`
-corrects the cut-facing native endpoint across the existing ramp instead of
-replacing only its final sample. A quintic adjustment has zero first/second
-derivatives at its boundaries; compressed degenerate regions use a monotonic
-limited-slope cubic. Pulse preserves its interior peak where enough intervals
-remain. Native first/last frames stay locked. The correction receipt records
-its region, time shift and maximum source displacement. Actual per-frame source
-targets supply `sample_grid_speed` and source time at the picture cut; the
-unadjusted requested curve remains separately available as `nominal_speed`.
-
-RGB-v8 introduced the whip/crash-zoom
-`c2-travel-log-zoom-single-rebound-frame-timed-shutter-v1` motion profile. A
-continuous time warp places the requested travel midpoint without a piecewise
-velocity discontinuity. Polynomial travel eases into/out of rest; log-scale
-zoom avoids a linear-scale corner at the handoff. `rebound` (0–1, default .15)
-maps to a restrained single overshoot/recovery, with a small `overscan` crop
-(0–.2, default .04) and mirrored sampling protecting transformed edges. Anchor
-tracking stays inside the available zoom crop to avoid reflected half-subjects.
-Existing `intensity` means shutter exposure, mapped to 0–360 degrees; `spread`
-shapes shutter softness. Exposure uses the actual `1 / (overlap_frames - 1)`
-step and tapers at exact endpoint locks. Whip uses continuous reflected spatial
-convolution; radial blur uses bounded adaptive transform samples with a gap-aware
-prefilter. This approximates transformed-image exposure, not temporal optical
-flow or reconstructed camera motion. Receipts preserve the motion policy and
-sampling limits. Existing RGB-v7 and RGB-v8 artifacts remain unchanged.
-
-RGB-v9 replaces only whip's adjacent-picture strip with
-`whole-frame-camera-whip-short-crossover-v1`. Each source follows a modest,
-same-direction procedural 2D camera path, using temporary sourcewise crop to
-cover translation and rebound. At the picture change, nominal translation is
-12% of the captured frame on each side. A short full-frame crossover near the
-blur peak replaces the moving boundary between two legible panels. Existing
-`softness` is exposed as **Cut blend** and controls the crossover's phase span,
-with a minimum .036 span. Camera whip defaults to 12 output frames, .65 exposure,
-.55 shutter softness and .04 cut blend. The bounded spatial shutter approximation,
-exact composited endpoint locks and current crash-zoom behavior remain. This is
-procedural camera motion, without subject-motion matching or added shake. RGB-v9
-does not change the speed integral, retime endpoint correction, frame count,
-source windows, output encoding or AI conditioning policy.
-
-Retimed preparation preserves native cadence through display/color normalization.
-Source-player-relative input seek uses up to one second of preroll; it is omitted
-at the beginning or when that preroll would enter nonpositive absolute media
-time. Strict trim uses raw absolute PTS. A fixed subtraction of the container
-origin then expresses lossless intermediate timestamps in source-player seconds,
-without changing source evidence. Receipts retain `container_origin` and
-`native_pts_space=source-player-seconds-raw-pts-minus-container-origin`.
-Frame blending works in linear Rec.709. Flow uses FFmpeg CPU motion compensation
-at 60–120 fps over the ramp with up to 0.25 seconds of context per side, clipped
-to the selected window. RGB-v8 adds at most 0.25 seconds of cloned final-native-frame
-context when flow reaches that boundary, so MCI can serve the final interior
-targets. This synthetic context does not extend source evidence or output targets;
-the final output sample still uses its native lock. It operates independently per source before A/B
-composition and is not a neural interpolation model. Native sampling applies
-outside the ramp and at its locked endpoints. Receipts record every output
-frame's requested target, sampled brackets, actual method, timing and scratch
-measurements. Ordinary Speed-off preparation remains unchanged.
-
-Each active source preparation has a four-minute deadline. Each external command
-receives at most three minutes, reduced to the remaining stage time with a
-one-second timeout floor.
-Native and flow timestamp lists reject more than 4096 frames; initial native
-normalization writes at most 4097 frames to detect overflow instead of accepting
-a truncated clip. A monitored 1-GiB budget covers that source's native and flow
-scratch files together; crossing it stops preparation. This is a checked budget,
-not an atomic disk quota. The sampler retains two decoded frames per reader;
-intermediates are disk-backed and owned by the render job. Cleanup follows
-success, cancellation or failure; locked-file cleanup logs a warning without
-masking the result. Final seam compositing has its separate five-minute budget;
-these stage limits are not an end-to-end completion guarantee.
-
-Local effects last 0.10–2 seconds, at least three 30-fps frames and shorter than
-either retimed clip. Half-frame ties round up; overlap shortens the output, while hard
-cut concatenates both windows. Output is muted H.264 MP4, 30 fps, landscape,
-portrait or square, with draft 480-pixel, review (`high`) 720-pixel or explicit
-`export` 1080-pixel short edge. Known
-source matrix/transfer/primaries/range are explicitly normalized to Rec.709;
-missing-tag assumptions are recorded. Tagged PQ/HLG receives bounded Mobius
-tone mapping to SDR. Light operations use linear RGB. This is not HDR export.
-Only bounded current frames and spatial fields are held for compositing.
-
-Manifests record source anchors and identity, framing, every recipe parameter,
-normalization policy/assumptions, renderer/encoder versions, endpoint timestamps
-and artifact digests. Completed earlier renderer artifacts remain downloadable;
-queued snapshots from an incompatible profile require a fresh render. Their
-saved result is never silently rerendered under the new profile. Artifact
-downloads validate ownership and digests.
-
-RGB-v7 records `compact-h264-closed-gop-2s-v1`: fast-start yuv420p H.264 with
-scene-cut keyframes, a maximum 60-frame closed GOP, CRF 21 for draft and 17 for
-review/export, and the bounded fast encoder. Imported bridge assembly v2 uses
-the same final policy. These compact SDR assets are not lossless/HDR masters or
-editable NLE effects. A 1080p copy is an explicit render from the saved request's
-original source windows, not an upscale of the saved draft or an automatic copy.
-
-The local render API can reuse a completed result only when the newly frozen
-source/request/profile exactly matches and manifest, video and both endpoints
-pass digest validation. The ledger rechecks snapshot, result, terminal state and
-cancellation under write serialization after file verification. Up to five exact
-completed candidates are considered; normal active-job reuse remains. Missing
-or changed bytes require a fresh render. Paid generation and imported originals
-are not deduplicated through this mechanism.
-
-Public local/bridge/generation job responses include optional measured `storage`
-with `output_bytes`, `original_bytes`, `retained_bytes` and `scratch_bytes` for
-the flat owned job directory. Unsafe or unreadable measurements return unknown.
-Rendering checks 256 MiB free headroom and 1.5 GiB of known job scratch no more
-than once per second; native/flow retains its stricter per-source bound. These
-are monitored ceilings, not reservations. Cancellation takes precedence. Scratch
-cleanup preserves originals, source evidence and provider/atomic receipt partials;
-only explicitly replaceable assembly and incomplete transfer files are added to
-ADR-0068's allowlist. No completed-history eviction or global storage quota exists.
-
-The browser offers three-duration sweeps, frame and BPM subdivision helpers,
-local named presets/favorites/notes and a shared seam-relative comparison clock.
-Saved-preview receipts distinguish the displayed request from working settings;
-history selection leaves a draft intact until explicit restoration. A sweep keeps
-the prior preview available and selects its center result on completion unless
-the user has since selected another result. Pair-local variants and current-profile
-comparison reuse avoid unnecessary rerenders. **Compare hard cut · same speed**
-retains the saved pair, framing, output quality and speed while removing its
-visual effect. **Compare without speed** retains that saved effect and timing
-while setting Speed off. Reuse requires equivalent effective recipe and speed
-settings; raw-pair comparison and native endpoint identity remain independent of
-speed so these controlled comparisons are possible. A single visible monitor
-switches between saved transition playback/comparison and either working source.
-The continuous A-to-B timeline stays below it. Its clip extents use rounded output
-durations and true overlap; all four source trim edges remain addressable, with
-separate hit areas for A-out and B-in at the join. Clicking a clip selects and
-source-seeks the monitor, pausing saved-preview playback and music. Clip trims
-preserve the opposite boundary and framing, freeze the pointer's time scale,
-enforce 0.2–12-second source windows, known film ends, the active ramp span and
-retimed overlap limits. Arrows adjust 1/30 source seconds, Shift adjusts .1 seconds,
-and Home/End choose the legal limits; these are not native-frame-accurate steps.
-The overlap handle changes transition duration in bounded output frames. A matching
-saved preview accepts direct sequence-time scrubbing on the ruler. Otherwise it
-inspects sources; the selected source has priority over stale saved playback time.
-Draft source positions map through the nominal 2048-step speed integral and are
-labeled approximate under active Speed because native endpoint corrections are
-not available in a working draft. The timeline owns no media loads or render jobs.
-Reframing uses pointer motion against the picture's actual
-contain/cover-plus-zoom geometry; numeric fields and position sliders remain
-under Precision controls. Raw endpoint stills match independently by each source
-film and window, regardless of the other clip, working crop or output aspect.
-The same current framing is applied to the retained still and source video.
-Comparison playback holds the shared clock and music while a required pane is
-buffering and resumes only for the current ready selection. Source media is
-attached on deliberate playback/scrubbing/near-frame inspection rather than
-loaded beneath retained endpoint stills. Saved output receipts expose actual
-dimensions, duration and file size; export copies and reused results are explicit.
-A selected local audio file can cue against the seam; it stays browser-local and
-is excluded from output. Musical timing is user-directed, not automatic beat
-detection or editorial selection. Successful encoding and numerical endpoint
-checks do not establish creative quality; played comparisons are still required.
-
-The workspace exposes separate Local effects and AI transitions tabs, retaining
-both drafts while pausing hidden media. Saved history starts collapsed and is
-progressively revealed. The saved preview and pair-version strip explicitly name
-their frozen source pair; adjusting working clips does not silently replace it.
-A visible **Preview needs update** banner distinguishes the saved monitor output
-from changed working settings. Rendering an update is explicit. Saved-preview
-details and comparisons remain collapsible, and loading settings for refinement
-is separate from selecting a saved result.
-AI preparation explicitly snapshots the working sources and framing into a local
-Draft hard cut with Speed off. It does not modify the local recipe, speed or output
-controls and does not generate/upload/pay for an AI result. A later user-selected
-preview wins over an outstanding preparation's completion. Missing Runway setup
-and the prepared-versus-working source mismatch remain visible before submission.
-
-Endpoint A is the last decoded native frame within its outgoing window; endpoint
-B is the first within the incoming window. Downloads honor display aspect and
-rotation and record actual source-relative timestamps. These frames bracket a
-manual external-generation handoff independently of local overlap. Prompt
-templates and provider/model notes support that experiment.
-When an individual working source film and window match a saved render, source
-inspection displays its retained still and native timestamp. The other source,
-framing and output aspect do not invalidate that raw evidence; current framing
-is applied in the monitor. Playback or scrubbing clears the still; changing that
-source's film or window invalidates only its own endpoint. Approximate browser
-seeks remain labeled as nearby inspection because keyframe decode timing can
-overshoot a shot boundary. No timestamp correction is inferred from that preview,
-and a retained still cannot be applied as an exclusive trim boundary via playhead.
-
-New bridge imports, generation quotes and hosted submissions require a completed
-Speed-off parent render; omitted legacy `retime` means Off. Client and server
-reject retimed parents with an instruction to render a Speed-off version. Local
-time maps have not been integrated into bridge assembly or provider conditioning.
-Existing bridge/generation history, original recovery and cancellation remain
-available. Two-image conditioning receives still images, not the source videos
-or verified source motion.
-
-A returned bridge import references a completed parent render. The server caps
-the multipart body before form parsing, copies a bounded MP4/MOV/WebM into its
-own UUID job root, validates a local video of at most 30 seconds/4096 pixels per
-side/9 megapixels, and hashes the original. The request separately records
-source trim and optional explicit playback duration; blank duration preserves
-speed. The import owns copies of its parent manifest and native endpoint frames.
-Its frozen source snapshot and artifacts remain independently verifiable.
-The worker assembles full source A, the trimmed/optionally retimed bridge and full
-source B at 30 fps using the same framing/color policy. The manifest marks the
-synthesized interval, actual timing, original hash, trim/retime and endpoint
-diagnostics. Diagnostics are review aids, not a pass/fail identity guarantee.
-When both source clips explicitly use Fill, an unrotated, square-pixel bridge
-within a symmetric 2% display-aspect mismatch uses centered Fill to avoid thin
-bars caused by model output dimensions. Missing pixel-aspect metadata follows
-FFmpeg's square-pixel assumption and is recorded. Other bridges retain centered
-Fit. The normalization receipt records the measured mismatch, chosen framing and
-`near-canvas-native-grid-correction-v1` policy; originals and saved outputs remain
-unchanged.
-Provider/model/prompt notes are `user-supplied-unverified`; an imported video is
-not represented as source-backed film evidence or verified provider output.
-
-`/lab/transitions` APIs expose recipes, renders/history/cancel/artifacts, bridge
-upload/history/cancel/artifacts, generation jobs/history/cancel/artifacts and
-read-only provider readiness/cost quotes. One Runway adapter supports Seedance 2.5
-(the legacy omitted-model default), H3 Max and WAN 3 through server-only
-credentials. A model registry validates their distinct prompt limits, supported
-durations/resolutions, seed support, expansion modes, payload fields and dated
-pricing. Lab requests permit Seedance 4–8 seconds, H3 Max 5–8 and WAN 3 2–8,
-with reviewed estimates of at most 300 credits. Submission binds the selected
-model, its price version and parent manifest hash
-and requires `confirm_spend=true` plus a stable `request_id`. Exact HTTP retries
-return the existing immutable job without requeueing any terminal state.
-
-Preparation copies native endpoint evidence and normalizes separate provider
-JPEGs directly from raw source using the same normalized 30-fps segment endpoints
-as assembly, with the frozen framing/color policy. Their selected output-frame
-indices are recorded separately from native endpoint timestamps. The worker owns
-an exclusive receipt before POST, provider
-task identity, accepted maximum estimate, terminal cost, original download and
-assembled A → bridge → B. Provider-generated origin remains distinct from
-user-supplied import notes. No secret, signed output URL or raw provider error
-payload is exposed in public metadata or the sanitized reconciliation receipt.
-Uncertain/interrupted submission is never automatically resubmitted. Polling is
-at least five seconds apart within twenty minutes; cancellation and bounded
-downloads retain the receipt. Runway provides no request-side hard credit cap:
-the adapter attempts cancellation when acceptance cost is invalid/excessive,
-but cancellation cannot guarantee avoiding charges. The UI describes estimates
-and potential charges explicitly. Readiness reports `generation_enabled=true`
-and `live_verified=false`; a missing key disables submission. Setting a key alone
-makes no calls. H3 Max defaults prompt expansion to disabled and optionally
-accepts balanced/quality; it sends resolution without an explicit output ratio.
-WAN 3 has no seed, uses auto resolution ratios and sends no reference media
-alongside its two keyframes. Normalized input dimensions are separate from
-actual output dimensions; first/last conditioning does not guarantee seam or
-identity continuity. Download transport uses a separate verified HTTPS opener,
-IPv4-first address selection with IPv6 fallback, bounded connection attempts and
-a 120-second total socket watchdog; credentials are never sent to artifact hosts.
-Measured output duration is preserved at original speed. The lab accepts at most
-150ms underrun or overrun, except H3 Max's observed native-frame/audio tail permits
-up to 250ms overrun. This is a recorded lab acceptance policy, not a vendor timing
-guarantee. Material duration mismatches retain the original for explicit recovery.
-Live model behavior remains scene-dependent, and editor
-promotion remains separate.
-
-The AI screen presents editable direction followed by one selected method,
-Generate here or Bring a result. Six cinematic and four explicitly experimental
-prompt recipes offer restrained/balanced/bold energy, applicable travel direction,
-optional anchor and observed motion notes. Applying direction explicitly replaces
-the prompt; selection changes preserve custom writing. Prompt recipes are not
-vendor effect IDs or verified generation results. Method/source switches preserve
-the working draft, while quotes and results remain bound to the current source;
-a retained import file requires explicit reassociation after a source change.
-Inactive methods pause their polling/playback, and history refresh preserves a
-valid explicit result selection. Advanced prompt/provider details are expandable.
-**Adjust timing** loads an eligible retained generation original into the existing
-import form through the local artifact API. It makes no provider request and
-preserves the saved model, prompt and seed as import notes. Saving still creates
-an explicit local import with unverified notes; it does not rewrite or upgrade
-the original generation's provenance. Unavailable or cancelled originals do not
-offer this action, and stale loads cannot replace a different source pair.
-After an uncertain submission, a subsequent failed retry cannot discard its
-reconciliation identity. Recovery keeps the frozen request and explicitly marks
-an attempt belonging to an earlier source render; only a confirmed saved job
-resolves that uncertainty in the current UI session.
-
-A completed provider download has its own size/hash receipt before assembly;
-failed or interrupted local assembly can still expose that verified original for
-manual recovery without paying for another generation. The single editor lane
-waits on the bounded provider task; this does not introduce a provider service or
-automatic interrupted-task resubmission.
-
-All three job kinds own `assets_dir/lab/renders/<job UUID>/` under ADR-0068. Originals,
-receipts, MP4s and frame artifacts remain with live jobs. Known temporary clips
-are removed after encoder teardown and use the existing cleanup allowlist.
-Uploads use a fresh UUID root protected by the existing orphan grace period,
-not a long database transaction. Raw films and shared evidence remain unchanged.
-There is no new global TTL, model cache, vector space or worker service.
-
-### Match Cuts audition and shadow research
-
-Manual A→B audition accepts exact user-chosen references or bounded source
-windows and normalized object/region marks. Whole-picture crops can enlarge
-and align a smaller object; they do not cut out or independently transform the
-object. The offline research harness scores region alignment, crop/context loss
-and resolution headroom while retaining source provenance and transform data.
-Transition stability and usefulness require a played comparison.
-
-The next oracle compares sparse keyframes with hand-selected instants. It is
-separate from the bounded Lab source-window search admitted by ADR-0027.
-Production activation still requires ADR-0008's static gate. Candidate recall and final geometry must be measured separately.
-The offline DINOv3 adapter in `pipeline/experiments/dense_geometry.py` accepts
-only an explicit local safetensors checkpoint and content-pins its configuration,
-preprocessing, weights and runtime. It extracts independent dense patch features
-for at most 200 operator images and compares full images or region-resampled
-grids without mixing scores with PE. No real checkpoint/library evaluation has
-been run; its tests use fake models. ADR-0027 now admits a separate prepared
-Lab workflow over this adapter and a real optical-flow baseline. Merely opening
-the route still never downloads models or derives profiles.
-
-The ingestion, retrieval, and recipe sections below describe production
-behavior. The Match Cut section is explicitly shadow-only, and its refinement
-and Motion Match subsection defines production promotion boundaries. ADR-0027
-and the bounded Match Cuts section describe the current Lab exception.
+Outputs are verified and reused only for identical requests, and earlier
+profiles stay available for comparison. Profile history, limits and acceptance
+notes are in ADR-0070 to ADR-0076, `pipeline/transitions/` and
+`web/features/transitions/`.
 
 ### Ingestion
 
@@ -2284,88 +1918,15 @@ reveal a prefix in viewport-sized batches, but it does not regroup that prefix
 into a separate Best per movie result mode. This bounded contract requires no
 cursor or server-side search-session state.
 
-### Match Cut shadow profile
+### Match Cut in ordinary search (gated)
 
-Match Cut is not an alias or silent upgrade for the current Framing workflow.
-It is an approved, separate shadow experiment under ADR-0008. Inspected
-tight-profile references exposed missing candidates as well as poor ordering:
-useful side-profile matches fell outside bounded PE/spatial pools, while
-frontal or motion-confounded people ranked ahead of closer geometry. Adjusting
-the 6x6 spatial weight cannot supply the missing entity, scale, orientation, or
-pose evidence.
-
-The shadow `match-layout-v1` contract represents the active picture plus a
-bounded, salience-ordered set of normalized entities. Entity evidence may
-include class or family, box, silhouette, pose, and screen orientation, but an
-extractor records only supported evidence and never fabricates low-confidence
-pose. Zero-detection frames remain explicit profile rows so completeness is
-measurable rather than biased toward easy images. The corresponding coarse
-vector and exact scoring contract belong to the same versioned profile.
-
-Candidate generation searches grounded-layout and legacy PE spaces
-independently, unions their bounded rankings by stable frame identity, and then
-uses an inspectable layout scorer over the pooled shortlist. Raw vector scores
-from incompatible spaces are never normalized together. Exact scoring follows
-the human criteria in `pipeline/eval/match_cut_cases.yaml`: subject/object,
-normalized position, scale, viewpoint/orientation, pose, and relations or
-negative space. Match Cut retains cross-film discovery by default while
-respecting explicit movie scope.
-
-The initial Dune cases demonstrate the failures but are not an acceptance
-corpus. Before Match Cut becomes product behavior, the human-owned set must
-grow to 10-15 representative references and freeze a 12-reference acceptance
-slice covering profiles, full-body pose, objects, multi-subject relations,
-scale, orientation, and negative space.
-
-The first grounded-score probe is not activation-ready: case A positives scored
-.602/.542/.632 versus hard negatives .457/.544/.536, while case B positives
-scored .677/.583 versus hard negatives .672/.759/.603. No orientation evidence
-was emitted, and the second case's confounders can outrank its positives.
-
-Against current Framing, a later challenger must:
-
-- win at least 8 of 12 blinded side-by-side choices;
-- improve median per-case nDCG@10 by at least 20% on fully judged pooled top
-  tens, with no more than two case regressions and every initial Dune case
-  improved or held;
-- place at least three judged positives with grade-2 or grade-3 geometry in the
-  tight-profile case's top ten; and
-- keep warm p95 candidate-union plus static-rerank latency below 250 ms on the
-  target hardware.
-
-Passing quality and latency is still insufficient without a complete manifest
-for the current published frame generation. Shadow outputs never affect
-production ranking until both requirements pass and the profile is explicitly
-selected.
-
-### Exact-frame refinement and Motion Match
-
-The up to three keyframes retained for a shot are candidate-recall evidence,
-not a guarantee that an indexed image is the best cut instant. After the static
-Match Cut profile passes its gate, an exact-frame refiner may operate only on a
-bounded set of top candidate shots. It decodes coarse samples from the retained
-source film, searches a finer neighborhood around each local winner, and
-returns the actual decoded presentation timestamp and frame evidence. A paused
-player timestamp may be the source query instant; otherwise the indexed
-keyframe timestamp remains the source anchor.
-
-The backend resolves the source film, unit interval, and legal timestamp. A
-browser path or vector is never authoritative. Decoded frames and layouts are
-replaceable caches keyed by source identity, unit/time range, decoder contract,
-and extractor/scorer profile. This design avoids a library-wide every-frame
-index while preserving enough source evidence to repeat or backfill a result.
-Exact-frame refinement needs a separate human comparison that judges the
-returned instant rather than only its containing shot before it can change
-product results.
-
-Production Motion Match remains a separate future short-window profile. It must describe
-temporal direction using optical flow, estimated global camera motion, and
-tracked subject/object trajectories after that camera motion is removed. It
-does not reuse a still layout score as proof of motion similarity, and Framing
-or still Match Cut is never a fallback presented under the Motion Match label.
-Activation requires its own versioned manifest, latency budget, and
-action-heavy human cases containing direction, relative-motion, and camera
-motion confounders.
+Ordinary search offers Framing only. A match-cut option there still needs
+ADR-0008's gate: on an owner-reviewed reference set it must beat Framing, and
+it needs acceptable latency and complete coverage (now the moment index,
+ADR-0099). Two experiments are frozen, recorded in ADR-0008 and ADR-0026:
+- the shadow `match-layout-v1` profile (`pipeline/search/match_layout*.py`,
+  `pipeline/eval/match_cut.py`);
+- the offline dense-geometry adapter (`pipeline/experiments/dense_geometry.py`).
 
 ### Modular recipe retrieval
 
@@ -2572,24 +2133,11 @@ but this baseline must not be rebuilt piecemeal after upstream weights change.
 Any future visual or multimodal replacement must use a separate versioned table
 with exact revision lineage and its own activation manifest.
 
-The grounded Match Cut profile is such a separate visual derivation. Its
-manifest records extractor model IDs, immutable revisions or weight hashes,
-library versions, preprocessing and active-picture normalization, thresholds
-and label mapping, layout schema, vector contract and dimensions, scorer
-versions, input frame generation, frame-identity coverage digest, and expected
-and completed row counts. It is complete only when every target frame has a
-row, including zero detections.
-
-If that manifest or any required profile data is missing, stale, partial,
-corrupt, incompatible, or unavailable at query time, Match Cut is disabled as
-a whole. Production Framing remains independently usable, but it is never a
-silent Match Cut fallback. Exact-frame refinement and Motion Match follow the
-same whole-profile activation rule when implemented.
-
-That complete-profile rule governs promotion into main search. ADR-0048 admits
-a separate, explicit Lab search using bounded on-demand person detection after
-existing keyframe recall; it does not activate a partial grounded index in main
-search or replace this promotion rule.
+Match cuts follow the same rule. The moment index is its own versioned
+derivation: its manifest records every film's producer profiles and the
+index contract. If match cuts ever enter ordinary search (ADR-0008), a
+missing, stale or partial index disables them as a whole, and Framing is
+never a silent fallback.
 
 ## Known limitations
 
@@ -2597,16 +2145,13 @@ search or replace this promotion rule.
 - The legacy PE baseline lacks immutable checkpoint lineage.
 - Hosted annotations record the requested model identifier, not a
   provider-resolved immutable revision.
-- Sparse keyframes can propose shots but can miss the best match-cut instant.
-  Exact source-backed within-shot refinement is available in the bounded Match
-  Cuts Lab and explicit scene-based Match search (ADR-0027 and ADR-0040);
-  ordinary descriptive search still uses indexed frames.
+- Ordinary search matches up to three indexed keyframes per shot; only Match
+  Cuts (ADR-0099) sees every 4 fps instant.
 - The optional Framing cache becomes inactive after any film publication until
   `index-framing` reconciles the new frame generation; live Framing remains
   available during that interval.
-- Grounded Match Cut and Motion Match are not active in main search. Current Framing
-  cannot reliably match pose, temporal direction, brief action, or camera
-  movement.
+- Match cuts are not offered in ordinary search. Framing cannot reliably match
+  pose, temporal direction, brief action or camera movement.
 - Semantic dialogue is embedded at shot level; utterance rows serve the quote
   channel through full text, not embeddings.
 - Full text covers visual captions and dialogue, not the understanding pass's
@@ -2657,11 +2202,9 @@ problem. Temporal retrieval is justified only when action or camera-motion
 failures recur. RAG is justified only for grounded reasoning, comparison, or
 reel-building above retrieved evidence.
 
-Match Cut is the concrete exception now admitted to shadow evaluation because
-inspected references showed both candidate and ordering failures. It follows
-the stricter human, latency, completeness, and explicit-selection gates above.
-ADR-0027 separately admits bounded refinement and optical-flow experiments
-in Match Cuts; it does not activate them in main search.
+Match cuts run over the library-wide moment index in the Lab and the editor
+(ADR-0099). Offering them in ordinary search needs ADR-0008's reference-set
+gate.
 
 Paid library-wide processing, global model activation, and removal of a working
 fallback require the small comparison above. Structural versioning, cache
@@ -2675,19 +2218,9 @@ retrieval misses separately from planning, timing and editing failures. The
 synthetic media and contract tests establish mechanics, not editorial quality.
 Study a varied creator-published reference set before expanding the editor.
 
-Expand and human-grade `pipeline/eval/match_cut_cases.yaml`, compare sparse
-frames with a manual instant/crop oracle, then compare current Framing with
-`match-layout-v1` and one independent dense-geometry challenger if justified.
-Keep backfills bounded to shadow subsets until ADR-0008's quality, latency and
-coverage gates pass. Distinguish candidate loss from poor ordering.
-
-Production promotion still requires the static grounded profile gates.
-ADR-0027 permits earlier Lab-only refinement inside ten shortlisted shots and
-a separately prepared temporal profile over 80 windows. ADR-0048 additionally
-permits existing-library keyframe recall and bounded on-demand person evidence
-inside the explicit scene Match search. It adds no full-library derivation or
-always-on main-search model. Motion is never
-smuggled into the static layout score. A query router or LLM decomposition layer cannot replace missing
+Match cuts are judged by the owner playing cuts on a reference set drawn from
+the edits they like. Weights change only from those notes (ADR-0099). A query
+router or LLM decomposition layer cannot replace missing
 visual or temporal evidence and must not become an always-on dependency without
 its own demonstrated need.
 
@@ -2828,62 +2361,9 @@ compared in output coordinates.
 - Native-frame refinement, a dense semantic channel, editor pool injection and
   an ordinary-search option wait for played-cut evidence (ADR-0099).
 
-The former scene-based search (ADR-0040/0046/0048: prepared cohorts, keyframe
-recall, on-demand Mask R-CNN and SAM, durable search and preview jobs) no
-longer backs `/match`. The contracts below remain only for saved Match Cuts
-projects at `/lab/visual-rhymes`, which are frozen.
+The former scene-based search (ADR-0040/0046/0048) no longer backs `/match`.
+Saved Match Cuts projects at `/lab/visual-rhymes` keep a frozen editor. It runs
+on a prepared 200-shot cohort with SAM 2.1 subject tracks, RAFT camera motion
+and bounded refinement windows (ADR-0027, ADR-0038). Its code in
+`pipeline/matching/` outside `moments/` is to be removed in a later cleanup.
 
-## Bounded Match Cuts Lab
-
-ADR-0038 extends this experiment with a single played-pair workspace and an
-independent tracked-subject profile. New explicit `focus`/`timing` requests use
-automatic or subject/camera/shape matching, nearby outgoing instants within one
-second or a fixed pin, and actual source PTS for frame navigation. Omitted fields
-retain the original experiment for saved jobs and controlled comparisons.
-
-SAM 2.1 Small follows automatically selected or point/box-prompted masks. Its
-separate complete profile records ordered subject-local flow, visibility,
-position, scale and silhouette, plus screen and background-compensated movement.
-Shape matching can use this grounded evidence without DINOv3; dense visual
-matching remains an independently prepared channel. Retrieval ranks combine
-without mixing raw scores. Only the winning proposed trim's measurements are
-reported as matching evidence. No subject identity or action-completion guarantee
-is inferred from masks. Unknown tracking/motion remains explicit.
-
-For the saved-project Lab route, the original cohort limits below remain in
-effect; new requests share a maximum
-of ten refinement windows across channels. Subject/shape channels initially
-refine at most five of their
-allocated windows, continuing within that allocation when fewer than three
-reliable candidates survive. Preparation resumes checksummed
-per-window rows and publishes only a complete manifest. The UI discloses searched
-coverage. Preview results can appear while the immutable search job runs;
-application waits for completion. Manual timing variants have their own preview
-jobs and require a playable preview plus the original revision/lock guards.
-Modern boundary scoring rejects unsupported flow in any temporal phase and
-records its own scorer identity with the job. Match renders use a versioned
-absolute-source-PTS boundary policy so preview, saved cut and export agree on
-last-A/first-B frames. The existing music render policy is unchanged.
-Uncropped proposals share one original/proposed render. These changes do not
-activate library-wide preparation or production matching; human played-cut
-acceptance is tracked separately by `pipeline.experiments.match_effectiveness`.
-
-`pipeline/matching` owns immutable cohorts, local model profiles, dense region
-retrieval, decoded-PTS refinement and camera/residual optical-flow matching.
-`pipeline/lab/matching.py` owns rendering and boundary-image checks. The Lab API
-queues a frozen job and applies only a saved candidate under revision and lock
-guards. Ordinary search does not import or invoke matching models.
-
-The experiment caps preparation at 200 shots/600 frames and 80 motion windows.
-DINOv3 and PE propose candidates independently; rank fusion never mixes vector
-values. Refinement decodes at most four seconds in each of ten candidate shots.
-Motion uses real RAFT Small flow and confidence-gated affine separation, not
-camera captions. Region matching and optional 2x crop proposals are separate.
-
-Image and motion reference windows permit at most four alternatives; fixed
-motion references measure the second preceding the marked instant. Returned source PTS,
-transforms, snapshot revision and profile IDs remain inspectable. Top-three
-previews and additional on-demand preview jobs include a compression-tolerant comparison of played boundary images
-against source evidence; duplicate frames and subtle adjacent-frame differences
-remain a limit of that check. Human played-transition review is still required.
-See ADR-0027 for scope, acceptance and promotion boundaries.
