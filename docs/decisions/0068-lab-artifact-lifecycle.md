@@ -4,6 +4,7 @@
 - Date: 2026-09-15
 - Extends: ADR-0006, ADR-0035 and ADR-0059
 - Supersedes: ADR-0035's records-only project deletion
+- Superseded by: ADR-0100 for project render retention only (each project keeps its newest preview and export)
 
 ## Observed failure
 

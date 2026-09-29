@@ -253,7 +253,10 @@ project. Experiments follow the shared
 [Lab workspace conventions](docs/lab-workspaces.md).
 
 Lab storage maintenance runs in the existing editor worker while idle, at most
-every five minutes. It removes leftover render intermediates, recognized job
+every five minutes. Each project keeps only its newest finished preview and
+newest finished export (the ones the editor offers); older renders of that
+project are removed. A failed or unfinished render never replaces the last good
+one. Maintenance also removes leftover render intermediates, recognized job
 files whose job no longer exists after a 24-hour grace period, and decoded-audio
 scratch older than 24 hours when no editor work is active or queued. New renders
 remove intermediates after success, failure or cancellation. Each maintenance
@@ -267,11 +270,13 @@ uv run python -m pipeline.lab.cleanup --apply
 
 The first command only reports eligible paths/bytes and pending deletions.
 Both accept `--config <path>`. Maintenance preserves saved projects, original
-music/films, active work, existing-job outputs and diagnostic receipts, shared
-versioned evidence/model caches and separately named experiment results. It
-does not reclaim every file in `assets_dir`, automatically remove imported
-originals, or expire saved exports. A deleted project's exports inside the app
-are removed; copies you downloaded elsewhere are outside this cleanup.
+music/films, active work, each project's newest preview/export and other job
+outputs and diagnostic receipts, shared versioned evidence/model caches and
+separately named experiment results. It does not reclaim every file in
+`assets_dir` or automatically remove imported originals. Renders inside the app
+are a cache of saved revisions: rendering a revision again recreates any removed
+one. A deleted project's renders are removed; copies you downloaded elsewhere
+are outside this cleanup.
 
 Search begins with a large, centered query bar and a row of category controls.
 Each category keeps the same footprint whether empty, filled with text or holding

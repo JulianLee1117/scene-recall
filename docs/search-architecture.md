@@ -19,7 +19,7 @@ records.
 | Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080 |
 | Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, with 0002-0021 and 0082-0087 where not superseded |
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
-| Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068 |
+| Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (default) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
 | Editor harness v2 (opt-in) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099 |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
@@ -1263,19 +1263,24 @@ The existing editor worker retries cleanup while idle, at most once every five
 minutes, with up to 100 tickets and 100 garbage paths per pass. A dry-run/apply
 CLI uses the same policy. It also reclaims terminal-job render intermediates,
 orphan UUID artifacts older than 24 hours, and reproducible decoded-audio WAVs
-older than 24 hours while no editor work is active or queued. Maintenance
+older than 24 hours while no editor work is active or queued. Project render
+outputs are a cache of saved revisions: each project keeps its newest completed
+`render` job per mode (preview/export), ordered like the editor's job list, and
+the render directories of its older completed renders are removed. Failed,
+cancelled or unfinished renders never supersede a completed one; job records
+stay, and the output endpoint already reports a removed cache (ADR-0100). Maintenance
 rechecks the ledger under a write transaction before garbage removal, excluding
 worker claim/enqueue races; linked/reparse paths and escapes are refused.
 Discovery scans are proportional to the Lab artifact directory size; deletion
 batches bound removals, not scan time. New renders discard their own intermediate
 clips/concat/partial files in `finally`, after the encoder has stopped.
 
-Live job outputs/manifests/receipts (including projectless Match and Transitions sessions),
+Other live job outputs/manifests/receipts (including projectless Match and Transitions sessions),
 unknown experiment namespaces, shared versioned AI/rhythm/observation/context
 evidence, model files, original tracks, film evidence and unrelated ingestion
 jobs remain. No broad age-based evidence eviction or per-artifact registry is
 introduced. Add new disposable namespaces explicitly to this lifecycle rather
-than adding a generic recursive purge. See ADR-0068. Named deletion confirmation,
+than adding a generic recursive purge. See ADR-0068 and ADR-0100. Named deletion confirmation,
 guarded unsaved exits and save-race checks belong to the UI; clean exits can leave
 durable jobs running. No project schema bump is needed. See ADR-0035.
 

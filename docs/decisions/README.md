@@ -129,7 +129,7 @@ The accepted boundary or behavior.
 | [0066](0066-source-context-pilot.md) | Frozen; superseded for story context by 0093 | Build independently versioned source context for bounded editorial comparisons, preserving retrieval and trim authority |
 | [0065](0065-private-discovery-and-flexible-assembly.md) | Frozen | Compare fixed slots, joint assembly and bounded discovery expansion using private frozen evidence |
 | [0067](0067-match-cuts-lab-only-entry.md) | Accepted; workspace superseded by 0099 | Keep experimental Match Cuts in its independent Lab workspace without actions in ordinary search or the main scene player |
-| [0068](0068-lab-artifact-lifecycle.md) | Accepted | Clean owned job artifacts on project deletion, retry durably and reclaim disposable render/audio leftovers in the existing worker |
+| [0068](0068-lab-artifact-lifecycle.md) | Accepted; export retention superseded by 0100 | Clean owned job artifacts on project deletion, retry durably and reclaim disposable render/audio leftovers in the existing worker |
 | [0069](0069-tiered-playback-and-idle-database-maintenance.md) | Accepted | Separate full-length playback storage and prune database history only under idle reader and writer guards |
 | [0070](0070-projectless-transition-recipes.md) | Frozen | Compare durable local transition recipes in a projectless Lab, with manual endpoint-frame handoff for external AI experiments |
 | [0071](0071-rgb-transition-lab-and-durable-bridge-imports.md) | Frozen | Expand bounded RGB recipes, music audition, durable imports and explicitly quoted Runway bridge jobs; keep editor promotion gated |
@@ -161,4 +161,5 @@ The accepted boundary or behavior.
 | [0097](0097-relevance-is-one-score.md) | Accepted | One relevance score through ordering: log-odds judge verdicts on the shortlist plus every retriever's best matches, bounded signal and prior factors, named films exempt from film diversity |
 | [0098](0098-focus-span.md) | Accepted | Show each shot's action: pictures from keyframe similarity, a focus span around the peak, hero frames and hover previews inside it, editor windows bounded by it |
 | [0099](0099-moment-match-cuts.md) | Accepted | Moment-level match cuts: a library-wide 4 fps moments pass (masks, keypoints, light, edges), a calibrated pair scorer with crops, a one-screen Lab workspace with in-browser audition and chains, and measured match cuts in editor transitions |
+| [0100](0100-renders-are-a-cache-of-the-newest.md) | Accepted | Project renders are a cache: each project keeps its newest preview and export; maintenance removes older ones (supersedes ADR-0068's export retention) |
 | [0101](0101-fold-look-alikes-and-measure-ordinary-moments.md) | Accepted | Fold same-film look-alike shots into their card instead of dropping them; a blind ordinary-moment eval; evals report runs that lost the judge or semantic text |

@@ -152,6 +152,42 @@ def test_maintenance_reclaims_only_known_terminal_intermediates_and_old_orphans(
     assert all(path.exists() for path in [output, manifest, thumbnail, fresh, recent_child, experiment])
 
 
+def rendered(store, project, mode, created_at, *, status="completed"):
+    job = store.enqueue("render", project["id"], project["revision"], mode=mode)
+    store.claim()
+    if status != "running":
+        store.finish(job["id"], result={"message": "Done"}, error="Encoder failed" if status == "failed" else None)
+    with store.connection() as con:
+        con.execute("UPDATE jobs SET created_at=? WHERE id=?", (created_at, job["id"]))
+    put(store, f"lab/renders/{job['id']}/output.mp4")
+    return store.assets_dir / "lab/renders" / job["id"]
+
+
+def test_each_project_keeps_only_its_newest_render_per_mode(store):
+    project = store.create_project("Edit", "music-sketch")
+    other = store.create_project("Other", "music-sketch")
+    old_export, old_preview = rendered(store, project, "export", 1), rendered(store, project, "preview", 2)
+    export, preview = rendered(store, project, "export", 3), rendered(store, project, "preview", 4)
+    only = rendered(store, other, "export", 0)
+    plan = cleanup.maintain_storage(store, apply=False)["garbage"]
+    assert sorted(Path(item["path"]) for item in plan["files"]) == sorted([old_export, old_preview])
+    assert {item["reason"] for item in plan["files"]} == {"superseded render"}
+    assert old_export.exists() and old_preview.exists()
+    result = cleanup.collect_garbage(store, apply=True)
+    assert result["errors"] == []
+    assert not old_export.exists() and not old_preview.exists()
+    assert all(path.exists() for path in [export, preview, only])
+
+
+def test_failed_or_unfinished_renders_never_supersede_the_last_good_one(store):
+    project = store.create_project("Edit", "music-sketch")
+    good = rendered(store, project, "export", 1)
+    failed = rendered(store, project, "export", 2, status="failed")
+    running = rendered(store, project, "export", 3, status="running")
+    assert cleanup.collect_garbage(store, apply=True)["files"] == []
+    assert all(path.exists() for path in [good, failed, running])
+
+
 def test_dry_run_is_read_only_and_batches_are_bounded(store):
     _, job = finished(store)
     paths = [put(store, f"lab/renders/{job['id']}/clip-{i:03}.mp4") for i in range(3)]

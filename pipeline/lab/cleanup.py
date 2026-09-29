@@ -133,7 +133,27 @@ def drain_cleanup(store, *, job_ids=None, limit=BATCH_SIZE):
     return report
 
 
-def _reason(path, owner, jobs, cutoff, root, *, audio=False, kind=None):
+def superseded_renders(con, project_id=None):
+    """Completed project renders with a newer completed render of the same project and mode.
+
+    The editor only offers a project's newest render, so older ones are unreachable
+    cache; rendering the saved revision again recreates any of them.
+    """
+    rows = con.execute(
+        "SELECT id, project_id, json_extract(snapshot, '$.mode') AS mode FROM jobs"
+        " WHERE kind='render' AND status='completed' AND project_id IS NOT NULL"
+        + (" AND project_id=?" if project_id else "") + " ORDER BY created_at DESC, id DESC",
+        (project_id,) if project_id else ()).fetchall()
+    seen, older = set(), set()
+    for row in rows:
+        key = (row["project_id"], row["mode"])
+        if key in seen:
+            older.add(row["id"])
+        seen.add(key)
+    return older
+
+
+def _reason(path, owner, jobs, cutoff, root, *, audio=False, kind=None, superseded=False):
     entries = _tree(path, root)
     if not entries:
         return None
@@ -142,18 +162,22 @@ def _reason(path, owner, jobs, cutoff, root, *, audio=False, kind=None):
     job = jobs.get(owner)
     if job is None:
         return "orphaned job files" if max(p.stat().st_mtime for p in entries) < cutoff else None
+    if job not in ACTIVE and superseded:
+        return "superseded render"
     if job not in ACTIVE and is_render_intermediate(path.name, kind):
         return "finished render intermediate"
     return None
 
 
 def collect_garbage(store, *, apply=False, now=None, limit=BATCH_SIZE):
-    """Reconcile legacy leftovers with the ledger; keep live outputs/receipts.
+    """Reconcile leftovers with the ledger; keep live outputs/receipts.
 
-    Each removal rechecks the ledger under a write transaction, so a worker
-    cannot claim work between the active-job check and removal. External
-    experiments keep their non-UUID namespaces; nothing outside the allowlist
-    is considered. The 24h grace protects freshly staged unknown files/audio.
+    A project keeps its newest completed render per mode (preview/export);
+    older renders of that project are superseded cache. Each removal rechecks
+    the ledger under a write transaction, so a worker cannot claim work between
+    the active-job check and removal. External experiments keep their non-UUID
+    namespaces; nothing outside the allowlist is considered. The 24h grace
+    protects freshly staged unknown files/audio.
     """
     cutoff = (time.time() if now is None else now) - GRACE_SECONDS
     root = _assets(store)
@@ -162,6 +186,7 @@ def collect_garbage(store, *, apply=False, now=None, limit=BATCH_SIZE):
         records = list(con.execute("SELECT id,status,kind FROM jobs"))
         jobs = {row["id"]: row["status"] for row in records}
         kinds = {row["id"]: row["kind"] for row in records}
+        superseded = superseded_renders(con)
     candidates = []
     from pipeline.lab.dialogue_assets import PROFILE as DIALOGUE_PROFILE
     dialogue_audio = root / "lab/dialogue-audio" / DIALOGUE_PROFILE / "audio"
@@ -171,7 +196,9 @@ def collect_garbage(store, *, apply=False, now=None, limit=BATCH_SIZE):
                 candidates.append((path, owner, False))
             elif jobs[owner] not in ACTIVE and path.parent == root / "lab/renders":
                 _checked(path, root)
-                if path.is_dir():
+                if owner in superseded and path.name == owner:
+                    candidates.append((path, owner, False))
+                elif path.is_dir():
                     candidates.extend((child, owner, False) for child in path.iterdir()
                                       if is_render_intermediate(child.name, kinds[owner]))
         audio = root / "lab/audio"
@@ -194,15 +221,18 @@ def collect_garbage(store, *, apply=False, now=None, limit=BATCH_SIZE):
             with guard, store.connection() as con:
                 if apply:
                     con.execute("BEGIN IMMEDIATE")
-                row = con.execute("SELECT status,kind FROM jobs WHERE id=?", (owner,)).fetchone()
+                row = con.execute("SELECT status,kind,project_id FROM jobs WHERE id=?", (owner,)).fetchone()
                 current = {owner: row[0]} if row else {}
+                stale = (row is not None and row["kind"] == "render" and path.name == owner
+                         and path.parent == root / "lab/renders" and owner in superseded_renders(con, row["project_id"]))
                 # Audio is shared scratch. Do not touch it while either worker
                 # has active editor work, including a cancellation still draining.
                 if audio:
                     from pipeline.lab.job_roles import role_for_kind
                     if any(role_for_kind(row["kind"]) == "editor" for row in con.execute("SELECT kind FROM jobs WHERE status IN ('queued','running')")):
                         continue
-                reason = _reason(path, owner, current, cutoff, root, audio=audio, kind=row["kind"] if row else None)
+                reason = _reason(path, owner, current, cutoff, root, audio=audio, kind=row["kind"] if row else None,
+                                 superseded=stale)
                 if reason is None:
                     continue
                 size = sum(p.stat().st_size for p in _tree(path, root) if p.is_file())
