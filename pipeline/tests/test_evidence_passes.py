@@ -329,6 +329,7 @@ def test_hover_preview_is_replaced_only_when_it_strays_from_the_focus_span():
     assert hero.preview_window(0.0, 12.0, (6.0, 12.0), 8.2) == (6.2, 10.2)   # around the peak, inside the span
     assert hero.preview_window(0.0, 12.0, (6.0, 12.0), 11.5) == (8.0, 12.0)  # clamped to the span's end
     assert hero.preview_window(0.0, 3.0, (1.0, 2.5), None) == (1.0, 2.5)     # a short span plays whole
+    assert hero.preview_window(0.0, 12.0, (9.0, 9.5), 9.2) is None           # a flash: the ingest clip is better
 
 
 def test_hero_pick_stays_on_the_picture_holding_the_peak():

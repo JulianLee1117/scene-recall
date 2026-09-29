@@ -56,6 +56,36 @@ def _hit(result: dict[str, Any], film_id: str, at: float, tolerance: float) -> b
     return float(result["t_start"]) - tolerance <= at <= float(result["t_end"]) + tolerance
 
 
+def _watch_degradation() -> dict[str, int]:
+    """Count queries that silently lost the judge or the semantic text channel.
+
+    Both fall back quietly when the GPU is busy (another process decoding or
+    encoding), which is right for serving and wrong for measuring: such a run
+    does not compare with others, so the report says how many were affected.
+    """
+    import logging
+
+    from pipeline.search import rerank as reranker
+
+    counts = {"judge_skipped": 0, "text_fallback": 0}
+    score = reranker.score
+
+    def counted(query: str, documents: list[str], **kwargs: Any) -> list[float] | None:
+        verdicts = score(query, documents, **kwargs)
+        if verdicts is None and documents:
+            counts["judge_skipped"] += 1
+        return verdicts
+
+    class Fallbacks(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if "Semantic text profile" in record.getMessage():
+                counts["text_fallback"] += 1
+
+    reranker.score = counted
+    logging.getLogger("pipeline.search.retrieve").addHandler(Fallbacks(level=logging.WARNING))
+    return counts
+
+
 def run(preset: str, films: list[str] | None, out: Path | None, rerank: int | None = None) -> dict[str, Any]:
     from pipeline.config import load_config
     from pipeline.evidence.library import resolve_films
@@ -69,6 +99,7 @@ def run(preset: str, films: list[str] | None, out: Path | None, rerank: int | No
     # GPU or CPU) would make results depend on whatever else the machine is doing.
     from pipeline.search import rerank as reranker
     reranker.set_budget(None)
+    degraded = _watch_degradation()
     db = open_db(config)
     spec = yaml.safe_load(SET_PATH.read_text(encoding="utf-8"))
     titles = {film.film_id: film.title for film in resolve_films(db, None)}
@@ -126,6 +157,7 @@ def run(preset: str, films: list[str] | None, out: Path | None, rerank: int | No
         "hit@12": sum(1 for rank in known if rank and rank <= 12),
         "missed": sum(1 for rank in known if not rank),
         "median_seconds": round(statistics.median(q["seconds"] for q in report["queries"] if "seconds" in q), 2),
+        **degraded,
     }
     destination = out or RUNS / f"searchset-{preset}-{datetime.now():%Y%m%d-%H%M%S}.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +178,10 @@ def main() -> None:
         rank = entry.get("rank", "-") if entry["kind"] != "discovery" else " "
         print(f"{str(rank or 'MISS'):>5}  {entry['query'][:60]:60s} {entry.get('seconds', '')}s")
     print(json.dumps(report["summary"]))
+    if report["summary"]["judge_skipped"] or report["summary"]["text_fallback"]:
+        print(f"WARNING: {report['summary']['judge_skipped']} queries ran without the judge and "
+              f"{report['summary']['text_fallback']} without semantic text (a busy GPU?); "
+              "this run does not compare with others. Rerun on an idle GPU.")
 
 
 if __name__ == "__main__":

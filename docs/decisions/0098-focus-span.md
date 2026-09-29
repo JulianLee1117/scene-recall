@@ -53,14 +53,16 @@ The `hero` producer (`frame-pick` v2) decides how a shot is shown.
 3. **Hero frame.** The existing score picks the best still inside the focus
    span.
 4. **Hover preview.** The ingest clip stays wherever it lies inside the focus
-   span. Otherwise a 4 s silent 480p H.264 clip is rendered around the peak,
-   inside the span, and compiled as `preview_path`. `/media/preview` serves it
+   span, and wherever the span is shorter than 1 s. Strobing films such as
+   Enter the Void would otherwise get half-second loops. Otherwise a 4 s silent
+   480p H.264 clip is rendered around the peak, inside the span, and compiled as
+   `preview_path`. `/media/preview` serves it
    in place of the WebM, and `preview_url` carries the span as a cache key.
 5. **Consumers.** Results carry the focus span, and the player opens there when
    no line or frame was matched. Editor v2 windows stay inside it.
 
-Unchanged hero frames are hard-linked from the previous profile, so a new
-profile costs only the frames and clips that changed.
+Unchanged hero frames and clips are hard-linked from the previous profile,
+so a new profile costs only the frames and clips that changed.
 
 ## Evidence
 

@@ -38,6 +38,7 @@ FOCUS_SIMILARITY = 0.7      # neighbouring keyframes of one picture stay above t
 PREVIEW_SECONDS = 4.0       # as the ingest hover preview (pipeline.ingest.media)
 PREVIEW_HEIGHT = 480
 PREVIEW_SLACK_S = 0.25      # an ingest preview this close to the focus span is kept
+PREVIEW_MIN_SECONDS = 1.0   # a shorter focus span (strobing, flash cuts) keeps the ingest preview
 PRODUCER = store.Producer(
     kind="hero",
     name="frame-pick",
@@ -46,8 +47,8 @@ PRODUCER = store.Producer(
               "score": "z(log sharpness)+0.3 people-2.0 bad exposure+peak(1.5,0.8s)|middle(0.6)+0.2 centrality-v1",
               "pictures": f"split at hidden cuts and where neighbouring keyframes fall below cosine {FOCUS_SIMILARITY}; "
                           "dark spans removed; focus = the picture holding the peak",
-              "preview": {"seconds": PREVIEW_SECONDS, "height": PREVIEW_HEIGHT, "codec": "h264",
-                          "when": "the ingest preview leaves the focus span"}},
+              "preview": {"seconds": PREVIEW_SECONDS, "min_seconds": PREVIEW_MIN_SECONDS, "height": PREVIEW_HEIGHT,
+                          "codec": "h264", "when": "the ingest preview leaves the focus span"}},
 )
 
 
@@ -102,9 +103,15 @@ def ingest_preview_window(t_start: float, t_end: float) -> tuple[float, float]:
 
 
 def preview_window(t_start: float, t_end: float, span: tuple[float, float], peak: float | None) -> tuple[float, float] | None:
-    """A replacement hover-preview window around the peak inside the focus span, or None if the ingest one fits."""
+    """A replacement hover-preview window around the peak inside the focus span, or None to keep the ingest one.
+
+    The ingest clip stays when it already fits the span, and when the span is
+    too short to make a better clip than it (strobing, flash cuts).
+    """
     ingest_start, ingest_end = ingest_preview_window(t_start, t_end)
     if ingest_start >= span[0] - PREVIEW_SLACK_S and ingest_end <= span[1] + PREVIEW_SLACK_S:
+        return None
+    if span[1] - span[0] < PREVIEW_MIN_SECONDS:
         return None
     anchor = peak if peak is not None and span[0] <= peak <= span[1] else (span[0] + span[1]) / 2
     length = min(PREVIEW_SECONDS, span[1] - span[0])
@@ -321,10 +328,18 @@ def run(config: Any, db: Any, films: list[FilmRef], *, force: bool = False,
             else:
                 targets[unit_id] = choice["time"]
             wanted = choice.get("preview")
+            if not wanted:
+                continue
+            clip, window = output / f"{unit_id}.mp4", (wanted["start"], wanted["end"])
             kept = (old.get(unit_id) or {}).get("preview") or {}
-            if wanted and not ((kept.get("start"), kept.get("end")) == (wanted["start"], wanted["end"])
-                               and (output / f"{unit_id}.mp4").is_file()):
-                windows[unit_id] = (wanted["start"], wanted["end"])
+            carried = (earlier.get(unit_id) or {}).get("preview") or {}
+            if (kept.get("start"), kept.get("end")) == window and clip.is_file():
+                continue
+            if (earlier_dir is not None and (carried.get("start"), carried.get("end")) == window
+                    and (earlier_dir / clip.name).is_file()):
+                _reuse(earlier_dir / clip.name, clip)
+                continue
+            windows[unit_id] = window
         try:
             written = extract(film, targets, output)
             rendered = render_previews(film, windows, output) if windows else {}

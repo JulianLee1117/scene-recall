@@ -68,6 +68,38 @@ queries:
   - {query: "soldiers stop shooting as the baby is carried out", film: "Children of Men", at: "1:32:45", tolerance: 20}
   - {query: "i drink your milkshake", film: "There Will Be Blood", line: "I drink your milkshake!"}
   - {query: "you're gonna need a bigger boat", film: "Jaws", line: "You're gonna need a bigger boat."}
+  # Ordinary moments (blind): 30 random non-iconic shots from 30 films (seed 2026), queries
+  # written from three frames each, without titles or evidence text, before any search ran.
+  - {query: "older man with thick black glasses grinning and talking in a dim office", film: "The Shawshank Redemption (1994)", at: "1:53:24", tolerance: 4.8}
+  - {query: "cameraman behind an old movie camera under camouflage netting in the desert", film: "Nope (2022)", at: "1:49:51", tolerance: 2.7}
+  - {query: "extreme close-up of a child's eyes", film: "Matilda (1996)", at: "1:23:42", tolerance: 2.3}
+  - {query: "young woman in a red dress with a white collar standing against a pale blue wall", film: "Portrait of a Lady on Fire (2019)", at: "1:05:10", tolerance: 5.0}
+  - {query: "young german officer talking at a table in a smoky basement tavern", film: "Inglourious Basterds (2009)", at: "1:23:43", tolerance: 3.9}
+  - {query: "black and white shot of a woman running down a big staircase inside a building", film: "Hiroshima Mon Amour (1959)", at: "1:10:09", tolerance: 3.7}
+  - {query: "young guy with a bowl cut in a blue cleaning jumpsuit", film: "Perfect Days (2023)", at: "0:11:23", tolerance: 4.4}
+  - {query: "tennis player bouncing the ball before serving at a small tournament", film: "Challengers (2024)", at: "0:19:52", tolerance: 2.2}
+  - {query: "man in a suit running through heavy rain seen from inside a car", film: "Inception (2010)", at: "1:05:02", tolerance: 2.9}
+  - {query: "bald man eating at a diner counter next to a guy in a red shirt", film: "Taxi Driver (1976) [Remastered]", at: "0:45:49", tolerance: 2.3}
+  - {query: "silhouette of a man in a hat working at a desk by a big bright window", film: "There Will Be Blood (2007)", at: "0:40:59", tolerance: 9.5}
+  - {query: "two astronauts whispering inside a red-lit space pod", film: "2001 - A Space Odyssey (1968)", at: "1:25:56", tolerance: 10.9}
+  - {query: "gliding over a calm river at dusk with dark trees on both banks", film: "The Tree of Life (2011) [Criterion]", at: "1:52:16", tolerance: 7.0}
+  - {query: "woman with curly hair in a leather jacket looking around nervously in a brick alley", film: "Goodfellas (1990)", at: "2:11:12", tolerance: 2.5}
+  - {query: "blonde woman knocking on a door under a lantern at night", film: "Mulholland Drive (2001)", at: "1:31:44", tolerance: 2.4}
+  - {query: "old man tending flowers in a small backyard garden behind a brick building", film: "Rear Window (1954)", at: "0:07:35", tolerance: 5.4}
+  - {query: "chubby guy with curly hair in a purple tracksuit talking on a car phone while driving", film: "Reservoir Dogs (1992)", at: "0:46:14", tolerance: 4.6}
+  - {query: "someone lounging on a floral sofa in a cozy living room full of books", film: "Call Me by Your Name (2017)", at: "1:02:03", tolerance: 2.5}
+  - {query: "black and white low angle of a man in a cap standing behind a cart of coal against the sky", film: "The Lighthouse (2019)", at: "0:16:52", tolerance: 2.4}
+  - {query: "man in a tuxedo with a smug face in a wood paneled room", film: "A New Leaf (1971)", at: "1:12:39", tolerance: 2.7}
+  - {query: "roulette wheel then a ballroom full of dancers in pastel dresses under a chandelier", film: "Singin in the Rain (1952)", at: "1:23:48", tolerance: 8.4}
+  - {query: "heavyset man in a pinstripe suit sitting at a table in a dim room", film: "The Godfather (1972)", at: "1:17:48", tolerance: 2.6}
+  - {query: "man slumped dead over a table covered in money in a smoky room", film: "Fallen Angels (1995)", at: "0:09:39", tolerance: 2.0}
+  - {query: "black and white family gathered in a living room by a christmas tree", film: "Frances Ha (2012)", at: "0:40:54", tolerance: 2.5}
+  - {query: "black and white: a man and a boy consulting an old woman sitting in an armchair", film: "Bicycle Thieves (1948)", at: "1:07:57", tolerance: 10.4}
+  - {query: "people watching a basketball game on tv in a dark room", film: "Uncut Gems (2019)", at: "1:59:51", tolerance: 2.4}
+  - {query: "close-up of a shiny silver fish in someone's hand in the dark", film: "All About Lily Chou-Chou (2001)", at: "1:00:07", tolerance: 2.8}
+  - {query: "two old women at a breakfast table with a yellow teapot", film: "Blue Velvet (1986)", at: "1:29:24", tolerance: 8.3}
+  - {query: "woman with short blond hair arguing in a kitchen", film: "Anatomy Of A Fall (2023)", at: "1:32:06", tolerance: 5.0}
+  - {query: "three astronauts in white suits getting ready inside the spaceship", film: "Interstellar (2014)", at: "1:36:29", tolerance: 7.8}
   # Discovery (whole library)
   - {query: "rain at night"}
   - {query: "slow motion"}
