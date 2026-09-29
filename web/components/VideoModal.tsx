@@ -52,7 +52,7 @@ export default function VideoModal({
     filmId: string; attempt: number; url?: string; error?: string;
   } | null>(null);
   const currentPlayback = playback?.filmId === shot.film_id && playback.attempt === playbackAttempt ? playback : null;
-  const evidenceTime = shot.matched_frame_timestamp ?? shot.t_start;
+  const evidenceTime = shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
   const [playheadTime, setPlayheadTime] = useState(evidenceTime);
   // A matched subtitle line is the most precise moment to start from.
   const seekTarget = Math.max(0, (shot.matched_line?.t_start ?? evidenceTime) - 1);

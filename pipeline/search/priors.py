@@ -37,7 +37,7 @@ _STRENGTH = {"balanced": 0.6, "famous": 1.6, "gems": 1.4}
 _MIN_MULTIPLIER = 0.15
 _EVIDENCE_COLUMNS = ["unit_id", "film_id", "scene_id", "fame", "fame_library", "craft", "distinctiveness", "iconic",
                      "gem", "famous_line", "iconic_note", "hero_path", "hero_time", "characters", "action", "peak_time",
-                     "camera", "camera_reliability", "saturation"]
+                     "camera", "camera_reliability", "saturation", "focus_start", "focus_end", "preview_path"]
 _SCENE_COLUMNS = ["scene_id", "title", "summary", "t_start", "t_end", "shot_count"]
 MAX_SCENE_ALTERNATIVES = 8
 
@@ -62,10 +62,12 @@ def load_evidence(db: Any, unit_ids: Iterable[str]) -> dict[str, dict[str, Any]]
     if not ids or SHOT_EVIDENCE not in table_names(db):
         return {}
     table = db.open_table(SHOT_EVIDENCE)
+    present = set(table.schema.names)           # a table compiled before a column existed simply lacks it
+    columns = [column for column in _EVIDENCE_COLUMNS if column in present]
     rows: dict[str, dict[str, Any]] = {}
     for start in range(0, len(ids), 400):
         chunk = ids[start:start + 400]
-        for row in table.search().select(_EVIDENCE_COLUMNS).where(_in_list("unit_id", chunk)).limit(len(chunk)).to_list():
+        for row in table.search().select(columns).where(_in_list("unit_id", chunk)).limit(len(chunk)).to_list():
             rows[row["unit_id"]] = row
     return rows
 
@@ -161,6 +163,12 @@ def decorate(result: dict[str, Any], evidence: dict[str, Any] | None, scene: dic
             pass
     if evidence.get("peak_time") is not None:
         result["peak_time"] = evidence["peak_time"]
+    if evidence.get("focus_start") is not None and evidence.get("focus_end") is not None:
+        result["focus_start"], result["focus_end"] = evidence["focus_start"], evidence["focus_end"]
+        if evidence.get("preview_path") and result.get("preview_url"):
+            # The same URL now serves a clip kept on the focus span; the span keys the browser cache.
+            base = str(result["preview_url"]).split("?", 1)[0]
+            result["preview_url"] = f"{base}?focus={float(evidence['focus_start']):.2f}"
     if scene:
         result["scene"] = {"id": scene["scene_id"], "title": scene.get("title") or "",
                            "summary": scene.get("summary") or "", "t_start": scene.get("t_start"),

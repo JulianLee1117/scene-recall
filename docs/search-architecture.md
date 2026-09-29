@@ -130,7 +130,7 @@ settings); recorded input digests make stale artifacts detectable. Producers:
 | `understanding` | Gemini 3.8 Flash | per chunk of ≤160 shots: 240p shot-numbered proxy + shot table + dialogue + cast/plot context → scenes, per-shot characters, action, peak time, emotion, line, sound, fame 0-3, craft 0-3, cut hint, iconic moments; resumable chunk receipts; standard or half-price batch transport; a synopsis that trips a content filter is retried without it; a clip refused even without it is closed with no records and listed in the artifact |
 | `highlights` | Gemini 3.8 Flash (text) | one call per film: merges the understanding pass's iconic flags into the film's best-known moments, ranked by recognizability (with Wikiquote quotes), plus visual motifs |
 | `measure` | RAFT-small, RF-DETR | one GPU decode per film: camera flow series (labels derived at compile time, including slow drift), hidden cuts, subject boxes and main-subject track, letterbox-aware look and palette, sharpness |
-| `hero` | frame pick | the best sampled still near the understanding peak, extracted at 1280 px |
+| `hero` | frame pick, keyframe embeddings | how a shot is shown (ADR-0098): its pictures (split at hidden cuts and wherever neighbouring keyframes stop looking alike, black removed), the focus span (the picture holding the peak), the best still inside it at 1280 px, and a 4 s H.264 hover preview around the peak where the ingest one strays outside the focus span |
 | `synthesis` | priors | within-film and library fame, craft, distinctiveness; rare iconic and hidden-gem flags; per-film highlights and gems |
 
 Measured facts come from pixels; model estimates of measurable quantities are
@@ -667,9 +667,10 @@ Footage control) is also the ranking preset of every editor search in v1 and v2.
   - Variety costs cover image similarity to the last six shots, reuse of a
     visual cluster (spherical k-means on the pool) anywhere in the edit, and
     growing film reuse.
-  - Windows never straddle hidden cuts or overlap near-black stretches
-    (`dark_spans`: sampled luma below 0.03 for at least 0.4 s, for example
-    fades). Locked shots are fixed spans. Spans only end where the remainder
+  - Windows stay inside the shot's focus span (the picture its evidence
+    describes, never across a dissolve; ADR-0098), never straddle hidden cuts
+    and never overlap near-black stretches (`dark_spans`: sampled luma below
+    0.03 for at least 0.4 s, for example fades). Locked shots are fixed spans. Spans only end where the remainder
     before the next hard boundary is empty or at least the pace minimum.
 - **Review** (`harness-sequence-review-v1`): one cached planner request sees each
   slot with up to four alternatives already placed on its span. It may swap a
@@ -2198,8 +2199,13 @@ spread.
 Results carry `keyframe_url`/`keyframe_index` (the exact indexed frame used when
 a result becomes a search source) and a display-only `thumbnail_url`: the hero
 frame, unless the visual channel is what found the shot. They also carry badges
-(`iconic`, `gem`), story action and characters, peak time, scene context and the
-matched subtitle line with exact times.
+(`iconic`, `gem`), story action and characters, peak time, the focus span
+(`focus_start`/`focus_end`: the picture holding the peak, never across a
+dissolve), scene context and the matched subtitle line with exact times. The
+hover preview is the ingest clip around the shot's midpoint unless that strays
+outside the focus span; then `/media/preview` serves the evidence clip around
+the peak, and `preview_url` carries the span as its cache key. The player opens
+at the matched line or frame, else at the focus span.
 
 Text views, frames and unit metadata are searched from resident copies of the
 request's pinned snapshot (`pipeline.search.resident`): float16 matrices (GPU
@@ -2610,6 +2616,11 @@ search or replace this promotion rule.
 - Measured camera labels are unreliable on chaotic handheld, water, smoke and
   very dark shots (they stay `unknown`); dolly versus zoom is not separated.
 - Hidden cuts are detected and recorded but units are not yet split.
+- Dissolves and fades are located only as finely as the three keyframes per
+  shot: a focus span ends at the last keyframe that still shows the picture, so
+  it can trim a little usable footage, and a change between two similar-looking
+  pictures goes unseen. TransNetV2's gradual-transition output misses slow
+  dissolves, so a denser detector needs its own evaluation first (ADR-0098).
 - There are no film clip/audio, router or RAG indexes. Imported music has
   bounded per-passage derivations, not a film-audio search index.
 - Saved scenes are local to one configured state database; named collections

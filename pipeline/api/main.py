@@ -1526,37 +1526,48 @@ def keyframe_endpoint(shot_id: str, n: int, request: Request) -> FileResponse:
     return FileResponse(str(path), media_type="image/webp")
 
 
-@app.get("/media/hero/{unit_id}")
-def hero_endpoint(unit_id: str, request: Request) -> FileResponse:
-    """Serve the shot's hero frame (evidence v2): the best still near its peak moment."""
+def _evidence_file(request: Request, unit_id: str, column: str, suffix: str) -> Path | None:
+    """A shot's evidence media file named by the compiled table (hero frame, focus preview), if present."""
     from pipeline.evidence.tables import SHOT_EVIDENCE
     from pipeline.index.writer import table_names
 
     db = request.app.state.db
     if SHOT_EVIDENCE not in table_names(db) or re.fullmatch(r"[0-9a-f]{64}_[0-9A-Za-z_.-]+", unit_id) is None:
-        raise HTTPException(status_code=404, detail="Hero frame not found")
-    rows = (db.open_table(SHOT_EVIDENCE).search().select(["film_id", "hero_path"])
-            .where(f"unit_id = '{unit_id}'").limit(1).to_list())
-    stored = rows[0].get("hero_path") if rows else None
+        return None
+    table = db.open_table(SHOT_EVIDENCE)
+    if column not in table.schema.names:
+        return None
+    rows = table.search().select(["film_id", column]).where(f"unit_id = '{unit_id}'").limit(1).to_list()
+    stored = rows[0].get(column) if rows else None
     if not stored:
-        raise HTTPException(status_code=404, detail="Hero frame not found")
+        return None
     config: Config = request.app.state.config
     film_id = str(rows[0]["film_id"])
     relative = Path(stored)
-    if relative.name != f"{unit_id}.webp" or relative.parts[:3] != (film_id, "evidence", "hero"):
-        raise HTTPException(status_code=404, detail="Hero frame not found")
+    if relative.name != f"{unit_id}{suffix}" or relative.parts[:3] != (film_id, "evidence", "hero"):
+        return None
     path = _safe_media_path(config.paths.assets_dir, film_id, relative.parent.relative_to(film_id).as_posix(),
                             relative.name)
-    if not path.is_file():
+    return path if path.is_file() else None
+
+
+@app.get("/media/hero/{unit_id}")
+def hero_endpoint(unit_id: str, request: Request) -> FileResponse:
+    """Serve the shot's hero frame (evidence v2): the best still of its focus span, near the peak."""
+    path = _evidence_file(request, unit_id, "hero_path", ".webp")
+    if path is None:
         raise HTTPException(status_code=404, detail="Hero frame not found")
     return FileResponse(str(path), media_type="image/webp", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/media/preview/{shot_id}")
 def preview_endpoint(shot_id: str, request: Request) -> FileResponse:
-    """Serve the WebM preview clip for *shot_id*."""
+    """Serve the hover preview for *shot_id*: the clip kept on its focus span when the ingest one strays."""
     config: Config = request.app.state.config
     unit = _unit_for_shot(shot_id, request)
+    focused = _evidence_file(request, str(unit["unit_id"]), "preview_path", ".mp4")
+    if focused is not None:
+        return FileResponse(str(focused), media_type="video/mp4")
     path = _safe_media_path(
         config.paths.assets_dir,
         str(unit["film_id"]),

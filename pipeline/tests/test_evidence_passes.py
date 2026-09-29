@@ -306,3 +306,36 @@ def test_flow_size_keeps_raft_minimum_height_for_ultra_wide_frames():
     assert measure.flow_size(800, 1920) == (136, 320)
     height, width = measure.flow_size(672, 1920)                        # 2.86:1 would be 112 px tall
     assert height == measure.FLOW_MIN_HEIGHT and width % 8 == 0 and abs(width / height - 1920 / 672) < 0.1
+
+
+def test_pictures_split_a_shot_where_neighbouring_keyframes_stop_looking_alike():
+    from pipeline.evidence import hero
+
+    beach, ride = np.array([1.0, 0.0]), np.array([0.53, (1 - 0.53 ** 2) ** 0.5])   # cosine 0.53: a dissolve
+    spans = hero.pictures(0.0, 12.0, [(3.0, beach), (6.0, ride), (9.0, ride)], [], [])
+    assert spans == [(0.0, 3.0), (6.0, 12.0)]           # the change happened somewhere in the gap: neither side
+    assert hero.focus(spans, 0.0, 12.0, 8.2) == (6.0, 12.0)
+    assert hero.focus(spans, 0.0, 12.0, 4.0) == (0.0, 3.0)   # a peak inside the gap takes the nearest picture
+    drift = [np.array([np.cos(a), np.sin(a)]) for a in (0.0, 0.5, 1.0)]   # neighbours 0.88, ends 0.54 apart
+    assert hero.pictures(0.0, 12.0, list(zip((3.0, 6.0, 9.0), drift)), [], []) == [(0.0, 12.0)]   # a slow move
+    assert hero.pictures(0.0, 12.0, [], [5.0], [[10.0, 12.0]]) == [(0.0, 5.0), (5.0, 10.0)]    # cuts, black
+
+
+def test_hover_preview_is_replaced_only_when_it_strays_from_the_focus_span():
+    from pipeline.evidence import hero
+
+    assert hero.ingest_preview_window(0.0, 12.0) == (4.0, 8.0)
+    assert hero.preview_window(0.0, 12.0, (0.0, 12.0), 11.0) is None        # the ingest clip already fits
+    assert hero.preview_window(0.0, 12.0, (6.0, 12.0), 8.2) == (6.2, 10.2)   # around the peak, inside the span
+    assert hero.preview_window(0.0, 12.0, (6.0, 12.0), 11.5) == (8.0, 12.0)  # clamped to the span's end
+    assert hero.preview_window(0.0, 3.0, (1.0, 2.5), None) == (1.0, 2.5)     # a short span plays whole
+
+
+def test_hero_pick_stays_on_the_picture_holding_the_peak():
+    from pipeline.evidence import hero
+
+    person = [["person", 0.9, [0.0, 0.0, 1.0, 1.0]]]
+    record = {"frames": [[t, sharpness, 0.5, person] for t, sharpness in ((1.0, 900.0), (2.0, 850.0), (7.0, 120.0),
+                                                                            (8.0, 110.0))]}
+    assert hero.pick(record, 0.0, 12.0, 7.5)["time"] == 1.0                # sharpness alone: the other picture
+    assert hero.pick(record, 0.0, 12.0, 7.5, (6.0, 12.0))["time"] == 7.0   # the focus span keeps it on the action

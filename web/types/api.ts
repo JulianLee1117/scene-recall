@@ -171,6 +171,9 @@ export interface SearchResult {
   characters?: string[];
   /** Most important instant inside the shot (film seconds). */
   peak_time?: number;
+  /** The stretch showing the same picture as the action peak (never across a dissolve). */
+  focus_start?: number;
+  focus_end?: number;
   /** The dramatic scene this shot belongs to. */
   scene?: SceneContext;
   /** Other matching shots of the same scene, folded into this card. */

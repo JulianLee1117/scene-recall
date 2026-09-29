@@ -121,10 +121,11 @@ test comes after match cutting.
   - story fields: `action`, `characters`, `emotion` and `iconic`.
 
   Search v2 (ADR-0094, ADR-0097) can supply candidates.
-- **Known gap, in progress in another session.** Dissolves and fades inside a
-  shot are not yet recorded. Top Gun: Maverick has a beach-to-motorcycle
-  dissolve inside one shot. Transition evidence and clean spans per shot will
-  land as ADR-0098. A cut point should come from a clean span.
+- **Focus spans (ADR-0098).** A shot can hold more than one picture: a
+  dissolve, a fade or a missed cut. `focus_start`/`focus_end` in
+  `shot_evidence` bound the picture holding the action peak. The hero artifact
+  also lists every picture of a multi-picture shot. A cut point should come from
+  a focus span or a picture, never from the gap between two.
 - **Coordination.** Two sessions push to master:
   - pull before pushing;
   - take ADR numbers from 0099 up;

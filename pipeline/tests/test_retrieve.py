@@ -4074,6 +4074,32 @@ def test_api_preview_404_when_missing(config: Config) -> None:
     assert response.status_code == 404
 
 
+def test_evidence_media_serves_the_focus_preview_and_refuses_foreign_paths(config: Config) -> None:
+    """The preview route prefers the evidence clip kept on the focus span; stored paths stay in their shot's folder."""
+    from types import SimpleNamespace
+
+    import lancedb
+
+    from pipeline.api.main import _evidence_file
+    from pipeline.evidence.tables import SHOT_EVIDENCE
+
+    clip = config.paths.assets_dir / MEDIA_FILM_ID / "evidence" / "hero" / "frame-pick-v2" / f"{MEDIA_SHOT_ID}.mp4"
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    clip.write_bytes(b"mp4")
+    db = lancedb.connect(str(config.paths.assets_dir / "db"))
+    stored = f"{MEDIA_FILM_ID}/evidence/hero/frame-pick-v2/{MEDIA_SHOT_ID}.mp4"
+    foreign_unit = f"{MEDIA_FILM_ID}_0002"
+    db.create_table(SHOT_EVIDENCE, [
+        {"unit_id": MEDIA_SHOT_ID, "film_id": MEDIA_FILM_ID, "preview_path": stored},
+        {"unit_id": foreign_unit, "film_id": MEDIA_FILM_ID, "preview_path": f"{OTHER_FILM_ID}/evidence/hero/p/{foreign_unit}.mp4"},
+    ])
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db=db, config=config)))
+
+    assert _evidence_file(request, MEDIA_SHOT_ID, "preview_path", ".mp4") == clip
+    assert _evidence_file(request, foreign_unit, "preview_path", ".mp4") is None     # another film's folder
+    assert _evidence_file(request, MEDIA_SHOT_ID, "hero_path", ".webp") is None      # a column the table lacks
+
+
 def test_api_preview_rejects_path_outside_assets(
     tmp_path: Path,
     config: Config,

@@ -146,6 +146,9 @@ def shot_evidence_schema() -> pa.Schema:
         pa.field("sharpness", pa.float32()),
         pa.field("hero_path", pa.string()),       # relative to assets_dir
         pa.field("hero_time", pa.float64()),
+        pa.field("focus_start", pa.float64()),    # the stretch showing the same picture as the peak
+        pa.field("focus_end", pa.float64()),
+        pa.field("preview_path", pa.string()),    # hover preview kept on the focus span, else the ingest one
         # Search text derived from the above (semantic views).
         pa.field("story_text", pa.string()),
         pa.field("scene_text", pa.string()),

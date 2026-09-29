@@ -156,3 +156,4 @@ The accepted boundary or behavior.
 | [0095](0095-serve-last-complete-generation.md) | Accepted | Compile from the newest available profile while a new one backfills; API search keeps its last complete snapshot during publication |
 | [0096](0096-editor-harness-v2.md) | Accepted (opt-in) | Editor harness v2: measured music map, concept acts, evidence pools, beat-lattice assembly and a sequence review; OTIO export |
 | [0097](0097-relevance-is-one-score.md) | Accepted | One relevance score through ordering: log-odds judge verdicts on the shortlist plus every retriever's best matches, bounded signal and prior factors, named films exempt from film diversity |
+| [0098](0098-focus-span.md) | Accepted | Show each shot's action: pictures from keyframe similarity, a focus span around the peak, hero frames and hover previews inside it, editor windows bounded by it |

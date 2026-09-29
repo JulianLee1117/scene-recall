@@ -108,3 +108,14 @@ def test_query_signals_lift_satisfying_evidence_and_leave_unknowns_neutral():
     assert signals.multiplier(parsed, units["a"], None) < 1.0
     assert signals.multiplier(parsed, units["c"], None) == 1.0
     assert parsed.named_films() == {"matrix"}                               # a character names its film
+
+
+def test_decorate_carries_the_focus_span_and_keys_a_replaced_preview():
+    evidence = {"focus_start": 3775.1, "focus_end": 3781.07, "preview_path": "f/evidence/hero/p/u.mp4"}
+    result = {"unit_id": "u", "preview_url": "/media/preview/u", "keyframe_url": "/media/keyframe/u/1"}
+    priors.decorate(result, evidence, None)
+    assert (result["focus_start"], result["focus_end"]) == (3775.1, 3781.07)
+    assert result["preview_url"] == "/media/preview/u?focus=3775.10"       # a new clip must not hit the old cache
+    plain = {"unit_id": "v", "preview_url": "/media/preview/v", "keyframe_url": "/media/keyframe/v/1"}
+    priors.decorate(plain, {"focus_start": 1.0, "focus_end": 2.0}, None)
+    assert plain["preview_url"] == "/media/preview/v"                       # the ingest clip still serves

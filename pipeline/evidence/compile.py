@@ -277,6 +277,9 @@ def compile_film_evidence(config: Any, db: Any, film: FilmRef) -> dict[str, int]
             "palette": _json(m.get("palette")), "sharpness": m.get("sharpness"),
             "hero_path": f"{hero_root}/{pick['file']}" if pick.get("file") else None,
             "hero_time": pick.get("time") if pick.get("file") else None,
+            "focus_start": (pick.get("focus") or [None, None])[0], "focus_end": (pick.get("focus") or [None, None])[1],
+            "preview_path": (f"{hero_root}/{pick['preview']['file']}"
+                             if (pick.get("preview") or {}).get("file") else None),
             "story_text": story_view_text(story, scene, iconic_notes.get(unit_id, ""), prior.get("famous_line")) if story else None,
             "scene_text": scene_view_text(scene) if scene else None,
             "mood_text": mood_view_text(story, scene) if story else None,

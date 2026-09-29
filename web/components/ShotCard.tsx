@@ -98,7 +98,7 @@ export default function ShotCard({
   const debugDescriptionId = useId();
   const displayedRank = shot.rank ?? position;
   const evidenceTime =
-    shot.matched_line?.t_start ?? shot.matched_frame_timestamp ?? shot.t_start;
+    shot.matched_line?.t_start ?? shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
   const sceneMore = shot.scene_alternatives?.length ?? 0;
   const matchedTextLabel = shot.matched_text_view
     ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")

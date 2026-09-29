@@ -18,7 +18,7 @@ _RRF_K = 10
 _EVIDENCE_COLUMNS = ["unit_id", "scene_id", "action", "characters", "peak_time", "camera", "camera_reliability",
                      "brightness", "saturation", "warmth",
                      "camera_segments", "motion_energy", "hidden_cuts", "dark_spans", "subject", "subject_size", "fame_library",
-                     "craft", "iconic", "gem", "sharpness", "hero_time", "famous_line"]
+                     "craft", "iconic", "gem", "sharpness", "hero_time", "famous_line", "focus_start", "focus_end"]
 # Detector classes that make a reliable main subject for continuity.
 _SUBJECT_CLASSES = {"person", "car", "motorcycle", "bicycle", "bus", "truck", "train", "airplane", "boat", "horse",
                     "dog", "cat", "bird", "cow", "sheep", "elephant", "bear", "zebra", "giraffe"}
@@ -46,6 +46,7 @@ class Candidate:
     motion: float = 0.0                     # subject motion energy (measured), raw
     hidden_cuts: list[float] = field(default_factory=list)
     dark_spans: list[tuple[float, float]] = field(default_factory=list)   # near-black stretches (fades)
+    focus: tuple[float, float] | None = None   # the stretch showing the same picture as the peak
     subject_start: tuple[float, float] | None = None
     subject_end: tuple[float, float] | None = None
     subject_size: float | None = None
@@ -114,6 +115,10 @@ def apply_evidence(candidate: Candidate, row: dict[str, Any]) -> None:
     candidate.hidden_cuts = [float(t) for t in _json(row.get("hidden_cuts"), []) if isinstance(t, (int, float))]
     candidate.dark_spans = [(float(a), float(b)) for a, b in _json(row.get("dark_spans"), [])
                             if isinstance(a, (int, float)) and isinstance(b, (int, float)) and b > a]
+    low, high = row.get("focus_start"), row.get("focus_end")
+    if isinstance(low, (int, float)) and isinstance(high, (int, float)):
+        low, high = max(float(low), candidate.t_start), min(float(high), candidate.t_end)
+        candidate.focus = (low, high) if high > low else None
     subject = _json(row.get("subject"), None)
     size = row.get("subject_size")
     if isinstance(subject, dict) and isinstance(size, (int, float)) and (

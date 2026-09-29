@@ -252,3 +252,14 @@ def test_footage_setting_bounds_act_fame_and_reaches_editor_searches(monkeypatch
     search_plan.execute_search(resolved, {"planner_settings": {"footage": "gems"}, "film_ids": []}, None, None)
     search_plan.execute_search(resolved, {"film_ids": []}, None, None)
     assert seen == ["gems", "balanced"]
+
+
+def test_editor_windows_stay_on_the_picture_the_evidence_describes():
+    dissolve = _candidate("dissolve", start=100.0, length=12.0, peak=108.2, focus=(106.0, 112.0))
+    assert asm._segments(dissolve) == [(106.0, 112.0)]
+    m = _map()
+    placement = asm.place(dissolve, 10.0, 13.0, asm.Act(10.0, 18.0, [dissolve]), {}, asm.span_context(m, 10.0, 13.0))
+    assert placement.source_start >= 106.0 - 1e-6           # never back across the dissolve
+    row = _candidate("row", start=100.0, length=12.0)
+    apply_evidence(row, {"focus_start": 99.0, "focus_end": 106.5})
+    assert row.focus == (100.0, 106.5)                       # clamped to the shot

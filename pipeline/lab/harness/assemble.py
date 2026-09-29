@@ -139,9 +139,11 @@ def pace_penalty(duration: float, pace: str, energy: float, scale: float = 1.0) 
 
 
 def _segments(candidate: Candidate) -> list[tuple[float, float]]:
-    """Usable source intervals: between hidden cuts, minus near-black stretches (fades)."""
-    cuts = sorted(t for t in candidate.hidden_cuts if candidate.t_start < t < candidate.t_end)
-    bounds = [candidate.t_start, *cuts, candidate.t_end]
+    """Usable source intervals: inside the focus span (the picture the evidence describes, so never
+    across a dissolve), between hidden cuts, minus near-black stretches (fades)."""
+    low, high = candidate.focus or (candidate.t_start, candidate.t_end)
+    cuts = sorted(t for t in candidate.hidden_cuts if low < t < high)
+    bounds = [low, *cuts, high]
     segments = list(zip(bounds, bounds[1:]))
     for dark_start, dark_end in sorted(candidate.dark_spans):
         kept = []
