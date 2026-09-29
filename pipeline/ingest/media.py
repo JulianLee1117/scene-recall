@@ -357,11 +357,18 @@ def _decode_native_samples(path: Path, shot: Shot) -> tuple[Fraction, list[tuple
     at their true proportions instead of stretching to the coded pixel shape.
     """
     deadline = time.monotonic() + 45
-    for preroll in (0.0, 5.0):
+    for preroll in (0.0, 5.0, 20.0):
         # Some inter-frame sources seek to a keyframe whose first decoded image
-        # is already past this short shot. Reopen once with five seconds of
-        # preroll; a shorter lookback can still land beyond the whole shot.
-        # keep the same deadline and accept only actual frames inside the shot.
+        # is already past this short shot; a short preroll recovers most of
+        # those. A cold seek can also land exactly on or just before a
+        # keyframe the decoder cannot produce frames from in isolation (an
+        # observed real-footage case: nothing decodes until the *next*
+        # keyframe, seconds later), even though those frames decode fine once
+        # reached sequentially or from an earlier GOP. The 20s fallback jumps
+        # back far enough to warm up the decoder across at least one earlier
+        # keyframe before it must produce this shot's frames.  Reopen fresh
+        # each attempt; keep the same deadline and accept only actual frames
+        # inside the shot.
         sar, samples = _decode_native_samples_from(path, shot, deadline, preroll)
         if samples:
             return sar, samples

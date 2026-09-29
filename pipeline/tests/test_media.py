@@ -996,7 +996,7 @@ def test_native_samples_recover_seek_overshoot_without_neighbor_frames(tmp_path,
     assert path.read_bytes() == original
 
 
-def test_native_sample_recovery_has_one_retry_and_shared_deadline(tmp_path, monkeypatch):
+def test_native_sample_recovery_retries_and_shares_one_deadline(tmp_path, monkeypatch):
     from pipeline.ingest import media
     from pipeline.ingest.shots import Shot
 
@@ -1008,7 +1008,50 @@ def test_native_sample_recovery_has_one_retry_and_shared_deadline(tmp_path, monk
     monkeypatch.setattr(media, "_decode_native_samples_from", empty)
     with pytest.raises(ValueError, match="No native video frame.*empty-shot"):
         media._decode_native_samples(tmp_path / "source.mkv", Shot("empty-shot", 4., 5., None))
-    assert attempts == [(145., 0.), (145., 5.)]
+    assert attempts == [(145., 0.), (145., 5.), (145., 20.)]
+
+
+def test_native_samples_recover_a_keyframe_the_decoder_cannot_seek_into(tmp_path, monkeypatch):
+    """A keyframe that only decodes with a warmed-up decoder state (observed on
+    real footage: a cold seek onto or near it produced nothing until the next
+    keyframe, seconds later) is recovered by the wider fallback preroll."""
+    import av
+    from pipeline.ingest.media import _decode_native_samples
+    from pipeline.ingest.shots import Shot
+
+    path = tmp_path / "cold-keyframe.mkv"
+    _write_native_test_video(path, count=90)
+    real_open = av.open
+
+    class ColdKeyframeContainer:
+        def __init__(self):
+            self.inner = real_open(str(path))
+            self.seek_time = None
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            self.inner.close()
+
+        def seek(self, offset, **kwargs):
+            self.seek_time = float(offset * kwargs["stream"].time_base)
+            self.inner.seek(offset, **kwargs)
+
+        def decode(self, stream):
+            # A seek landing at or after 4.0s cannot produce any frame; only a
+            # seek that lands well before it (or no seek at all) can.
+            if self.seek_time is not None and self.seek_time >= 4.0:
+                return
+            yield from self.inner.decode(stream)
+
+    monkeypatch.setattr(av, "open", lambda *_args, **_kwargs: ColdKeyframeContainer())
+    _sar, samples = _decode_native_samples(path, Shot("cold-keyframe", 4.2, 4.5, None))
+    assert samples
+    assert all(4.2 <= timestamp < 4.5 for timestamp, _, _ in samples)
 
 
 @pytest.mark.parametrize("origin_frames", [100, -10])
