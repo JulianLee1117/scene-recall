@@ -85,8 +85,37 @@ def _query(index: moment_index.Index, row: int, request: Request, has_subject: b
     return vector
 
 
-def _similarity(coarse: np.ndarray, query: np.ndarray) -> np.ndarray:
-    """Coarse dot products in float32, converting the float16 matrix a block at a time."""
+_DEVICE_COARSE: dict[str, Any] = {}
+_GPU_HEADROOM_BYTES = 2 * 1024 ** 3
+
+
+def _device_coarse(index: moment_index.Index) -> Any | None:
+    """The coarse matrix as a float16 CUDA tensor when the GPU has room (loaded once per index), else None."""
+    key = f"{index.id}:{index.coarse.shape}"
+    if key in _DEVICE_COARSE:
+        return _DEVICE_COARSE[key]
+    tensor = None
+    try:
+        import torch
+        if torch.cuda.is_available():
+            free, _total = torch.cuda.mem_get_info()
+            if free > index.coarse.nbytes + _GPU_HEADROOM_BYTES:
+                tensor = torch.from_numpy(np.ascontiguousarray(index.coarse)).to("cuda", dtype=torch.float16)
+    except Exception:  # noqa: BLE001 - the CPU path is always available
+        tensor = None
+    _DEVICE_COARSE.clear()
+    _DEVICE_COARSE[key] = tensor
+    return tensor
+
+
+def _similarity(index: moment_index.Index, query: np.ndarray) -> np.ndarray:
+    """Coarse dot products: one float16 GPU product when the matrix is resident, else float32 CPU blocks."""
+    device = _device_coarse(index)
+    if device is not None:
+        import torch
+        vector = torch.from_numpy(query.astype(np.float16)).to(device.device)
+        return (device @ vector).float().cpu().numpy()
+    coarse = index.coarse
     out = np.empty(len(coarse), dtype=np.float32)
     step = 1 << 18
     for start in range(0, len(coarse), step):
@@ -148,7 +177,7 @@ def find(index: moment_index.Index, request: Request) -> dict[str, Any]:
     query = _query(index, row, request, has_subject)
     allowed_units = _allowed_units(index, reference_unit, request)
     coarse_units = index.columns["unit"][index.coarse_rows]
-    similarity = _similarity(index.coarse, query)
+    similarity = _similarity(index, query)
     similarity[~allowed_units[coarse_units]] = -np.inf
     top = np.argpartition(-similarity, min(COARSE_HITS, len(similarity) - 1))[:COARSE_HITS]
     top = top[np.isfinite(similarity[top])]

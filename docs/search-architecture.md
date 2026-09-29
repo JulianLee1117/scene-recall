@@ -2312,8 +2312,10 @@ compared in output coordinates.
 **Search** (`pipeline.matching.moments.find`):
 
 - The reference is the usable instant nearest the requested time.
-- One float32 pass over the float16 coarse matrix yields the top 6,000
-  instants and the best 360 shots, keeping at most three hits per shot.
+- One pass over the float16 coarse matrix yields the top 6,000 instants and
+  the best 360 shots, keeping at most three hits per shot. The pass is a GPU
+  product when the matrix fits with 2 GB to spare, loaded once per index, else
+  float32 CPU blocks.
 - Every usable instant within 0.8 s of a hit is scored exactly, if it leaves
   `min_seconds` (default 1) of footage after the cut (`next`) or before it
   (`previous`).

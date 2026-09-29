@@ -516,8 +516,8 @@ def subject(reference: Moments, reference_group: np.ndarray, reference_crop_: np
     cand_ids = group[group >= 0]
     if len(ref_ids) == 0 or len(cand_ids) == 0:
         return np.zeros(n)
-    flat_ref = rasterize(reference, ref_ids, reference_crop_[None], grid).reshape(len(ref_ids), -1)       # A x G
-    flat_cand = rasterize(candidates, cand_ids, crops, grid).reshape(len(cand_ids), -1)                    # K x G
+    flat_ref = rasterize(reference, ref_ids, reference_crop_[None], grid, supersample=2).reshape(len(ref_ids), -1)   # A x G
+    flat_cand = rasterize(candidates, cand_ids, crops, grid, supersample=2).reshape(len(cand_ids), -1)                # K x G
     compatible = _COMPATIBLE[_FAMILY[candidates.classes[cand_ids]][:, None], _FAMILY[reference.classes[ref_ids]][None, :]]
     block_all = np.minimum(flat_cand[:, None, :], flat_ref[None, :, :]).sum(axis=-1) * compatible             # K x A soft intersections
     owner = np.searchsorted(candidates.inst_ptr, cand_ids, side="right") - 1
