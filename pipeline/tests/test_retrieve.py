@@ -1434,6 +1434,63 @@ def test_uploaded_frame_candidate_expansion_bypasses_explicit_scope() -> None:
     query.limit.assert_called_once_with(9)
 
 
+def test_resident_framing_candidates_regain_keyframe_sources(tmp_path, monkeypatch) -> None:
+    """A film-scoped Framing search reads keyframes the resident matrix does not carry."""
+    import lancedb
+    import pyarrow as pa
+    import torch
+
+    from pipeline.index.snapshot import IndexSnapshot, _ReadTable
+    from pipeline.search import resident
+    from pipeline.search.retrieve import (
+        _global_frame_candidate_rows,
+        _reference_valid_rows,
+        _with_frame_sources,
+    )
+
+    monkeypatch.setattr(resident, "_device_for", lambda _bytes: torch.device("cpu"))
+    monkeypatch.setattr(resident, "_MATRICES", {})
+    keyframes = []
+    for name in ("a0", "b0", "c0"):
+        path = tmp_path / f"{name}.webp"
+        path.write_bytes(b"keyframe")
+        keyframes.append(str(path))
+    vectors = np.array([[1, 0, 0], [0.8, 0.6, 0], [0.9, 0.1, 0]], dtype=np.float32)
+    lance = lancedb.connect(tmp_path / "index")
+    lance.create_table("frames", pa.table({
+        "frame_id": ["a0", "b0", "c0"],
+        "unit_id": ["a", "b", "c"],
+        "shot_id": ["a", "b", "c"],
+        "film_id": ["film-a", "film-b", "film-source"],
+        "frame_index": [0, 0, 0],
+        "timestamp": [1.0, 2.0, 3.0],
+        "path": keyframes,
+        "source_size": [8, 8, 8],
+        "source_mtime_ns": [5, 6, 7],
+        "visual_vec": pa.FixedSizeListArray.from_arrays(pa.array(vectors.ravel()), 3),
+    }))
+
+    snapshot = IndexSnapshot(str(tmp_path / "index"), {"frames": _ReadTable(lance.open_table("frames"))}, {})
+    rows = _global_frame_candidate_rows(
+        np.array([1, 0, 0], dtype=np.float32),
+        snapshot,
+        ("film-a", "film-b"),
+        candidate_limit=5,
+    )
+    assert [row["frame_id"] for row in rows] == ["a0", "b0"]
+    assert not any(row.get("path") for row in rows)
+
+    rows = _with_frame_sources(snapshot, rows)
+    assert [(row["path"], row["source_size"], row["source_mtime_ns"]) for row in rows] == [
+        (keyframes[0], 8, 5),
+        (keyframes[1], 8, 6),
+    ]
+    valid_rows, _images = _reference_valid_rows(
+        rows, spatial_shortlist_limit=2, candidate_limit=2, load_images=False,
+    )
+    assert [row["frame_id"] for row in valid_rows] == ["a0", "b0"]
+
+
 def test_look_reserve_preserves_global_rank_through_hydration() -> None:
     from pipeline.search.retrieve import (
         _clause_results_from_rows,

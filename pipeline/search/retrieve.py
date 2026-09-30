@@ -199,6 +199,7 @@ _FRAME_CANDIDATE_COLUMNS = [
     "source_mtime_ns",
     "_distance",
 ]
+_FRAME_SOURCE_COLUMNS = ("path", "source_size", "source_mtime_ns")
 
 
 class SemanticTextProfileUnavailable(RuntimeError):
@@ -954,6 +955,42 @@ def _global_frame_candidate_rows(
         if len(reserved_films) >= reserve_limit:
             break
     return base
+
+
+def _with_frame_sources(
+    db: lancedb.DBConnection,
+    frame_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach keyframe source columns that resident candidates do not carry.
+
+    Framing reads and hashes each candidate keyframe, but the resident frame
+    matrix keeps only identities and times. Fetch the sources of just this
+    bounded candidate set from the same pinned snapshot.
+    """
+    missing = tuple(
+        dict.fromkeys(
+            str(row["frame_id"])
+            for row in frame_rows
+            if row.get("frame_id") and not row.get("path")
+        )
+    )
+    if not missing:
+        return frame_rows
+    with search_stage("frame_sources"):
+        sources = {
+            str(row["frame_id"]): row
+            for row in filtered_rows(
+                db.open_table("frames"),
+                where=_any_of("frame_id", missing),
+                columns=["frame_id", *_FRAME_SOURCE_COLUMNS],
+                limit=len(missing),
+            )
+        }
+    for row in frame_rows:
+        source = sources.get(str(row.get("frame_id") or ""))
+        if source is not None and not row.get("path"):
+            row.update({column: source.get(column) for column in _FRAME_SOURCE_COLUMNS})
+    return frame_rows
 
 
 def _reference_spatial_candidate_order(
@@ -2757,6 +2794,7 @@ def _reference_frame_candidates(
             spatial_candidate_count=0,
         )
         return []
+    frame_rows = _with_frame_sources(db, frame_rows)
     if framing_profile is not None and partial_profile is None:
         # Candidate retrieval and manifest resolution are separate reads. A
         # film can publish a new frames generation between them, so validate
