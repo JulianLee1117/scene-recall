@@ -390,9 +390,10 @@ Wish and Starjunk stay as regression passages. Supersedes LLM numeric cut timing
 
 ## Frozen (keep code and data; no new investment)
 
-- Framing representation pilot and the 134 held preparation jobs. Do not resume
-  them: measured subject layout replaces embedding grids for Framing. Reclaim
-  their storage after Phase 1 layout works.
+- Framing representation pilot. Its 134 held preparation jobs were cancelled
+  on 2026-10-01; 23 films keep their prepared cache. Measured subject layout
+  replaces embedding grids for Framing. Reclaim that storage after Phase 1
+  layout works.
 - Jev/intent-routing experiments (ADR-0086 to ADR-0091).
 - Match Cuts cohorts (SAM/RAFT/DINOv3); their RAFT/SAM code is reused in
   Phase 1.
@@ -404,8 +405,8 @@ Wish and Starjunk stay as regression passages. Supersedes LLM numeric cut timing
 
 ## Carried-over state
 
-- 134 optional Framing jobs are on operator hold (`waiting_worker` with the
-  pause marker); 18 completed. Leave the hold in place.
+- The 134 optional Framing jobs on operator hold were cancelled on
+  2026-10-01; 23 had completed earlier.
 - Earlier pilot runs remain under `pipeline/eval/runs/` and `.tmp/`; the
   archived plan lists them.
 - The last full backend run recorded in the archived plan passed; re-run the
