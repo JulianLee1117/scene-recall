@@ -218,6 +218,24 @@ mode to process at most one queued job; add `--role` to restrict it.
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+### Use it from your phone
+
+The phone reaches the app privately over [Tailscale](https://tailscale.com).
+Nothing is exposed to the internet.
+
+1. Set `NEXT_PUBLIC_API_URL=/api` in `web/.env.local`. The web server then
+   proxies API calls to the local API, so the phone needs only one address. The
+   dev server picks up the change by itself.
+2. Install Tailscale on this PC and on the phone, and sign in to both with the
+   same account.
+3. On the PC, run `tailscale serve --bg 3000`. The first time, it may ask you to
+   enable HTTPS certificates for your tailnet.
+4. On the phone, open the `https://<pc-name>.<tailnet>.ts.net` address that
+   `tailscale serve status` shows.
+
+Keep the PC awake while you use it. `tailscale serve reset` stops sharing. Don't
+use `tailscale funnel`: it publishes the app to the internet with no sign-in.
+
 For managed film downloads, also run qBittorrent and the independent acquisition
 monitor. See [Managed downloads](#managed-downloads) for connections and commands.
 
