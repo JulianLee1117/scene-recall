@@ -1,6 +1,6 @@
 # ADR-0096: Editor harness v2 — measured music, evidence pools and beat-lattice assembly
 
-- Status: Accepted (opt-in: `lab.harness: v2`)
+- Status: Accepted; amended by ADR-0103 (free paces, flash and hold moves, the default editor)
 - Date: 2026-09-28
 - Supersedes for v2 regeneration: ADR-0060 (LLM numeric cut timing), ADR-0041 and
   ADR-0058 (source-aware first timing through text selection)

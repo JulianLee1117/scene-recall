@@ -131,7 +131,7 @@ def test_concept_keeps_one_act_per_section_and_falls_back_to_listening():
                                     {"start": 14.0, "end": 18.0, "energy": 0.8, "feeling": "driving"}]})
     concept = Concept.model_validate({"concept": "c", "motifs": [], "acts": [
         {"section": 1, "intent": "chase", "queries": ["car chase at night", "car chase at night", "running feet"],
-         "fame": "anchor", "pace": "rapid"}]})
+         "fame": "anchor", "pace": "rapid", "moves": []}]})
     payload = {"pacing_preference": "balanced",
                "sections": [{"listening_query": "quiet window", "feeling": "calm"}, {"listening_query": "", "feeling": "driving"}]}
     acts = resolve_acts(concept, m, payload)
@@ -295,3 +295,66 @@ def test_a_measured_match_cut_wins_the_following_span():
     _, parts = asm.transition(matched[index - 1], matched[index], 1.0, matcher.strength)
     assert parts["match"] == 1.0 and "eye_trace" not in parts
     assert "matches the previous shot" in asm.reason(matched[index], matched[index - 1], matcher)
+
+
+def test_a_section_takes_any_pace_and_moves_split_it_on_the_beat():
+    from pipeline.lab.harness.concept import Concept, resolve_acts, section_shape
+    m = _map(analysis={"segments": [{"start": 10.0, "end": 14.0, "energy": 0.3, "feeling": "calm"},
+                                    {"start": 14.0, "end": 18.0, "energy": 0.8, "feeling": "driving"}]})
+    concept = Concept.model_validate({"concept": "c", "motifs": [], "acts": [
+        {"section": 0, "intent": "stillness", "queries": ["empty street at dawn"], "fame": "any", "pace": "patient",
+         "moves": [{"kind": "flash", "start": 1.3, "end": 2.2, "query": "faces in quick succession"},
+                   {"kind": "flash", "start": 1.6, "end": 2.0, "query": ""},       # overlaps the first: dropped
+                   {"kind": "hold", "start": 3.0, "end": 3.4, "query": ""}]},      # too short: dropped
+        {"section": 1, "intent": "chase", "queries": ["car chase at night"], "fame": "any", "pace": "rapid",
+         "moves": [{"kind": "hold", "start": 1.85, "end": 3.65, "query": "a man stares out to sea"}]}]})
+    payload = {"pacing_preference": "patient", "sections": [{"listening_query": "", "feeling": "calm"},
+                                                            {"listening_query": "", "feeling": "driving"}]}
+    acts = resolve_acts(concept, m, payload)
+    assert [(a["pace"], a["move"]) for a in acts] == [
+        ("patient", None), ("flash", "flash"), ("patient", None), ("rapid", None), ("hold", "hold")]
+    flash, hold = acts[1], acts[4]
+    assert (flash["start"], flash["end"]) == (11.25, 12.25)                    # snapped to beats
+    assert flash["queries"] == ["faces in quick succession", "empty street at dawn"]
+    assert hold["end"] == 18.0                                                 # the sliver to the section end joins it
+    patient = Concept.model_validate({"concept": "c", "motifs": [], "acts": [
+        {"section": 0, "intent": "still", "queries": ["sea"], "fame": "any", "pace": "patient",
+         "moves": [{"kind": "hold", "start": 1.25, "end": 3.75, "query": ""}]}]})
+    held = resolve_acts(patient, m, payload)[0]
+    assert (held["pace"], held["start"], held["end"]) == ("hold", 10.0, 14.25)  # 1.25 s and 0.5 s are under a patient shot
+    assert all(a["end"] == b["start"] for a, b in zip(acts, acts[1:]))
+    assert acts[0]["start"] == 10.0 and acts[-1]["end"] == 18.0
+    shape = section_shape(m, 10.0, 14.25)                                      # what the planner sees per section
+    assert len(shape["loudness_per_second"]) == 5 and all(0 <= t < 4.25 for t in shape["accents_s"])
+
+
+def test_a_flash_cuts_in_frames_and_a_hold_is_one_shot():
+    m = _map()
+    pool = _pool()
+    acts = [asm.Act(10.0, 12.25, pool, pace="patient"), asm.Act(12.25, 13.25, pool, pace="flash"),
+            asm.Act(13.25, 14.25, pool, pace="balanced"), asm.Act(14.25, 18.0, pool, pace="hold")]
+    result = asm.assemble(m, acts)
+    flash = [p for p in result if 12.25 <= p.start < 13.25]
+    assert len(flash) >= 3 and all(asm.FLASH[0] - 1e-6 <= p.end - p.start <= asm.FLASH[2] + 1e-6 for p in flash)
+    held = [p for p in result if p.start >= 14.25]
+    assert len(held) == 1 and (held[0].start, held[0].end) == (14.25, 18.0)
+    short = [_candidate(f"s{i}", start=100.0 * i, length=2.5, relevance=1.0, film=f"f{i % 4}") for i in range(12)]
+    split = [p for p in asm.assemble(m, [asm.Act(14.25, 18.0, short, pace="hold")])]
+    assert len(split) == 2 and all(p.end - p.start >= 1.5 - 1e-6 for p in split)   # nothing covers 3.75 s
+
+
+def test_pools_run_each_shared_search_once():
+    calls = []
+
+    def search(query, db, config, **kwargs):
+        calls.append(query)
+        return [{"unit_id": query, "film_id": "f", "t_start": 1.0, "t_end": 4.0}]
+
+    class NoTables:
+        def table_names(self, **_):
+            return []
+
+    acts = [{"queries": ["night", "rain"], "fame": "any"}, {"queries": ["flash", "night", "rain"], "fame": "any"}]
+    pools = gather(NoTables(), None, acts, search=search)
+    assert sorted(calls) == ["flash", "night", "rain"]
+    assert [c.unit_id for c in pools[1]] == ["flash", "night", "rain"]

@@ -20,8 +20,8 @@ records.
 | Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, with 0002-0021 and 0082-0087 where not superseded |
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
-| AI Music Video v1 (default) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
-| Editor harness v2 (opt-in) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099 |
+| AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
+| Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103 |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
 | Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067 |
 
@@ -623,22 +623,32 @@ creative acceptance remains open; a formal labeling campaign is not required
 to use or polish this workflow. Source-bound and playback checks cannot certify
 artistic quality. No learning pipeline or new retrieval representation is added.
 
-#### Editor harness v2 (ADR-0096)
+#### Editor harness v2 (ADR-0096, ADR-0103)
 
-`lab.harness: v2` (default `v1`) replaces whole-edit regeneration with
-`pipeline.lab.harness`. Language models plan meaning; the edit itself is
-measured and optimized.
+`lab.harness: v2` (the default; `v1` keeps the earlier editor) replaces
+whole-edit regeneration with `pipeline.lab.harness`. Language models plan
+meaning; the edit itself is measured and optimized.
 
 - **Music map** (`music-map-v1`): Beat This! beats and downbeats, a band-wise
   spectral-flux onset envelope, accents (peaks at least 100 ms apart, marked
   on-beat within 60 ms), per-beat loudness percentiles, and the listening
   sections snapped to downbeats. Span intensity blends the listening section's
   energy (65%) with relative loudness (35%).
-- **Concept** (`harness-concept-v1`): one cached planner request turns the scoped
+- **Concept** (`harness-concept-v2`): one cached planner request turns the scoped
   editor direction, song meaning and sections into one act per section: intent,
   one to four search-v2 queries, a fame target (anchor, fresh, any) and a pace.
   Sections the plan skips keep the listening suggestion.
-  - Paces stay within one step of the owner's pacing preference.
+  - Pacing is a shape (ADR-0103). The pacing preference is a tendency; any
+    section may take any pace.
+  - An act may carry up to four moves. A **flash** is a burst of 3-12 frame
+    shots; a **hold** is one shot across the move, split in two (never under
+    1.5 s) only when nothing covers it.
+  - Move times are seconds from the section's start, snapped to a beat or a
+    strong off-beat accent within half a beat. Overlapping or too-short moves
+    are dropped. Gaps under a beat join the move, and so do gaps beside a hold
+    shorter than the section's shortest shot.
+  - Each section shows the planner its measured shape: strongest accents, rises
+    (entrances out of quiet first), quietest spans and loudness per second.
   - Fame targets never contradict `planner_settings.footage`: `famous` allows no
     fresh act and `gems` no anchor act.
 
@@ -647,13 +657,15 @@ Footage control) is also the ranking preset of every editor search in v1 and v2.
 - **Pools**: each act's queries run through `search` with the preset matching the
   fame target. Candidates carry compiled shot evidence and a normalized image
   embedding; the previous edit's shots are excluded.
-- **Assembly** (`beat-lattice-assembly-v1`): a deterministic lattice beam search
+- **Assembly** (`beat-lattice-assembly-v2`): a deterministic lattice beam search
   (8 states per grid point) over frame-snapped beats. Kinetic and rapid acts also
-  offer half-beats and strong accents as cut points.
+  offer half-beats and strong accents as cut points; flashes add quarter beats
+  and every accent. Each move is its own act with fixed bounds, unscaled by
+  intensity or critique.
   - Screen time carries relevance, motion versus intensity, craft and the fame
     target.
   - Each shot adds its peak-on-accent alignment and a log-duration penalty
-    around a pace target scaled by intensity.
+    around its act's target (the four paces scale theirs by intensity).
   - Transitions add eye-trace and screen-direction continuity, and penalize the
     same scene, the same film back to back and jump cuts. With a moment index,
     the eye-trace term becomes a measured match between the actual cut frames,

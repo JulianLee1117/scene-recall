@@ -118,7 +118,7 @@ class LabConfig:
     beat_device: str = "cpu"
     footage_inspection: bool = False
     context_profile: str | None = None
-    harness: str = "v1"              # v1: LLM timing and selection; v2: measured music + beat-lattice assembly
+    harness: str = "v2"              # v2: measured music + beat-lattice assembly; v1: LLM timing and selection
     harness_critique: bool = False   # v2: watch a rough cut (Gemini) and re-assemble once around flagged issues
 
 
@@ -392,7 +392,7 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         beat_device=beat_device,
         footage_inspection=footage_inspection,
         context_profile=context_profile,
-        harness=_harness(lab_raw.get("harness", "v1")),
+        harness=_harness(lab_raw.get("harness", "v2")),
         harness_critique=bool(lab_raw.get("harness_critique", False)),
     )
 

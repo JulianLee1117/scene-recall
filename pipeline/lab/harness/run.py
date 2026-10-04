@@ -161,7 +161,7 @@ def _document(document: dict[str, Any], planned: dict[str, Any], music: music_ma
     result["direction_plan"] = {
         "contract": HARNESS_CONTRACT, "track_id": document["track"]["id"], "passage": deepcopy(document["passage"]),
         "concept": planned["concept"], "motifs": planned["motifs"], "concept_artifact": planned["artifact_id"],
-        "acts": [{key: act[key] for key in ("start", "end", "intent", "queries", "fame", "pace", "planned")}
+        "acts": [{key: act.get(key) for key in ("start", "end", "intent", "queries", "fame", "pace", "move", "planned")}
                  for act in planned["acts"]],
         "music_map": music.summary(), **extra,
         "timing_plan": timing_receipt(document, slots, planned["acts"], artifact_id)}

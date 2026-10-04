@@ -36,7 +36,7 @@ Landed:
   - Eval on the whole library (55 known items: 30 on the pilot films, 25 held
     out on 23 others): MRR 0.956, 52 at #1, 1 missed (was 0.868, 46, 3).
   - Latency: about 1.0 s median on the whole library with the rerank.
-- **Editor harness v2** (`lab.harness: v2`, opt-in):
+- **Editor harness v2** (the default since ADR-0103):
   - music map, concept acts, evidence pools;
   - beat-lattice assembly, where action peaks land on accents and variety covers
     scenes, films, looks and recent similarity;
@@ -82,9 +82,6 @@ Afterwards:
 - Read the library eval and discovery report.
 - Keep subtitle downloads going daily (`subtitles --max-downloads 20`, then
   `refresh-dialogue`) until no film is left.
-- Owner: compare harness v2 on your own projects (set `lab.harness: v2`, then
-  Regenerate edit; History restores the previous edit). Switch the default once
-  it wins.
 
 Next:
 
@@ -95,6 +92,34 @@ Next:
   shots. Cut times stay evidence; assembly windows never straddle them.
   Splitting canonical units is deferred until a concrete failure.
 - Match cuts: see below (ADR-0099).
+
+### Editor styles (2026-10-03)
+
+Goal: one editor that makes many kinds of edit, either from a detailed brief or
+on its own. Styles are combinations of general settings, never per-style code.
+Edits that work get saved as loose, editable presets.
+
+1. Foundation:
+   - pacing as a shape (ADR-0103, landed);
+   - recipes as data: settings, direction, films and format in one object;
+   - a thin toolkit of the hand-editing tools (candidates, match-cut scoring,
+     shot checks, render).
+2. Style round 1, reviewed by the owner on the private dailies page (renders
+   only while the owner is mobile):
+   - holds and a flash;
+   - a single-film beat edit (Dune: Part Two, *Everything In Its Right Place*);
+   - pure match cuts across films.
+
+   Hand-built versions only where the automatic one falls short.
+3. Add the settings that round 1's failures point to, one at a time, each
+   tested by re-rendering the style that failed. Likely candidates:
+   - speed changes;
+   - dialogue placed by the generator;
+   - sound design;
+   - crops that follow the subject;
+   - a hidden-cut guard.
+4. Presets from edits the owner liked; the UI waits until the owner is back at
+   the PC.
 
 ### Match cuts (ADR-0099, 2026-09-28)
 

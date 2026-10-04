@@ -23,7 +23,7 @@ ingest:
   annotation_concurrency: 8      # parallel hosted annotation requests per film
 
 lab:
-  harness: v1                   # v2: measured music + beat-lattice assembly for Regenerate edit (ADR-0096)
+  harness: v2                   # v1: the earlier LLM-timed editor; v2: measured music + beat-lattice assembly (ADR-0096, ADR-0103)
   footage_inspection: false     # bounded editor pilot; enable only for evaluated runs
   context_profile: null         # optional cached narrative context; pilot before activation
   music_provider: openai        # openai | gemini; independent of film annotation

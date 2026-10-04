@@ -76,6 +76,9 @@ def config(tmp_path: Path) -> Config:
 
         ingest:
           evidence: false   # tests never run hosted or GPU evidence passes
+
+        lab:
+          harness: v1       # the generation tests exercise v1; harness v2 is tested on its own
     """)
 
     cfg_file = tmp_path / "config.yaml"

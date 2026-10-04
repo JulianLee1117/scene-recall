@@ -1,9 +1,15 @@
 """Assembly: choose cuts, shots and source windows together over the beat grid.
 
 A lattice beam search. Nodes are grid points (beats; at kinetic and rapid
-paces also half-beats and strong off-beat accents), snapped to output frames.
-A step places one candidate shot on the span between two grid points. Each
-node keeps the best few partial edits that end there.
+paces also half-beats and strong off-beat accents; in a flash also quarter
+beats and every accent), snapped to output frames. A step places one candidate
+shot on the span between two grid points. Each node keeps the best few partial
+edits that end there.
+
+Every act has duration bounds and a target. The four paces scale theirs with
+the music's intensity; a flash (a burst of shots a few frames long) and a hold
+(one shot across the act, two when nothing in the pool is long enough) are
+fixed shapes the concept places inside a section.
 
 A placement is scored on its own:
 
@@ -37,9 +43,11 @@ import numpy as np
 from pipeline.lab.harness.music_map import MusicMap
 from pipeline.lab.harness.pools import Candidate
 
-ASSEMBLY_CONTRACT = "beat-lattice-assembly-v1"
+ASSEMBLY_CONTRACT = "beat-lattice-assembly-v2"
 # Duration bounds and target (seconds) per pace, before energy scaling.
 PACE = {"patient": (2.0, 5.0, 12.0), "balanced": (1.0, 2.6, 6.0), "kinetic": (0.5, 1.4, 3.0), "rapid": (0.25, 0.8, 1.8)}
+FLASH = (0.125, 0.25, 0.5)     # three to twelve frames at 24 fps; not scaled by intensity
+_HOLD_SPLIT_S = 1.5            # a hold splits only when no shot covers it, never into pieces shorter than this
 # Per second of screen time (relative to the pace target), so the number of cuts never inflates quality.
 QUALITY = {"relevance": 1.0, "motion": 0.25, "craft": 0.1}
 # Once per shot: events at the cut and the rhythm of durations.
@@ -61,10 +69,21 @@ class Act:
     start: float
     end: float
     pool: list[Candidate]
-    pace: str = "balanced"
+    pace: str = "balanced"             # patient | balanced | kinetic | rapid | flash | hold
     fame: str = "any"                  # anchor | fresh | any
     intent: str = ""
     pace_scale: float = 1.0            # >1 holds longer (a critique found it too busy), <1 cuts faster
+
+
+def bounds(act: Act) -> tuple[float, float, float]:
+    """Shortest, target and longest shot (seconds) for an act, before intensity scaling."""
+    if act.pace == "hold":
+        length = act.end - act.start
+        return min(length, _HOLD_SPLIT_S), length, length
+    if act.pace == "flash":
+        return FLASH
+    low, target, high = PACE.get(act.pace, PACE["balanced"])
+    return low * act.pace_scale, target, high * act.pace_scale
 
 
 @dataclass
@@ -119,11 +138,16 @@ def grid(music: MusicMap, start: float, end: float, pace: str, fps: int = 24) ->
     """Candidate cut times inside [start, end], frame-snapped, including both ends."""
     beats = [float(t) for t in music.beats if start < t < end]
     points = set(beats)
-    if pace in ("kinetic", "rapid"):
+    if pace in ("kinetic", "rapid", "flash"):
         full = [float(t) for t in music.beats]
         points.update((a + b) / 2 for a, b in zip(full, full[1:]) if start < (a + b) / 2 < end)
+        floor = 0.0 if pace == "flash" else _STRONG_ACCENT
         points.update(accent["time"] for accent in music.accents
-                      if accent["strength"] >= _STRONG_ACCENT and start < accent["time"] < end)
+                      if accent["strength"] >= floor and start < accent["time"] < end)
+    if pace == "flash":
+        full = [float(t) for t in music.beats]
+        for a, b in zip(full, full[1:]):
+            points.update(t for t in (a + (b - a) / 4, a + 3 * (b - a) / 4) if start < t < end)
     snapped = sorted({_frame(t, music.start, fps) for t in points} | {start, end})
     merged: list[float] = []
     for t in snapped:                       # keep one point per 40 ms, preferring the earlier (beat-side) one
@@ -135,9 +159,15 @@ def grid(music: MusicMap, start: float, end: float, pace: str, fps: int = 24) ->
     return merged
 
 
-def pace_penalty(duration: float, pace: str, energy: float, scale: float = 1.0) -> float:
-    """0 at the energy-scaled target duration, increasingly negative away from it (log scale)."""
-    target = PACE.get(pace, PACE["balanced"])[1] * (1.6 - 0.9 * energy) * scale  # intense passages cut faster
+def pace_penalty(duration: float, act: Act, energy: float) -> float:
+    """0 at the act's target duration, increasingly negative away from it (log scale).
+
+    The four paces scale their target with intensity (intense passages cut
+    faster); a flash or a hold keeps its shape.
+    """
+    target = bounds(act)[1]
+    if act.pace in PACE:
+        target *= (1.6 - 0.9 * energy) * act.pace_scale
     return -(math.log(max(duration, 1e-3) / target) ** 2) / (2 * 0.45 ** 2)
 
 
@@ -209,8 +239,8 @@ def place(candidate: Candidate, start: float, end: float, act: Act, motion_rank:
         parts["fame"] = 0.1 * candidate.fame
     quality += parts["fame"]
     parts["alignment"] = alignment
-    parts["pace"] = pace_penalty(duration, act.pace, energy, act.pace_scale)
-    score = quality * duration / PACE.get(act.pace, PACE["balanced"])[1] + ALIGNMENT * alignment + PACE_PENALTY * parts["pace"]
+    parts["pace"] = pace_penalty(duration, act, energy)
+    score = quality * duration / bounds(act)[1] + ALIGNMENT * alignment + PACE_PENALTY * parts["pace"]
     return Placement(start, end, candidate, round(source, 4), score, parts,
                      accent if alignment > 0 and accent is not None else None)
 
@@ -334,7 +364,7 @@ def assemble(music: MusicMap, acts: list[Act], *, fixed: Iterable[Fixed] = (), f
     ranks = [_motion_ranks(act.pool) for act in acts]
     override_ranks = {key: _motion_ranks(act.pool) for key, act in overrides.items()}
     span = acts[-1].end - acts[0].start
-    expected = sum((act.end - act.start) / PACE.get(act.pace, PACE["balanced"])[1] for act in acts)
+    expected = sum((act.end - act.start) / bounds(act)[1] for act in acts)
     look_of = looks((c for act in [*acts, *overrides.values()] for c in act.pool),
                     max(6, min(40, round(expected / 3)))) if span > 0 else {}
 
@@ -397,7 +427,7 @@ def assemble(music: MusicMap, acts: list[Act], *, fixed: Iterable[Fixed] = (), f
                     reuse = -0.3 * state.scenes.get(scene, 0) if scene else 0.0
                     # Film and look reuse are about screen time, so they scale with duration:
                     # otherwise every extra cut costs more and the search drifts to fewer, longer shots.
-                    share = (end - node) / PACE.get(span_act.pace, PACE["balanced"])[1]
+                    share = (end - node) / bounds(span_act)[1]
                     overuse = -_FILM_REUSE * state.films.get(option.candidate.film_id, 0) * share
                     look = look_of.get(unit)
                     repeat = -_CLUSTER_REUSE * state.looks.get(look, 0) * share if look is not None else 0.0
@@ -451,8 +481,7 @@ def _spans(points: list[float], index: int, act: Act, fixed_at: dict[float, Fixe
         return [(shot.end, shot)]
     if pinned:
         return [(points[index + 1], None)]
-    low, _target, high = PACE.get(act.pace, PACE["balanced"])
-    low, high = low * act.pace_scale, high * act.pace_scale
+    low, _target, high = bounds(act)
     limit = min([act.end] + [a for a, _b in blocked if a >= node - 1e-6])
     spans = []
     for end in points[index + 1:]:

@@ -200,21 +200,24 @@ def gather(db: Any, config: Any, acts: list[dict[str, Any]], *, film_ids: list[s
     exclude = exclude_units or set()
     jobs = [(index, query, PRESET_FOR_FAME.get(str(act.get("fame") or "any"), "balanced"))
             for index, act in enumerate(acts) for query in act.get("queries") or []]
+    # Acts split around flashes and holds share their section's queries: each search runs once.
+    searches = list(dict.fromkeys((query, preset) for _index, query, preset in jobs))
 
-    def run(job: tuple[int, str, str]) -> list[dict[str, Any]]:
-        _index, query, preset = job
+    def run(key: tuple[str, str]) -> list[dict[str, Any]]:
+        query, preset = key
         return search(query, db, config, film_ids=film_ids or None, result_limit=per_query, preset=preset)
 
     # Searches are independent; a few run at once (search is thread-safe, as the API serves in parallel).
     # Progress is reported from this thread (job callbacks may not be thread-safe), and results merge
     # in job order, so pools are identical to a sequential run.
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    results: list[list[dict[str, Any]]] = [[] for _ in jobs]
-    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(jobs) or 1))) as pool:
-        futures = {pool.submit(run, job): index for index, job in enumerate(jobs)}
+    found: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(searches) or 1))) as pool:
+        futures = {pool.submit(run, key): key for key in searches}
         for done, future in enumerate(as_completed(futures), start=1):
-            results[futures[future]] = future.result()
-            progress(f"Finding footage: {done} of {len(jobs)} searches")
+            found[futures[future]] = future.result()
+            progress(f"Finding footage: {done} of {len(searches)} searches")
+    results = [found[(query, preset)] for _index, query, preset in jobs]
     everything: dict[str, Candidate] = {}
     relevance: list[dict[str, list[float]]] = [{} for _ in acts]
     for (index, query, _preset), rows in zip(jobs, results):

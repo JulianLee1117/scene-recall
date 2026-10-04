@@ -310,10 +310,13 @@ distinguishes its retrieved frame from the current playback time.
 
 ### AI Music Video and Match Cuts
 
-**Editor harness v2** ([ADR-0096](docs/decisions/0096-editor-harness-v2.md)) is
-opt-in with `lab.harness: v2` in `config.yaml`. **Regenerate edit** then:
+**Editor harness v2** ([ADR-0096](docs/decisions/0096-editor-harness-v2.md),
+[ADR-0103](docs/decisions/0103-pacing-is-a-shape.md)) is the default editor;
+`lab.harness: v1` in `config.yaml` restores the earlier one. **Regenerate edit**:
 - measures the song's beats, accents and loudness;
-- plans a concept with one act and a few footage queries per musical section;
+- plans a concept with one act and a few footage queries per musical section.
+  The pace you choose is a tendency: sections can change pace, hold one shot
+  for a long stretch, or flash a burst of images on a hit;
 - assembles cuts, shots and source windows together, so action peaks land on
   accents and cuts follow continuity;
 - lets the planner swap shots once among pre-timed alternatives.
