@@ -321,6 +321,10 @@ distinguishes its retrieved frame from the current playback time.
   accents and cuts follow continuity;
 - lets the planner swap shots once among pre-timed alternatives.
 
+`scripts/edit_tools.py` holds optional helpers that drive the same API from a
+terminal: make an edit from a JSON spec, render it, print its recipe and pacing
+shape, make a contact sheet, or build a review page of rendered edits.
+
 **Footage** in AI direction sets the recognizable ↔ fresh balance (the search
 Famous / Balanced / Hidden gems presets) for every editor search. **Match cuts**
 (*Where they fit* by default, *As often as possible*, *Plain cuts*) sets how
