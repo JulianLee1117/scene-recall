@@ -399,3 +399,58 @@ def test_a_flash_cuts_on_a_steady_subdivision():
                               asm.Act(14.25, 18.0, _pool(), pace="balanced")])
     flash = [round(p.end - p.start, 3) for p in result if 12.25 <= p.start < 14.25]
     assert flash == [0.25] * 8
+
+
+def test_track_shape_reads_the_whole_song_in_four_second_steps(tmp_path):
+    import wave
+    from pipeline.lab.harness.song import track_shape
+    rate = 8000
+    quiet = np.full(8 * rate, 0.01, np.float32)
+    loud = np.sin(np.linspace(0, 2 * np.pi * 440 * 8, 8 * rate)).astype(np.float32) * 0.5
+    path = tmp_path / "song.wav"
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes((np.concatenate([quiet, loud]) * 32767).astype(np.int16).tobytes())
+    shape = track_shape(path)
+    assert len(shape) == 4 and shape[2] == 0 and shape[3] == 0 and shape[0] < -20
+
+
+def test_treatment_chooses_settings_only_when_asked(monkeypatch, config):
+    from pipeline.lab import music as hosted
+    from pipeline.lab.harness import song
+    from pipeline.lab.harness.concept import concept_payload
+    calls = []
+
+    def answer(_config, prompt, schema, **kwargs):
+        calls.append(kwargs["operation"])
+        if kwargs["operation"] == "profile":
+            return {"recognized": True, "artist": "Prospa", "title": "Will You Be Mine", "genre": "UK rave", "scene_and_era": "2020s",
+                    "sound": "breakbeats", "lyric_reading": "a plea", "mood": "euphoric", "shape": "build then drop",
+                    "cultural_use": "", "uncertainty": ""}
+        return {"style": "Rave memory", "idea": "i", "pace": "rapid", "pace_shape": "s", "footage": "gems", "look": "l",
+                "match_cuts": "many", "cutting": "c", "impact": "p", "avoid": "a"}
+
+    monkeypatch.setattr(hosted, "_hosted_json", answer)
+    monkeypatch.setattr(song, "track_shape", lambda _path: [-10, 0])
+
+    class Store:
+        def __init__(self, _root):
+            pass
+
+        def get_track(self, _id):
+            return {"name": "Prospa - Will You Be Mine.wav", "duration": 8.0, "path": "unused"}
+
+    monkeypatch.setattr("pipeline.lab.store.LabStore", Store)
+    m = _map()
+    document = {"track": {"id": "t"}, "passage": {"start": 10.0, "end": 18.0}, "editor_direction": None, "brief": "",
+                "planner_settings": {"pacing": "patient", "footage": "balanced", "match_cuts": "some"}}
+    kept = song.treat(document, m, config, "job", lambda _m: None, film_titles=[])
+    assert kept["settings"]["pacing"] == "patient" and calls == ["profile", "treatment"]
+    chosen = song.treat({**document, "planner_settings": {**document["planner_settings"], "auto": True}}, m, config, "job2",
+                        lambda _m: None, film_titles=[])
+    assert (chosen["settings"]["pacing"], chosen["settings"]["footage"], chosen["settings"]["match_cuts"]) == ("rapid", "gems", "many")
+    assert calls == ["profile", "treatment", "treatment"]                       # the profile is cached per track and excerpt
+    payload = concept_payload(document, m, [], None, chosen)
+    assert payload["treatment"]["style"] == "Rave memory" and payload["song_profile"]["genre"] == "UK rave"

@@ -25,7 +25,7 @@ from pipeline.lab.harness.assemble import PACE
 from pipeline.lab.harness.music_map import RATE_HZ, MusicMap
 from pipeline.lab.models import LabModel
 
-CONCEPT_CONTRACT = "harness-concept-v6"
+CONCEPT_CONTRACT = "harness-concept-v7"
 Query = Annotated[str, Field(min_length=3, max_length=200)]
 PACES = ("patient", "balanced", "kinetic", "rapid")
 _MIN_MOVE_S = {"flash": 0.5, "hold": 1.5}
@@ -85,6 +85,9 @@ GUIDANCE = EDITORIAL_GUIDANCE + (
     "should share one look or motif; what the hold stays on); an empty query uses the act's queries. An act "
     "without moves cuts at its pace. A range instruction asking for a flash or a hold becomes a move. Exact cut "
     "times are measured later from the audio. "
+    "song_profile, when given, is what is known about the song (genre, scene, sound, how its lyrics are read) and "
+    "treatment is the style chosen for this edit: build the concept, queries, paces and moves from the treatment, "
+    "and let the footage belong with the song. "
     "Song meaning and listening notes are uncertain observations; follow lyric_treatment for how literally to use "
     "them. When film_scope is given, only those films exist; name their characters and moments. catalog, when "
     "given, lists those films' key moments and hidden gems: build the arc around the strongest of them, put key "
@@ -94,7 +97,7 @@ GUIDANCE = EDITORIAL_GUIDANCE + (
 
 
 def concept_payload(document: dict[str, Any], music: MusicMap, film_titles: list[str],
-                    catalog: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                    catalog: list[dict[str, Any]] | None = None, style: dict[str, Any] | None = None) -> dict[str, Any]:
     analysis = document.get("analysis") or {}
     segments = analysis.get("segments") or []
     settings = document.get("planner_settings") or {}
@@ -123,6 +126,9 @@ def concept_payload(document: dict[str, Any], music: MusicMap, film_titles: list
         "sections": sections,
         "film_scope": film_titles[:200],
         **({"catalog": catalog} if catalog else {}),
+        **({"song_profile": {key: value for key, value in style["profile"].items() if key != "artifact_id"},
+            "treatment": {key: value for key, value in style["treatment"].items() if key != "artifact_id"}}
+           if style else {}),
     }
 
 
@@ -158,11 +164,11 @@ def section_shape(music: MusicMap, start: float, end: float) -> dict[str, Any]:
 
 def plan_concept(document: dict[str, Any], music: MusicMap, config: Any, job_id: str,
                  progress: Callable[[str], None], *, film_titles: list[str] | None = None,
-                 catalog: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                 catalog: list[dict[str, Any]] | None = None, style: dict[str, Any] | None = None) -> dict[str, Any]:
     """Planned acts with absolute times, cached by the full request identity."""
     from pipeline.lab import music as hosted
 
-    payload = concept_payload(document, music, film_titles or [], catalog)
+    payload = concept_payload(document, music, film_titles or [], catalog, style)
     schema = Concept.model_json_schema()
     settings = hosted.PLANNER_SETTINGS if config.lab.music_provider == "openai" else hosted.SETTINGS
     identity = {"contract": CONCEPT_CONTRACT, "provider": config.lab.music_provider, "model": config.lab.planner_model,

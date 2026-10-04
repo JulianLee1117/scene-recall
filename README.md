@@ -312,9 +312,14 @@ distinguishes its retrieved frame from the current playback time.
 
 **Editor harness v2** ([ADR-0096](docs/decisions/0096-editor-harness-v2.md),
 [ADR-0103](docs/decisions/0103-pacing-is-a-shape.md),
-[ADR-0104](docs/decisions/0104-casting-and-purposeful-pacing.md)) is the default editor;
+[ADR-0104](docs/decisions/0104-casting-and-purposeful-pacing.md),
+[ADR-0105](docs/decisions/0105-song-profile-and-treatment.md)) is the default editor;
 `lab.harness: v1` in `config.yaml` restores the earlier one. **Regenerate edit**:
 - measures the song's beats, accents and loudness;
+- recognizes the song from its track name and chooses a style for the edit
+  from what the song is (genre, scene, how its lyrics are read) and how the
+  excerpt sounds. Your direction comes first. With `planner_settings.auto`
+  (no UI control yet) the style also sets pace, footage and match cuts;
 - plans a concept with one act and a few footage queries per musical section.
   The pace you choose is every section's default: sections can go faster, at
   most one step slower, or hold one shot for a long stretch. A burst of images

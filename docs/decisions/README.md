@@ -104,7 +104,7 @@ The accepted boundary or behavior.
 | [0040](0040-scene-based-match-search.md) | Superseded by 0099 | Discover next clips from a scene with projectless jobs and independent cues measured at one exact cut |
 | [0041](0041-simple-editor-and-source-aware-first-cuts.md) | Accepted | Simplify the editor, expose real progress and choose bounded first-edit cuts with available footage and explicit abstention |
 | [0042](0042-explicit-whole-edit-regeneration.md) | Accepted | Rebuild the entire music edit explicitly from current settings while retaining the previous revision |
-| [0043](0043-song-meaning-edit-density-and-fresh-footage.md) | Accepted | Separate heard meaning from atmosphere, enforce whole-edit pace density and prevent automatic footage reuse |
+| [0043](0043-song-meaning-edit-density-and-fresh-footage.md) | Accepted; amended by 0105 for harness v2 planning | Separate heard meaning from atmosphere, enforce whole-edit pace density and prevent automatic footage reuse |
 | [0044](0044-scoped-scene-selection-and-compact-evidence.md) | Accepted | Bind scene choices and cuts to each shot, compact repeated model evidence and preserve failed-job offer diagnostics |
 | [0045](0045-bounded-full-length-music-video.md) | Accepted | Support ten-minute music videos with bounded analysis and generation sections inside one atomic edit |
 | [0046](0046-distinctive-match-evidence-and-reference-selection.md) | Superseded by 0099 | Correct background reference selection, require outline evidence and bound common-position ranking |
@@ -166,3 +166,4 @@ The accepted boundary or behavior.
 | [0102](0102-rejected-releases-are-deleted.md) | Accepted | Rejected releases are deleted, not archived: `remove_film --delete-files` withdraws the film and deletes its verified source, asset folder and playback copy |
 | [0103](0103-pacing-is-a-shape.md) | Accepted; amended by 0104 | Pacing is a shape: free section paces, flash and hold moves keyed to measured rises and quiet spans; harness v2 is the default editor |
 | [0104](0104-casting-and-purposeful-pacing.md) | Accepted | Casting: the planner chooses each act's moments in order with a peak, from the act's candidates and a scoped film's key moments; pace floor one step below the setting; flashes only on request, on a steady pulse |
+| [0105](0105-song-profile-and-treatment.md) | Accepted | Know the song: a profile from the track name and world knowledge, then a treatment that chooses the edit's style (optionally its pace, footage and match cuts) |

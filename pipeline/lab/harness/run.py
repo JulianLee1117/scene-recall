@@ -18,6 +18,7 @@ from typing import Any, Callable
 from pipeline.lab.harness import assemble as asm
 from pipeline.lab.harness import music_map
 from pipeline.lab.harness.cast import cast, catalog, moment
+from pipeline.lab.harness.song import treat
 from pipeline.lab.harness.concept import plan_concept
 from pipeline.lab.harness.matchcuts import CutMatcher
 from pipeline.lab.harness.pools import Candidate, gather
@@ -310,9 +311,12 @@ def regenerate(document: dict[str, Any], config: Any, db: Any, progress: Callabl
     progress("Measuring the music's beats, accents and loudness")
     music = load_music(document, config)
     film_ids = list(document.get("film_ids") or [])
+    titles = _film_titles(db, film_ids)
+    style = treat(document, music, config, job_id, progress, film_titles=titles)
+    original, document = document, {**document, "planner_settings": style["settings"]}   # the edit runs on its treatment
     films = catalog(db, config, film_ids, previous_units or set())
-    planned = plan_concept(document, music, config, job_id, progress, film_titles=_film_titles(db, film_ids),
-                           catalog=[moment(candidate) for candidate in films])
+    planned = plan_concept(document, music, config, job_id, progress, film_titles=titles,
+                           catalog=[moment(candidate) for candidate in films], style=style)
     pools = gather(db, config, planned["acts"], film_ids=film_ids or None, exclude_units=previous_units or set(),
                    progress=progress)
     if not any(pools):
@@ -323,7 +327,8 @@ def regenerate(document: dict[str, Any], config: Any, db: Any, progress: Callabl
     matcher = _matcher(document, config, progress)
     placements, options, reviewed = _assemble_and_review(document, planned, music, acts, config, job_id, progress,
                                                          matcher=matcher)
-    extra: dict[str, Any] = {"cast": casting, "review": reviewed}
+    extra: dict[str, Any] = {"song": {key: style[key] for key in ("profile", "treatment")}, "cast": casting,
+                             "review": reviewed}
     if getattr(config.lab, "harness_critique", False):
         placements, options, second, watched = _critique_round(document, planned, music, acts, placements, options,
                                                                config, db, job_id, progress, previous_units or set(),
@@ -332,6 +337,7 @@ def regenerate(document: dict[str, Any], config: Any, db: Any, progress: Callabl
         if second is not None:
             extra["review_after_critique"] = second
     result = _document(document, planned, music, placements, options, extra, matcher)
+    result["planner_settings"] = deepcopy(original.get("planner_settings"))   # the user's settings, not the treatment's
     peaks = sum(p.accent is not None for p in placements)
     matched = 0
     if matcher is not None:

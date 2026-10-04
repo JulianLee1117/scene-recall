@@ -110,7 +110,11 @@ Edits that work get saved as loose, editable presets.
      films. The owner found the flashes awkward and purposeless, the pace
      fighting the music, and the shot choices without intent.
    - Round 2 (ADR-0104) answered with casting, a pace floor, and flashes only on
-     request. It awaits the owner's reactions.
+     request.
+   - The owner then found the song understanding behind style choices lacking.
+     Round 3 (ADR-0105) adds a song profile from world knowledge and a
+     treatment that chooses the style; three edits with no brief await the
+     owner's reactions.
    - Open: burned-in subtitles in some films. A match-cut brief now trades
      measured matches for meaning (1 matched cut against 8).
 3. Add the settings that round 1's failures point to, one at a time, each

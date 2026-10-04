@@ -166,13 +166,22 @@ def _section(index: int, total: int, item: dict) -> str:
     legend = "".join(f'<span class="key"><i class="b-{p}"></i>{PACE_LABEL[p]}</span>' for p in paces)
     rows = "".join(f"<tr><td>{i + 1}</td><td>{tc(s['start'] - origin)}</td><td>{t:.2f}s</td><td>{html.escape(f)}</td></tr>"
                    for i, (s, t, f) in enumerate(zip(slots, durations, films)))
-    instruction = (d.get("editor_direction") or {}).get("instruction") or "(no brief)"
+    instruction = (d.get("editor_direction") or {}).get("instruction") or "(no brief: the editor chose the style)"
+    song = plan.get("song") or {}
+    read = ""
+    if song:
+        known, style = song.get("profile") or {}, song.get("treatment") or {}
+        heard = " · ".join(part for part in (known.get("genre"), known.get("mood")) if part)
+        read = (f'<div class="read"><p class="label">How the editor read the song</p>'
+                f'<p>{html.escape(heard)}</p><p>{html.escape(known.get("lyric_reading") or "")}</p>'
+                f'<p class="label">The style it chose: {html.escape(style.get("style", ""))}</p>'
+                f'<p>{html.escape(style.get("idea", ""))}</p><p class="muted">Look: {html.escape(style.get("look", ""))}</p></div>')
     return f"""<section class="edit" id="e{index}">
   <header class="edit-head"><p class="eyebrow">Edit {index} of {total}</p><h2>{html.escape(item['title'])}</h2>
     <p class="song">{html.escape(Path(d['track']['name']).stem)} <span class="mono">{tc(origin)}–{tc(d['passage']['end'])}</span></p></header>
   <video controls playsinline preload="metadata" src="{item['file']}"></video>
   <div class="facts">
-    <p class="brief">“{html.escape(instruction)}”</p>
+    <p class="brief">“{html.escape(instruction)}”</p>{read}
     <ul class="chips">{''.join(f'<li>{html.escape(c)}</li>' for c in chips)}</ul>
     <div class="shape"><p class="label">Pacing shape <span class="mono">{len(slots)} shots · {len(set(films))} films · {min(durations):.2f}–{max(durations):.2f}s</span></p>
       {_strip(d)}<div class="legend">{legend}<span class="key"><i class="cutkey"></i>cut</span></div></div>
@@ -219,6 +228,8 @@ summary { cursor: pointer; font-weight: 600; } summary:focus-visible, video:focu
 table { border-collapse: collapse; width: 100%; font: 400 .82rem/1.4 var(--mono); font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: .3rem .6rem .3rem 0; border-bottom: 1px solid var(--line); white-space: nowrap; } th { color: var(--muted); font-weight: 500; }
 footer { color: var(--muted); border-top: 1px solid var(--line); padding-top: 1.5rem; }
+.read { display: grid; gap: .45rem; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: .8rem .9rem; }
+.read .label:not(:first-child) { margin-top: .4rem; } .muted { color: var(--muted); }
 """
 
 

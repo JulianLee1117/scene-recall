@@ -90,6 +90,8 @@ export interface PlannerSettings {
   footage?: "balanced" | "famous" | "gems";
   /** How strongly cuts prefer frames that match across the cut; absent means some. */
   match_cuts?: "off" | "some" | "many";
+  /** Harness v2: the song's treatment chooses pacing, footage and match cuts; absent means false. */
+  auto?: boolean;
 }
 export interface SongLyric {
   id: string;

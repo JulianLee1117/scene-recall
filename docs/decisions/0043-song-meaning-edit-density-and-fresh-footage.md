@@ -1,6 +1,6 @@
 # ADR-0043: Song meaning, controlled edit density and fresh footage
 
-- Status: Accepted
+- Status: Accepted; amended by [ADR-0105](0105-song-profile-and-treatment.md): harness v2 planning identifies the song from its track name (listening still does not)
 - Date: 2026-09-13
 - Extends: ADR-0032, ADR-0033, ADR-0041 and ADR-0042
 - Supersedes: audio-proposed moment count as whole-edit shot-count authority; pacing as an unenforced adjective; automatic repeated source windows

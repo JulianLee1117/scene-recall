@@ -203,6 +203,8 @@ class PlannerSettings(LabModel):
     footage: Literal["balanced", "famous", "gems"] = "balanced"
     # How strongly cuts prefer frames that match across the cut (harness v2 with a moment index).
     match_cuts: Literal["off", "some", "many"] = "some"
+    # Harness v2: the song's treatment chooses pacing, footage and match cuts instead of these values.
+    auto: bool = False
 
 
 class SuppliedLyric(LabModel):
