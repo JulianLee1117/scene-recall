@@ -21,7 +21,7 @@ records.
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
-| Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103 |
+| Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103, 0104 |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
 | Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067 |
 
@@ -623,7 +623,7 @@ creative acceptance remains open; a formal labeling campaign is not required
 to use or polish this workflow. Source-bound and playback checks cannot certify
 artistic quality. No learning pipeline or new retrieval representation is added.
 
-#### Editor harness v2 (ADR-0096, ADR-0103)
+#### Editor harness v2 (ADR-0096, ADR-0103, ADR-0104)
 
 `lab.harness: v2` (the default; `v1` keeps the earlier editor) replaces
 whole-edit regeneration with `pipeline.lab.harness`. Language models plan
@@ -634,15 +634,18 @@ meaning; the edit itself is measured and optimized.
   on-beat within 60 ms), per-beat loudness percentiles, and the listening
   sections snapped to downbeats. Span intensity blends the listening section's
   energy (65%) with relative loudness (35%).
-- **Concept** (`harness-concept-v2`): one cached planner request turns the scoped
+- **Concept** (`harness-concept-v6`): one cached planner request turns the scoped
   editor direction, song meaning and sections into one act per section: intent,
   one to four search-v2 queries, a fame target (anchor, fresh, any) and a pace.
   Sections the plan skips keep the listening suggestion.
-  - Pacing is a shape (ADR-0103). The pacing preference is a tendency; any
-    section may take any pace.
-  - An act may carry up to four moves. A **flash** is a burst of 3-12 frame
-    shots; a **hold** is one shot across the move, split in two (never under
-    1.5 s) only when nothing covers it.
+  - Pacing is a shape (ADR-0103, ADR-0104). The pacing preference is every
+    section's default; a section may be faster, but at most one step slower.
+  - An act may carry up to four moves. A **hold** is one shot across the move,
+    split in two (never under 1.5 s) only when nothing covers it. A **flash**
+    (a burst of short shots) is placed only where the direction asks.
+  - For an edit scoped to at most three films, the planner also sees those
+    films' key moments and hidden gems (the catalog) and builds the arc on
+    them.
   - Move times are seconds from the section's start, snapped to a beat or a
     strong off-beat accent within half a beat. Overlapping or too-short moves
     are dropped. Gaps under a beat join the move, and so do gaps beside a hold
@@ -657,11 +660,18 @@ Footage control) is also the ranking preset of every editor search in v1 and v2.
 - **Pools**: each act's queries run through `search` with the preset matching the
   fame target. Candidates carry compiled shot evidence and a normalized image
   embedding; the previous edit's shots are excluded.
-- **Assembly** (`beat-lattice-assembly-v2`): a deterministic lattice beam search
+- **Casting** (`harness-cast-v1`): one cached planner request reads each act's
+  top 16 candidates (plus the catalog) and casts the shots that carry the act,
+  in order, with the one that lands its biggest musical moment. A shot is cast
+  once. Fill gaps is not cast.
+- **Assembly** (`beat-lattice-assembly-v3`): a deterministic lattice beam search
   (8 states per grid point) over frame-snapped beats. Kinetic and rapid acts also
-  offer half-beats and strong accents as cut points; flashes add quarter beats
-  and every accent. Each move is its own act with fixed bounds, unscaled by
-  intensity or critique.
+  offer half-beats and strong accents as cut points. Each move is its own act
+  with fixed bounds, unscaled by intensity or critique.
+  - A flash steps through a steady pulse: one shot per beat subdivision, the
+    one nearest 0.25 s. Shots that look alike score higher inside it.
+  - Cast shots score a bonus, plus more for the act's peak, and keep their cast
+    order within the act.
   - Screen time carries relevance, motion versus intensity, craft and the fame
     target.
   - Each shot adds its peak-on-accent alignment and a log-duration penalty

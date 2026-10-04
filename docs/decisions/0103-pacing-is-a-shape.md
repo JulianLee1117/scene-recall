@@ -1,6 +1,6 @@
 # ADR-0103: Pacing is a shape; harness v2 is the default editor
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0104 (pace floor, flashes only on request)
 - Date: 2026-10-03
 - Amends: ADR-0096 (concept paces, assembly bounds, opt-in status)
 - Superseded by: None

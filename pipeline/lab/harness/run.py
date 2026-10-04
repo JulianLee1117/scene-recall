@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from pipeline.lab.harness import assemble as asm
 from pipeline.lab.harness import music_map
+from pipeline.lab.harness.cast import cast, catalog, moment
 from pipeline.lab.harness.concept import plan_concept
 from pipeline.lab.harness.matchcuts import CutMatcher
 from pipeline.lab.harness.pools import Candidate, gather
@@ -309,17 +310,20 @@ def regenerate(document: dict[str, Any], config: Any, db: Any, progress: Callabl
     progress("Measuring the music's beats, accents and loudness")
     music = load_music(document, config)
     film_ids = list(document.get("film_ids") or [])
-    planned = plan_concept(document, music, config, job_id, progress, film_titles=_film_titles(db, film_ids))
+    films = catalog(db, config, film_ids, previous_units or set())
+    planned = plan_concept(document, music, config, job_id, progress, film_titles=_film_titles(db, film_ids),
+                           catalog=[moment(candidate) for candidate in films])
     pools = gather(db, config, planned["acts"], film_ids=film_ids or None, exclude_units=previous_units or set(),
                    progress=progress)
     if not any(pools):
         raise ValueError("No footage matched this concept; widen the film scope or the direction")
     acts = [asm.Act(spec["start"], spec["end"], pool, pace=spec["pace"], fame=spec["fame"], intent=spec["intent"])
             for spec, pool in zip(planned["acts"], pools)]
+    acts, casting = cast(document, planned, acts, music, config, job_id, progress, extra=films)
     matcher = _matcher(document, config, progress)
     placements, options, reviewed = _assemble_and_review(document, planned, music, acts, config, job_id, progress,
                                                          matcher=matcher)
-    extra: dict[str, Any] = {"review": reviewed}
+    extra: dict[str, Any] = {"cast": casting, "review": reviewed}
     if getattr(config.lab, "harness_critique", False):
         placements, options, second, watched = _critique_round(document, planned, music, acts, placements, options,
                                                                config, db, job_id, progress, previous_units or set(),
@@ -339,7 +343,9 @@ def regenerate(document: dict[str, Any], config: Any, db: Any, progress: Callabl
                    "concept_artifact": planned["artifact_id"], "shots": len(placements),
                    "films": len({p.candidate.film_id for p in placements}), "peaks_on_accents": peaks,
                    "pool_sizes": [len(pool) for pool in pools], "pool_evidence": with_evidence,
-                   "previous_excluded": len(previous_units or ()), "review_swaps": len(reviewed["applied"]),
+                   "previous_excluded": len(previous_units or ()), "cast_shots": casting["cast_shots"],
+                   "cast_used": sum(p.candidate.cast_rank is not None for p in placements),
+                   "review_swaps": len(reviewed["applied"]),
                    "critique_issues": len((extra.get("critique") or {}).get("issues") or []),
                    "match_cuts": {"setting": (document.get("planner_settings") or {}).get("match_cuts", "some"),
                                   "index": matcher.index.id if matcher is not None else None, "matched_cuts": matched},

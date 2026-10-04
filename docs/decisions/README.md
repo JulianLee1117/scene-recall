@@ -164,4 +164,5 @@ The accepted boundary or behavior.
 | [0100](0100-renders-are-a-cache-of-the-newest.md) | Accepted | Project renders are a cache: each project keeps its newest preview and export; maintenance removes older ones (supersedes ADR-0068's export retention) |
 | [0101](0101-fold-look-alikes-and-measure-ordinary-moments.md) | Accepted | Fold same-film look-alike shots into their card instead of dropping them; a blind ordinary-moment eval; evals report runs that lost the judge or semantic text |
 | [0102](0102-rejected-releases-are-deleted.md) | Accepted | Rejected releases are deleted, not archived: `remove_film --delete-files` withdraws the film and deletes its verified source, asset folder and playback copy |
-| [0103](0103-pacing-is-a-shape.md) | Accepted | Pacing is a shape: free section paces, flash and hold moves keyed to measured rises and quiet spans; harness v2 is the default editor |
+| [0103](0103-pacing-is-a-shape.md) | Accepted; amended by 0104 | Pacing is a shape: free section paces, flash and hold moves keyed to measured rises and quiet spans; harness v2 is the default editor |
+| [0104](0104-casting-and-purposeful-pacing.md) | Accepted | Casting: the planner chooses each act's moments in order with a peak, from the act's candidates and a scoped film's key moments; pace floor one step below the setting; flashes only on request, on a steady pulse |

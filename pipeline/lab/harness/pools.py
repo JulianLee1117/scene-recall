@@ -61,6 +61,8 @@ class Candidate:
     vector: Any = field(default=None, repr=False, compare=False)   # unit-normalized image embedding
     aspect: float | None = None             # the film's display aspect ratio (width / height)
     grade: tuple[float, float, float] | None = None   # measured brightness, saturation, warmth
+    cast_rank: int | None = None            # position in its act's cast (``cast``), None when not cast
+    cast_peak: bool = False                 # cast to land the act's biggest musical moment
 
     @property
     def duration(self) -> float:
@@ -236,19 +238,24 @@ def gather(db: Any, config: Any, acts: list[dict[str, Any]], *, film_ids: list[s
             scores.setdefault(unit_id, []).append((_RRF_K + 1) / (_RRF_K + rank))
             if query not in candidate.queries:
                 candidate.queries.append(query)
-    load_evidence(db, everything)
-    load_vectors(db, everything)
-    titles = _film_titles(db)
-    aspects = film_aspects(db, {candidate.film_id for candidate in everything.values()})
-    for candidate in everything.values():
-        candidate.film_title = titles.get(candidate.film_id, candidate.film_title)
-        candidate.aspect = aspects.get(candidate.film_id)
+    hydrate(db, everything)
     # Best rank, plus a little for each other query of the act that also found the shot.
     return [sorted((replace(everything[unit_id], relevance=max(values) + 0.15 * (sum(values) - max(values)),
                             rank=round((_RRF_K + 1) / max(values) - _RRF_K))
                     for unit_id, values in scores.items()),
                    key=lambda item: (-item.relevance, item.unit_id))
             for scores in relevance]
+
+
+def hydrate(db: Any, candidates: dict[str, Candidate]) -> None:
+    """Attach evidence, image embeddings, film titles and aspect ratios to candidates in place."""
+    load_evidence(db, candidates)
+    load_vectors(db, candidates)
+    titles = _film_titles(db)
+    aspects = film_aspects(db, {candidate.film_id for candidate in candidates.values()})
+    for candidate in candidates.values():
+        candidate.film_title = titles.get(candidate.film_id, candidate.film_title)
+        candidate.aspect = aspects.get(candidate.film_id)
 
 
 def placed_candidates(db: Any, clips: list[dict[str, Any]]) -> dict[str, Candidate]:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -137,6 +139,9 @@ def test_concept_keeps_one_act_per_section_and_falls_back_to_listening():
     acts = resolve_acts(concept, m, payload)
     assert [(a["intent"], a["planned"]) for a in acts] == [("calm", False), ("chase", True)]
     assert acts[0]["queries"] == ["quiet window"] and acts[0]["pace"] == "balanced"
+    assert acts[1]["pace"] == "rapid"                                         # faster than the preference is free
+    from pipeline.lab.harness.concept import floor_pace
+    assert floor_pace("patient", "rapid") == "kinetic" and floor_pace("kinetic", "rapid") == "kinetic"
     assert acts[1]["queries"] == ["car chase at night", "running feet"]
     assert acts[0]["end"] == acts[1]["start"]
 
@@ -358,3 +363,39 @@ def test_pools_run_each_shared_search_once():
     pools = gather(NoTables(), None, acts, search=search)
     assert sorted(calls) == ["flash", "night", "rain"]
     assert [c.unit_id for c in pools[1]] == ["flash", "night", "rain"]
+
+
+def test_cast_leads_each_pool_in_order_and_each_shot_is_cast_once():
+    from pipeline.lab.harness.cast import Cast, apply_cast
+    pool_a, pool_b = _pool(6), [_candidate(f"b{i}", start=900.0 + 10 * i) for i in range(3)]
+    acts = [asm.Act(10.0, 14.25, pool_a), asm.Act(14.25, 18.0, pool_b + [pool_a[5]])]
+    keys = {f"a0-{i}": c for i, c in enumerate(pool_a)} | {f"a1-{i}": c for i, c in enumerate(acts[1].pool)} | {
+        "k0": _candidate("key", start=5000.0)}
+    parsed = Cast.model_validate({"notes": "n", "acts": [
+        {"act": 0, "shots": ["a0-3", "k0", "a0-5", "nope"], "peak": "k0", "reason": "build"},
+        {"act": 1, "shots": ["a1-3", "a1-0"], "peak": "", "reason": "a1-3 is a0-5, already cast"}]})
+    result, receipt = apply_cast(acts, parsed, keys)
+    first = result[0].pool
+    assert [c.unit_id for c in first[:3]] == ["u3", "key", "u5"] and [c.cast_rank for c in first[:3]] == [0, 1, 2]
+    assert first[1].cast_peak and not first[0].cast_peak and first[3].cast_rank is None
+    assert [c.unit_id for c in result[1].pool if c.cast_rank is not None] == ["b0"]
+    assert "u5" not in [c.unit_id for c in result[1].pool]                    # cast shots leave other acts' pools
+    assert receipt["acts"][0] == {"act": 0, "cast": ["u3", "key", "u5"], "peak": "key"}
+
+
+def test_assembly_keeps_cast_order_and_prefers_cast_shots():
+    m = _map()
+    pool = _pool(20)
+    cast = [replace(pool[i], cast_rank=rank, cast_peak=rank == 2) for rank, i in enumerate((15, 9, 4, 12))]
+    result = asm.assemble(m, [asm.Act(10.0, 18.0, cast + [c for c in pool if c not in cast], pace="balanced")])
+    ranks = [p.candidate.cast_rank for p in result if p.candidate.cast_rank is not None]
+    assert len(ranks) >= 3 and ranks == sorted(ranks)
+
+
+def test_a_flash_cuts_on_a_steady_subdivision():
+    m = _map()                                                                 # 0.5 s beats: two shots per beat
+    assert asm.flash_division(m) == 2
+    result = asm.assemble(m, [asm.Act(10.0, 12.25, _pool(), pace="patient"), asm.Act(12.25, 14.25, _pool(), pace="flash"),
+                              asm.Act(14.25, 18.0, _pool(), pace="balanced")])
+    flash = [round(p.end - p.start, 3) for p in result if 12.25 <= p.start < 14.25]
+    assert flash == [0.25] * 8

@@ -104,13 +104,15 @@ Edits that work get saved as loose, editable presets.
    - recipes as data: settings, direction, films and format in one object;
    - a thin toolkit of the hand-editing tools (candidates, match-cut scoring,
      shot checks, render).
-2. Style round 1, reviewed by the owner on the private dailies page (renders
-   only while the owner is mobile):
-   - holds and a flash;
-   - a single-film beat edit (Dune: Part Two, *Everything In Its Right Place*);
-   - pure match cuts across films.
-
-   Hand-built versions only where the automatic one falls short.
+2. Style rounds, reviewed by the owner on the private dailies page (renders
+   only while the owner is mobile).
+   - Round 1: holds and a flash, a single-film Dune edit, and match cuts across
+     films. The owner found the flashes awkward and purposeless, the pace
+     fighting the music, and the shot choices without intent.
+   - Round 2 (ADR-0104) answered with casting, a pace floor, and flashes only on
+     request. It awaits the owner's reactions.
+   - Open: burned-in subtitles in some films. A match-cut brief now trades
+     measured matches for meaning (1 matched cut against 8).
 3. Add the settings that round 1's failures point to, one at a time, each
    tested by re-rendering the style that failed. Likely candidates:
    - speed changes;
