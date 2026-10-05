@@ -51,13 +51,27 @@ export interface LabDialogueClip {
   duck_attack_seconds?: number;
   duck_release_seconds?: number;
 }
+export interface LabEffectSource {
+  film_id: string;
+  unit_id?: string | null;
+  source_start: number;
+  crop?: LabClip["crop"];
+}
 export interface LabEffect {
   id: string;
-  kind: "overlay" | "lock_cut" | "zoom_through" | "punch" | "flash" | "echo";
+  kind: "overlay" | "lock_cut" | "zoom_through" | "punch" | "flash" | "echo" | "fill" | "panel" | "strips";
   start: number;
   end: number;
   at?: number | null;
-  source?: { film_id: string; unit_id?: string | null; source_start: number; crop?: LabClip["crop"] } | null;
+  source?: LabEffectSource | null;
+  sources?: LabEffectSource[];
+  region?: "full" | "eyes" | "mouth" | "face" | "subject";
+  classes?: string[];
+  edge?: "soft" | "hard" | null;
+  matte?: string | null;
+  rect?: { x: number; y: number; width: number; height: number } | null;
+  turn?: number;
+  settle?: boolean;
   align?: "eyes" | "subject" | "none";
   track?: boolean;
   blend?: "normal" | "screen" | "lighten" | "multiply" | "difference" | "luma";

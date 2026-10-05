@@ -85,21 +85,34 @@ class EffectSource(LabModel):
 
 
 class Effect(LabModel):
-    """A render-time effect on the song clock (ADR-0106).
+    """A render-time effect on the song clock (ADR-0106, ADR-0107).
 
-    ``overlay`` needs ``source``; ``lock_cut`` and ``zoom_through`` need ``at``,
-    the cut they cross, inside ``start``..``end``. ``align`` pins the overlay or
-    zoom to the picture's eyes (two eyes when shown) or main subject.
+    ``overlay``, ``fill`` and ``panel`` need ``source``; ``strips`` needs two or
+    more ``sources``; ``lock_cut`` and ``zoom_through`` need ``at``, the cut they
+    cross, inside ``start``..``end``. ``align`` pins an overlay or zoom to the
+    picture's eyes (two eyes when shown) or main subject. ``region`` limits an
+    overlay to a hard patch around its own eyes, mouth or face, or to its
+    segmented subject (``classes``, COCO names, default person); ``fill`` shows
+    its source inside the picture's own segmented subject; ``panel`` sets the
+    source into ``rect`` (output fractions), turned by ``turn`` degrees.
     """
 
     id: str = Field(min_length=1, max_length=100)
-    kind: Literal["overlay", "lock_cut", "zoom_through", "punch", "flash", "echo"]
+    kind: Literal["overlay", "lock_cut", "zoom_through", "punch", "flash", "echo", "fill", "panel", "strips"]
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     at: float | None = Field(default=None, ge=0)
     source: EffectSource | None = None
+    sources: list[EffectSource] = Field(default_factory=list, max_length=12)
     align: Literal["eyes", "subject", "none"] = "eyes"
     track: bool = True
+    region: Literal["full", "eyes", "mouth", "face", "subject"] = "full"
+    classes: list[str] = Field(default_factory=list, max_length=12)
+    edge: Literal["soft", "hard"] | None = None
+    matte: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    rect: Crop | None = None
+    turn: float = Field(default=0.0, ge=-45, le=45)
+    settle: bool = False
     blend: Literal["normal", "screen", "lighten", "multiply", "difference", "luma"] = "normal"
     opacity: float = Field(default=1.0, ge=0, le=1)
     attack: float = Field(default=0.0, ge=0, le=10)
@@ -114,10 +127,17 @@ class Effect(LabModel):
             raise ValueError("Effect end must follow its start")
         if self.end - self.start > 60:
             raise ValueError("An effect spans at most 60 seconds")
-        if self.kind == "overlay" and self.source is None:
-            raise ValueError("Overlay effects need a source window")
-        if self.kind != "overlay" and self.source is not None:
-            raise ValueError("Only overlay effects take a source window")
+        needs_source = ("overlay", "fill", "panel")
+        if self.kind in needs_source and self.source is None:
+            raise ValueError("Overlay, fill and panel effects need a source window")
+        if self.kind not in needs_source and self.source is not None:
+            raise ValueError("Only overlay, fill and panel effects take a source window")
+        if (self.kind == "strips") != bool(self.sources):
+            raise ValueError("Strips, and only strips, take a list of sources")
+        if self.kind == "strips" and len(self.sources) < 2:
+            raise ValueError("Strips need at least two sources")
+        if self.kind == "panel" and self.rect is None:
+            raise ValueError("Panels need a rectangle")
         if self.kind in ("lock_cut", "zoom_through"):
             if self.at is None or not self.start < self.at < self.end:
                 raise ValueError("Cut effects need a cut time inside their span")

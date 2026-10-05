@@ -132,6 +132,10 @@ Edits that work get saved as loose, editable presets.
    - Agent-built edits use them through the API; Mirrors v5 is the first
      review.
    - The harness and a UI wait for the owner's verdict.
+   - The owner found the eased settle novice and wanted hard crops, not
+     semi-transparent overlays. ADR-0107 adds hard feature patches, panels,
+     strips, and render-time masks (cutouts, mattes, fills); settle is
+     opt-in.
 
 ### Match cuts (ADR-0099, 2026-09-28)
 

@@ -115,9 +115,9 @@ def validate_sources(document, db, store, *, require_media=False, clip_ids=None,
     sources = [(clip, clip_ids) for clip in doc["clips"]]
     sources += [(clip, dialogue_ids) for clip in doc["dialogue_clips"]]
     if require_media:
-        sources += [({"id": effect["id"], "film_id": effect["source"]["film_id"],
-                      "source_end": effect["source"]["source_start"] + effect["end"] - effect["start"]}, None)
-                    for effect in doc["effects"] if effect["source"]]
+        sources += [({"id": effect["id"], "film_id": source["film_id"],
+                      "source_end": source["source_start"] + effect["end"] - effect["start"]}, None)
+                    for effect in doc["effects"] for source in ([effect["source"]] if effect["source"] else []) + effect["sources"]]
     for clip, selected_ids in sources:
         if selected_ids is not None and clip["id"] not in selected_ids:
             continue
@@ -394,7 +394,9 @@ def _apply_effects(directory, manifest, concat, config, db, progress, cancelled)
     except (OSError, ValueError, KeyError):
         index = None
     progress("Placing effects")
-    plan = effect_pass.build_plan(manifest, db, effect_pass.FeatureSource(index), progress, cancelled)
-    effect_pass.composite(base, composited, plan, sum(clip["frame_count"] for clip in manifest["clips"]), progress, cancelled)
+    segmenter = effect_pass.Segmenter()                       # loaded only if an effect needs masks
+    plan = effect_pass.build_plan(manifest, db, effect_pass.FeatureSource(index), progress, cancelled, segmenter)
+    effect_pass.composite(base, composited, plan, sum(clip["frame_count"] for clip in manifest["clips"]), progress, cancelled,
+                          segmenter)
     report = {"profile": EFFECTS_PROFILE, "indexed": index is not None, "skipped": plan.skipped, "unaligned": plan.unaligned}
     return ["-i", str(composited)], report

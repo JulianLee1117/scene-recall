@@ -417,14 +417,112 @@ def valid_mask(picture: Picture, width: int, height: int, feather: float = FEATH
 
 @dataclass
 class Layer:
-    """An overlay for a run of output frames."""
+    """An overlay for a run of output frames.
+
+    ``mask`` (static) or ``masks`` (per frame) say where it shows. They live in
+    the overlay picture's own pixels and move with its matrix, unless
+    ``mask_space`` is ``output``. ``base_classes`` replaces the mask with the
+    base picture's own segmented subject (a fill). ``matte`` paints the shown
+    area a flat colour (a silhouette).
+    """
 
     first: int
     frames: list[np.ndarray]
-    mask: np.ndarray
+    mask: np.ndarray | None
     matrices: list[np.ndarray]
     opacity: list[float]
     blend: str
+    masks: list[np.ndarray] | None = None
+    mask_space: str = "picture"
+    base_classes: list[str] | None = None
+    matte: tuple[float, float, float] | None = None
+
+
+class Segmenter:
+    """Per-frame instance masks (RF-DETR segmentation, the evidence model), loaded on first use."""
+
+    def __init__(self, threshold: float = 0.4):
+        self.threshold = threshold
+        self._model = None
+        self._names: dict[int, str] = {}
+
+    def _load(self):
+        if self._model is None:
+            import torch
+            from rfdetr import RFDETRSegSmall
+            from rfdetr.assets.coco_classes import COCO_CLASSES
+            self._model = RFDETRSegSmall()
+            if torch.cuda.is_available():
+                self._model.inference(compile=False, dtype=torch.float16)
+            self._names = {int(key): str(value) for key, value in COCO_CLASSES.items()}
+        return self._model
+
+    def mask(self, rgb: np.ndarray, classes: list[str]) -> np.ndarray:
+        """The union of the wanted classes' masks (H x W uint8, 0 or 255)."""
+        from PIL import Image
+        model = self._load()
+        wanted = {name.lower() for name in (classes or ["person"])}
+        detections = model.predict(Image.fromarray(rgb), threshold=self.threshold)
+        out = np.zeros(rgb.shape[:2], np.uint8)
+        masks = getattr(detections, "mask", None)
+        if masks is None or not len(detections):
+            return out
+        for class_id, instance in zip(detections.class_id, masks):
+            if self._names.get(int(class_id), "").lower() in wanted:
+                out[np.asarray(instance, bool)] = 255
+        return out
+
+
+def feature_patch(feature: Feature, region: str, width: int, height: int) -> np.ndarray:
+    """A hard rectangle around a face feature (eyes strip, mouth or face), in the picture's pixels."""
+    centre, span = feature.centre(), feature.size
+    if len(feature.points) == 2:
+        across = feature.points[1] - feature.points[0]
+        across = across / max(np.hypot(*across), 1e-6)
+        if across[0] < 0:
+            across = -across
+    else:
+        across = np.array([1.0, 0.0])
+    down = np.array([-across[1], across[0]])
+    if region == "eyes":
+        middle, half_w, half_h = centre, 1.35 * span, 0.42 * span
+    elif region == "mouth":
+        middle, half_w, half_h = centre + down * 1.15 * span, 0.85 * span, 0.42 * span
+    else:                                                                       # face
+        middle, half_w, half_h = centre + down * 0.55 * span, 1.35 * span, 1.6 * span
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    dx, dy = xx - middle[0], yy - middle[1]
+    inside = (np.abs(dx * across[0] + dy * across[1]) <= half_w) & (np.abs(dx * down[0] + dy * down[1]) <= half_h)
+    return inside.astype(np.uint8) * 255
+
+
+def rect_mask(rect: dict, turn: float, width: int, height: int) -> np.ndarray:
+    """A hard (optionally turned) rectangle given in output fractions."""
+    cx, cy = (rect["x"] + rect["width"] / 2) * width, (rect["y"] + rect["height"] / 2) * height
+    half_w, half_h = rect["width"] * width / 2, rect["height"] * height / 2
+    angle = math.radians(turn)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    dx, dy = xx - cx, yy - cy
+    u = dx * math.cos(angle) + dy * math.sin(angle)
+    v = -dx * math.sin(angle) + dy * math.cos(angle)
+    return ((np.abs(u) <= half_w) & (np.abs(v) <= half_h)).astype(np.uint8) * 255
+
+
+def panel_matrix(rect: dict, turn: float, width: int, height: int) -> np.ndarray:
+    """Takes the whole output-sized picture into ``rect``, covering it, turned about its centre."""
+    rw, rh = rect["width"] * width, rect["height"] * height
+    scale = max(rw / width, rh / height)
+    angle = math.radians(turn)
+    rotation = np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]]) * scale
+    target = np.array([(rect["x"] + rect["width"] / 2) * width, (rect["y"] + rect["height"] / 2) * height])
+    shift = target - rotation @ np.array([width / 2, height / 2])
+    return np.hstack([rotation, shift[:, None]])
+
+
+def hex_colour(value: str | None) -> tuple[float, float, float] | None:
+    if not value:
+        return None
+    return tuple(int(value[i:i + 2], 16) / 255 for i in (1, 3, 5))
 
 
 @dataclass
@@ -455,8 +553,9 @@ def _film_path(db: Any, film_id: str, cache: dict[str, tuple[str, float]]) -> tu
 
 
 def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Callable[[str], None] = lambda _: None,
-               cancelled: Callable[[], bool] = lambda: False) -> Plan:
+               cancelled: Callable[[], bool] = lambda: False, segmenter: Segmenter | None = None) -> Plan:
     """Resolve every effect of a render manifest into per-frame work."""
+    segmenter = segmenter or Segmenter()
     fps, width, height = manifest["fps"], manifest["width"], manifest["height"]
     plan = Plan(width, height, fps)
     films: dict[str, tuple[str, float]] = {}
@@ -531,19 +630,25 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
                 scale = 1 + (effect.get("zoom", 1.3) - 1) * (1 - ease(progress_value, "out"))
                 plan.base[f] = compose(plan.base.get(f, np.eye(2, 3)), scale_about(point, scale))
             continue
-        if effect["kind"] == "overlay":
+        if effect["kind"] in ("overlay", "fill", "panel"):
             source = effect["source"]
             path, aspect = _film_path(db, source["film_id"], films)
             picture = Picture(source["film_id"], source.get("unit_id"), path, aspect, source.get("crop"))
             count = b - a
             frames = read_frames(picture, source["source_start"], count, fps, width, height)
-            matrices, opacity, fixed = [], [], None
-            aligned = kind == "none"
+            region = effect.get("region", "full") if effect["kind"] == "overlay" else "full"
+            soft_default = region == "full" and effect["kind"] == "overlay"
+            hard = (effect.get("edge") or ("soft" if soft_default else "hard")) == "hard"
+            matrices, opacity, fixed, masks = [], [], None, []
+            aligned = kind == "none" or effect["kind"] == "panel"
             for i in range(count):
                 f = a + i
                 t = effect["start"] + i / fps
                 matrix = np.eye(2, 3)
-                if kind != "none" and (effect.get("track", True) or fixed is None):
+                moving = None
+                if effect["kind"] == "panel":
+                    matrix = panel_matrix(effect["rect"], effect.get("turn", 0.0), width, height)
+                elif kind != "none" and (effect.get("track", True) or fixed is None):
                     moving = picture.feature(features, source["source_start"] + i / fps, kind, width, height)
                     target = base_feature(f, kind)
                     if moving is not None and target is not None:
@@ -552,12 +657,46 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
                     fixed = matrix
                 elif fixed is not None:
                     matrix = fixed
+                if region in ("eyes", "mouth", "face"):
+                    own = moving if moving is not None else picture.feature(features, source["source_start"] + i / fps,
+                                                                             "eyes", width, height)
+                    masks.append(feature_patch(own, region, width, height) if own is not None
+                                 else np.zeros((height, width), np.uint8))
+                elif region == "subject":
+                    masks.append(segmenter.mask(frames[i], effect.get("classes") or ["person"]))
                 matrices.append(matrix)
                 opacity.append(effect.get("opacity", 1.0) *
                                envelope(t, effect["start"], effect["end"], effect.get("attack", 0.0), effect.get("release", 0.0)))
             if not aligned:
                 plan.unaligned.append(label)
-            plan.layers.append(Layer(a, frames, valid_mask(picture, width, height), matrices, opacity, effect.get("blend", "normal")))
+            matte = hex_colour(effect.get("matte"))
+            if effect["kind"] == "panel":
+                plan.layers.append(Layer(a, frames, rect_mask(effect["rect"], effect.get("turn", 0.0), width, height), matrices,
+                                         opacity, effect.get("blend", "normal"), mask_space="output", matte=matte))
+            elif effect["kind"] == "fill":
+                plan.layers.append(Layer(a, frames, None, matrices, opacity, effect.get("blend", "normal"),
+                                         base_classes=effect.get("classes") or ["person"], matte=matte))
+            else:
+                frame_mask = valid_mask(picture, width, height, 0.0 if hard else FEATHER)
+                if masks:
+                    masks = [np.minimum(m, frame_mask) for m in masks]
+                plan.layers.append(Layer(a, frames, frame_mask if not masks else None, matrices, opacity,
+                                         effect.get("blend", "normal"), masks=masks or None, matte=matte))
+            continue
+        if effect["kind"] == "strips":
+            count, sources = b - a, effect["sources"]
+            band = width / len(sources)
+            for k, source in enumerate(sources):
+                path, aspect = _film_path(db, source["film_id"], films)
+                picture = Picture(source["film_id"], source.get("unit_id"), path, aspect, source.get("crop"))
+                frames = read_frames(picture, source["source_start"], count, fps, width, height)
+                shift = np.array([[1.0, 0.0, (k + 0.5) * band - width / 2], [0.0, 1.0, 0.0]])
+                strip = {"x": k / len(sources), "y": 0.0, "width": 1 / len(sources), "height": 1.0}
+                opacity = [effect.get("opacity", 1.0) * envelope(effect["start"] + i / fps, effect["start"], effect["end"],
+                                                                 effect.get("attack", 0.0), effect.get("release", 0.0))
+                           for i in range(count)]
+                plan.layers.append(Layer(a, frames, rect_mask(strip, 0.0, width, height), [shift] * count, opacity,
+                                         effect.get("blend", "normal"), mask_space="output"))
             continue
         # Cut effects: find the cut nearest ``at``.
         cut_frame = frame_of(effect["at"])
@@ -625,11 +764,15 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
         in_feature = incoming.feature(features, in_start, kind, width, height)
         for i in range(after):
             f = cut + i
-            weight = ease(i / max(after - 1, 1), "out")
-            base_matrix = blend_matrices(settle, np.eye(2, 3), weight)
-            anchor = base_matrix[:, :2] @ (in_feature.centre() if in_feature is not None else centre) + base_matrix[:, 2]
-            base_matrix = cover(base_matrix, in_box, anchor)
-            plan.base[f] = compose(plan.base.get(f, np.eye(2, 3)), base_matrix)
+            if effect.get("settle", False):
+                # The incoming shot starts where the outgoing feature was and eases back to its own framing.
+                weight = ease(i / max(after - 1, 1), "out")
+                base_matrix = blend_matrices(settle, np.eye(2, 3), weight)
+                anchor = base_matrix[:, :2] @ (in_feature.centre() if in_feature is not None else centre) + base_matrix[:, 2]
+                base_matrix = cover(base_matrix, in_box, anchor)
+                plan.base[f] = compose(plan.base.get(f, np.eye(2, 3)), base_matrix)
+            else:
+                base_matrix = np.eye(2, 3)                    # no settle: the incoming shot keeps its own framing
             moving = outgoing.feature(features, out_end + i / fps, kind, width, height)
             target_raw = incoming.feature(features, in_start + i / fps, kind, width, height)
             if moving is None or target_raw is None:
@@ -663,8 +806,9 @@ def _unit_bound(features: FeatureSource, picture: Picture, time: float, start: b
 # -- compositing -----------------------------------------------------------------
 
 def composite(source: Path, target: Path, plan: Plan, expected_frames: int, progress: Callable[[str], None],
-              cancelled: Callable[[], bool] = lambda: False) -> None:
+              cancelled: Callable[[], bool] = lambda: False, segmenter: Segmenter | None = None) -> None:
     """Re-encode the cut sequence with the plan applied (frames without effects pass through)."""
+    segmenter = segmenter or Segmenter()
     import av
     from fractions import Fraction
     touched = plan.touched()
@@ -690,12 +834,25 @@ def composite(source: Path, target: Path, plan: Plan, expected_frames: int, prog
                 work = picture.astype(np.float32) / 255
                 if index in plan.base:
                     work = warp(work, plan.base[index], width, height).astype(np.float32) / 255
+                base_masks: dict[tuple[str, ...], np.ndarray] = {}
                 for layer, i in layers_at.get(index, []):
                     opacity = layer.opacity[i]
                     if opacity <= 0.001:
                         continue
                     top = warp(layer.frames[i], layer.matrices[i], width, height).astype(np.float32) / 255
-                    alpha = warp(layer.mask, layer.matrices[i], width, height, order=1).astype(np.float32)[..., None] / 255
+                    if layer.base_classes is not None:
+                        key = tuple(layer.base_classes)
+                        if key not in base_masks:
+                            base_masks[key] = segmenter.mask(np.clip(work * 255 + 0.5, 0, 255).astype(np.uint8), list(key))
+                        alpha = base_masks[key].astype(np.float32)[..., None] / 255
+                    else:
+                        mask = layer.masks[i] if layer.masks is not None else layer.mask
+                        if layer.mask_space == "output":
+                            alpha = mask.astype(np.float32)[..., None] / 255
+                        else:
+                            alpha = warp(mask, layer.matrices[i], width, height, order=1).astype(np.float32)[..., None] / 255
+                    if layer.matte is not None:
+                        top = np.broadcast_to(np.array(layer.matte, np.float32), top.shape)
                     work = blend(work, top, alpha * opacity, layer.blend)
                 if index in plan.flash:
                     work = work + (1 - work) * plan.flash[index]

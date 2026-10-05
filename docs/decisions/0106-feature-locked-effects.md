@@ -4,7 +4,7 @@
 - Date: 2026-10-05
 - Extends: ADR-0099 (moment index), ADR-0100 (renders are a cache)
 - Leaves frozen: the projectless Transitions Lab (ADR-0070 to ADR-0076)
-- Superseded by: None
+- Superseded by: None (amended by ADR-0107: settle is opt-in, masks landed)
 
 ## Context
 

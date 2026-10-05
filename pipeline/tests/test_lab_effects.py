@@ -225,3 +225,63 @@ def test_a_move_too_far_to_cover_is_weakened_instead_of_leaving_black():
     corners = np.array([[0, 0], [1280, 0], [0, 720], [1280, 720]], float) @ inverse[:, :2].T + inverse[:, 2]
     assert corners.min() >= -0.5 and corners[:, 0].max() <= 1280.5 and corners[:, 1].max() <= 720.5
     assert math.hypot(covered[0, 0], covered[1, 0]) <= effects.COVER_LIMIT + 1e-6
+
+
+def test_feature_patches_sit_on_the_face_and_panels_fill_their_rectangle():
+    eyes = effects.Feature(np.array([[600.0, 300.0], [680.0, 300.0]]), 80.0)
+    strip = effects.feature_patch(eyes, "eyes", 1280, 720)
+    assert strip[300, 640] == 255 and strip[300, 560] == 255 and strip[300, 500] == 0 and strip[380, 640] == 0
+    mouth = effects.feature_patch(eyes, "mouth", 1280, 720)
+    assert mouth[392, 640] == 255 and mouth[300, 640] == 0
+    rect = {"x": 0.5, "y": 0.1, "width": 0.4, "height": 0.4}
+    matrix = effects.panel_matrix(rect, 0.0, 1280, 720)
+    assert np.allclose(matrix[:, :2] @ np.array([640.0, 360.0]) + matrix[:, 2], [(0.5 + 0.2) * 1280, (0.1 + 0.2) * 720])
+    mask = effects.rect_mask(rect, 0.0, 1280, 720)
+    assert mask[216, 896] == 255 and mask[216, 600] == 0
+    turned = effects.rect_mask(rect, 20.0, 1280, 720)
+    assert turned[216, 896] == 255 and (turned != mask).any()
+
+
+def test_real_render_places_panels_strips_fills_and_cutouts(config, store, db, tmp_path, monkeypatch):
+    video, audio = _media(tmp_path)
+    track = import_track(store, audio, "Music.wav")
+    db.open_table("films").add([{"film_id": "film", "title": "Film", "path": str(video), "duration": 3., "fps": 30.}])
+
+    def left_half(self, rgb, classes):                     # a stand-in segmenter: the subject is the left half
+        mask = np.zeros(rgb.shape[:2], np.uint8)
+        mask[:, : rgb.shape[1] // 2] = 255
+        return mask
+
+    monkeypatch.setattr(effects.Segmenter, "mask", left_half)
+    project = store.create_project("Reel", "music-sketch")
+    doc = {**project["document"], "track": {key: track[key] for key in ("id", "name", "duration")},
+           "passage": {"start": .5, "end": 1.5},
+           "clips": [{"id": "a", "film_id": "film", "source_start": .25, "source_end": .75},
+                     {"id": "b", "film_id": "film", "source_start": 1.25, "source_end": 1.75}]}
+    doc["effects"] = [
+        {"id": "panel", "kind": "panel", "start": .5, "end": .7, "source": {"film_id": "film", "source_start": 1.2},
+         "rect": {"x": .6, "y": .1, "width": .3, "height": .3}},
+        {"id": "strips", "kind": "strips", "start": .8, "end": .95,
+         "sources": [{"film_id": "film", "source_start": .3}, {"film_id": "film", "source_start": 1.3}]},
+        {"id": "fill", "kind": "fill", "start": 1.1, "end": 1.3, "source": {"film_id": "film", "source_start": .3}, "align": "none"},
+        {"id": "cutout", "kind": "overlay", "start": 1.35, "end": 1.45, "source": {"film_id": "film", "source_start": .3},
+         "align": "none", "region": "subject", "matte": "#ffffff"},
+    ]
+    project = store.update_project(project["id"], 1, doc)
+    store.enqueue("render", project["id"], 2)
+    job = store.claim()
+    render_reel(job, config, db, store, lambda _: None)
+    output = config.paths.assets_dir / "lab" / "renders" / job["id"] / "output.mp4"
+    from PIL import Image
+
+    def pixel(frame, x, y=360):
+        raw = run_process(["ffmpeg", "-v", "error", "-i", str(output), "-vf", f"select=eq(n\\,{frame})", "-frames:v", "1",
+                           "-f", "image2pipe", "-vcodec", "png", "pipe:1"])
+        return Image.open(BytesIO(raw)).convert("RGB").getpixel((x, y))
+
+    assert pixel(2, 960, 200)[1] > 100 and pixel(2, 960, 200)[0] < 40      # the green panel, inside its rectangle
+    assert pixel(2, 300)[0] > 200                                        # the red picture around it
+    assert pixel(9, 100)[0] > 200 and pixel(9, 500)[2] > 200             # left strip: the red/blue picture, centred on it
+    assert pixel(9, 900)[1] > 100 and pixel(9, 900)[0] < 40              # right strip: green
+    assert pixel(16, 100)[0] > 200 and pixel(16, 900)[1] > 100           # fill: red/blue inside the left-half subject, green outside
+    assert min(pixel(21, 100)) > 230 and pixel(21, 900)[1] > 100         # white matte cutout on the left half only
