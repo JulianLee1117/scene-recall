@@ -5,12 +5,19 @@ act's fame target). Candidates are merged per act by best rank, then joined
 with compiled shot evidence: action peak, measured camera segments, main
 subject at the shot's start and end, motion, hidden cuts, fame/craft and scene.
 Shots without evidence stay usable with neutral values.
+
+Shots that would read wrong under music never enter a pool: burned-in
+captions, subtitles, credits or title cards (the unit's recognized on-screen
+text, ``reads_as_text``), and shots the understanding pass describes as a
+dissolve or superimposition that the cut detector did not split
+(``describes_dissolve``).
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
@@ -24,6 +31,9 @@ _SUBJECT_CLASSES = {"person", "car", "motorcycle", "bicycle", "bus", "truck", "t
                     "dog", "cat", "bird", "cow", "sheep", "elephant", "bear", "zebra", "giraffe"}
 _MIN_SUBJECT_SIZE = 0.02
 PRESET_FOR_FAME = {"anchor": "famous", "fresh": "gems", "any": "balanced"}
+_WORD = re.compile(r"[A-Za-z][A-Za-z'’-]*")
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")   # kana, CJK ideographs, hangul
+_DISSOLVE = re.compile(r"\b(dissolv\w*|cross-?fad\w*|superimpos\w*|double exposure|overlapping images|fades? (?:in)?to (?!black|darkness|white)\w|fades? from)", re.I)
 
 
 @dataclass
@@ -62,6 +72,7 @@ class Candidate:
     aspect: float | None = None             # the film's display aspect ratio (width / height)
     grade: tuple[float, float, float] | None = None   # measured brightness, saturation, warmth
     cast_rank: int | None = None            # position in its act's cast (``cast``), None when not cast
+    on_screen_text: str = ""                # recognized text in the picture (subtitles, titles, signs)
     cast_peak: bool = False                 # cast to land the act's biggest musical moment
 
     @property
@@ -84,6 +95,34 @@ class Candidate:
                 "t_end": round(self.t_end, 3), "action": self.action or self.caption[:160],
                 "peak_time": self.peak_time, "camera": self.camera if self.camera_reliability >= 0.5 else None,
                 "fame": round(self.fame, 2), "craft": round(self.craft, 2), "iconic": self.iconic, "gem": self.gem}
+
+
+def reads_as_text(text: str) -> bool:
+    """On-screen text that would read as a caption over music: subtitles, credits, title cards, long signs.
+
+    Short signs (TAXI, EXIT, a neon word) stay; sentence-like or multi-word text, all-caps title lines of
+    three or more words and runs of CJK characters do not.
+    """
+    text = (text or "").strip()
+    if not text:
+        return False
+    if len(_CJK.findall(text)) >= 4:
+        return True
+    words = _WORD.findall(text)
+    if not words:
+        return False
+    lower = any(word != word.upper() for word in words)
+    sentence = len(words) >= 2 or text[-1:] in "!?.…"
+    return (lower and sentence) or (len(words) >= 3 and not lower)
+
+
+def describes_dissolve(candidate: "Candidate") -> bool:
+    """The understanding pass saw a dissolve or superimposition inside this unit."""
+    return bool(_DISSOLVE.search(candidate.action or ""))
+
+
+def usable(candidate: "Candidate") -> bool:
+    return not reads_as_text(candidate.on_screen_text) and not describes_dissolve(candidate)
 
 
 def _center(box: Any) -> tuple[float, float] | None:
@@ -164,7 +203,7 @@ def load_evidence(db: Any, candidates: dict[str, Candidate]) -> int:
 
 
 def load_vectors(db: Any, candidates: dict[str, Candidate]) -> int:
-    """Attach unit-normalized image embeddings (visual variety between neighbouring shots)."""
+    """Attach unit-normalized image embeddings (visual variety between neighbouring shots) and on-screen text."""
     import numpy as np
 
     from pipeline.index.writer import table_names
@@ -176,11 +215,14 @@ def load_vectors(db: Any, candidates: dict[str, Candidate]) -> int:
     if "img_vec" not in table.schema.names:
         return 0
     identities = list(candidates)
+    columns = ["unit_id", "img_vec"] + (["on_screen_text"] if "on_screen_text" in table.schema.names else [])
     found = 0
     for offset in range(0, len(identities), 256):
         batch = tuple(identities[offset:offset + 256])
-        for row in table.search().where(_any_of("unit_id", batch)).select(["unit_id", "img_vec"]).limit(len(batch) + 1).to_list():
+        for row in table.search().where(_any_of("unit_id", batch)).select(columns).limit(len(batch) + 1).to_list():
             candidate, vector = candidates.get(row["unit_id"]), row.get("img_vec")
+            if candidate is not None:
+                candidate.on_screen_text = str(row.get("on_screen_text") or "")
             if candidate is None or vector is None:
                 continue
             array = np.asarray(vector, np.float32)
@@ -239,10 +281,11 @@ def gather(db: Any, config: Any, acts: list[dict[str, Any]], *, film_ids: list[s
             if query not in candidate.queries:
                 candidate.queries.append(query)
     hydrate(db, everything)
+    unusable = {unit_id for unit_id, candidate in everything.items() if not usable(candidate)}
     # Best rank, plus a little for each other query of the act that also found the shot.
     return [sorted((replace(everything[unit_id], relevance=max(values) + 0.15 * (sum(values) - max(values)),
                             rank=round((_RRF_K + 1) / max(values) - _RRF_K))
-                    for unit_id, values in scores.items()),
+                    for unit_id, values in scores.items() if unit_id not in unusable),
                    key=lambda item: (-item.relevance, item.unit_id))
             for scores in relevance]
 

@@ -23,7 +23,7 @@ from pydantic import Field
 from pipeline.lab.editorial_context import editorial_context
 from pipeline.lab.harness import assemble as asm
 from pipeline.lab.harness.music_map import MusicMap
-from pipeline.lab.harness.pools import Candidate, hydrate
+from pipeline.lab.harness.pools import Candidate, hydrate, usable
 from pipeline.lab.models import LabModel
 
 CAST_CONTRACT = "harness-cast-v1"
@@ -113,7 +113,7 @@ def catalog(db: Any, config: Any, film_ids: list[str], exclude: set[str] = froze
                                 relevance=1.0, rank=1)
              for unit_id, row in rows.items()}
     hydrate(db, found)
-    return list(found.values())
+    return [candidate for candidate in found.values() if usable(candidate)]
 
 
 def cast_payload(document: dict[str, Any], planned: dict[str, Any], acts: list[asm.Act], music: MusicMap,

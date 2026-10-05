@@ -668,7 +668,12 @@ meaning; the edit itself is measured and optimized.
 Footage control) is also the ranking preset of every editor search in v1 and v2.
 - **Pools**: each act's queries run through `search` with the preset matching the
   fame target. Candidates carry compiled shot evidence and a normalized image
-  embedding; the previous edit's shots are excluded.
+  embedding; the previous edit's shots are excluded. Shots that would read
+  wrong under music never enter a pool:
+  - recognized on-screen text that reads as a caption (subtitles, credits,
+    title cards, multi-word signs; short signs stay);
+  - units the understanding pass describes as a dissolve or superimposition
+    that the cut detector did not split.
 - **Casting** (`harness-cast-v1`): one cached planner request reads each act's
   top 16 candidates (plus the catalog) and casts the shots that carry the act,
   in order, with the one that lands its biggest musical moment. A shot is cast

@@ -454,3 +454,14 @@ def test_treatment_chooses_settings_only_when_asked(monkeypatch, config):
     assert calls == ["profile", "treatment", "treatment"]                       # the profile is cached per track and excerpt
     payload = concept_payload(document, m, [], None, chosen)
     assert payload["treatment"]["style"] == "Rave memory" and payload["song_profile"]["genre"] == "UK rave"
+
+
+def test_pools_leave_out_captioned_and_dissolving_shots():
+    from pipeline.lab.harness.pools import describes_dissolve, reads_as_text, usable
+    assert reads_as_text("Long live the fighters!") and reads_as_text("Witch!") and reads_as_text("WARNER BROS. PICTURES")
+    assert reads_as_text("《居場所を探し続けて》")
+    assert not reads_as_text("TAXI") and not reads_as_text("Hotel") and not reads_as_text("")
+    assert describes_dissolve(_candidate("d", action="Dissolve between apartment scenes"))
+    assert not describes_dissolve(_candidate("f", action="The scene fades to black"))
+    assert not usable(_candidate("s", on_screen_text="I need your guidance with\nthe two foreigners"))
+    assert usable(_candidate("ok", action="Paul walks the ridge", on_screen_text="EXIT"))
