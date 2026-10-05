@@ -372,7 +372,7 @@ export function useLabProject(experiment: ExperimentId) {
         }
         const end = Math.min(30, track.duration);
         change((current) => ({ ...current, track, passage: { start: 0, end },
-          clips: [], dialogue_clips: [], analysis: null, rhythm: null, music_timeline: null, direction_plan: null,
+          clips: [], dialogue_clips: [], effects: [], analysis: null, rhythm: null, music_timeline: null, direction_plan: null,
           song_context: null, visual_plan: null,
           editor_direction: { ...effectiveEditorDirection(current), ranges: [] },
           audio_fade_in_seconds: Math.min(current.audio_fade_in_seconds ?? 0, end),

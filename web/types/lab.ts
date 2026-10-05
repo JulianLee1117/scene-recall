@@ -51,6 +51,23 @@ export interface LabDialogueClip {
   duck_attack_seconds?: number;
   duck_release_seconds?: number;
 }
+export interface LabEffect {
+  id: string;
+  kind: "overlay" | "lock_cut" | "zoom_through" | "punch" | "flash" | "echo";
+  start: number;
+  end: number;
+  at?: number | null;
+  source?: { film_id: string; unit_id?: string | null; source_start: number; crop?: LabClip["crop"] } | null;
+  align?: "eyes" | "subject" | "none";
+  track?: boolean;
+  blend?: "normal" | "screen" | "lighten" | "multiply" | "difference" | "luma";
+  opacity?: number;
+  attack?: number;
+  release?: number;
+  zoom?: number;
+  strength?: number;
+  title?: string;
+}
 export interface LabDocument {
   schema_version: number;
   track: { id: string; name: string; duration: number } | null;
@@ -66,6 +83,8 @@ export interface LabDocument {
   audio_fade_out_seconds?: number;
   music_gain_db?: number;
   dialogue_clips?: LabDialogueClip[];
+  /** Render-time effects on the song clock (ADR-0106); placed through the API, shown in renders only. */
+  effects?: LabEffect[];
   music_timeline?: MusicPlan | null;
   direction_plan?: Record<string, unknown> | null;
   planner_settings?: PlannerSettings;

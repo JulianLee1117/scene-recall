@@ -167,3 +167,4 @@ The accepted boundary or behavior.
 | [0103](0103-pacing-is-a-shape.md) | Accepted; amended by 0104 | Pacing is a shape: free section paces, flash and hold moves keyed to measured rises and quiet spans; harness v2 is the default editor |
 | [0104](0104-casting-and-purposeful-pacing.md) | Accepted | Casting: the planner chooses each act's moments in order with a peak, from the act's candidates and a scoped film's key moments; pace floor one step below the setting; flashes only on request, on a steady pulse |
 | [0105](0105-song-profile-and-treatment.md) | Accepted | Know the song: a profile from the track name and world knowledge, then a treatment that chooses the edit's style (optionally its pace, footage and match cuts) |
+| [0106](0106-feature-locked-effects.md) | Accepted | Render-time effects on the song clock: overlays pinned eye on eye from the moment index, eye-locked dissolves, zoom-through, punch-in, flash and echo; Transitions Lab stays frozen |

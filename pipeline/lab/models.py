@@ -75,6 +75,55 @@ class ClipSelection(LabModel):
         return self
 
 
+class EffectSource(LabModel):
+    """The source window an overlay effect plays (from ``source_start``, for the effect's length)."""
+
+    film_id: str = Field(min_length=1, max_length=200)
+    unit_id: str | None = Field(default=None, max_length=240)
+    source_start: float = Field(ge=0)
+    crop: Crop | None = None
+
+
+class Effect(LabModel):
+    """A render-time effect on the song clock (ADR-0106).
+
+    ``overlay`` needs ``source``; ``lock_cut`` and ``zoom_through`` need ``at``,
+    the cut they cross, inside ``start``..``end``. ``align`` pins the overlay or
+    zoom to the picture's eyes (two eyes when shown) or main subject.
+    """
+
+    id: str = Field(min_length=1, max_length=100)
+    kind: Literal["overlay", "lock_cut", "zoom_through", "punch", "flash", "echo"]
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    at: float | None = Field(default=None, ge=0)
+    source: EffectSource | None = None
+    align: Literal["eyes", "subject", "none"] = "eyes"
+    track: bool = True
+    blend: Literal["normal", "screen", "lighten", "multiply", "difference", "luma"] = "normal"
+    opacity: float = Field(default=1.0, ge=0, le=1)
+    attack: float = Field(default=0.0, ge=0, le=10)
+    release: float = Field(default=0.0, ge=0, le=10)
+    zoom: float = Field(default=1.3, ge=1, le=8)
+    strength: float = Field(default=0.5, ge=0, le=0.95)
+    title: str = Field(default="", max_length=300)
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if self.end <= self.start:
+            raise ValueError("Effect end must follow its start")
+        if self.end - self.start > 60:
+            raise ValueError("An effect spans at most 60 seconds")
+        if self.kind == "overlay" and self.source is None:
+            raise ValueError("Overlay effects need a source window")
+        if self.kind != "overlay" and self.source is not None:
+            raise ValueError("Only overlay effects take a source window")
+        if self.kind in ("lock_cut", "zoom_through"):
+            if self.at is None or not self.start < self.at < self.end:
+                raise ValueError("Cut effects need a cut time inside their span")
+        return self
+
+
 class MusicMatchEvidence(LabModel):
     rank: int = Field(ge=1)
     matched_text: str = Field(default="", max_length=1500)
@@ -320,6 +369,7 @@ class ProjectDocument(LabModel):
     audio_fade_out_seconds: float = Field(default=0, ge=0, le=90)
     music_gain_db: float = Field(default=0, ge=-60, le=0)
     dialogue_clips: list[DialogueClip] = Field(default_factory=list, max_length=32)
+    effects: list[Effect] = Field(default_factory=list, max_length=600)
     brief: str = Field(default="", max_length=20000)
     planner_settings: PlannerSettings = Field(default_factory=PlannerSettings)
     song_context: SongContext | None = None
@@ -348,6 +398,9 @@ class ProjectDocument(LabModel):
         for clip in dialogue:
             if clip.start < self.passage.start or clip.start + clip.source_end - clip.source_start > self.passage.end + .000001:
                 raise ValueError("Dialogue clips must fit inside the selected passage")
+        if len({effect.id for effect in self.effects}) != len(self.effects):
+            raise ValueError("Effect IDs must be unique")
+        # Effects outside the passage stay saved and are skipped at render, so passage edits never block a save.
         if self.track and self.passage.end > self.track.duration + 0.001:
             raise ValueError("Passage extends beyond the imported track")
         if self.editor_direction and self.editor_direction.ranges:

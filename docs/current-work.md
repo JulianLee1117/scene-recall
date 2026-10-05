@@ -126,6 +126,12 @@ Edits that work get saved as loose, editable presets.
    - a hidden-cut guard.
 4. Presets from edits the owner liked; the UI waits until the owner is back at
    the PC.
+5. Render effects (ADR-0106, landed 2026-10-05, at the owner's request).
+   - Feature-locked overlays and cut effects on the song clock: eye-on-eye
+     overlays, eye-locked dissolves, zoom-through, punch-in, flash and echo.
+   - Agent-built edits use them through the API; Mirrors v5 is the first
+     review.
+   - The harness and a UI wait for the owner's verdict.
 
 ### Match cuts (ADR-0099, 2026-09-28)
 

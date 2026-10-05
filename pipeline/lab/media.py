@@ -18,6 +18,7 @@ from lancedb.expr import col, lit
 from pipeline.index.writer import table_names
 from pipeline.lab.models import ProjectDocument
 from pipeline.lab.audio_mix import AUDIO_MIX_PROFILE, audio_filter_graph, music_manifest
+from pipeline.lab.effects import EFFECTS_PROFILE
 
 
 DISPLAY_PROFILE = "square-pixel-display-aspect-fit-v1"
@@ -113,6 +114,10 @@ def validate_sources(document, db, store, *, require_media=False, clip_ids=None,
     films = {}
     sources = [(clip, clip_ids) for clip in doc["clips"]]
     sources += [(clip, dialogue_ids) for clip in doc["dialogue_clips"]]
+    if require_media:
+        sources += [({"id": effect["id"], "film_id": effect["source"]["film_id"],
+                      "source_end": effect["source"]["source_start"] + effect["end"] - effect["start"]}, None)
+                    for effect in doc["effects"] if effect["source"]]
     for clip, selected_ids in sources:
         if selected_ids is not None and clip["id"] not in selected_ids:
             continue
@@ -203,7 +208,10 @@ def render_manifest(document, db, store, *, mode="preview", experiment_id="music
         track = store.get_track(doc["track"]["id"])
     landscape = (1280, 720) if mode == "preview" else (1920, 1080)
     width, height = landscape if doc["aspect_ratio"] == "16:9" else landscape[::-1]
-    return {
+    # Documents without effects keep their exact manifest (and render identity); ADR-0106.
+    effects = {"effects": doc["effects"], "effects_profile": EFFECTS_PROFILE} \
+        if experiment_id == "music-sketch" and doc["effects"] else {}
+    return {**effects,
         "schema_version": 1, "profile": MATCH_BOUNDARY_PROFILE if experiment_id == "visual-rhymes" else "decoded-reel-shared-voice-mix-v6", "fps": fps,
         "display_profile": DISPLAY_PROFILE,
         "width": width, "height": height, "duration": sum(counts) / fps,
@@ -227,7 +235,8 @@ def render_from_manifest(identity, manifest, config, db, store, progress: Callab
         raise ValueError("Invalid render identity")
     directory = (config.paths.assets_dir / "lab" / "renders" / identity).absolute()
     intermediates = [directory / f"clip-{index:03}.mp4" for index in range(len(manifest["clips"]))]
-    intermediates += [directory / "clips.txt", directory / "audio-filters.txt", directory / "output.partial.mp4"]
+    intermediates += [directory / "clips.txt", directory / "audio-filters.txt", directory / "output.partial.mp4",
+                      directory / "effects-base.mp4", directory / "effects.mp4"]
     _check_render_directory(directory)
     for path in [*intermediates, directory / "manifest.json", directory / "dialogue-assets.json", directory / "output.mp4"]:
         _check_render_file(path)
@@ -338,7 +347,11 @@ def _render_in_directory(directory, manifest, db, store, progress, cancelled, co
     concat = directory / "clips.txt"
     concat.write_text("\n".join(f"file 'clip-{index:03}.mp4'" for index in range(len(manifest["clips"]))) + "\n", encoding="utf-8")
     temporary = directory / "output.partial.mp4"
-    args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-f", "concat", "-safe", "1", "-i", str(concat)]
+    picture = ["-f", "concat", "-safe", "1", "-i", str(concat)]
+    effects_report = None
+    if manifest.get("effects"):
+        picture, effects_report = _apply_effects(directory, manifest, concat, config, db, progress, cancelled)
+    args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", *picture]
     music = manifest["music"]
     if music:
         track = store.get_track(music["track_id"])
@@ -365,4 +378,23 @@ def _render_in_directory(directory, manifest, db, store, progress, cancelled, co
     if dialogue_assets:
         (directory / "dialogue-assets.json").write_text(json.dumps(dialogue_assets, indent=2), encoding="utf-8")
     temporary.replace(output)
-    return {"manifest": manifest}
+    return {"manifest": manifest, **({"effects": effects_report} if effects_report is not None else {})}
+
+
+def _apply_effects(directory, manifest, concat, config, db, progress, cancelled):
+    """Join the cut clips, composite the document's effects over them and return the new picture input."""
+    from pipeline.lab import effects as effect_pass
+    base, composited = directory / "effects-base.mp4", directory / "effects.mp4"
+    run_process(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-f", "concat", "-safe", "1",
+                 "-i", str(concat), "-map", "0:v:0", "-an", "-c:v", "copy", str(base)], cancelled=cancelled)
+    index = None
+    try:
+        from pipeline.matching.moments import index as moment_index
+        index = moment_index.load(config)
+    except (OSError, ValueError, KeyError):
+        index = None
+    progress("Placing effects")
+    plan = effect_pass.build_plan(manifest, db, effect_pass.FeatureSource(index), progress, cancelled)
+    effect_pass.composite(base, composited, plan, sum(clip["frame_count"] for clip in manifest["clips"]), progress, cancelled)
+    report = {"profile": EFFECTS_PROFILE, "indexed": index is not None, "skipped": plan.skipped, "unaligned": plan.unaligned}
+    return ["-i", str(composited)], report

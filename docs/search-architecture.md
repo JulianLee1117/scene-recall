@@ -22,6 +22,7 @@ records.
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
 | Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103, 0104, 0105 |
+| Render effects (feature-locked overlays, cut effects) | Effects | `pipeline/lab/effects.py`, `pipeline/lab/media.py` | 0106, 0099 |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
 | Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067 |
 
@@ -1434,6 +1435,63 @@ their sequential ordering and complete-duration requirement under the new profil
 Rendered preview uses 720 output; the API also supports 1080 export.
 Derived caches and renders remain
 under `assets_dir/lab`; user originals and revisions remain durable.
+
+#### Effects (ADR-0106)
+
+A music-video document may carry `effects`, timed on the song clock. Each
+effect has an ID, a kind and a span. A document without effects keeps exactly
+its previous manifest and render.
+
+**Kinds:**
+- `overlay` plays another source window (`source`: film, start, optional crop)
+  over the picture;
+- `lock_cut` is an eye-locked dissolve across the cut at `at`. The incoming
+  pre-roll fades in pinned to the outgoing feature; after the cut, the
+  incoming shot eases back to its own framing while the outgoing post-roll
+  fades out on top;
+- `zoom_through` pushes into the outgoing feature and pulls out of the
+  incoming one;
+- `punch` is a decaying zoom around the feature;
+- `flash` lifts exposure toward white;
+- `echo` leaves a decaying trail of earlier frames.
+
+**Settings:**
+- `align`: `eyes`, `subject` or `none`;
+- `track`: re-align every frame;
+- `blend`: normal, screen, lighten, multiply, difference, or `luma` (a double
+  exposure through the picture's shadows);
+- opacity, attack and release;
+- `zoom` (punch and zoom-through peak) and `strength` (echo).
+
+**Anchoring.** Effects anchor to song time, never slot IDs. A cut effect uses
+the cut within one frame of `at`. Effects with no such cut, or outside the
+reel, are skipped and reported. Passage and timeline edits never block a save.
+
+**Features** come from the moment index (ADR-0099):
+- the main person's two eyes when both are shown, else the eye-trace point
+  sized by the subject box;
+- interpolated between 4 fps instants;
+- mapped through the film's content box, the clip's crop and the renderer's
+  fit into output pixels.
+
+Alignment is a similarity transform. A turn over 15° is dropped, and scale
+stays within 0.4-3. Overlay edges fade over 8% of the picture's shorter side.
+A moved base picture zooms up to 2x about its feature so it keeps filling its
+frame. With no feature, or no index, an effect centres at unit
+scale and is reported as unaligned. When the index knows the shot, pre-rolls
+and post-rolls hold a frame instead of showing a neighbouring shot.
+
+**Rendering.** After the cut sequence renders, a compositing pass decodes it
+(PyAV), composites with NumPy and PIL affine resampling, and re-encodes at
+libx264 CRF 18. Audio is then muxed as before, and the frame count is
+enforced. The manifest records `feature-locked-effects-v1`. The job result
+lists skipped and unaligned effects.
+
+**Scope.**
+- Effects show in renders only: the browser player plays cuts, and OTIO export
+  carries cuts.
+- The editor harness does not place effects. Automatic placement and a UI wait
+  for the owner to keep effects in reviewed edits.
 
 ### Transitions Lab
 
