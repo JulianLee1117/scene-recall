@@ -35,7 +35,7 @@ import numpy as np
 
 EFFECTS_PROFILE = "feature-locked-effects-v1"
 FEATURE_KINDS = ("overlay", "lock_cut", "zoom_through", "punch")
-SCALE_LIMITS = (0.4, 3.0)
+SCALE_LIMITS = (0.6, 3.0)       # below 0.6 an overlay reads as a pasted thumbnail
 MAX_TURN = math.radians(15)
 FEATHER = 0.08              # overlay edges fade over this share of the picture's shorter side
 COVER_LIMIT = 2.0          # extra zoom allowed to keep a moved picture covering its own frame
@@ -115,7 +115,12 @@ def scale_about(point: np.ndarray, scale: float, target: np.ndarray | None = Non
 
 def cover(matrix: np.ndarray, box: tuple[float, float, float, float], anchor: np.ndarray,
           limit: float = COVER_LIMIT) -> np.ndarray:
-    """Zoom ``matrix`` about ``anchor`` until the moved picture still fills its own box (no new black corners)."""
+    """Keep a moved picture filling its own box (no new black corners).
+
+    First zoom about ``anchor`` (the feature, so it stays put) up to ``limit``.
+    When even that leaves a corner uncovered, the move itself is weakened
+    toward the picture's own framing until a zoom within the limit fills it.
+    """
     left, top, w, h = box
     corners = np.array([[left, top], [left + w, top], [left, top + h], [left + w, top + h]])
 
@@ -125,15 +130,27 @@ def cover(matrix: np.ndarray, box: tuple[float, float, float, float], anchor: np
         return bool(np.all((back[:, 0] >= left - 0.5) & (back[:, 0] <= left + w + 0.5) &
                            (back[:, 1] >= top - 0.5) & (back[:, 1] <= top + h + 0.5)))
 
-    if fills(matrix):
-        return matrix
-    low, high = 1.0, limit
-    if not fills(compose(scale_about(anchor, high), matrix)):
-        return compose(scale_about(anchor, high), matrix)
-    for _ in range(24):
-        middle = (low + high) / 2
-        low, high = (low, middle) if fills(compose(scale_about(anchor, middle), matrix)) else (middle, high)
-    return compose(scale_about(anchor, high), matrix)
+    def zoomed(m, point):
+        if fills(m):
+            return m
+        if not fills(compose(scale_about(point, limit), m)):
+            return None
+        low, high = 1.0, limit
+        for _ in range(24):
+            middle = (low + high) / 2
+            low, high = (low, middle) if fills(compose(scale_about(point, middle), m)) else (middle, high)
+        return compose(scale_about(point, high), m)
+
+    identity = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    inverse = np.linalg.inv(np.vstack([matrix, [0.0, 0.0, 1.0]]))[:2]
+    source_anchor = inverse[:, :2] @ anchor + inverse[:, 2]           # the feature in the unmoved picture
+    for strength in (1.0, 0.8, 0.6, 0.4, 0.2, 0.0):
+        weaker = blend_matrices(identity, matrix, strength) if strength < 1 else matrix
+        point = weaker[:, :2] @ source_anchor + weaker[:, 2]
+        result = zoomed(weaker, point)
+        if result is not None:
+            return result
+    return identity
 
 
 def blend_matrices(a: np.ndarray, b: np.ndarray, weight: float) -> np.ndarray:

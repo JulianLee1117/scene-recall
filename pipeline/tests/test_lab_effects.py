@@ -215,3 +215,13 @@ def test_moved_pictures_keep_covering_their_frame_and_overlay_edges_fade():
     assert np.allclose(effects.cover(np.eye(2, 3), box, anchor), np.eye(2, 3))
     mask = effects.valid_mask(effects.Picture("f", None, "", 16 / 9, None), 1280, 720)
     assert mask[360, 640] == 255 and mask[360, 0] < 10 and 0 < mask[360, 40] < 255
+
+
+def test_a_move_too_far_to_cover_is_weakened_instead_of_leaving_black():
+    box = (0.0, 0.0, 1280.0, 720.0)
+    far = effects.scale_about(np.array([100.0, 100.0]), 1.0, np.array([1100.0, 650.0]))       # eyes dragged across the frame
+    covered = effects.cover(far, box, np.array([1100.0, 650.0]))
+    inverse = np.linalg.inv(np.vstack([covered, [0, 0, 1]]))[:2]
+    corners = np.array([[0, 0], [1280, 0], [0, 720], [1280, 720]], float) @ inverse[:, :2].T + inverse[:, 2]
+    assert corners.min() >= -0.5 and corners[:, 0].max() <= 1280.5 and corners[:, 1].max() <= 720.5
+    assert math.hypot(covered[0, 0], covered[1, 0]) <= effects.COVER_LIMIT + 1e-6

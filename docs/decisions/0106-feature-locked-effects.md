@@ -61,7 +61,7 @@ That makes feature locking a lookup, not a new model.
      and the renderer's fit into output pixels.
    - **Alignment:** a similarity transform. Two points fix scale and turn, but
      a turn over 15° is dropped (it reads as a tilted card, and a half turn
-     means mirrored faces). Scale is limited to 0.4-3.
+     means mirrored faces). Scale is limited to 0.6-3 (smaller reads as a pasted thumbnail).
    - **Clean pictures:** overlay edges fade over 8% of the picture's shorter
      side. A moved base picture (a settle or a zoom-through) zooms up to 2x
      about its feature, so it keeps filling its frame without black corners.

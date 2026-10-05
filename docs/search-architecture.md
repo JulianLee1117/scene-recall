@@ -1475,7 +1475,7 @@ reel, are skipped and reported. Passage and timeline edits never block a save.
   fit into output pixels.
 
 Alignment is a similarity transform. A turn over 15° is dropped, and scale
-stays within 0.4-3. Overlay edges fade over 8% of the picture's shorter side.
+stays within 0.6-3. Overlay edges fade over 8% of the picture's shorter side.
 A moved base picture zooms up to 2x about its feature so it keeps filling its
 frame. With no feature, or no index, an effect centres at unit
 scale and is reported as unaligned. When the index knows the shot, pre-rolls
