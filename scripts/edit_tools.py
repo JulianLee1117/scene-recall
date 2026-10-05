@@ -157,7 +157,8 @@ def _section(index: int, total: int, item: dict) -> str:
     d = project(item["pid"])["document"]
     plan, origin, slots = d.get("direction_plan") or {}, d["passage"]["start"], d["music_timeline"]["slots"]
     durations = [s["end"] - s["start"] for s in slots]
-    films = [(s.get("alternatives") or [{}])[0].get("film_title", "") for s in slots]
+    titles = {c["id"]: c.get("title", "") for c in d.get("clips", [])}       # hand-built edits have no alternatives
+    films = [(s.get("alternatives") or [{}])[0].get("film_title", "") or titles.get(s.get("clip_id"), "") for s in slots]
     settings = d["planner_settings"]
     chips = [f"pace: {PACE_LABEL.get(settings.get('pacing'), settings.get('pacing'))}",
              f"footage: {settings.get('footage', 'balanced')}", f"match cuts: {settings.get('match_cuts', 'some')}",
