@@ -1467,7 +1467,8 @@ its previous manifest and render.
 - `edge` (`soft` only for full overlays by default) and `matte` (a flat
   colour, for silhouettes);
 - `rect` on an overlay: it shows only inside that screen rectangle (split
-  screens, half-and-half faces);
+  screens, half-and-half faces); an aligned overlay zooms, or eases its move,
+  to keep that window filled;
 - `settle` (lock cuts): opt-in easing from the outgoing feature back to the
   incoming shot's own framing;
 - `track`: re-align every frame;

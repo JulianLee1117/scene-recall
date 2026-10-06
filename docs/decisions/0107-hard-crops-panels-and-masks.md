@@ -40,7 +40,9 @@ loaded.
    `edge` is `soft` by default only for full overlays. A `matte` colour
    paints the shown area flat, for silhouettes. An overlay with `rect` shows
    only inside that screen rectangle, for split screens and half-and-half
-   faces.
+   faces. An aligned overlay keeps that window filled under the cover rule:
+   it zooms about the feature, or eases its move, rather than leaving a
+   smaller picture floating in the window.
 2. **New kinds.**
    - `fill` shows its source inside the picture's own segmented subject
      (`classes`).

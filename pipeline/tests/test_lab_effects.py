@@ -227,6 +227,18 @@ def test_a_move_too_far_to_cover_is_weakened_instead_of_leaving_black():
     assert math.hypot(covered[0, 0], covered[1, 0]) <= effects.COVER_LIMIT + 1e-6
 
 
+def test_an_aligned_half_screen_overlay_keeps_its_window_filled():
+    box, half = (0.0, 0.0, 1280.0, 720.0), (640.0, 0.0, 640.0, 720.0)
+    eyes = np.array([640.0, 300.0])
+    shrunk = effects.scale_about(eyes, 0.68)                      # a bigger face laid eye-on-eye over a smaller one
+    covered = effects.cover(shrunk, box, eyes, region=half)
+    inverse = np.linalg.inv(np.vstack([covered, [0, 0, 1]]))[:2]
+    corners = np.array([[640, 0], [1280, 0], [640, 720], [1280, 720]], float) @ inverse[:, :2].T + inverse[:, 2]
+    assert corners.min() >= -0.5 and corners[:, 0].max() <= 1280.5 and corners[:, 1].max() <= 720.5
+    assert np.allclose(covered[:, :2] @ eyes + covered[:, 2], eyes)            # still eye on eye
+    assert np.allclose(effects.cover(shrunk, box, eyes, region=(600.0, 250.0, 80.0, 100.0)), shrunk)   # small windows: no zoom
+
+
 def test_feature_patches_sit_on_the_face_and_panels_fill_their_rectangle():
     eyes = effects.Feature(np.array([[600.0, 300.0], [680.0, 300.0]]), 80.0)
     strip = effects.feature_patch(eyes, "eyes", 1280, 720)

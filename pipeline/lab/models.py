@@ -93,7 +93,8 @@ class Effect(LabModel):
     picture's eyes (two eyes when shown) or main subject. ``region`` limits an
     overlay to a hard patch around its own eyes, mouth or face, or to its
     segmented subject (``classes``, COCO names, default person); an overlay
-    with ``rect`` shows only inside that screen rectangle (a split screen);
+    with ``rect`` shows only inside that screen rectangle (a split screen),
+    which an aligned overlay keeps filled;
     ``fill`` shows its source inside the picture's own segmented subject;
     ``panel`` sets the source into ``rect`` (output fractions), turned by
     ``turn`` degrees.

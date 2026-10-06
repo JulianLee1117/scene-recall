@@ -114,15 +114,16 @@ def scale_about(point: np.ndarray, scale: float, target: np.ndarray | None = Non
 
 
 def cover(matrix: np.ndarray, box: tuple[float, float, float, float], anchor: np.ndarray,
-          limit: float = COVER_LIMIT) -> np.ndarray:
-    """Keep a moved picture filling its own box (no new black corners).
+          limit: float = COVER_LIMIT, region: tuple[float, float, float, float] | None = None) -> np.ndarray:
+    """Keep a moved picture filling its own box, or ``region`` of the output (no new black corners).
 
     First zoom about ``anchor`` (the feature, so it stays put) up to ``limit``.
     When even that leaves a corner uncovered, the move itself is weakened
     toward the picture's own framing until a zoom within the limit fills it.
     """
     left, top, w, h = box
-    corners = np.array([[left, top], [left + w, top], [left, top + h], [left + w, top + h]])
+    r_left, r_top, r_w, r_h = region or box
+    corners = np.array([[r_left, r_top], [r_left + r_w, r_top], [r_left, r_top + r_h], [r_left + r_w, r_top + r_h]])
 
     def fills(m):
         inverse = np.linalg.inv(np.vstack([m, [0.0, 0.0, 1.0]]))[:2]
@@ -655,6 +656,12 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
                     target = base_feature(f, kind)
                     if moving is not None and target is not None:
                         matrix = similarity(moving, target, (width / 2, height / 2))
+                        if effect.get("rect"):
+                            # a window stays filled: the aligned picture zooms (or eases its move) to cover it
+                            rect = effect["rect"]
+                            window_box = (rect["x"] * width, rect["y"] * height, rect["width"] * width, rect["height"] * height)
+                            matrix = cover(matrix, fit_box(picture.display_aspect, picture.crop, width, height), target.centre(),
+                                           region=window_box)
                         aligned = True
                     fixed = matrix
                 elif fixed is not None:
