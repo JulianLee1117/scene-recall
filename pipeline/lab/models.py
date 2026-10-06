@@ -92,9 +92,11 @@ class Effect(LabModel):
     cross, inside ``start``..``end``. ``align`` pins an overlay or zoom to the
     picture's eyes (two eyes when shown) or main subject. ``region`` limits an
     overlay to a hard patch around its own eyes, mouth or face, or to its
-    segmented subject (``classes``, COCO names, default person); ``fill`` shows
-    its source inside the picture's own segmented subject; ``panel`` sets the
-    source into ``rect`` (output fractions), turned by ``turn`` degrees.
+    segmented subject (``classes``, COCO names, default person); an overlay
+    with ``rect`` shows only inside that screen rectangle (a split screen);
+    ``fill`` shows its source inside the picture's own segmented subject;
+    ``panel`` sets the source into ``rect`` (output fractions), turned by
+    ``turn`` degrees.
     """
 
     id: str = Field(min_length=1, max_length=100)

@@ -38,7 +38,9 @@ loaded.
      default person).
 
    `edge` is `soft` by default only for full overlays. A `matte` colour
-   paints the shown area flat, for silhouettes.
+   paints the shown area flat, for silhouettes. An overlay with `rect` shows
+   only inside that screen rectangle, for split screens and half-and-half
+   faces.
 2. **New kinds.**
    - `fill` shows its source inside the picture's own segmented subject
      (`classes`).

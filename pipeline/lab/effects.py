@@ -423,7 +423,8 @@ class Layer:
     the overlay picture's own pixels and move with its matrix, unless
     ``mask_space`` is ``output``. ``base_classes`` replaces the mask with the
     base picture's own segmented subject (a fill). ``matte`` paints the shown
-    area a flat colour (a silhouette).
+    area a flat colour (a silhouette). ``window`` (output pixels) further limits
+    where it shows (a split screen).
     """
 
     first: int
@@ -436,6 +437,7 @@ class Layer:
     mask_space: str = "picture"
     base_classes: list[str] | None = None
     matte: tuple[float, float, float] | None = None
+    window: np.ndarray | None = None
 
 
 class Segmenter:
@@ -680,8 +682,9 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
                 frame_mask = valid_mask(picture, width, height, 0.0 if hard else FEATHER)
                 if masks:
                     masks = [np.minimum(m, frame_mask) for m in masks]
+                window = rect_mask(effect["rect"], effect.get("turn", 0.0), width, height) if effect.get("rect") else None
                 plan.layers.append(Layer(a, frames, frame_mask if not masks else None, matrices, opacity,
-                                         effect.get("blend", "normal"), masks=masks or None, matte=matte))
+                                         effect.get("blend", "normal"), masks=masks or None, matte=matte, window=window))
             continue
         if effect["kind"] == "strips":
             count, sources = b - a, effect["sources"]
@@ -851,6 +854,8 @@ def composite(source: Path, target: Path, plan: Plan, expected_frames: int, prog
                             alpha = mask.astype(np.float32)[..., None] / 255
                         else:
                             alpha = warp(mask, layer.matrices[i], width, height, order=1).astype(np.float32)[..., None] / 255
+                        if layer.window is not None:
+                            alpha = alpha * (layer.window.astype(np.float32)[..., None] / 255)
                     if layer.matte is not None:
                         top = np.broadcast_to(np.array(layer.matte, np.float32), top.shape)
                     work = blend(work, top, alpha * opacity, layer.blend)
