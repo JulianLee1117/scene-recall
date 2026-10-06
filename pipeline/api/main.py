@@ -1583,9 +1583,13 @@ def preview_endpoint(shot_id: str, request: Request) -> FileResponse:
 
 def _video_source(film_id: str, request: Request) -> Path:
     """Resolve an indexed source, including films outside the library folder."""
+    from pipeline.lab.generated import find, is_generated
+
     db = request.app.state.db
-    tbl = db.open_table("films")
-    rows = tbl.search().where(col("film_id") == lit(film_id)).to_list()
+    if is_generated(film_id):
+        rows = [row] if (row := find(db, film_id)) else []
+    else:
+        rows = db.open_table("films").search().where(col("film_id") == lit(film_id)).to_list()
     if not rows:
         raise HTTPException(status_code=404, detail=f"Film {film_id!r} not found")
 

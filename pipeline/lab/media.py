@@ -94,6 +94,13 @@ def import_track(store, source: Path, name: str):
 
 
 def resolve_film(db, film_id):
+    from pipeline.lab.generated import find, is_generated
+
+    if is_generated(film_id):
+        generated = find(db, film_id)
+        if generated is None:
+            raise ValueError(f"Generated source {film_id} is unavailable")
+        return generated
     if "films" not in table_names(db):
         raise ValueError("No indexed source films are available")
     rows = db.open_table("films").search().where(col("film_id") == lit(film_id)).limit(1).to_list()

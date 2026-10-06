@@ -23,6 +23,7 @@ records.
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
 | Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103, 0104, 0105 |
 | Render effects (feature-locked overlays, hard crops, panels, masks, screens) | Effects | `pipeline/lab/effects.py`, `pipeline/lab/screens.py`, `pipeline/lab/media.py` | 0106, 0107, 0108, 0099 |
+| Generated sources (AI clips placed as shots) | Generated sources | `pipeline/lab/generated.py` | 0109 |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
 | Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067 |
 
@@ -1532,6 +1533,18 @@ lists skipped and unaligned effects.
   project's latest render.
 - The editor harness does not place effects. Automatic placement and a UI wait
   for the owner to keep effects in reviewed edits.
+
+#### Generated sources (ADR-0109)
+
+A document can place a generated (AI) clip like a film shot, as a clip or an
+effect source. `python -m pipeline.lab.generated register <mp4> --title T
+--provenance JSON` copies the clip by content into `state_dir/lab/generated`
+and records a `gen-<sha256[:20]>` identity, its duration and fps, and its
+provenance in the `lab_generated` table. Source resolution falls back to that
+table for `gen-` IDs only, so validation, renders, effects, OTIO export and the
+player work unchanged; the API streams the original bytes. Search, ingestion
+and the `films` table never include generated clips. The editor does not
+choose, request or pay for them.
 
 ### Transitions Lab
 

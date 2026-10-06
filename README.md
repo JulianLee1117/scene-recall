@@ -334,6 +334,12 @@ distinguishes its retrieved frame from the current playback time.
 `scripts/edit_tools.py` holds optional helpers that drive the same API from a
 terminal: make an edit from a JSON spec, render it, print its recipe and pacing
 shape, make a contact sheet, or build a review page of rendered edits.
+A generated (AI) clip, such as a Runway push, can be placed in an edit like a
+film shot once registered; the command prints its `gen-` source ID:
+
+```bash
+uv run python -m pipeline.lab.generated register push.mp4 --title "Push into the TV" --provenance '{"model": "seedance2_fast"}'
+```
 
 **Footage** in AI direction sets the recognizable ↔ fresh balance (the search
 Famous / Balanced / Hidden gems presets) for every editor search. **Match cuts**
