@@ -36,7 +36,7 @@ from typing import Any, Callable, Iterable
 
 import numpy as np
 
-EFFECTS_PROFILE = "feature-locked-effects-v1"
+EFFECTS_PROFILE = "feature-locked-effects-v2"
 FEATURE_KINDS = ("overlay", "lock_cut", "zoom_through", "punch")
 SCALE_LIMITS = (0.6, 3.0)       # below 0.6 an overlay reads as a pasted thumbnail
 MAX_TURN = math.radians(15)
@@ -455,6 +455,7 @@ class Layer:
     window: np.ndarray | None = None
     occluders: list[str] | None = None
     screens: list[np.ndarray] | None = None
+    tone: list[float] | None = None
 
 
 class Segmenter:
@@ -642,6 +643,35 @@ def glass(picture: np.ndarray, rect: tuple[float, float, float, float], strength
     return np.clip(picture.astype(np.float32) * falloff[..., None], 0, 255).astype(np.uint8)
 
 
+def screen_tone(top: np.ndarray, base: np.ndarray, alpha: np.ndarray, strength: float = 1.0) -> np.ndarray:
+    """Show ``top`` (H x W x 3, 0-1) the way the set shows its own picture in ``base``: a CRT on film is softer,
+    its blacks are grey, its light blooms, and the glass keeps some reflection. The insert takes about half of
+    the set's brightness and tint (never darker than 0.6 x, never brighter than 1.25 x its own), its black level,
+    a little bloom, and a trace of what was on the glass. ``strength`` fades it out as a push enters the screen."""
+    if strength <= 0:
+        return top
+    region = alpha[..., 0] > 0.5
+    if region.sum() < 64:
+        return top
+    t, b = top[region], base[region]
+    weights = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    lum_t, lum_b = float(t.mean(axis=0) @ weights), float(b.mean(axis=0) @ weights)
+    target = float(np.clip(0.5 * lum_t + 0.5 * lum_b, 0.6 * lum_t, 1.25 * lum_t))
+    gain = target / max(lum_t, 1e-3)
+    tint = b.mean(axis=0) / max(lum_b, 1e-3)
+    tint = 1 + 0.25 * (np.clip(tint, 0.5, 1.6) - 1)
+    floor = float(np.clip(0.8 * np.percentile(b @ weights, 3), 0.0, 0.1))
+    out = top * gain * tint
+    out = floor + out * (1 - floor) * 0.94                      # grey blacks, a touch less contrast
+    from scipy import ndimage
+    sigma = max(1.0, 0.012 * np.sqrt(region.sum()))
+    glow = ndimage.gaussian_filter(np.clip(out - 0.6, 0, 1), (sigma, sigma, 0))
+    out = out + 0.35 * glow                                     # highlights bloom
+    out = out + 0.08 * base                                     # the glass's own reflections
+    out = np.clip(out, 0, 1)
+    return top + (out - top) * strength
+
+
 def static_frame(seed: int, width: int, height: int) -> np.ndarray:
     """A frame of TV static: coarse grey noise with rolling bands."""
     rng = np.random.default_rng(seed)
@@ -766,7 +796,7 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
             noisy = int(round(effect.get("static", 0.0) * fps))
             push = effect.get("push")
             seed = sum(ord(c) for c in effect["id"]) * 1009
-            shown, matrices, masks, opacity, corners = [], [], [], [], []
+            shown, matrices, masks, opacity, corners, tone = [], [], [], [], [], []
             for i in range(count):
                 t = origin + (a + i) / fps
                 quad = quad_at(effect["quad"], t, width, height)
@@ -790,9 +820,10 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
                     opacity.append(0.0)
                 frame = static_frame(seed + i, width, height) if i < noisy else frames[i]
                 shown.append(glass(frame, rect, SCREEN_GLASS * (1 - entered)))
+                tone.append(0.0 if i < noisy else 1 - entered)
                 masks.append(screen_mask(rect, effect.get("radius", 0.06) * (1 - entered), width, height))
             plan.layers.append(Layer(a, shown, None, matrices, opacity, "normal", masks=masks,
-                                     occluders=effect.get("classes") or None, screens=corners))
+                                     occluders=effect.get("classes") or None, screens=corners, tone=tone))
             continue
         if effect["kind"] in ("overlay", "fill", "panel"):
             source = effect["source"]
@@ -1037,6 +1068,8 @@ def composite(source: Path, target: Path, plan: Plan, expected_frames: int, prog
                             alpha = alpha * (1 - front.astype(np.float32)[..., None] / 255)
                     if layer.matte is not None:
                         top = np.broadcast_to(np.array(layer.matte, np.float32), top.shape)
+                    if layer.tone is not None and layer.tone[i] > 0:
+                        top = screen_tone(top, work, alpha, layer.tone[i])
                     work = blend(work, top, alpha * opacity, layer.blend)
                 if index in plan.flash:
                     work = work + (1 - work) * plan.flash[index]

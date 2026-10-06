@@ -1464,7 +1464,9 @@ its previous manifest and render.
   the corners keyed in `quad` (top-left, top-right, bottom-right,
   bottom-left, output fractions, linear between keys). It shows the middle of
   the source cut to the screen's shape, with `radius` rounded corners and a
-  curved screen's falloff. `static` seconds of TV noise come first, and
+  curved screen's falloff. The picture is toned like the set's own: about half
+  of its brightness and tint, its grey black level, a little bloom and a trace
+  of the glass's reflection, fading out as a push enters. `static` seconds of TV noise come first, and
   `classes` stay in front, except instances lying mostly on the screen, which
   are its own picture. From `push` to the end the frame zooms into the
   screen, speeding up, until the source fills the frame on the last frame.
@@ -1524,7 +1526,8 @@ frame. Fill masks are taken from the picture being composited.
 (PyAV), composites with NumPy and PIL affine resampling, and re-encodes at
 libx264 CRF 18. Screens and their pushes resample through projective
 matrices. Audio is then muxed as before, and the frame count is
-enforced. The manifest records `feature-locked-effects-v1`. The job result
+enforced. The manifest records `feature-locked-effects-v2` (v2: screens are toned like the
+set's own picture). The job result
 lists skipped and unaligned effects.
 
 **Scope.**

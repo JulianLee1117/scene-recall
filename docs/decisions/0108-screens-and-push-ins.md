@@ -65,3 +65,14 @@ camera into a screen.
 - Segmenting occluders costs about 15 ms a frame, as other masks do.
 - Effects stay render-only: the browser player plays cuts, and OTIO export
   carries cuts.
+
+## Amendment (2026-10-06): screens toned like the set
+
+The owner found some inserted pictures lit wrong for their set: an insert kept
+its own exposure and contrast, and read as pasted on. A screen now shows its
+source the way the set shows its own picture. It takes about half of the set's
+brightness and tint, bounded to 0.6-1.25 times its own; the set's grey black
+level; a little bloom on highlights; and 8% of what was on the glass. The tone
+fades out as a push enters, so the landing frame is the source itself. The
+effects profile becomes `feature-locked-effects-v2`, and earlier renders keep
+their identity.

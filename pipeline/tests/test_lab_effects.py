@@ -381,3 +381,16 @@ def test_real_render_plays_a_screen_and_pushes_into_it(config, store, db, tmp_pa
     assert pixel(15, 335, 190)[1] > 100                                    # a rounded corner shows the set behind
     assert pixel(15, 660, 350)[2] > 150                                    # a person on the screen is its picture, not in front
     assert pixel(23, 60)[0] > 150 and pixel(23, 1220)[2] > 150             # the push lands with the source filling the frame
+
+
+def test_a_screen_shows_its_picture_the_way_the_set_shows_its_own():
+    top = np.zeros((100, 100, 3), np.float32)
+    top[:, :50] = 1.0                                       # a hard white/black picture
+    base = np.full((100, 100, 3), 0.25, np.float32)         # the set's own picture: dim grey
+    alpha = np.zeros((100, 100, 1), np.float32)
+    alpha[20:80, 20:80] = 1
+    toned = effects.screen_tone(top, base, alpha)
+    inside = alpha[..., 0] > .5
+    assert toned[inside].mean() < top[inside].mean()        # pulled toward the set's exposure
+    assert toned[inside].min() > 0.05                       # CRT blacks are grey, never pure black
+    assert np.allclose(effects.screen_tone(top, base, alpha, 0.0), top)   # no strength, no change
