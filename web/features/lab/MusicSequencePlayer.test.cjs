@@ -395,3 +395,17 @@ test("an explicit same-time seek can repair source position and the handle follo
   handle.seek(25);
   assert.equal(app.audio.currentTime, 20, "a retained handle cannot command a disposed transport");
 });
+
+test("an edit with render effects says the preview plays cuts and opens the latest export when there is one", async () => {
+  const player = await setup();
+  assert.ok(!player.text.includes("export"));
+  await player.update({ document: { ...player.props.document, effects: [{ id: "tv", kind: "screen", start: 12, end: 13 }] } });
+  assert.ok(player.text.includes("Effects show in an export"));
+  let opened = 0;
+  await player.update({ onShowExport: () => { opened += 1; } });
+  const note = player.nodes.find((node) => node.type === "button" && node.props.className === "effectsNote");
+  assert.ok(note && text(note) === "Effects play in the export");
+  note.props.onClick();
+  assert.equal(opened, 1);
+  player.dispose();
+});

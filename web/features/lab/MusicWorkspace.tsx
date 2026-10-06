@@ -665,6 +665,7 @@ export default function MusicWorkspace() {
                 filmTitles={filmTitles}
                 onPlayingChange={setSequencePlaying}
                 compactTransport
+                onShowExport={renderUrl ? () => setShowExport(true) : undefined}
                 suspended={
                   activeView !== "edit" || passageOpen || showExport || !!footageReview || dialogueAudition
                 }

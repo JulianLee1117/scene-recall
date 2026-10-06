@@ -1408,7 +1408,8 @@ those filters; there is no stereo cancellation or speech-separation claim.
 Browser sequence/solo playback and export share a bounded source-window 48 kHz
 stereo float WAV under `source-window-pcm48-center-band-v1`, starting at asset time
 zero. `GET /lab/dialogue-audio` prepares by indexed source/range/mode and redirects
-to immutable SHA-addressed WAV bytes with range support. Profile, source fingerprint,
+(relatively, so a proxy path prefix such as the web app's `/api` survives) to
+immutable SHA-addressed WAV bytes with range support. Profile, source fingerprint,
 range and mode key the lookup receipt; content hashes validate representation bytes.
 Gain and fades remain outside the cached asset. The small cache under
 `assets_dir/lab/dialogue-audio/<profile>` is independently regenerable: the existing
@@ -1527,7 +1528,8 @@ lists skipped and unaligned effects.
 
 **Scope.**
 - Effects show in renders only: the browser player plays cuts, and OTIO export
-  carries cuts.
+  carries cuts. When an edit has effects, the preview says so and opens the
+  project's latest render.
 - The editor harness does not place effects. Automatic placement and a UI wait
   for the owner to keep effects in reviewed edits.
 

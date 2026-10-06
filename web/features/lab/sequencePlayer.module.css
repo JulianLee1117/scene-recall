@@ -21,6 +21,18 @@
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
+.effectsNote {
+  margin-right: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--editor-muted, #92969e);
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+button.effectsNote { cursor: pointer; }
+button.effectsNote:hover, button.effectsNote:focus-visible { color: var(--editor-text, #e7e8ea); }
 .previewTitle { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .previewTitle > span { color: var(--editor-muted, #92969e); flex-shrink: 0; }
 .previewTitle > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 450; }

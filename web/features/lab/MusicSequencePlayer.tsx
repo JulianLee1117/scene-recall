@@ -28,6 +28,8 @@ interface Props {
   onSelectSlot?: (id: string) => void;
   suspended?: boolean;
   compactTransport?: boolean;
+  /** Opens the latest render; the preview plays cuts, so render effects only show there (ADR-0106). */
+  onShowExport?: () => void;
 }
 
 interface Deck {
@@ -60,6 +62,7 @@ export default function MusicSequencePlayer({
   onPlayingChange,
   onSelectSlot,
   suspended = false,
+  onShowExport,
   compactTransport = false,
 }: Props) {
   const audio = useRef<HTMLAudioElement>(null);
@@ -643,6 +646,11 @@ export default function MusicSequencePlayer({
           {filmTitle && <strong title={filmTitle} aria-label={`Current film: ${filmTitle}`}>{filmTitle}</strong>}
         </div>
         <span>
+          {!!document.effects?.length && (onShowExport
+            ? <button type="button" className={styles.effectsNote} onClick={onShowExport}
+              title="This preview plays the cuts. The edit's render effects show in its latest export.">Effects play in the export</button>
+            : <span className={styles.effectsNote}
+              title="This preview plays the cuts. Export the video to see the edit's render effects.">Effects show in an export</span>)}
           {slot
             ? `${slots.indexOf(slot) + 1} / ${slots.length}`
             : experimentName("music-sketch")}
