@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -84,8 +85,22 @@ class EffectSource(LabModel):
     crop: Crop | None = None
 
 
+class ScreenKey(LabModel):
+    """A screen's corners at song time ``t``: top-left, top-right, bottom-right, bottom-left, as output fractions."""
+
+    t: float = Field(ge=0)
+    corners: list[list[float]] = Field(min_length=4, max_length=4)
+
+    @model_validator(mode="after")
+    def points(self):
+        for point in self.corners:
+            if len(point) != 2 or not all(math.isfinite(v) and -2 <= v <= 3 for v in point):
+                raise ValueError("Screen corners are four (x, y) pairs in output fractions")
+        return self
+
+
 class Effect(LabModel):
-    """A render-time effect on the song clock (ADR-0106, ADR-0107).
+    """A render-time effect on the song clock (ADR-0106, ADR-0107, ADR-0108).
 
     ``overlay``, ``fill`` and ``panel`` need ``source``; ``strips`` needs two or
     more ``sources``; ``lock_cut`` and ``zoom_through`` need ``at``, the cut they
@@ -98,11 +113,15 @@ class Effect(LabModel):
     ``fill`` shows its source inside the picture's own segmented subject
     (set into ``rect`` when given, like a picture on a screen);
     ``panel`` sets the source into ``rect`` (output fractions), turned by
-    ``turn`` degrees.
+    ``turn`` degrees. ``screen`` plays its source on a screen in the picture:
+    in perspective inside the corners keyed in ``quad``, with ``radius``
+    rounded corners, ``static`` seconds of noise first (a channel change),
+    ``classes`` kept in front, and from ``push`` to the end a zoom into the
+    screen that lands with the source filling the frame.
     """
 
     id: str = Field(min_length=1, max_length=100)
-    kind: Literal["overlay", "lock_cut", "zoom_through", "punch", "flash", "echo", "fill", "panel", "strips"]
+    kind: Literal["overlay", "lock_cut", "zoom_through", "punch", "flash", "echo", "fill", "panel", "strips", "screen"]
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     at: float | None = Field(default=None, ge=0)
@@ -123,6 +142,10 @@ class Effect(LabModel):
     release: float = Field(default=0.0, ge=0, le=10)
     zoom: float = Field(default=1.3, ge=1, le=8)
     strength: float = Field(default=0.5, ge=0, le=0.95)
+    quad: list[ScreenKey] = Field(default_factory=list, max_length=4000)
+    radius: float = Field(default=0.06, ge=0, le=0.5)
+    static: float = Field(default=0.0, ge=0, le=2)
+    push: float | None = Field(default=None, ge=0)
     title: str = Field(default="", max_length=300)
 
     @model_validator(mode="after")
@@ -131,11 +154,22 @@ class Effect(LabModel):
             raise ValueError("Effect end must follow its start")
         if self.end - self.start > 60:
             raise ValueError("An effect spans at most 60 seconds")
-        needs_source = ("overlay", "fill", "panel")
+        needs_source = ("overlay", "fill", "panel", "screen")
         if self.kind in needs_source and self.source is None:
-            raise ValueError("Overlay, fill and panel effects need a source window")
+            raise ValueError("Overlay, fill, panel and screen effects need a source window")
         if self.kind not in needs_source and self.source is not None:
-            raise ValueError("Only overlay, fill and panel effects take a source window")
+            raise ValueError("Only overlay, fill, panel and screen effects take a source window")
+        if self.kind == "screen":
+            if not self.quad:
+                raise ValueError("Screens need their corners (quad)")
+            if any(b.t <= a.t for a, b in zip(self.quad, self.quad[1:])):
+                raise ValueError("Screen corner keys must be in time order")
+            if self.push is not None and not self.start < self.push < self.end:
+                raise ValueError("A screen's push starts inside its span")
+            if self.static >= self.end - self.start:
+                raise ValueError("A screen's static must leave time for its picture")
+        elif self.quad or self.push is not None or self.static:
+            raise ValueError("Only screens take corners, a push or static")
         if (self.kind == "strips") != bool(self.sources):
             raise ValueError("Strips, and only strips, take a list of sources")
         if self.kind == "strips" and len(self.sources) < 2:

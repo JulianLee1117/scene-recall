@@ -59,7 +59,7 @@ export interface LabEffectSource {
 }
 export interface LabEffect {
   id: string;
-  kind: "overlay" | "lock_cut" | "zoom_through" | "punch" | "flash" | "echo" | "fill" | "panel" | "strips";
+  kind: "overlay" | "lock_cut" | "zoom_through" | "punch" | "flash" | "echo" | "fill" | "panel" | "strips" | "screen";
   start: number;
   end: number;
   at?: number | null;
@@ -80,6 +80,11 @@ export interface LabEffect {
   release?: number;
   zoom?: number;
   strength?: number;
+  /** Screen corners on the song clock (ADR-0108): top-left, top-right, bottom-right, bottom-left, output fractions. */
+  quad?: { t: number; corners: [number, number][] }[];
+  radius?: number;
+  static?: number;
+  push?: number | null;
   title?: string;
 }
 export interface LabDocument {

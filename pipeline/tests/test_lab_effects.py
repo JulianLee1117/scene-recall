@@ -304,3 +304,80 @@ def test_real_render_places_panels_strips_fills_and_cutouts(config, store, db, t
     assert pixel(5, 300)[0] > 200 and pixel(5, 1000)[1] > 100 and pixel(5, 1000)[2] < 60  # split: red left, green window right
     # screen fill: the red/blue picture squeezed into the middle rect, shown only on the left-half "subject"
     assert pixel(13, 380)[0] > 200 and pixel(13, 600)[0] > 200 and pixel(13, 200)[1] > 100 and pixel(13, 800)[2] < 60
+
+
+def test_screens_need_corners_in_order_and_only_screens_take_them():
+    corners = [[.25, .25], [.75, .25], [.75, .75], [.25, .75]]
+    source = {"film_id": "film", "source_start": 0}
+    ok = {"id": "tv", "kind": "screen", "start": 1, "end": 2, "source": source, "quad": [{"t": 1, "corners": corners}], "push": 1.5}
+    ProjectDocument.model_validate({"effects": [ok]})
+    for bad in ({**ok, "quad": []}, {**ok, "push": 2.5}, {**ok, "static": 1.0},
+                {**ok, "quad": [{"t": 1.2, "corners": corners}, {"t": 1.1, "corners": corners}]},
+                {**ok, "quad": [{"t": 1, "corners": corners[:3]}]},
+                {"id": "o", "kind": "overlay", "start": 1, "end": 2, "source": source, "push": 1.5}):
+        with pytest.raises(ValidationError):
+            ProjectDocument.model_validate({"effects": [bad]})
+
+
+def test_pushing_into_a_screen_grows_it_to_the_frame():
+    quad = np.array([[320.0, 180.0], [960.0, 180.0], [960.0, 540.0], [320.0, 540.0]])
+    frame = np.array([[0.0, 0.0], [1280.0, 0.0], [1280.0, 720.0], [0.0, 720.0]])
+    moved = effects.homography(quad, frame)
+    mapped = (moved @ np.c_[quad, np.ones(4)].T).T
+    assert np.allclose(mapped[:, :2] / mapped[:, 2:], frame)
+    assert np.allclose(effects.pushed_quad(quad, 0.0, 1280, 720), quad)
+    assert np.allclose(effects.pushed_quad(quad, 1.0, 1280, 720), frame)
+    widths = [np.ptp(effects.pushed_quad(quad, p, 1280, 720)[:, 0]) for p in (0.25, 0.5, 0.75)]
+    assert 640 < widths[0] < widths[1] < widths[2] < 1280                  # grows steadily toward the frame
+    tilted = np.array([[100.0, 100.0], [500.0, 140.0], [480.0, 400.0], [120.0, 380.0]])
+    picture = np.full((720, 1280, 3), 200, np.uint8)
+    rect = effects.screen_rect(tilted, 1280, 720)
+    x, y, w, h = rect
+    on_screen = effects.warp(picture, effects.homography(np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]), tilted), 1280, 720)
+    assert on_screen[250, 300, 0] > 150 and on_screen[600, 900, 0] == 0  # perspective warp lands inside the corners only
+
+
+def test_real_render_plays_a_screen_and_pushes_into_it(config, store, db, tmp_path, monkeypatch):
+    video, audio = _media(tmp_path)
+    track = import_track(store, audio, "Music.wav")
+    db.open_table("films").add([{"film_id": "film", "title": "Film", "path": str(video), "duration": 3., "fps": 30.}])
+
+    def people(self, rgb, classes):                         # stand-in instances: someone in front (x < 400), someone on the screen
+        front = np.zeros(rgb.shape[:2], bool)
+        front[:, :400] = True
+        on_screen = np.zeros(rgb.shape[:2], bool)
+        on_screen[300:400, 600:700] = True
+        return [front, on_screen]
+
+    monkeypatch.setattr(effects.Segmenter, "instances", people)
+    project = store.create_project("Reel", "music-sketch")
+    doc = {**project["document"], "track": {key: track[key] for key in ("id", "name", "duration")},
+           "passage": {"start": .5, "end": 1.5},
+           "clips": [{"id": "a", "film_id": "film", "source_start": .25, "source_end": .75},
+                     {"id": "b", "film_id": "film", "source_start": 1.25, "source_end": 1.75}]}
+    corners = [[.25, .25], [.75, .25], [.75, .75], [.25, .75]]
+    doc["effects"] = [
+        {"id": "tv", "kind": "screen", "start": 1.0, "end": 1.25, "source": {"film_id": "film", "source_start": .3},
+         "quad": [{"t": 1.0, "corners": corners}], "radius": .3, "static": .08, "classes": ["person"]},
+        {"id": "in", "kind": "screen", "start": 1.25, "end": 1.5, "source": {"film_id": "film", "source_start": .3},
+         "quad": [{"t": 1.25, "corners": corners}], "push": 1.3},
+    ]
+    project = store.update_project(project["id"], 1, doc)
+    store.enqueue("render", project["id"], 2)
+    job = store.claim()
+    render_reel(job, config, db, store, lambda _: None)
+    output = config.paths.assets_dir / "lab" / "renders" / job["id"] / "output.mp4"
+    from PIL import Image
+
+    def pixel(frame, x, y=360):
+        raw = run_process(["ffmpeg", "-v", "error", "-i", str(output), "-vf", f"select=eq(n\\,{frame})", "-frames:v", "1",
+                           "-f", "image2pipe", "-vcodec", "png", "pipe:1"])
+        return Image.open(BytesIO(raw)).convert("RGB").getpixel((x, y))
+
+    static = pixel(12, 500)
+    assert max(static) - min(static) < 40                                  # channel change: grey static first
+    assert pixel(15, 500)[0] > 150 and pixel(15, 820)[2] > 150             # then red/blue on the green set's screen
+    assert pixel(15, 1100)[1] > 100 and pixel(15, 350)[1] > 100            # off the screen, and in front of it, the set
+    assert pixel(15, 335, 190)[1] > 100                                    # a rounded corner shows the set behind
+    assert pixel(15, 660, 350)[2] > 150                                    # a person on the screen is its picture, not in front
+    assert pixel(23, 60)[0] > 150 and pixel(23, 1220)[2] > 150             # the push lands with the source filling the frame

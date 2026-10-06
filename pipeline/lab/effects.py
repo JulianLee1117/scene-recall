@@ -14,7 +14,10 @@ effects, this pass decodes that sequence and composites, frame by frame:
   in the incoming feature and pulls back out;
 - ``punch``: a sudden zoom around the feature that decays;
 - ``flash``: an exposure flash;
-- ``echo``: a decaying trail of earlier frames.
+- ``echo``: a decaying trail of earlier frames;
+- ``screen`` (ADR-0108): another source playing on a screen in the picture,
+  in perspective inside keyed corners, optionally pushing into the screen
+  until the source fills the frame.
 
 Features come from the library moment index (ADR-0099): a person's two eyes
 (COCO keypoints) when both are shown, else the eye-trace point of the main
@@ -170,9 +173,10 @@ def blend_matrices(a: np.ndarray, b: np.ndarray, weight: float) -> np.ndarray:
 
 
 def compose(outer: np.ndarray, inner: np.ndarray) -> np.ndarray:
-    """outer after inner, both 2 x 3."""
-    full = lambda m: np.vstack([m, [0.0, 0.0, 1.0]])
-    return (full(outer) @ full(inner))[:2]
+    """outer after inner: 2 x 3 when both are affine, else the 3 x 3 projective product."""
+    full = lambda m: m if m.shape == (3, 3) else np.vstack([m, [0.0, 0.0, 1.0]])
+    product = full(outer) @ full(inner)
+    return product[:2] if outer.shape != (3, 3) and inner.shape != (3, 3) else product
 
 
 def ease(value: float, kind: str = "smooth") -> float:
@@ -199,16 +203,23 @@ def envelope(t: float, start: float, end: float, attack: float, release: float) 
 # -- pixels --------------------------------------------------------------------
 
 def warp(picture: np.ndarray, matrix: np.ndarray, width: int, height: int, order: int = 3) -> np.ndarray:
-    """Resample ``picture`` (H x W x C uint8 or float) through ``matrix`` (picture -> output pixels)."""
+    """Resample ``picture`` (H x W x C uint8 or float) through ``matrix`` (picture -> output pixels).
+
+    ``matrix`` is affine (2 x 3) or projective (3 x 3, for screens in perspective).
+    """
     from PIL import Image
-    full = np.vstack([matrix, [0.0, 0.0, 1.0]])
-    inverse = np.linalg.inv(full)[:2].ravel()
+    full = matrix if matrix.shape == (3, 3) else np.vstack([matrix, [0.0, 0.0, 1.0]])
+    inverse = np.linalg.inv(full)
     resample = Image.BICUBIC if order == 3 else Image.BILINEAR
     if picture.dtype != np.uint8:
         picture = np.clip(picture * 255 + 0.5, 0, 255).astype(np.uint8)
     mode = "L" if picture.ndim == 2 else "RGB"
-    image = Image.fromarray(picture, mode).transform((width, height), Image.AFFINE, tuple(inverse), resample=resample)
-    return np.asarray(image)
+    image = Image.fromarray(picture, mode)
+    if np.allclose(inverse[2], [0.0, 0.0, inverse[2, 2]]):
+        coefficients = tuple((inverse[:2] / inverse[2, 2]).ravel())
+        return np.asarray(image.transform((width, height), Image.AFFINE, coefficients, resample=resample))
+    coefficients = tuple((inverse / inverse[2, 2]).ravel()[:8])
+    return np.asarray(image.transform((width, height), Image.PERSPECTIVE, coefficients, resample=resample))
 
 
 def blend(base: np.ndarray, top: np.ndarray, alpha: np.ndarray, mode: str) -> np.ndarray:
@@ -425,7 +436,10 @@ class Layer:
     ``mask_space`` is ``output``. ``base_classes`` replaces the mask with the
     base picture's own segmented subject (a fill). ``matte`` paints the shown
     area a flat colour (a silhouette). ``window`` (output pixels) further limits
-    where it shows (a split screen).
+    where it shows (a split screen). ``occluders`` are segmented classes of the
+    picture underneath that stay in front of the layer (people before a screen);
+    with ``screens`` (the screen's corners per frame), instances lying mostly on
+    the screen are its own picture, not in front of it.
     """
 
     first: int
@@ -439,6 +453,8 @@ class Layer:
     base_classes: list[str] | None = None
     matte: tuple[float, float, float] | None = None
     window: np.ndarray | None = None
+    occluders: list[str] | None = None
+    screens: list[np.ndarray] | None = None
 
 
 class Segmenter:
@@ -460,19 +476,23 @@ class Segmenter:
             self._names = {int(key): str(value) for key, value in COCO_CLASSES.items()}
         return self._model
 
-    def mask(self, rgb: np.ndarray, classes: list[str]) -> np.ndarray:
-        """The union of the wanted classes' masks (H x W uint8, 0 or 255)."""
+    def instances(self, rgb: np.ndarray, classes: list[str]) -> list[np.ndarray]:
+        """Each detected instance of the wanted classes, as an H x W bool mask."""
         from PIL import Image
         model = self._load()
         wanted = {name.lower() for name in (classes or ["person"])}
         detections = model.predict(Image.fromarray(rgb), threshold=self.threshold)
-        out = np.zeros(rgb.shape[:2], np.uint8)
         masks = getattr(detections, "mask", None)
         if masks is None or not len(detections):
-            return out
-        for class_id, instance in zip(detections.class_id, masks):
-            if self._names.get(int(class_id), "").lower() in wanted:
-                out[np.asarray(instance, bool)] = 255
+            return []
+        return [np.asarray(instance, bool) for class_id, instance in zip(detections.class_id, masks)
+                if self._names.get(int(class_id), "").lower() in wanted]
+
+    def mask(self, rgb: np.ndarray, classes: list[str]) -> np.ndarray:
+        """The union of the wanted classes' masks (H x W uint8, 0 or 255)."""
+        out = np.zeros(rgb.shape[:2], np.uint8)
+        for instance in self.instances(rgb, classes):
+            out[instance] = 255
         return out
 
 
@@ -526,6 +546,110 @@ def hex_colour(value: str | None) -> tuple[float, float, float] | None:
     if not value:
         return None
     return tuple(int(value[i:i + 2], 16) / 255 for i in (1, 3, 5))
+
+
+# -- screens (ADR-0108) -----------------------------------------------------------
+
+SCREEN_GLASS = 0.3          # how much a screen's picture darkens toward its edges (a CRT's falloff)
+ON_SCREEN = 0.8             # an instance with this share of itself on the screen is the screen's own picture
+
+
+def in_front(instances: list[np.ndarray], quad: np.ndarray | None) -> np.ndarray:
+    """The union (H x W uint8) of instances standing in front of a screen: those not lying mostly on it."""
+    if not instances:
+        return np.zeros((0, 0), np.uint8)
+    out = np.zeros(instances[0].shape, np.uint8)
+    screen = None
+    if quad is not None:
+        from PIL import Image, ImageDraw
+        centre = quad.mean(axis=0)
+        grown = centre + (quad - centre) * 1.04
+        image = Image.new("1", (out.shape[1], out.shape[0]), 0)
+        ImageDraw.Draw(image).polygon([tuple(p) for p in grown], fill=1)
+        screen = np.asarray(image, bool)
+    for instance in instances:
+        area = instance.sum()
+        if area == 0:
+            continue
+        if screen is not None and (instance & screen).sum() >= ON_SCREEN * area:
+            continue
+        out[instance] = 255
+    return out
+
+
+def homography(points: np.ndarray, targets: np.ndarray) -> np.ndarray:
+    """The 3 x 3 projective map taking four points onto four targets."""
+    rows, values = [], []
+    for (x, y), (u, v) in zip(points, targets):
+        rows += [[x, y, 1, 0, 0, 0, -u * x, -u * y], [0, 0, 0, x, y, 1, -v * x, -v * y]]
+        values += [u, v]
+    return np.append(np.linalg.solve(np.array(rows, float), np.array(values, float)), 1.0).reshape(3, 3)
+
+
+def quad_at(keys: list[dict], t: float, width: int, height: int) -> np.ndarray:
+    """A screen's corners (output pixels: top-left, top-right, bottom-right, bottom-left) at song time ``t``."""
+    times = [key["t"] for key in keys]
+    if t <= times[0] or len(keys) == 1:
+        corners = np.array(keys[0]["corners"], float)
+    elif t >= times[-1]:
+        corners = np.array(keys[-1]["corners"], float)
+    else:
+        k = int(np.searchsorted(times, t)) - 1
+        weight = (t - times[k]) / (times[k + 1] - times[k])
+        corners = np.array(keys[k]["corners"], float) * (1 - weight) + np.array(keys[k + 1]["corners"], float) * weight
+    return corners * [width, height]
+
+
+def pushed_quad(quad: np.ndarray, progress: float, width: int, height: int) -> np.ndarray:
+    """The screen partway to filling the frame: an accelerating zoom at a steady exponential rate."""
+    frame = np.array([[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]])
+    eased = min(max(progress, 0.0), 1.0) ** 1.5
+    x, y = quad[:, 0], quad[:, 1]
+    area = 0.5 * abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
+    size = min(math.sqrt(max(area, 1.0) / (width * height)), 0.999)
+    weight = (size ** (1 - eased) - size) / (1 - size)
+    return quad + weight * (frame - quad)
+
+
+def screen_rect(quad: np.ndarray, width: int, height: int) -> tuple[float, float, float, float]:
+    """The middle of a full frame cut to the screen's own shape (x, y, w, h in pixels): what the screen shows."""
+    across = (np.linalg.norm(quad[1] - quad[0]) + np.linalg.norm(quad[2] - quad[3])) / 2
+    down = (np.linalg.norm(quad[3] - quad[0]) + np.linalg.norm(quad[2] - quad[1])) / 2
+    aspect = across / max(down, 1e-6)
+    w, h = (width, width / aspect) if aspect > width / height else (height * aspect, height)
+    return (width - w) / 2, (height - h) / 2, w, h
+
+
+def screen_mask(rect: tuple[float, float, float, float], radius: float, width: int, height: int) -> np.ndarray:
+    """A rounded rectangle (anti-aliased) in the source frame's pixels; ``radius`` is a share of its shorter side."""
+    from PIL import Image, ImageDraw
+    x, y, w, h = rect
+    big = Image.new("L", (width * 2, height * 2), 0)
+    ImageDraw.Draw(big).rounded_rectangle([x * 2, y * 2, (x + w) * 2 - 1, (y + h) * 2 - 1],
+                                          radius=max(radius * min(w, h) * 2, 0.0), fill=255)
+    return np.asarray(big.resize((width, height), Image.BOX))
+
+
+def glass(picture: np.ndarray, rect: tuple[float, float, float, float], strength: float) -> np.ndarray:
+    """Darken a picture toward the edges of ``rect``, as a curved screen does."""
+    if strength <= 0:
+        return picture
+    x, y, w, h = rect
+    height, width = picture.shape[:2]
+    dx = (np.arange(width, dtype=np.float32) - (x + w / 2)) / (w / 2)
+    dy = (np.arange(height, dtype=np.float32) - (y + h / 2)) / (h / 2)
+    falloff = 1 - strength * np.clip(dx[None, :] ** 2 + dy[:, None] ** 2, 0, 2) ** 2 / 4
+    return np.clip(picture.astype(np.float32) * falloff[..., None], 0, 255).astype(np.uint8)
+
+
+def static_frame(seed: int, width: int, height: int) -> np.ndarray:
+    """A frame of TV static: coarse grey noise with rolling bands."""
+    rng = np.random.default_rng(seed)
+    noise = rng.random((height // 3 + 1, width // 3 + 1), dtype=np.float32)
+    noise = np.repeat(np.repeat(noise, 3, axis=0), 3, axis=1)[:height, :width]
+    bands = 0.75 + 0.35 * np.sin(np.linspace(0, rng.uniform(6, 14), height, dtype=np.float32) + rng.uniform(0, 6))
+    grey = np.clip(noise * bands[:, None] * 255, 0, 255).astype(np.uint8)
+    return np.repeat(grey[..., None], 3, axis=2)
 
 
 @dataclass
@@ -632,6 +756,43 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
                 progress_value = (f - a) / max(b - a - 1, 1)
                 scale = 1 + (effect.get("zoom", 1.3) - 1) * (1 - ease(progress_value, "out"))
                 plan.base[f] = compose(plan.base.get(f, np.eye(2, 3)), scale_about(point, scale))
+            continue
+        if effect["kind"] == "screen":
+            source = effect["source"]
+            path, aspect = _film_path(db, source["film_id"], films)
+            picture = Picture(source["film_id"], source.get("unit_id"), path, aspect, source.get("crop"))
+            count = b - a
+            frames = read_frames(picture, source["source_start"], count, fps, width, height)
+            noisy = int(round(effect.get("static", 0.0) * fps))
+            push = effect.get("push")
+            seed = sum(ord(c) for c in effect["id"]) * 1009
+            shown, matrices, masks, opacity, corners = [], [], [], [], []
+            for i in range(count):
+                t = origin + (a + i) / fps
+                quad = quad_at(effect["quad"], t, width, height)
+                target, entered = quad, 0.0
+                if push is not None and t + 1e-6 >= push:
+                    # the last frame lands with the source filling the frame, so the cut that follows is seamless
+                    entered = min(1.0, (t + 1 / fps - push) / max(effect["end"] - push, 1e-6))
+                    target = pushed_quad(quad, entered, width, height)
+                    try:
+                        plan.base[a + i] = compose(homography(quad, target), plan.base.get(a + i, np.eye(2, 3)))
+                    except np.linalg.LinAlgError:
+                        pass
+                corners.append(target)
+                rect = screen_rect(target, width, height)
+                x, y, w, h = rect
+                try:
+                    matrices.append(homography(np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]), target))
+                    opacity.append(effect.get("opacity", 1.0))
+                except np.linalg.LinAlgError:
+                    matrices.append(np.eye(2, 3))
+                    opacity.append(0.0)
+                frame = static_frame(seed + i, width, height) if i < noisy else frames[i]
+                shown.append(glass(frame, rect, SCREEN_GLASS * (1 - entered)))
+                masks.append(screen_mask(rect, effect.get("radius", 0.06) * (1 - entered), width, height))
+            plan.layers.append(Layer(a, shown, None, matrices, opacity, "normal", masks=masks,
+                                     occluders=effect.get("classes") or None, screens=corners))
             continue
         if effect["kind"] in ("overlay", "fill", "panel"):
             source = effect["source"]
@@ -848,6 +1009,7 @@ def composite(source: Path, target: Path, plan: Plan, expected_frames: int, prog
                 if index in plan.base:
                     work = warp(work, plan.base[index], width, height).astype(np.float32) / 255
                 base_masks: dict[tuple[str, ...], np.ndarray] = {}
+                found: dict[tuple[str, ...], list[np.ndarray]] = {}
                 for layer, i in layers_at.get(index, []):
                     opacity = layer.opacity[i]
                     if opacity <= 0.001:
@@ -866,6 +1028,13 @@ def composite(source: Path, target: Path, plan: Plan, expected_frames: int, prog
                             alpha = warp(mask, layer.matrices[i], width, height, order=1).astype(np.float32)[..., None] / 255
                     if layer.window is not None:
                         alpha = alpha * (layer.window.astype(np.float32)[..., None] / 255)
+                    if layer.occluders:
+                        key = ("instances",) + tuple(layer.occluders)
+                        if key not in found:
+                            found[key] = segmenter.instances(np.clip(work * 255 + 0.5, 0, 255).astype(np.uint8), list(layer.occluders))
+                        front = in_front(found[key], layer.screens[i] if layer.screens is not None else None)
+                        if front.size:
+                            alpha = alpha * (1 - front.astype(np.float32)[..., None] / 255)
                     if layer.matte is not None:
                         top = np.broadcast_to(np.array(layer.matte, np.float32), top.shape)
                     work = blend(work, top, alpha * opacity, layer.blend)

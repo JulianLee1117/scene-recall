@@ -22,7 +22,7 @@ records.
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
 | Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103, 0104, 0105 |
-| Render effects (feature-locked overlays, hard crops, panels, masks) | Effects | `pipeline/lab/effects.py`, `pipeline/lab/media.py` | 0106, 0107, 0099 |
+| Render effects (feature-locked overlays, hard crops, panels, masks, screens) | Effects | `pipeline/lab/effects.py`, `pipeline/lab/screens.py`, `pipeline/lab/media.py` | 0106, 0107, 0108, 0099 |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
 | Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067 |
 
@@ -1436,7 +1436,7 @@ Rendered preview uses 720 output; the API also supports 1080 export.
 Derived caches and renders remain
 under `assets_dir/lab`; user originals and revisions remain durable.
 
-#### Effects (ADR-0106, ADR-0107)
+#### Effects (ADR-0106, ADR-0107, ADR-0108)
 
 A music-video document may carry `effects`, timed on the song clock. Each
 effect has an ID, a kind and a span. A document without effects keeps exactly
@@ -1457,7 +1457,15 @@ its previous manifest and render.
 - `fill` shows its source inside the picture's own segmented subject;
 - `panel` sets its source, covering, into `rect` (output fractions), turned by
   `turn` degrees;
-- `strips` lays 2-12 `sources` side by side in vertical strips.
+- `strips` lays 2-12 `sources` side by side in vertical strips;
+- `screen` plays its source on a screen in the picture, in perspective inside
+  the corners keyed in `quad` (top-left, top-right, bottom-right,
+  bottom-left, output fractions, linear between keys). It shows the middle of
+  the source cut to the screen's shape, with `radius` rounded corners and a
+  curved screen's falloff. `static` seconds of TV noise come first, and
+  `classes` stay in front, except instances lying mostly on the screen, which
+  are its own picture. From `push` to the end the frame zooms into the
+  screen, speeding up, until the source fills the frame on the last frame.
 
 **Settings:**
 - `align`: `eyes`, `subject` or `none`;
@@ -1498,13 +1506,22 @@ frame. With no feature, or no index, an effect centres at unit
 scale and is reported as unaligned. When the index knows the shot, pre-rolls
 and post-rolls hold a frame instead of showing a neighbouring shot.
 
+**Screens** are found by tooling, not by the render. In
+`pipeline/lab/screens.py`, detection takes the lit part of the segmentation
+model's TV mask and fits a line to each edge for the corners. A TV's picture
+can be dark in places and people can cover it, so an editor may give the
+corners instead. Following moves corners with the set: patches on the casing
+are matched frame to frame and a robust scale, turn and shift is fitted.
+Documents store the corners.
+
 **Masks** come from the library's RF-DETR segmentation model. It loads in the
 editor worker only when an effect needs a mask, and runs at about 15 ms a
 frame. Fill masks are taken from the picture being composited.
 
 **Rendering.** After the cut sequence renders, a compositing pass decodes it
 (PyAV), composites with NumPy and PIL affine resampling, and re-encodes at
-libx264 CRF 18. Audio is then muxed as before, and the frame count is
+libx264 CRF 18. Screens and their pushes resample through projective
+matrices. Audio is then muxed as before, and the frame count is
 enforced. The manifest records `feature-locked-effects-v1`. The job result
 lists skipped and unaligned effects.
 

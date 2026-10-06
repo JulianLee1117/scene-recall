@@ -136,6 +136,9 @@ Edits that work get saved as loose, editable presets.
      semi-transparent overlays. ADR-0107 adds hard feature patches, panels,
      strips, and render-time masks (cutouts, mattes, fills); settle is
      opt-in.
+   - The owner found rectangle inserts on TVs unclear. ADR-0108 adds
+     `screen`: perspective inserts on tracked screen corners, static, people
+     in front, and a push into the screen.
 
 ### Match cuts (ADR-0099, 2026-09-28)
 
