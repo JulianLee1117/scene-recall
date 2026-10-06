@@ -45,7 +45,9 @@ loaded.
    smaller picture floating in the window.
 2. **New kinds.**
    - `fill` shows its source inside the picture's own segmented subject
-     (`classes`).
+     (`classes`). With a `rect`, the source is set into that rectangle
+     first, so a scene can play on a TV screen, hidden where someone in front
+     of the TV covers it.
    - `panel` sets its source, covering, into `rect` (output fractions),
      turned by `turn` degrees, with hard edges.
    - `strips` lays two to twelve `sources` side by side in vertical strips,

@@ -643,13 +643,14 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
             soft_default = region == "full" and effect["kind"] == "overlay"
             hard = (effect.get("edge") or ("soft" if soft_default else "hard")) == "hard"
             matrices, opacity, fixed, masks = [], [], None, []
-            aligned = kind == "none" or effect["kind"] == "panel"
+            placed = effect["kind"] == "panel" or (effect["kind"] == "fill" and bool(effect.get("rect")))
+            aligned = kind == "none" or placed
             for i in range(count):
                 f = a + i
                 t = effect["start"] + i / fps
                 matrix = np.eye(2, 3)
                 moving = None
-                if effect["kind"] == "panel":
+                if placed:
                     matrix = panel_matrix(effect["rect"], effect.get("turn", 0.0), width, height)
                 elif kind != "none" and (effect.get("track", True) or fixed is None):
                     moving = picture.feature(features, source["source_start"] + i / fps, kind, width, height)
@@ -683,8 +684,10 @@ def build_plan(manifest: dict, db: Any, features: FeatureSource, progress: Calla
                 plan.layers.append(Layer(a, frames, rect_mask(effect["rect"], effect.get("turn", 0.0), width, height), matrices,
                                          opacity, effect.get("blend", "normal"), mask_space="output", matte=matte))
             elif effect["kind"] == "fill":
+                # with a rect the source is set into it (a screen) and shows only where the picture's own subject is
+                window = rect_mask(effect["rect"], effect.get("turn", 0.0), width, height) if effect.get("rect") else None
                 plan.layers.append(Layer(a, frames, None, matrices, opacity, effect.get("blend", "normal"),
-                                         base_classes=effect.get("classes") or ["person"], matte=matte))
+                                         base_classes=effect.get("classes") or ["person"], matte=matte, window=window))
             else:
                 frame_mask = valid_mask(picture, width, height, 0.0 if hard else FEATHER)
                 if masks:
@@ -861,8 +864,8 @@ def composite(source: Path, target: Path, plan: Plan, expected_frames: int, prog
                             alpha = mask.astype(np.float32)[..., None] / 255
                         else:
                             alpha = warp(mask, layer.matrices[i], width, height, order=1).astype(np.float32)[..., None] / 255
-                        if layer.window is not None:
-                            alpha = alpha * (layer.window.astype(np.float32)[..., None] / 255)
+                    if layer.window is not None:
+                        alpha = alpha * (layer.window.astype(np.float32)[..., None] / 255)
                     if layer.matte is not None:
                         top = np.broadcast_to(np.array(layer.matte, np.float32), top.shape)
                     work = blend(work, top, alpha * opacity, layer.blend)

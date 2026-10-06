@@ -280,6 +280,8 @@ def test_real_render_places_panels_strips_fills_and_cutouts(config, store, db, t
          "align": "none", "region": "subject", "matte": "#ffffff"},
         {"id": "split", "kind": "overlay", "start": .65, "end": .75, "source": {"film_id": "film", "source_start": 1.3},
          "align": "none", "rect": {"x": .5, "y": 0, "width": .5, "height": 1}},
+        {"id": "screen", "kind": "fill", "start": 1.0, "end": 1.08, "source": {"film_id": "film", "source_start": .3},
+         "rect": {"x": .25, "y": 0, "width": .5, "height": 1}},
     ]
     project = store.update_project(project["id"], 1, doc)
     store.enqueue("render", project["id"], 2)
@@ -300,3 +302,5 @@ def test_real_render_places_panels_strips_fills_and_cutouts(config, store, db, t
     assert pixel(16, 100)[0] > 200 and pixel(16, 900)[1] > 100           # fill: red/blue inside the left-half subject, green outside
     assert min(pixel(21, 100)) > 230 and pixel(21, 900)[1] > 100         # white matte cutout on the left half only
     assert pixel(5, 300)[0] > 200 and pixel(5, 1000)[1] > 100 and pixel(5, 1000)[2] < 60  # split: red left, green window right
+    # screen fill: the red/blue picture squeezed into the middle rect, shown only on the left-half "subject"
+    assert pixel(13, 380)[0] > 200 and pixel(13, 600)[0] > 200 and pixel(13, 200)[1] > 100 and pixel(13, 800)[2] < 60

@@ -95,7 +95,8 @@ class Effect(LabModel):
     segmented subject (``classes``, COCO names, default person); an overlay
     with ``rect`` shows only inside that screen rectangle (a split screen),
     which an aligned overlay keeps filled;
-    ``fill`` shows its source inside the picture's own segmented subject;
+    ``fill`` shows its source inside the picture's own segmented subject
+    (set into ``rect`` when given, like a picture on a screen);
     ``panel`` sets the source into ``rect`` (output fractions), turned by
     ``turn`` degrees.
     """

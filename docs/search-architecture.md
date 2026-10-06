@@ -1469,6 +1469,9 @@ its previous manifest and render.
 - `rect` on an overlay: it shows only inside that screen rectangle (split
   screens, half-and-half faces); an aligned overlay zooms, or eases its move,
   to keep that window filled;
+- `rect` on a fill: the source is set into that rectangle and shows only where
+  the picture's own segmented subject is (a scene playing on a TV, behind
+  whoever sits in front of it);
 - `settle` (lock cuts): opt-in easing from the outgoing feature back to the
   incoming shot's own framing;
 - `track`: re-align every frame;
