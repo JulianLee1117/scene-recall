@@ -60,6 +60,7 @@ def test_real_center_focus_removes_other_channels_and_cache_is_the_browser_pcm(s
         assert response.status_code == 200, response.text
         assert response.content == pcm.read_bytes()
         assert response.history[0].status_code == 307
+        assert response.history[0].headers["location"] == f"dialogue-audio/assets/{focused['asset_id']}.wav"   # proxy-safe
         ranged = client.get("/lab/dialogue-audio", params=request, headers={"Range": "bytes=0-63"})
         assert ranged.status_code == 206 and ranged.content == response.content[:64]
         assert ranged.headers["etag"] == f'"{focused["asset_id"]}"'

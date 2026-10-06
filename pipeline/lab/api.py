@@ -205,7 +205,8 @@ def dialogue_audio(request: Request, film_id: str, source_start: float, source_e
         raise HTTPException(503, str(exc), headers={"Retry-After": "2"}) from None
     except (ValueError, KeyError) as exc:
         raise HTTPException(422, str(exc).strip("'")) from None
-    return RedirectResponse(asset["audio_url"], status_code=307,
+    # Relative, so a path prefix the browser reached the API through (the web app's /api proxy) is kept.
+    return RedirectResponse(f"dialogue-audio/assets/{asset['asset_id']}.wav", status_code=307,
                             headers={"Cache-Control": "no-store", "X-Dialogue-Channel-Method": asset["channel_method"]})
 
 
