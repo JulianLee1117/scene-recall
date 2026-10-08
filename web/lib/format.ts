@@ -13,3 +13,8 @@ export function filmLabel(filmId: string): string {
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+/** "Taxi Driver (1976) [Remastered]" → "Taxi Driver (1976)": edition tags stay in the library, not on screen. */
+export function displayTitle(title: string): string {
+  return title.replace(/(\s*\[[^\]]*\])+\s*$/, "").trim() || title;
+}

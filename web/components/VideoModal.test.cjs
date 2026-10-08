@@ -59,7 +59,7 @@ function harness({ shot = film(), apiUrl = "http://api.invalid" } = {}) {
     require(name) {
       if (name === "react") return react;
       if (name === "react/jsx-runtime") return { jsx: (type, props, key) => ({ type, props, key }), jsxs: (type, props, key) => ({ type, props, key }) };
-      if (name === "@/lib/format") return { filmLabel: String, formatTime: (value) => `${value}s` };
+      if (name === "@/lib/format") return { filmLabel: String, displayTitle: String, formatTime: (value) => `${value}s` };
       if (name === "@/lib/searchRecipe") return { FACET_LABELS: {} };
       if (name === "@/lib/matchReasons") return reasons;
       return { default: name };

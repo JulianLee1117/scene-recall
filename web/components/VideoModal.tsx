@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import UseInSearchMenu from "./UseInSearchMenu";
 import FacetIcon from "./FacetIcon";
 import BookmarkIcon from "./BookmarkIcon";
-import { filmLabel, formatTime } from "@/lib/format";
+import { displayTitle, filmLabel, formatTime } from "@/lib/format";
 import { FACET_LABELS } from "@/lib/searchRecipe";
 import { matchBreakdown } from "@/lib/matchReasons";
 import MatchBreakdown from "./MatchBreakdown";
@@ -50,7 +50,7 @@ export default function VideoModal({
   const [playheadTime, setPlayheadTime] = useState(evidenceTime);
   // A matched subtitle line is the most precise moment to start from.
   const seekTarget = Math.max(0, (shot.matched_line?.t_start ?? evidenceTime) - 1);
-  const filmTitle = shot.film_title ?? filmLabel(shot.film_id);
+  const filmTitle = displayTitle(shot.film_title ?? filmLabel(shot.film_id));
   const hasBreakdown = matchBreakdown(shot).rows.length > 0;
   // Match cuts start from what is on screen while it is still this shot.
   const matchTime = playheadTime >= shot.t_start && playheadTime <= shot.t_end ? playheadTime : evidenceTime;
@@ -287,7 +287,7 @@ export default function VideoModal({
           {hasBreakdown && (
             <section className="modal-reasons" aria-label="Why this scene ranked here">
               <h3>Why it&apos;s here</h3>
-              <MatchBreakdown shot={shot} omitDetail={shot.caption} />
+              <MatchBreakdown shot={shot} />
             </section>
           )}
           {(shot.scene_alternatives?.length ?? 0) > 0 && (

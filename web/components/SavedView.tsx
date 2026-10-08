@@ -7,7 +7,7 @@ import type {
   RecipeMatchFacet,
   SearchResult,
 } from "@/types/api";
-import { filmLabel, formatTime } from "@/lib/format";
+import { displayTitle, filmLabel, formatTime } from "@/lib/format";
 
 interface SavedViewProps {
   bookmarks: BookmarkRecord[];
@@ -77,7 +77,7 @@ export default function SavedView({
         <ol className="result-grid saved-grid" aria-label="Saved scenes">
           {bookmarks.map((bookmark, index) =>
             bookmark.scene ? (
-              <li className="result-grid-item" key={bookmark.bookmark_id} style={tileStyle(bookmark.scene.film_id)}>
+              <li className="result-grid-item" key={bookmark.bookmark_id} style={tileStyle(bookmark.scene)}>
                 <ShotCard
                   shot={bookmark.scene}
                   onFrameLoad={learnAspect}
@@ -102,7 +102,7 @@ export default function SavedView({
                   <div>
                     <span>Scene unavailable</span>
                     <strong>
-                      {bookmark.film_title || filmLabel(bookmark.film_id)}
+                      {displayTitle(bookmark.film_title || filmLabel(bookmark.film_id))}
                     </strong>
                     <span>{formatTime(bookmark.evidence_timestamp)}</span>
                   </div>

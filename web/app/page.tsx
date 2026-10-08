@@ -111,11 +111,14 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "info", label: "Info" },
 ];
 
+// Each example shows a different way in: a spoken line, light and color, a
+// mood, a kind of shot, an action. All were checked against the library.
 const SEARCH_EXAMPLES = [
-  "sunlight through trees",
-  "embracing on a beach",
-  "quietly unsettling",
-  "medium shot of two people, neo-noir lighting",
+  { label: "“you talkin’ to me?”", query: "you talkin' to me?" },
+  { label: "neon in the rain", query: "neon in the rain" },
+  { label: "quietly unsettling", query: "quietly unsettling" },
+  { label: "symmetrical hallway", query: "symmetrical hallway" },
+  { label: "dancing alone", query: "dancing alone" },
 ] as const;
 
 function focusFacetBrowse(facet: RecipeMatchFacet) {
@@ -1204,7 +1207,6 @@ export default function Home() {
                 drafts={matchDrafts}
                 image={mainImage}
                 sourceEvidence={sourceEvidenceByFacet}
-                showDetails={showDetails}
                 hasMainText={query.trim().length > 0}
                 onCommitText={handleFacetTextCommit}
                 onRemove={handleRemoveFacet}
@@ -1218,38 +1220,41 @@ export default function Home() {
                 referenceHasResults={facetSourceSearch.results.length > 0}
                 onCloseReference={handleSourceReferenceCancel}
                 controls={
-                  <div className="search-controls">
-                    <MovieScopeFilter
-                      selectedFilmIds={selectedFilmIds}
-                      onChange={handleMoviePickerChange}
-                      films={films}
-                    />
-                    <RankingPresetControl
-                      value={preset}
-                      onChange={handlePresetChange}
-                    />
-                    <SearchOptions
-                      showDetails={showDetails}
-                      onShowDetailsChange={setShowDetails}
-                    />
-                  </div>
-                }
-                idleContent={
-                  showSearchExamples && (
+                  // A fresh home shows examples beside Refine; once you start
+                  // composing, the scope and ranking settings take their place.
+                  showSearchExamples ? (
                     <div className="search-examples" aria-label="Example searches">
                       <span>Try</span>
                       {SEARCH_EXAMPLES.map((example) => (
                         <button
-                          key={example}
+                          key={example.query}
                           type="button"
                           onClick={() => {
-                            commitMovieDraft({ text: example, mentions: [] });
-                            void runRecipe(example, matchDrafts);
+                            commitMovieDraft({ text: example.query, mentions: [] });
+                            void runRecipe(example.query, matchDrafts);
                           }}
                         >
-                          {example}
+                          {example.label}
                         </button>
                       ))}
+                    </div>
+                  ) : (
+                    <div className="search-controls">
+                      <MovieScopeFilter
+                        selectedFilmIds={selectedFilmIds}
+                        onChange={handleMoviePickerChange}
+                        films={films}
+                      />
+                      <RankingPresetControl
+                        value={preset}
+                        onChange={handlePresetChange}
+                      />
+                      {(hasCompletedSearch || results.length > 0) && (
+                        <SearchOptions
+                          showDetails={showDetails}
+                          onShowDetailsChange={setShowDetails}
+                        />
+                      )}
                     </div>
                   )
                 }
@@ -1348,6 +1353,7 @@ export default function Home() {
                           pendingBookmarkUnitIds={pendingBookmarkUnitIds}
                           bookmarkDisabled={bookmarksLoading}
                           showDetails={false}
+                          size="small"
                         />
                       </div>
                     </section>

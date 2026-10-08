@@ -65,45 +65,27 @@ export function readableEvidence(view: string, text: string): string {
   return view === "facets" || view === "mood" ? readableShotDetails(text) : text;
 }
 
-/** 5 = among the very best for that finder, 1 = it barely made the list. */
-export type Strength = 1 | 2 | 3 | 4 | 5;
-
+/** One finder's verdict on a scene: where it ranked it, and on what. */
 export interface MatchRow {
-  /** What found the scene: Picture, Story, Dialogue, Look, Framing… */
+  /** Picture, Text, Rerank, or a category: Look, Framing, Scene, Words, Mood. */
   label: string;
-  strength: Strength;
-  /** Full sentence for tooltips and screen readers, e.g. "Ranked 3rd by Picture". */
-  note: string;
-  /** What it matched: an excerpt, a quoted line or the frame time. */
-  detail?: string;
+  /** "#2", "0.52" for the rerank score, or "–" when this finder did not return it. */
+  value: string;
+  /** The rank, for finders that rank; drives the hover summary. */
+  rank?: number;
+  matched: boolean;
+  /** What matched: the frame time, or the text view and its words. */
+  detail: string;
+  /** Short name for hover labels: Picture, Story, Dialogue, Look… */
+  short: string;
+  /** What this finder measures, for the label's tooltip. */
+  hint: string;
 }
 
 export interface MatchBreakdown {
-  /** How well the scene fits the description overall, when it was checked. */
-  fit?: { strength: Strength; word: string };
   rows: MatchRow[];
-}
-
-export function ordinal(value: number): string {
-  const tens = value % 100;
-  const suffix = tens >= 11 && tens <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[value % 10] ?? "th";
-  return `${value}${suffix}`;
-}
-
-export function rankStrength(rank: number): Strength {
-  if (rank <= 3) return 5;
-  if (rank <= 10) return 4;
-  if (rank <= 30) return 3;
-  if (rank <= 100) return 2;
-  return 1;
-}
-
-function fitOf(verdict: number): { strength: Strength; word: string } {
-  if (verdict >= 0.7) return { strength: 5, word: "Strong fit" };
-  if (verdict >= 0.55) return { strength: 4, word: "Good fit" };
-  if (verdict >= 0.4) return { strength: 3, word: "Fair fit" };
-  if (verdict >= 0.2) return { strength: 2, word: "Loose fit" };
-  return { strength: 1, word: "Weak fit" };
+  /** The final ordering score, when the search reports one. */
+  score?: number;
 }
 
 /** The per-finder ranking behind one clause, when the API reported it. */
@@ -115,52 +97,86 @@ function clauseChannels(shot: SearchResult, match: SearchMatch): SearchChannelsD
   return (shot.matches ?? []).length <= 1 ? debug.channels : undefined;
 }
 
-function rowFor(label: string, rank: number, detail?: string): MatchRow {
-  return { label, strength: rankStrength(rank), note: `Ranked ${ordinal(rank)} by ${label}`, detail: detail || undefined };
-}
+const NOT_MATCHED = "–";
 
-function evidenceDetail(match: SearchMatch): string | undefined {
+function evidenceDetail(match: SearchMatch): string {
   const evidence = match.evidence;
-  if (evidence?.type === "text") return readableEvidence(evidence.view, evidence.text);
-  if (evidence?.type === "frame" && typeof evidence.timestamp === "number") return `Closest frame at ${formatTime(evidence.timestamp)}`;
-  return undefined;
+  if (evidence?.type === "text") {
+    return `${TEXT_VIEW_LABELS[evidence.view] ?? evidence.view} · ${readableEvidence(evidence.view, evidence.text)}`;
+  }
+  if (evidence?.type === "frame" && typeof evidence.timestamp === "number") return `frame ${formatTime(evidence.timestamp)}`;
+  return "";
 }
 
 /**
- * Why a scene ranked where it did, in words: each finder that found it
- * (picture, a text view, exact words, a quoted line, or a reference clause),
- * how highly it ranked there, and what it matched. Strongest first.
+ * How each finder ranked a scene. A typed description always reports the
+ * same rows (Picture, Text, Rerank) so scenes compare at a glance; a finder
+ * that did not return the scene shows "–". Each extra category adds its own
+ * row with the scene's rank in that category.
  */
 export function matchBreakdown(shot: SearchResult): MatchBreakdown {
   const rows: MatchRow[] = [];
-  let verdict: number | undefined;
+  let score: number | undefined;
   for (const match of shot.matches ?? []) {
     const clause = CLAUSE_LABELS[match.facet] ?? match.facet;
     const channels = match.facet === "all" ? clauseChannels(shot, match) : undefined;
-    if (match.facet === "all" && typeof channels?.rerank?.verdict === "number") verdict = channels.rerank.verdict;
-    const found: MatchRow[] = [];
-    if (channels?.quote && shot.matched_line) {
-      found.push(rowFor("Line", channels.quote.rank, `“${shot.matched_line.text}”`));
+    if (!channels) {
+      rows.push({ label: clause, value: `#${match.rank}`, rank: match.rank, matched: true, detail: evidenceDetail(match), short: clause, hint: `Rank among scenes matching ${clause}` });
+      continue;
     }
-    if (channels?.txt) {
-      const view = channels.txt.matched_text?.view ?? channels.txt.source ?? "";
-      const text = channels.txt.matched_text?.text ?? (match.evidence?.type === "text" ? match.evidence.text : "");
-      found.push(rowFor(TEXT_VIEW_LABELS[view] ?? "Text", channels.txt.rank, text ? readableEvidence(view, text) : undefined));
+    if (typeof shot.debug?.relevance === "number") score = shot.debug.relevance;
+    const img = channels.img;
+    const at = img?.matched_frame?.timestamp;
+    rows.push({
+      label: "Picture",
+      value: img ? `#${img.rank}` : NOT_MATCHED,
+      rank: img?.rank,
+      matched: Boolean(img),
+      detail: img ? (typeof at === "number" ? `frame ${formatTime(at)}` : "") : "not in picture results",
+      short: "Picture",
+      hint: "Rank among frames whose picture is closest to your words",
+    });
+    const txt = channels.txt;
+    const view = txt?.matched_text?.view ?? txt?.source ?? "";
+    const viewLabel = TEXT_VIEW_LABELS[view] ?? "Text";
+    const text = txt?.matched_text?.text ?? (match.evidence?.type === "text" ? match.evidence.text : "");
+    rows.push({
+      label: "Text",
+      value: txt ? `#${txt.rank}` : NOT_MATCHED,
+      rank: txt?.rank,
+      matched: Boolean(txt),
+      detail: txt
+        ? view === "caption" && text === shot.caption
+          ? "Description (above)"
+          : `${viewLabel}${text ? ` · ${readableEvidence(view, text)}` : ""}`
+        : "not in text results",
+      short: viewLabel,
+      hint: "Rank among scenes whose descriptions, dialogue or story best match your words",
+    });
+    if (channels.lex) {
+      rows.push({ label: "Keywords", value: `#${channels.lex.rank}`, rank: channels.lex.rank, matched: true, detail: "", short: "Keywords", hint: "Rank by exact word matches" });
     }
-    if (channels?.img) {
-      const at = channels.img.matched_frame?.timestamp;
-      found.push(rowFor("Picture", channels.img.rank, typeof at === "number" ? `Closest frame at ${formatTime(at)}` : undefined));
+    if (channels.quote && shot.matched_line) {
+      rows.push({ label: "Line", value: `#${channels.quote.rank}`, rank: channels.quote.rank, matched: true, detail: `“${shot.matched_line.text}”`, short: "Line", hint: "Rank among spoken lines matching your words" });
     }
-    if (channels?.lex) found.push(rowFor("Exact words", channels.lex.rank));
-    rows.push(...(found.length ? found : [rowFor(clause, match.rank, evidenceDetail(match))]));
+    const verdict = channels.rerank?.verdict;
+    rows.push({
+      label: "Rerank",
+      value: typeof verdict === "number" ? verdict.toFixed(2) : NOT_MATCHED,
+      matched: typeof verdict === "number",
+      detail: typeof verdict === "number" ? "" : "not reranked (only the top 40 are)",
+      short: "Rerank",
+      hint: "A second model's check of how well the scene fits your words, 0 to 1",
+    });
   }
-  rows.sort((a, b) => b.strength - a.strength);
-  return { fit: verdict === undefined ? undefined : fitOf(verdict), rows };
+  return { rows, score };
 }
 
-/** Short names of what found a scene, strongest first, for the hover label. */
+/** What found a scene well (top 30 in that finder), for the hover label. */
 export function foundBy(shot: SearchResult, limit = 3): string[] {
-  const { rows } = matchBreakdown(shot);
-  const strong = rows.filter((row) => row.strength >= 3);
-  return Array.from(new Set((strong.length ? strong : rows.slice(0, 1)).map((row) => row.label))).slice(0, limit);
+  const ranked = matchBreakdown(shot).rows
+    .filter((row) => row.matched && typeof row.rank === "number")
+    .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+  const strong = ranked.filter((row) => (row.rank ?? Infinity) <= 30);
+  return Array.from(new Set((strong.length ? strong : ranked.slice(0, 1)).map((row) => row.short))).slice(0, limit);
 }

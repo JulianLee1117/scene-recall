@@ -314,9 +314,10 @@ stay). Saved cards keep playback, bookmarks and Related without dragging or a
 drag badge. The player distinguishes its retrieved frame from the current
 playback time; its action bar saves the scene, finds related scenes, opens
 **Match cuts** at the playhead in a new tab and copies the film and time.
-**Details** shows each result's description, its overall fit, and each finder
-that ranked it (Picture, a text view such as Story or Dialogue, Exact words, a
-quoted Line, or a reference category) with a five-step meter and what matched.
+**Details** shows each result's description and how each finder ranked it, as
+an aligned table: the Picture rank, the Text rank with the view it matched (Story,
+Dialogue, On-screen text…), the Rerank score, and one row per category. A
+finder that did not return the scene shows "–".
 
 ### AI Music Video and Match Cuts
 
@@ -1425,9 +1426,10 @@ scene**, **Use text instead** where supported, or **Remove**. **Change aspect**
 provides a keyboard/touch alternative to dragging: choose the destination,
 then **Move to…** or **Replace…** if it already has a clue. Selecting or cancelling
 does not apply a change. The source/frame identity is preserved, and uploaded
-images can move only between Look and Framing. With **Details** on, its
-**Matched evidence** disclosure shows the exact caption, dialogue/OCR, or
-mood/energy text it contributes. Look and
+images can move only between Look and Framing. Its editor shows what the
+category reads from the scene (**Searching for its words**, and so on): the exact
+caption, dialogue/OCR, or mood/energy text it contributes, which the active
+chip also shows in short. Look and
 Framing sources remain explicitly visual rather than being translated into
 invented words. Choosing Framing from the result menu and dragging that result
 onto the Framing chip create the same source clause. Framing supplies the

@@ -12,7 +12,7 @@ import FacetIcon from "./FacetIcon";
 import DirectionIcon from "./DirectionIcon";
 import { formatTime } from "@/lib/format";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
-import { referenceGateCopy, SEARCH_CLUE_COPY } from "@/lib/searchClues";
+import { referenceGateCopy, referenceReading, SEARCH_CLUE_COPY } from "@/lib/searchClues";
 import {
   SCENE_POINTER_EVENT,
   useScenePointerDrag,
@@ -50,7 +50,6 @@ interface MatchByRailProps {
   drafts: MatchDrafts;
   image?: RecipeImageInput | null;
   sourceEvidence?: Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>;
-  showDetails?: boolean;
   /** The Framing/Look shortlist note only makes sense once a description orders it. */
   hasMainText?: boolean;
   onCommitText?: (facet: TextMatchFacet, text: string) => void;
@@ -165,7 +164,6 @@ export default function MatchByRail({
   drafts,
   image,
   sourceEvidence = {},
-  showDetails = false,
   hasMainText = false,
   onCommitText,
   onRemove,
@@ -485,14 +483,17 @@ export default function MatchByRail({
     return copy ? [{ facet, kind, ...copy }] : [];
   });
 
-  const evidence = editorFacet ? sourceEvidence[editorFacet] : undefined;
-
-  const evidenceMatches =
-    editorSource &&
-    evidence &&
-    "unit_id" in evidence.source &&
-    evidence.source.unit_id === editorSource.source.unit_id &&
-    evidence.source.frame_index === editorSource.source.frame_index;
+  // The API reports what each category took from its scene; only trust it
+  // while it still describes the reference currently in that category.
+  const evidenceFor = (facet: RecipeMatchFacet) => {
+    const draft = drafts[facet];
+    const evidence = sourceEvidence[facet];
+    if (draft?.kind !== "source" || !evidence || !("unit_id" in evidence.source)) return undefined;
+    return evidence.source.unit_id === draft.source.unit_id && evidence.source.frame_index === draft.source.frame_index
+      ? evidence
+      : undefined;
+  };
+  const editorReading = editorFacet ? referenceReading(editorFacet, evidenceFor(editorFacet)) : null;
 
   return (
     <section
@@ -541,8 +542,10 @@ export default function MatchByRail({
           {activeFacets.map((facet) => {
             const draft = drafts[facet];
             const hasImage = image?.facet === facet;
+            const film = draft?.kind === "source" ? draft.display?.filmTitle || "Reference scene" : "";
+            const reading = draft?.kind === "source" ? referenceReading(facet, evidenceFor(facet)).summary : undefined;
             const title = hasImage ? image.display.label
-              : draft?.kind === "source" ? draft.display?.filmTitle || "Reference scene"
+              : draft?.kind === "source" ? reading ?? film
                 : draft?.kind === "text" ? draft.text : "";
             const thumbnail = hasImage ? image.display.previewUrl
               : draft?.kind === "source" && draft.display?.keyframeUrl ? `${API_URL}${draft.display.keyframeUrl}` : null;
@@ -554,7 +557,7 @@ export default function MatchByRail({
               aria-label={`Edit ${FACET_LABELS[facet]}: ${title}`}
               aria-expanded={openFacet === facet}
               aria-controls={`${panelId}-panel`}
-              title={`${FACET_LABELS[facet]}: ${title}`}
+              title={`${FACET_LABELS[facet]}: ${title}${reading ? ` (from ${film})` : ""}`}
               onClick={() => selectFacet(facet)}
             >
               {thumbnail && <img src={thumbnail} alt="" draggable={false} />}
@@ -736,6 +739,17 @@ export default function MatchByRail({
                         }
                       />
 
+                      {editorReading && (
+                        <div className="clue-reading" aria-live="polite">
+                          <strong>{editorReading.heading}</strong>
+                          {editorReading.parts.map((part) => (
+                            <p key={part.label}><span>{part.label}</span>{part.text}</p>
+                          ))}
+                          {editorSource && editorFacet !== "look" && editorFacet !== "composition" && editorReading.parts.length === 0 && (
+                            <p className="clue-reading-pending">Shown after the search runs.</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -831,12 +845,6 @@ export default function MatchByRail({
                     )}
                   </div>
 
-                  {editorMode === "reference" && showDetails && evidenceMatches && evidence.effective_text && (
-                    <details className="clue-evidence">
-                      <summary>Matched evidence</summary>
-                      {evidence.effective_text}
-                    </details>
-                  )}
                 </>
               )}
         </div>

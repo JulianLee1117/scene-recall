@@ -712,7 +712,11 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 /* Opening a category never moves the main input or category row. */
-.search-hero.is-home { padding-top: clamp(72px, 19dvh, 190px); }
+.search-hero.is-home { --home-top: max(32px, calc(50dvh - 141px)); padding-top: var(--home-top); }
+.search-hero.is-home .search-bar-shell { max-width: 720px; }
+.search-hero.is-home .match-rail { max-width: 720px; margin-top: 12px; }
+.search-hero.is-home .clues-toolbar { gap: 10px; }
+.search-hero.is-home .clues-tools { padding-left: 10px; }
 
 
 .search-workspace-form {
@@ -728,7 +732,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .search-bar-shell,
 .search-meta {
   width: 100%;
-  max-width: 880px;
+  max-width: 720px;
 }
 
 .search-bar-shell {
@@ -778,11 +782,12 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 .search-main-input::placeholder { color: #85817a; }
 .search-bar-shell.is-home .search-text-entry {
-  min-height: 76px;
-  padding-left: 22px;
+  min-height: 62px;
+  padding-left: 20px;
+  border-radius: 14px;
 }
 .search-bar-shell.is-home .movie-search-input {
-  font-size: 1.2rem;
+  font-size: 1.06rem;
 }
 
 
@@ -842,27 +847,27 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   text-align: right;
 }
 
+/* One wordmark: large on home, the same mark smaller above results. */
 .search-wordmark {
-  margin-bottom: 21px;
+  margin-bottom: 16px;
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--accent);
+  color: #cdb593;
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.85rem;
-  font-weight: 500;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  font-size: 1.12rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
   transition:
     color 0.15s ease,
     font-size 0.3s ease;
 }
 
 .search-wordmark.is-home {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
   color: #dbc4a2;
-  font-size: 1.65rem;
+  font-size: 1.85rem;
   font-weight: 400;
   letter-spacing: .04em;
   text-transform: none;
@@ -931,13 +936,13 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clues-tools .movie-scope-trigger { max-width: min(180px, 26vw); border-color: transparent; background: transparent; }
 .clues-tools .movie-scope-popover { z-index: 40; }
 .clues-tools .movie-scope-options { max-height: min(300px, 45dvh); }
-.search-hero.is-home .movie-scope-options { max-height: max(120px, min(340px, calc(100dvh - clamp(72px, 19dvh, 190px) - 400px))); }
+.search-hero.is-home .movie-scope-options { max-height: max(120px, min(340px, calc(100dvh - var(--home-top) - 400px))); }
 .clue-editor-close { display: grid; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #8f8980; cursor: pointer; font-size: 1rem; }
 .clue-editor-close:hover { color: #fff; background: #ffffff0c; }
 .clues-framing-note { margin: 8px auto 0; max-width: 620px; color: #857d70; font-size: .7rem; line-height: 1.6; text-align: center; }
 .clues-framing-note button { padding: 0; border: 0; background: transparent; color: #c9ac85; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .clue-editor { box-sizing: border-box; max-height: min(480px, calc(100dvh - 310px)); overflow: auto; padding: 15px 2px; }
-.search-hero.is-home .clue-editor { max-height: max(200px, min(520px, calc(100dvh - clamp(72px, 19dvh, 190px) - 290px))); }
+.search-hero.is-home .clue-editor { max-height: max(200px, min(520px, calc(100dvh - var(--home-top) - 290px))); }
 .clue-editor-heading, .clue-reference-picker > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .clue-editor-heading strong, .clue-reference-picker > header strong { color: #cbbda7; font-size: .78rem; font-weight: 500; line-height: 22px; }
 .clue-editor-heading p, .clue-reference-picker > header p { margin: 3px 0 0; color: #928779; font-size: .7rem; line-height: 1.5; }
@@ -964,7 +969,11 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-source > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .clue-source strong { overflow: hidden; color: #ddd2c1; font-size: .72rem; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .clue-source small { color: #898178; font-size: .64rem; }
-.clue-evidence { margin-top: 10px; color: #afa08c; font-size: .7rem; line-height: 1.5; }
+.clue-reading { margin-top: 10px; padding: 9px 11px; border-left: 2px solid #5a4a33; background: #14120f; font-size: .72rem; line-height: 1.5; }
+.clue-reading strong { display: block; margin-bottom: 4px; color: #d8c29d; font-weight: 600; }
+.clue-reading p { margin: 2px 0 0; color: #c9c0b2; }
+.clue-reading p > span { margin-right: 8px; color: #8d8373; font-size: .62rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.clue-reading .clue-reading-pending { color: #7d746a; }
 .search-clues.is-drag-floating .clues-panel { position: fixed; z-index: 100; top: 55px; left: 50%; width: min(580px, calc(100vw - 32px)); border-color: #80613d; box-shadow: 0 15px 60px #000c; }
 .search-clues.is-drag-floating .clue-chip { min-height: 41px; }
 .search-clues.is-drag-active .clue-editor { pointer-events: none; opacity: .35; }
@@ -984,7 +993,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .search-no-overlap > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 600px) {
   .search-hero { padding-top: 28px; }
-  .search-bar-shell.is-home .search-text-entry { min-height: 66px; padding-left: 15px; }
+  .search-bar-shell.is-home .search-text-entry { min-height: 56px; padding-left: 15px; }
   .search-bar-shell.is-home .movie-search-input { font-size: 1rem; }
   .clues-panel { padding-inline: 8px; }
   .clue-chip { padding-inline: 2px; font-size: .75rem; }
@@ -1458,11 +1467,11 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .search-examples {
   display: flex;
   min-width: 0;
-  margin: 22px auto 0;
+  margin: 0;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 4px 10px;
   color: #6f6a62;
   font-size: 0.72rem;
   scrollbar-width: none;
@@ -1576,17 +1585,53 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   list-style: none;
 }
 
-/* The last row keeps natural widths instead of stretching to fill. */
-.result-grid::after {
+/* Rows show whole; only the final row of all results keeps natural widths. */
+.result-grid.is-end::after,
+.saved-grid::after {
   content: "";
   flex: 1000 1 0;
+}
+
+/* Measured results render explicit rows, each justified on its own. */
+.result-grid.is-rows {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.result-row {
+  display: flex;
+  gap: 2px;
+}
+
+.result-row.is-short > .result-grid-item {
+  flex-grow: 0;
 }
 
 .result-grid-item {
   --ar: 1.7778;
 
+  display: flex;
   flex: var(--ar) 1 calc(var(--ar) * var(--row-h));
   min-width: 0;
+}
+
+.result-grid-item > .result-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.result-grid-item > .result-card > .result-card-primary {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.result-grid-item > .result-card .result-card-media {
+  flex: none;
+}
+
+.result-grid-item > .saved-unavailable {
+  flex: 1;
 }
 
 @media (max-width: 600px) {
@@ -2020,83 +2065,66 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   position: absolute;
   inset: 0;
   display: flex;
-  padding: 8px 10px;
+  padding: 10px 12px;
   flex-direction: column;
   justify-content: flex-end;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.78), transparent 52%);
+  gap: 3px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.84), rgba(0, 0, 0, 0.3) 46%, transparent 72%);
   transition: opacity 0.15s ease;
   pointer-events: none;
 }
 
-.result-match-facets,
-.modal-match-facets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
+.result-overlay-evidence {
+  display: -webkit-box;
+  margin-bottom: 3px;
+  overflow: hidden;
+  color: #ebe6dd;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.result-match-facets {
-  margin-bottom: 5px;
-}
-
-.result-match-facets > span,
-.modal-match-facets > span {
-  padding: 2px 5px;
-  border: 1px solid rgba(212, 169, 106, 0.25);
-  border-radius: 999px;
-  background: rgba(14, 12, 9, 0.68);
-  color: #ccb184;
-  font-size: 0.55rem;
-  font-weight: 600;
-  letter-spacing: 0.035em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.result-film {
-  color: var(--accent);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1.3;
-  text-transform: uppercase;
-}
-
-.result-time {
-  margin-top: 2px;
-  color: #bbb;
-  font-size: 0.65rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.result-match-evidence {
+.result-overlay-title {
   display: flex;
   min-width: 0;
-  margin-bottom: 6px;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 8px;
 }
 
-.result-match-evidence > span:first-child {
-  color: #e8d2b0;
-  font-size: 0.62rem;
+.result-overlay-finders {
+  color: #c8ab7f;
+  font-size: 0.58rem;
   font-weight: 600;
-  letter-spacing: 0.035em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.result-match-evidence > span:last-child {
+
+.result-film {
+  min-width: 0;
   overflow: hidden;
-  color: #d0d0d0;
-  font-size: 0.67rem;
+  color: #f3eee6;
+  font-size: 0.74rem;
+  font-weight: 600;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.result-time {
+  flex: none;
+  color: #a9a39a;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+
+
+
 .result-details {
   display: flex;
-  height: 9.25rem;
+  flex: 1;
   overflow: hidden;
   padding: 9px 11px 10px;
   flex-direction: column;
@@ -2115,76 +2143,59 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   -webkit-line-clamp: 2;
 }
 
-/* Why a scene ranked here: overall fit, then one row per finder. */
-.match-breakdown {
-  display: flex;
+/* How each finder ranked a scene: finder | rank | what matched. */
+.match-table {
+  display: grid;
   min-width: 0;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.match-fit,
-.match-row {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.match-fit-word {
-  color: #e2c597;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 3px 10px;
   font-size: 0.68rem;
-  font-weight: 600;
+  line-height: 1.35;
 }
 
-.match-aside {
-  margin-left: auto;
-  color: #6f6f6f;
-  font-size: 0.64rem;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.match-row {
+  display: contents;
 }
 
 .match-label {
-  flex: 0 0 5.6rem;
-  overflow: hidden;
   color: #a99a84;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-overflow: ellipsis;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  white-space: nowrap;
 }
 
-.match-meter {
-  display: inline-flex;
-  flex: none;
-  gap: 2px;
-}
-
-.match-meter > span {
-  width: 9px;
-  height: 3px;
-  border-radius: 1px;
-  background: #2b2924;
-}
-
-.match-meter > span.is-on {
-  background: var(--accent);
+.match-value {
+  color: #e6d2b0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .match-detail {
   min-width: 0;
   color: #9a9a9a;
-  font-size: 0.68rem;
-  line-height: 1.35;
 }
 
-.match-breakdown.is-compact .match-detail {
+.match-row.is-unmatched > span {
+  color: #555555;
+}
+
+.match-table.is-compact .match-detail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.match-foot {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 3px;
+  color: #6f6f6f;
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .search-options-trigger {
@@ -2512,14 +2523,12 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   gap: 8px;
 }
 
-.modal-reasons .match-row {
-  align-items: baseline;
+.modal-reasons .match-table {
+  font-size: 0.78rem;
 }
 
 .modal-reasons .match-detail {
   color: #c9c9c9;
-  font-size: 0.8rem;
-  line-height: 1.45;
 }
 
 .modal-reasons h3 {

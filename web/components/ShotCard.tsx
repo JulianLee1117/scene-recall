@@ -7,10 +7,10 @@ import BookmarkIcon from "./BookmarkIcon";
 import { FACET_LABELS, sourceDraftFromShot, writeSceneSourceDrag } from "@/lib/searchRecipe";
 import { useScenePointerDrag } from "@/hooks/useScenePointerDrag";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
-import { foundBy, readableEvidence, TEXT_VIEW_LABELS } from "@/lib/matchReasons";
+import { foundBy, readableEvidence } from "@/lib/matchReasons";
 import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
-import { formatTime, filmLabel } from "@/lib/format";
+import { displayTitle, formatTime, filmLabel } from "@/lib/format";
 
 interface ShotCardProps {
   shot: SearchResult;
@@ -19,7 +19,7 @@ interface ShotCardProps {
   showRank?: boolean;
   allowSourceDrag?: boolean;
   /** Reports the keyframe's natural size so the grid can keep the film's frame shape. */
-  onFrameLoad?: (filmId: string, width: number, height: number) => void;
+  onFrameLoad?: (scene: SearchResult, width: number, height: number) => void;
   onClick: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   disabledUseFacets?: ReadonlySet<RecipeMatchFacet>;
@@ -55,11 +55,14 @@ export default function ShotCard({
   const displayedRank = shot.rank ?? position;
   const evidenceTime =
     shot.matched_line?.t_start ?? shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
-  const filmTitle = shot.film_title ?? filmLabel(shot.film_id);
+  const filmTitle = displayTitle(shot.film_title ?? filmLabel(shot.film_id));
   const sceneMore = shot.scene_alternatives?.length ?? 0;
-  const matchedTextLabel = shot.matched_text_view
-    ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
-    : null;
+  // One line of what matched: the spoken line, else the matched text, else the action.
+  const overlayEvidence = shot.matched_line
+    ? `“${shot.matched_line.text}”`
+    : shot.matched_text
+      ? readableEvidence(shot.matched_text_view ?? "", shot.matched_text)
+      : shot.action;
   const finders = foundBy(shot);
   const sourceAvailable = Number.isInteger(shot.keyframe_index);
   // Scenes are modular: drag one onto a search category, or use its Related menu.
@@ -135,7 +138,7 @@ export default function ShotCard({
             alt=""
             loading="lazy"
             draggable={false}
-            onLoad={(event) => onFrameLoad?.(shot.film_id, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+            onLoad={(event) => onFrameLoad?.(shot, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
             style={{ opacity: hovered ? 0 : 1 }}
           />
 
@@ -176,31 +179,16 @@ export default function ShotCard({
           )}
 
           <span className="result-card-overlay" style={{ opacity: hovered ? 1 : 0 }}>
-            {shot.matched_line ? (
-              <span className="result-match-evidence">
-                <span>Line</span>
-                <span>{shot.matched_line.text}</span>
-              </span>
-            ) : matchedTextLabel && shot.matched_text ? (
-              <span className="result-match-evidence">
-                <span>{matchedTextLabel}</span>
-                <span>{readableEvidence(shot.matched_text_view ?? "", shot.matched_text)}</span>
-              </span>
-            ) : shot.action ? (
-              <span className="result-match-evidence">
-                <span>{shot.scene?.title || "Story"}</span>
-                <span>{shot.action}</span>
-              </span>
-            ) : null}
+            {overlayEvidence && <span className="result-overlay-evidence">{overlayEvidence}</span>}
+            <span className="result-overlay-title">
+              <span className="result-film">{filmTitle}</span>
+              <span className="result-time">{formatTime(evidenceTime)}</span>
+            </span>
             {finders.length > 0 && (
-              <span className="result-match-facets" aria-label={`Found by ${finders.join(", ")}`}>
-                {finders.map((label) => (
-                  <span key={label}>{label}</span>
-                ))}
+              <span className="result-overlay-finders" aria-label={`Found by ${finders.join(", ")}`}>
+                {finders.join(" · ")}
               </span>
             )}
-            <span className="result-film">{filmTitle}</span>
-            <span className="result-time">{formatTime(evidenceTime)}</span>
           </span>
         </span>
 
@@ -262,7 +250,6 @@ function ResultDetails({ id, shot }: { id: string; shot: SearchResult }) {
       <MatchBreakdown
         shot={shot}
         compact
-        omitDetail={shot.caption}
         aside={`${formatTime(shot.t_start)} – ${formatTime(shot.t_end)}`}
       />
     </span>

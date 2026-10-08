@@ -70,6 +70,7 @@ function setup(overrides = {}) {
         if (name === "react/jsx-runtime") return { jsx: (type, props, key) => ({ type, props, key }), jsxs: (type, props, key) => ({ type, props, key }), Fragment: "fragment" };
         if (name === "@/lib/searchRecipe") return load("../lib/searchRecipe.ts");
         if (name === "@/lib/searchClues") return load("../lib/searchClues.ts");
+        if (name === "@/lib/matchReasons") return load("../lib/matchReasons.ts");
         if (name === "@/hooks/useScenePointerDrag") return load("../hooks/useScenePointerDrag.ts");
         if (name === "@/lib/nativeDragPreview") return load("../lib/nativeDragPreview.ts");
         if (name === "@/lib/format") return { formatTime: String };
@@ -584,5 +585,35 @@ test("an uploaded image dragged out natively is removed and Undo re-adds the sam
     app.render();
     app.button("Undo").props.onClick();
     assert.deepEqual(app.calls[1], ["image-file", "composition", still.file]);
+  } finally { app.cleanup(); }
+});
+
+test("a scene reference shows what its category reads from it, on the chip and in its editor", () => {
+  const words = source("words");
+  const evidence = { clause_id: "words", facet: "words", adapter: "dialogue+ocr", source: { unit_id: "shot-4", frame_index: 2 },
+    evidence: [{ type: "text", view: "dialogue", text: "That is a beer." }, { type: "text", view: "ocr", text: "PENNY PACK" }] };
+  const app = setup({ drafts: { words }, sourceEvidence: { words: evidence } });
+  try {
+    const summary = app.find((node) => node.type === "button" && node.props.className === "clue-summary");
+    assert.match(text(summary), /Words“That is a beer.” · PENNY PACK/);
+    assert.match(summary.props.title, /\(from Film\)/);
+    app.chip("words").props.onClick(); app.render();
+    const reading = text(app.find((node) => node.props?.className === "clue-reading"));
+    assert.match(reading, /Searching for its words/);
+    assert.match(reading, /DialogueThat is a beer\./);
+    assert.match(reading, /On-screen textPENNY PACK/);
+  } finally { app.cleanup(); }
+  const stale = setup({ drafts: { words }, sourceEvidence: { words: { ...evidence, source: { unit_id: "other", frame_index: 0 } } } });
+  try {
+    const summary = stale.find((node) => node.type === "button" && node.props.className === "clue-summary");
+    assert.match(text(summary), /WordsFilm/, "evidence for a different scene is never shown");
+  } finally { stale.cleanup(); }
+});
+
+test("visual categories say they search the picture itself, not words", () => {
+  const app = setup({ drafts: { composition: source("composition") } });
+  try {
+    app.chip("composition").props.onClick(); app.render();
+    assert.match(text(app.find((node) => node.props?.className === "clue-reading")), /where people and things sit in the frame\. No words are used\./);
   } finally { app.cleanup(); }
 });
