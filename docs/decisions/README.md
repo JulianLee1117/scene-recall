@@ -115,7 +115,7 @@ The accepted boundary or behavior.
 | [0051](0051-shared-lab-navigation-and-unsaved-drafts.md) | Accepted | Share Lab entry and return navigation, keep untouched editors unsaved and create complete projects on first save |
 | [0052](0052-short-shot-temporal-evidence-and-targeted-backfill.md) | Accepted | Add versioned temporal sampling for short shots and bounded background backfill without repeating unrelated ingestion |
 | [0053](0053-neutral-semantic-query-instruction.md) | Accepted | Keep semantic query instructions neutral and reconcile activation without reembedding unchanged document evidence |
-| [0054](0054-caption-backed-visual-junk-filtering.md) | Accepted | Classify visual junk from caption evidence without letting dialogue suppress ordinary scenes |
+| [0054](0054-caption-backed-visual-junk-filtering.md) | Accepted; refined by 0087, 0112 | Classify visual junk from caption evidence without letting dialogue suppress ordinary scenes |
 | [0055](0055-idle-worker-development-reload.md) | Accepted | Refresh development workers between jobs without interrupting active work or replaying hosted requests |
 | [0056](0056-automated-external-subtitle-checks.md) | Accepted | Validate external subtitles locally and choose embedded fallback conservatively from English metadata |
 | [0057](0057-conservative-release-layout-selection.md) | Accepted | Select one clearly associated complete film and handle release layouts without guessing or extracting archives |
@@ -172,3 +172,4 @@ The accepted boundary or behavior.
 | [0108](0108-screens-and-push-ins.md) | Accepted (amended 2026-10-06); extended by 0109 | Screens: a source played in perspective on keyed TV-screen corners, with rounded corners, static, people in front and a push into the screen; screens found by tooling, not the render |
 | [0109](0109-generated-sources.md) | Accepted | Generated (AI) clips registered by content as `gen-` sources, placed explicitly in edits like film shots; kept out of the library; the editor never generates them |
 | [0111](0111-ingest-heals-text-index-gaps.md) | Accepted | A film ingest also repairs small semantic-text gaps other films left (e.g. after a GPU out-of-memory), so one failure no longer silently disables the profile; migrations stay an explicit `index-text` run |
+| [0112](0112-scene-titled-logo-sequences.md) | Accepted | Scene titles from the understanding pass identify pure logo sequences (distributor idents whose captions never say "logo"); dropped from search, highlights and film browsing unless the query asks for logos |

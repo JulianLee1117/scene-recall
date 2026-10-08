@@ -4636,3 +4636,38 @@ def test_api_video_file_missing_on_disk_returns_404(tmp_path: Path, config: Conf
             response = client.get("/video/film_test")
 
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("title", "is_logo_sequence"),
+    [
+        # Real scene titles from the understanding pass.
+        ("Opening Production Logos", True),  # Anora's NEON ident
+        ("Studio Logo", True),
+        ("Opening Logos and Title Card", True),
+        ("Closing Credits and Studio Logo", True),
+        ("Opening Titles and Mosfilm Logo", True),
+        # Credits and title sequences often play over real footage.
+        ("Opening Title Sequence", False),  # Raging Bull, Seven
+        ("Opening Credits", False),
+        ("End Credits", False),
+        ("Studio Logos and Prologue", False),
+        ("Walking into the Sunset and End Credits", False),
+        ("Meeting President Kennedy", False),
+        ("", False),
+    ],
+)
+def test_logo_sequences_are_recognized_from_scene_titles(title: str, is_logo_sequence: bool) -> None:
+    from pipeline.search.retrieve import _scene_junk_categories
+
+    assert _scene_junk_categories({"title": title}) == ({"logos"} if is_logo_sequence else set())
+
+
+def test_logo_scenes_drop_unless_the_query_asks_for_logos() -> None:
+    from pipeline.search import retrieve
+
+    evidence = {"logo_shot": {"scene_id": "s0"}, "story_shot": {"scene_id": "s1"}, "no_evidence": {}}
+    scenes = {"s0": {"scene_id": "s0", "title": "Opening Production Logos"}, "s1": {"scene_id": "s1", "title": "The Diner"}}
+    with patch.object(retrieve._priors, "load_scenes", return_value=scenes):
+        assert retrieve._units_in_unrequested_junk_scenes(None, evidence, set()) == {"logo_shot"}
+        assert retrieve._units_in_unrequested_junk_scenes(None, evidence, {"logos"}) == set()

@@ -3,7 +3,8 @@
 - Status: Accepted
 - Date: 2026-09-14
 - Supersedes: None
-- Refined by: [ADR-0087](0087-conservative-whole-frame-blank-filter.md) for blank-frame detection only
+- Refined by: [ADR-0087](0087-conservative-whole-frame-blank-filter.md) for blank-frame detection only;
+  [ADR-0112](0112-scene-titled-logo-sequences.md) adds scene titles as a source for logo sequences
 
 ## Context
 

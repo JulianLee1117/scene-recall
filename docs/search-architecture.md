@@ -17,7 +17,7 @@ records.
 |---|---|---|---|
 | Evidence: per-film artifacts, compiled tables | Evidence v2 | `pipeline/evidence/` | 0001, 0093, 0095, 0098, 0099 |
 | Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080, 0102 |
-| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, with 0002-0021 and 0082-0087 where not superseded |
+| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, 0112, with 0002-0021 and 0082-0087 where not superseded |
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
@@ -1983,7 +1983,11 @@ move, a time of day or a colour that a candidate's evidence satisfies or
 contradicts; unknown evidence is neutral.
 
 Deterministic filtering handles unrequested credits, logos, title cards, blank
-frames and static artifacts using the visual caption only (ADR-0054, ADR-0087).
+frames and static artifacts using the visual caption (ADR-0054, ADR-0087). Scene
+titles from the understanding pass add one category: a scene titled purely as
+studio or distributor logos (optionally with title cards or credits) is
+dropped from search, highlights and film browsing unless the query asks for
+logos (ADR-0112).
 Visual deduplication then folds a near-identical shot of the same film (a reverse angle, a
 recurring set-up) into the card it resembles, among its other matching shots, and drops
 near-identical shots of other films (ADR-0101).

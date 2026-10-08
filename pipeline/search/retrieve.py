@@ -287,6 +287,47 @@ _JUNK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     ),
 }
 
+# Scene-level junk (ADR-0112). The understanding pass titles each dramatic
+# scene from the picture, so a scene titled purely as a logo sequence ("Opening
+# Production Logos", "Studio Logo") is junk even when a shot's caption only
+# describes what it shows: NEON's ident is "a glowing red neon sign spelling
+# NEON". Each category is one title pattern and uses the same query overrides
+# as the caption categories. Opening credits and title sequences without logos
+# often play over real footage, so they are not scene-level junk.
+_SCENE_JUNK_TERM = (
+    r"(?:(?:opening|closing|end|final|studio|production|distribution|distributor|company)\s+)*"
+    r"(?:(?:[\w'-]+\s+)?logos?|idents?|credits|title\s+cards?|titles|intertitles?|title\s+sequence)"
+)
+_SCENE_JUNK_TITLES: dict[str, re.Pattern[str]] = {
+    "logos": re.compile(
+        rf"^(?=.*\b(?:logos?|idents?)\b)\s*{_SCENE_JUNK_TERM}"
+        rf"(?:\s*(?:,|&|\band\b)\s*{_SCENE_JUNK_TERM})*\s*$",
+        re.IGNORECASE,
+    ),
+}
+
+
+def _scene_junk_categories(scene: dict[str, Any] | None) -> set[str]:
+    """The junk categories a scene's title alone establishes."""
+    title = str((scene or {}).get("title") or "")
+    return {category for category, pattern in _SCENE_JUNK_TITLES.items() if pattern.match(title)}
+
+
+def _units_in_unrequested_junk_scenes(
+    db: Any,
+    evidence: dict[str, dict[str, Any]],
+    requested: set[str],
+) -> set[str]:
+    """Unit IDs whose dramatic scene is junk the query did not ask for.
+
+    *evidence* maps unit ID to its compiled shot evidence (with ``scene_id``);
+    units without evidence are never excluded here.
+    """
+    scenes = _priors.load_scenes(db, (row.get("scene_id") for row in evidence.values()))
+    junk = {scene_id for scene_id, scene in scenes.items() if _scene_junk_categories(scene) - requested}
+    return {unit_id for unit_id, row in evidence.items() if row.get("scene_id") in junk}
+
+
 _JUNK_QUERY_PATTERNS: dict[str, re.Pattern[str]] = {
     "credits": re.compile(
         r"\b(?:credits|credit roll|opening credit|closing credit|end credit"
@@ -2025,6 +2066,9 @@ def search(
     if not _defer_result_preferences:
         with search_stage("priors"):
             evidence = _priors.load_evidence(db, (_candidate_unit_id(candidate) for candidate in eligible))
+            junk_units = _units_in_unrequested_junk_scenes(db, evidence, requested_junk)
+            if junk_units:
+                eligible = [candidate for candidate in eligible if _candidate_unit_id(candidate) not in junk_units]
             for candidate in eligible:
                 candidate["relevance"] *= _priors.multiplier(
                     evidence.get(_candidate_unit_id(candidate)), preset=preset, specificity=specificity)

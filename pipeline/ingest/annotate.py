@@ -391,7 +391,7 @@ def annotate_shot(
     return {**annotation, "searchable_text": searchable_text}
 
 
-_LATIN_LETTER = re.compile(r"[A-Za-zÀ-ɏ]")
+_LATIN_LETTER = re.compile(r"[A-Za-z\u00c0-\u024f]")
 
 
 def _caption_is_english(raw: dict) -> bool:

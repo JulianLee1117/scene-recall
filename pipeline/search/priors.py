@@ -79,8 +79,12 @@ def load_scenes(db: Any, scene_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
     if not ids or SCENES not in table_names(db):
         return {}
     table = db.open_table(SCENES)
-    return {row["scene_id"]: row for row in
-            table.search().select(_SCENE_COLUMNS).where(_in_list("scene_id", ids)).limit(len(ids)).to_list()}
+    rows: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(ids), 400):
+        chunk = ids[start:start + 400]
+        for row in table.search().select(_SCENE_COLUMNS).where(_in_list("scene_id", chunk)).limit(len(chunk)).to_list():
+            rows[row["scene_id"]] = row
+    return rows
 
 
 def prior(evidence: dict[str, Any] | None, preset: str) -> float:

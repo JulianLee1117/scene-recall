@@ -21,6 +21,7 @@ from pipeline.index.reads import filtered_rows, iter_filtered_rows
 from pipeline.index.snapshot import acquire_search_snapshot
 from pipeline.index.writer import table_names
 from pipeline.search.retrieve import (
+    _units_in_unrequested_junk_scenes,
     _clause_results_from_rows,
     _film_filter,
     _is_unrequested_junk,
@@ -138,6 +139,8 @@ def browse_scenes(
     Apply it only inside the requested scope, with all reads pinned together.
     Missing/unpublished IDs return no scenes; an absent scope is an error.
     """
+    from pipeline.search import priors
+
     scope = _scope(film_ids)
     limit = resolve_result_limit(config, result_limit)
     snapshot = db if getattr(db, "is_index_snapshot", False) is True else acquire_search_snapshot(config, db)
@@ -161,9 +164,11 @@ def browse_scenes(
             if not units:
                 break
             frames = _frames_for_units(snapshot.open_table("frames"), film_id, units)
+            junk_units = _units_in_unrequested_junk_scenes(
+                snapshot, priors.load_evidence(snapshot, (unit["unit_id"] for unit in units)), set())
             for unit in units:
                 unit_id = unit["unit_id"]
-                if unit_id not in seen and unit_id in frames:
+                if unit_id not in seen and unit_id in frames and unit_id not in junk_units:
                     selected.append({**unit, "_matched_frame": frames[unit_id]})
                     seen.add(unit_id)
                     if len(selected) == limit:
@@ -219,6 +224,8 @@ def browse_highlights(
     ranked = sorted(rows, key=famous if preset == "famous" else gem, reverse=True)
     if preset == "gems":
         ranked = [row for row in ranked if not row.get("iconic")]
+    junk_units = _units_in_unrequested_junk_scenes(snapshot, {row["unit_id"]: row for row in ranked}, set())
+    ranked = [row for row in ranked if row["unit_id"] not in junk_units]
     picked, scenes = [], set()
     for row in ranked:
         scene = row.get("scene_id") or row["unit_id"]
