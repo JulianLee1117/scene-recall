@@ -65,16 +65,51 @@ export function readableEvidence(view: string, text: string): string {
   return view === "facets" || view === "mood" ? readableShotDetails(text) : text;
 }
 
+/**
+ * The finders a search can report, in the fixed order Details lists them.
+ * A typed description is ranked by Picture, Text, Exact words and Spoken
+ * line, then checked by Rerank; each category adds its own finder.
+ */
+export type MatchColumn = "img" | "txt" | "lex" | "quote" | "scene" | "words" | "look" | "composition" | "mood" | "rerank";
+
+const COLUMN_ORDER: MatchColumn[] = ["img", "txt", "lex", "quote", "scene", "words", "look", "composition", "mood", "rerank"];
+
+const COLUMN_LABELS: Record<MatchColumn, string> = {
+  img: "Picture",
+  txt: "Text",
+  lex: "Exact words",
+  quote: "Spoken line",
+  scene: "Scene",
+  words: "Words",
+  look: "Look",
+  composition: "Framing",
+  mood: "Mood",
+  rerank: "Rerank",
+};
+
+const COLUMN_HINTS: Record<MatchColumn, string> = {
+  img: "Rank among frames whose picture is closest to your words",
+  txt: "Rank among scenes whose description, dialogue or story means the closest thing to your words",
+  lex: "Rank among scenes whose description or dialogue contains your exact words",
+  quote: "Rank among spoken lines that match your words",
+  scene: "Rank in the Scene category",
+  words: "Rank in the Words category",
+  look: "Rank in the Look category",
+  composition: "Rank in the Framing category",
+  mood: "Rank in the Mood category",
+  rerank: "A second model's score for how well the scene fits your words, 0 to 1",
+};
+
 /** One finder's verdict on a scene: where it ranked it, and on what. */
 export interface MatchRow {
-  /** Picture, Text, Rerank, or a category: Look, Framing, Scene, Words, Mood. */
+  column: MatchColumn;
   label: string;
   /** "#2", "0.52" for the rerank score, or "–" when this finder did not return it. */
   value: string;
   /** The rank, for finders that rank; drives the hover summary. */
   rank?: number;
   matched: boolean;
-  /** What matched: the frame time, or the text view and its words. */
+  /** What matched (frame time, text view and words), or why nothing did. */
   detail: string;
   /** Short name for hover labels: Picture, Story, Dialogue, Look… */
   short: string;
@@ -88,16 +123,14 @@ export interface MatchBreakdown {
   score?: number;
 }
 
-/** The per-finder ranking behind one clause, when the API reported it. */
-function clauseChannels(shot: SearchResult, match: SearchMatch): SearchChannelsDebug | undefined {
+/** The ranking detail behind one clause, when the API reported it. */
+function clauseDebug(shot: SearchResult, match: SearchMatch) {
   const debug = shot.debug;
   if (!debug) return undefined;
-  if (debug.clauses) return debug.clauses[match.clause_id]?.channels;
+  if (debug.clauses) return debug.clauses[match.clause_id];
   // A single-clause search reports its channels at the top level.
-  return (shot.matches ?? []).length <= 1 ? debug.channels : undefined;
+  return (shot.matches ?? []).length <= 1 ? debug : undefined;
 }
-
-const NOT_MATCHED = "–";
 
 function evidenceDetail(match: SearchMatch): string {
   const evidence = match.evidence;
@@ -108,67 +141,90 @@ function evidenceDetail(match: SearchMatch): string {
   return "";
 }
 
-/**
- * How each finder ranked a scene. A typed description always reports the
- * same rows (Picture, Text, Rerank) so scenes compare at a glance; a finder
- * that did not return the scene shows "–". Each extra category adds its own
- * row with the scene's rank in that category.
- */
-export function matchBreakdown(shot: SearchResult): MatchBreakdown {
-  const rows: MatchRow[] = [];
-  let score: number | undefined;
-  for (const match of shot.matches ?? []) {
-    const clause = CLAUSE_LABELS[match.facet] ?? match.facet;
-    const channels = match.facet === "all" ? clauseChannels(shot, match) : undefined;
-    if (!channels) {
-      rows.push({ label: clause, value: `#${match.rank}`, rank: match.rank, matched: true, detail: evidenceDetail(match), short: clause, hint: `Rank among scenes matching ${clause}` });
-      continue;
+/** The finders present anywhere in a result set, in display order. */
+export function matchColumns(results: SearchResult[]): MatchColumn[] {
+  const present = new Set<MatchColumn>();
+  for (const shot of results) {
+    for (const match of shot.matches ?? []) {
+      if (match.facet !== "all") {
+        present.add(match.facet as MatchColumn);
+        continue;
+      }
+      const channels = clauseDebug(shot, match)?.channels;
+      if (!channels) continue;
+      // Picture and Text always rank a typed description.
+      present.add("img");
+      present.add("txt");
+      for (const column of ["lex", "quote", "rerank"] as const) {
+        if (channels[column]) present.add(column);
+      }
     }
-    if (typeof shot.debug?.relevance === "number") score = shot.debug.relevance;
-    const img = channels.img;
-    const at = img?.matched_frame?.timestamp;
-    rows.push({
-      label: "Picture",
-      value: img ? `#${img.rank}` : NOT_MATCHED,
-      rank: img?.rank,
-      matched: Boolean(img),
-      detail: img ? (typeof at === "number" ? `frame ${formatTime(at)}` : "") : "not in picture results",
-      short: "Picture",
-      hint: "Rank among frames whose picture is closest to your words",
-    });
-    const txt = channels.txt;
-    const view = txt?.matched_text?.view ?? txt?.source ?? "";
-    const viewLabel = TEXT_VIEW_LABELS[view] ?? "Text";
-    const text = txt?.matched_text?.text ?? (match.evidence?.type === "text" ? match.evidence.text : "");
-    rows.push({
-      label: "Text",
-      value: txt ? `#${txt.rank}` : NOT_MATCHED,
-      rank: txt?.rank,
-      matched: Boolean(txt),
-      detail: txt
-        ? view === "caption" && text === shot.caption
-          ? "Description (above)"
-          : `${viewLabel}${text ? ` · ${readableEvidence(view, text)}` : ""}`
-        : "not in text results",
-      short: viewLabel,
-      hint: "Rank among scenes whose descriptions, dialogue or story best match your words",
-    });
-    if (channels.lex) {
-      rows.push({ label: "Keywords", value: `#${channels.lex.rank}`, rank: channels.lex.rank, matched: true, detail: "", short: "Keywords", hint: "Rank by exact word matches" });
-    }
-    if (channels.quote && shot.matched_line) {
-      rows.push({ label: "Line", value: `#${channels.quote.rank}`, rank: channels.quote.rank, matched: true, detail: `“${shot.matched_line.text}”`, short: "Line", hint: "Rank among spoken lines matching your words" });
-    }
-    const verdict = channels.rerank?.verdict;
-    rows.push({
-      label: "Rerank",
-      value: typeof verdict === "number" ? verdict.toFixed(2) : NOT_MATCHED,
-      matched: typeof verdict === "number",
-      detail: typeof verdict === "number" ? "" : "not reranked (only the top 40 are)",
-      short: "Rerank",
-      hint: "A second model's check of how well the scene fits your words, 0 to 1",
-    });
   }
+  return COLUMN_ORDER.filter((column) => present.has(column));
+}
+
+/**
+ * How each finder ranked one scene: one row per column in a fixed order, so
+ * every card in a search reads the same way. A finder that did not return
+ * the scene says why: it ranked below that finder's cutoff.
+ */
+export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matchColumns([shot])): MatchBreakdown {
+  const main = (shot.matches ?? []).find((match) => match.facet === "all");
+  const mainDebug = main ? clauseDebug(shot, main) : undefined;
+  const channels = mainDebug?.channels;
+  const below = (depth?: number) => (depth ? `below its top ${depth}` : "below its cutoff");
+  const score = typeof mainDebug?.relevance === "number" ? mainDebug.relevance : undefined;
+  const row = (column: MatchColumn, found: Partial<MatchRow> & { matched: boolean; detail: string }): MatchRow => ({
+    column,
+    label: COLUMN_LABELS[column],
+    value: "–",
+    short: COLUMN_LABELS[column],
+    hint: COLUMN_HINTS[column],
+    ...found,
+  });
+
+  const rows = columns.map((column): MatchRow => {
+    if (column === "img") {
+      const img = channels?.img;
+      const at = img?.matched_frame?.timestamp;
+      return img
+        ? row(column, { value: `#${img.rank}`, rank: img.rank, matched: true, detail: typeof at === "number" ? `frame ${formatTime(at)}` : "" })
+        : row(column, { matched: false, detail: below(mainDebug?.depth) });
+    }
+    if (column === "txt") {
+      const txt = channels?.txt;
+      if (!txt) return row(column, { matched: false, detail: below(mainDebug?.depth) });
+      const view = txt.matched_text?.view ?? txt.source ?? "";
+      const viewLabel = TEXT_VIEW_LABELS[view] ?? "Text";
+      const text = txt.matched_text?.text ?? (main?.evidence?.type === "text" ? main.evidence.text : "");
+      const detail = view === "caption" && text === shot.caption
+        ? "Description (above)"
+        : `${viewLabel}${text ? ` · ${readableEvidence(view, text)}` : ""}`;
+      return row(column, { value: `#${txt.rank}`, rank: txt.rank, matched: true, detail, short: viewLabel });
+    }
+    if (column === "lex") {
+      const lex = channels?.lex;
+      return lex
+        ? row(column, { value: `#${lex.rank}`, rank: lex.rank, matched: true, detail: "" })
+        : row(column, { matched: false, detail: "your words are not in its text" });
+    }
+    if (column === "quote") {
+      const quote = channels?.quote;
+      return quote && shot.matched_line
+        ? row(column, { value: `#${quote.rank}`, rank: quote.rank, matched: true, detail: `“${shot.matched_line.text}”` })
+        : row(column, { matched: false, detail: "no matching line spoken" });
+    }
+    if (column === "rerank") {
+      const verdict = channels?.rerank?.verdict;
+      return typeof verdict === "number"
+        ? row(column, { value: verdict.toFixed(2), matched: true, detail: "" })
+        : row(column, { matched: false, detail: "only the top 40 are reranked" });
+    }
+    const match = (shot.matches ?? []).find((item) => item.facet === column);
+    return match
+      ? row(column, { value: `#${match.rank}`, rank: match.rank, matched: true, detail: evidenceDetail(match) })
+      : row(column, { matched: false, detail: below(shot.debug?.depth) });
+  });
   return { rows, score };
 }
 

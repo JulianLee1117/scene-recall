@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useState, type CSSProperties, type RefObjec
 import ShotCard from "./ShotCard";
 import { ROW_GAP, rowStarts, useJustifiedRows } from "@/hooks/useJustifiedRows";
 import { visibleTileCount, type RowSize } from "@/lib/justifiedRows";
+import { matchColumns } from "@/lib/matchReasons";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 
 const MIN_VISIBLE_ROWS = 3;
@@ -85,11 +86,14 @@ export default function ResultGrid({
   const movieLabel = movieCount === 1 ? "movie" : "movies";
   const starts = layout ? rowStarts(layout.sizes) : [];
   const listLabel = `${visibleResults.length} of ${results.length} ${order === "chronological" ? "scenes in source order" : "ranked search results"} shown`;
+  // One set of finder rows for the whole result set, in a fixed order.
+  const columns = showDetails ? matchColumns(results) : undefined;
   const card = (shot: SearchResult, index: number) => (
     <ShotCard
       shot={shot}
       position={index + 1}
       showDetails={showDetails}
+      matchColumns={columns}
       onFrameLoad={learnAspect}
       onClick={onShotClick}
       onUseInSearch={onUseInSearch}

@@ -2147,7 +2147,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .match-table {
   display: grid;
   min-width: 0;
-  grid-template-columns: max-content max-content minmax(0, 1fr);
+  grid-template-columns: 5.4rem 2.6rem minmax(0, 1fr);
   align-items: baseline;
   gap: 3px 10px;
   font-size: 0.68rem;

@@ -2094,6 +2094,9 @@ def search(
                 "final_score": float(candidate["final_score"]),
                 "relevance": candidate.get("relevance"),
                 "channels": candidate["channels"],
+                # How deep each finder looked; a unit missing from a channel
+                # ranked below this cutoff there.
+                "depth": channel_candidate_limit,
             },
         }
         if isinstance(matched_frame, dict):

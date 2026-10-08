@@ -672,6 +672,7 @@ def test_search_fuses_channel_ranks_with_config_weights(config: Config) -> None:
     )
     assert results[0]["debug"]["channels"]["img"]["rank"] == 2
     assert results[0]["debug"]["channels"]["txt"]["rank"] == 2
+    assert results[0]["debug"]["depth"] > 0, "the finder cutoff explains a missing channel"
     embed.assert_called_once_with(["cigarette"], config)
 
 
@@ -1878,7 +1879,7 @@ def test_search_uses_middle_keyframe_and_serializable_debug(
 
     assert result["keyframe_url"] == f"/media/keyframe/{shot_id}/1"
     assert result["rank"] == 1
-    assert set(result["debug"]) == {"final_score", "relevance", "channels"}
+    assert set(result["debug"]) == {"final_score", "relevance", "channels", "depth"}
     assert set(result["debug"]["channels"]) == {"img", "txt", "lex"}
     assert result["debug"]["channels"]["img"]["distance"] == pytest.approx(0.1)
     assert result["debug"]["channels"]["lex"]["distance"] is None

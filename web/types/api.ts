@@ -129,6 +129,8 @@ export interface SearchClauseDebug {
   final_score?: number;
   relevance?: number | null;
   channels?: SearchChannelsDebug;
+  /** How deep each finder looked; a missing channel ranked below this. */
+  depth?: number;
 }
 
 /** Diagnostic ranking detail; recipe searches key `clauses` by clause id. */

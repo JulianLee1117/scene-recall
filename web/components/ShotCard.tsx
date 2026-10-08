@@ -7,7 +7,7 @@ import BookmarkIcon from "./BookmarkIcon";
 import { FACET_LABELS, sourceDraftFromShot, writeSceneSourceDrag } from "@/lib/searchRecipe";
 import { useScenePointerDrag } from "@/hooks/useScenePointerDrag";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
-import { foundBy, readableEvidence } from "@/lib/matchReasons";
+import { foundBy, readableEvidence, type MatchColumn } from "@/lib/matchReasons";
 import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { displayTitle, formatTime, filmLabel } from "@/lib/format";
@@ -16,6 +16,8 @@ interface ShotCardProps {
   shot: SearchResult;
   position: number;
   showDetails: boolean;
+  /** The finders this search reports, so every card's Details lists the same rows. */
+  matchColumns?: MatchColumn[];
   showRank?: boolean;
   allowSourceDrag?: boolean;
   /** Reports the keyframe's natural size so the grid can keep the film's frame shape. */
@@ -36,6 +38,7 @@ export default function ShotCard({
   shot,
   position,
   showDetails,
+  matchColumns,
   showRank = true,
   allowSourceDrag = true,
   onFrameLoad,
@@ -192,7 +195,7 @@ export default function ShotCard({
           </span>
         </span>
 
-        {showDetails && <ResultDetails id={detailsId} shot={shot} />}
+        {showDetails && <ResultDetails id={detailsId} shot={shot} columns={matchColumns} />}
       </button>
 
       {(onToggleBookmark || onUseInSearch) && (
@@ -243,12 +246,13 @@ export default function ShotCard({
 }
 
 /** The description and why the scene ranked here, finder by finder. */
-function ResultDetails({ id, shot }: { id: string; shot: SearchResult }) {
+function ResultDetails({ id, shot, columns }: { id: string; shot: SearchResult; columns?: MatchColumn[] }) {
   return (
     <span className="result-details" id={id}>
       <span className="result-details-caption">{shot.caption || "No description yet"}</span>
       <MatchBreakdown
         shot={shot}
+        columns={columns}
         compact
         aside={`${formatTime(shot.t_start)} – ${formatTime(shot.t_end)}`}
       />
