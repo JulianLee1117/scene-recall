@@ -1,26 +1,23 @@
 "use client";
 
 interface SearchOptionsProps {
-  showRankingDetails: boolean;
-  onShowRankingDetailsChange: (enabled: boolean) => void;
+  showDetails: boolean;
+  onShowDetailsChange: (enabled: boolean) => void;
 }
 
+/** Shows each scene's description and, in plain words, why it matched. */
 export default function SearchOptions({
-  showRankingDetails,
-  onShowRankingDetailsChange,
+  showDetails,
+  onShowDetailsChange,
 }: SearchOptionsProps) {
   return (
     <button
       type="button"
       className="search-options-trigger"
-      aria-label={
-        showRankingDetails ? "Hide ranking details" : "Show ranking details"
-      }
-      aria-pressed={showRankingDetails}
-      title={
-        showRankingDetails ? "Hide ranking evidence" : "Show ranking evidence"
-      }
-      onClick={() => onShowRankingDetailsChange(!showRankingDetails)}
+      aria-label={showDetails ? "Hide details" : "Show details"}
+      aria-pressed={showDetails}
+      title={showDetails ? "Hide descriptions" : "Show each scene's description and why it matched"}
+      onClick={() => onShowDetailsChange(!showDetails)}
     >
       <svg
         width="13"

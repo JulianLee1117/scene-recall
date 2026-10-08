@@ -967,7 +967,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-reference-search { margin-bottom: 9px; }
 .clue-reference-results { max-height: min(350px, 42dvh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #514330 transparent; }
 .clue-reference-results .search-results { padding: 0 0 8px; }
-.clue-reference-results .result-grid { --result-card-min: 180px; gap: 10px; }
+.clue-reference-results .result-grid { --row-h: 96px; padding-inline: 0; }
 .clue-reference-results .result-toolbar { padding: 2px 0 10px; }
 .clue-reference-results .result-count { font-size: .68rem; }
 .clue-reference-status, .clue-reference-error { margin: 0; padding: 0 0 3px; color: #b9aa95; font-size: .72rem; }
@@ -988,7 +988,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   .clues-tools .movie-scope { position: static; }
   .clues-tools .movie-scope-popover { left: 50%; right: auto; transform: translateX(-50%); }
   .clue-editor { padding: 12px 3px; }
-  .clue-reference-results .result-grid { --result-card-min: 140px; gap: 8px; }
+  .clue-reference-results .result-grid { --row-h: 76px; }
   .clue-reference-results { max-height: 42dvh; }
   .app-lab-link { padding-right: 0; }
   .app-lab-link span { display: none; }
@@ -1540,26 +1540,37 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   letter-spacing: 0.025em;
 }
 
+/* A moodboard of uncropped frames: justified rows where each tile keeps its
+   film's shape (--ar, set per tile) and every tile in a row shares a height. */
 .result-grid {
-  --result-card-min: clamp(270px, 22vw, 460px);
+  --row-h: clamp(140px, 14vw, 240px);
 
-  display: grid;
-  grid-auto-flow: row;
-  grid-template-columns:
-    repeat(auto-fit, minmax(min(100%, var(--result-card-min)), 1fr));
-  gap: var(--gap);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
   margin: 0;
   padding: 8px 12px 16px;
   list-style: none;
 }
 
+/* The last row keeps natural widths instead of stretching to fill. */
+.result-grid::after {
+  content: "";
+  flex: 1000 1 0;
+}
+
 .result-grid-item {
+  --ar: 1.7778;
+
+  flex: var(--ar) 1 calc(var(--ar) * var(--row-h));
   min-width: 0;
 }
 
 @media (max-width: 600px) {
   .result-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    --row-h: 92px;
+
+    padding-inline: 8px;
   }
 }
 
@@ -1659,7 +1670,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .result-card-media {
   position: relative;
   display: block;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--ar, 16 / 9);
   overflow: hidden;
   background: #050505;
 }
@@ -1679,19 +1690,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   display: block;
   width: 100%;
   height: 100%;
-  /* Search results are visual evidence. Never crop scope/anamorphic frames
-     into a uniform card; the existing dark background supplies letterboxing. */
+  /* Search results are visual evidence: never crop a frame. Tiles take the
+     film's shape, so contain only letterboxes until that shape is known. */
   object-fit: contain;
   transition: opacity 0.15s ease;
   pointer-events: none;
 }
 
 .rank-badge {
-  position: absolute;
-  top: 7px;
-  left: 7px;
-  z-index: 2;
-  display: inline-flex;
+  display: none;
   min-width: 1.55rem;
   height: 1.55rem;
   padding: 0 0.38rem;
@@ -1704,8 +1711,49 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  pointer-events: none;
   backdrop-filter: blur(4px);
+}
+
+/* Corner marks stay quiet until a tile is explored: rank appears on hover,
+   Iconic / Hidden gem show as small dots and expand into labels. */
+.result-card-marks {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.result-card-marks .result-badge {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: currentColor;
+  box-shadow: 0 0 0 2px rgba(5, 5, 5, 0.55);
+  font-size: 0;
+}
+
+.result-card:hover .rank-badge,
+.result-card:focus-within .rank-badge,
+.result-card.has-details .rank-badge {
+  display: inline-flex;
+}
+
+.result-card:hover .result-card-marks .result-badge,
+.result-card:focus-within .result-card-marks .result-badge,
+.result-card.has-details .result-card-marks .result-badge {
+  width: auto;
+  height: auto;
+  padding: 3px 6px;
+  border: 1px solid currentColor;
+  background: rgba(5, 5, 5, 0.78);
+  box-shadow: none;
+  font-size: 0.56rem;
 }
 
 .result-card-actions {
@@ -1716,8 +1764,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   display: flex;
   align-items: center;
   gap: 5px;
-  opacity: 1;
-  transform: none;
+  opacity: 0;
+  transform: translateY(-2px);
   transition:
     opacity 0.15s ease,
     transform 0.15s ease;
@@ -1811,9 +1859,17 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   grid-template-columns: 1fr;
 }
 
+.use-in-search-menu-title {
+  margin: 0;
+  padding: 7px 10px 4px;
+  color: #8d8373;
+  font-size: 0.64rem;
+  letter-spacing: 0.02em;
+}
+
 .use-in-search-context-menu > button {
   width: 100%;
-  min-height: 62px;
+  min-height: 50px;
   height: auto;
   padding: 8px 10px;
   justify-content: flex-start;
@@ -2015,65 +2071,57 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   white-space: nowrap;
 }
 
-.result-debug {
-  display: block;
-  min-height: 8.5rem;
-  padding: 9px 10px 10px;
-  border-top: 1px solid #242424;
-  background: #111;
+.result-details {
+  display: flex;
+  height: 8.5rem;
+  overflow: hidden;
+  padding: 10px 11px 11px;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #1d1d1d;
+  background: #0e0e0e;
 }
 
-.result-debug-caption {
+.result-details-caption {
   display: -webkit-box;
-  min-height: 3.9em;
-  margin: 0 0 8px;
   overflow: hidden;
-  color: #c9c9c9;
-  font-size: 0.72rem;
-  line-height: 1.3;
+  color: #cfcfcf;
+  font-size: 0.74rem;
+  line-height: 1.4;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
 
-.result-debug-line,
-.result-debug-channels,
-.result-debug-matches {
+.result-details-reasons {
   display: flex;
-  align-items: center;
-  color: #777;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.62rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.5;
-}
-
-.result-debug-matches {
-  display: flex;
-  min-width: 0;
-  margin-top: 3px;
   flex-direction: column;
-  align-items: stretch;
-  color: #8a8a8a;
+  gap: 5px;
 }
 
-.result-debug-matches > span {
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  white-space: normal;
+.result-details-reasons > span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #9a9a9a;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.result-debug-line {
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0 8px;
+.result-details-reasons strong {
+  margin-right: 6px;
+  color: #c8ab7f;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.result-debug-channels {
-  flex-wrap: wrap;
-  gap: 0 9px;
-  margin-top: 3px;
-  color: #9c825f;
+.result-details-time {
+  margin-top: auto;
+  color: #6f6f6f;
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .search-options-trigger {
@@ -2147,10 +2195,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 .saved-grid {
-  grid-template-columns:
-    repeat(auto-fill, minmax(min(100%, 280px), 380px));
-  align-items: start;
-  justify-content: start;
   padding-top: 0;
 }
 
@@ -2179,7 +2223,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 .saved-unavailable {
   display: flex;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--ar, 16 / 9);
   padding: 13px;
   align-items: flex-end;
   justify-content: space-between;
@@ -2372,7 +2416,70 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .modal-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 7px;
+}
+
+.modal-toolbar {
+  display: flex;
+  padding: 10px 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  border-bottom: 1px solid #1c1c1c;
+}
+
+.modal-toolbar .modal-anchor-context {
+  margin-bottom: 0;
+}
+
+.modal-actions .modal-action-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 9px;
+  border: 1px solid #302b25;
+  border-radius: 5px;
+  background: #15130f;
+  color: #c9b18c;
+  font-size: 0.7rem;
+  text-decoration: none;
+}
+
+.modal-actions .modal-action-link::after {
+  content: "↗";
+  margin-left: 5px;
+  color: #8b7a62;
+}
+
+.modal-actions .modal-action-link:hover {
+  border-color: #514633;
+  color: #ead5b5;
+}
+
+.modal-actions .modal-action-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.modal-reasons {
+  display: flex;
+  margin: 4px 0 2px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-reasons h3 {
+  margin: 0;
+  color: #8d8d8d;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.modal-evidence > .modal-caption {
+  color: #a8a8a8;
 }
 
 .modal-anchor-context {
@@ -2397,9 +2504,11 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 .modal-anchor-context button:hover { text-decoration: underline; }
 .modal-anchor-context button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.modal-evidence > .modal-anchor-note { margin: 0 0 14px; color: #80796f; font-size: 0.67rem; line-height: 1.5; }
 
 .modal-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 6px 9px;
   border: 1px solid #302b25;
   border-radius: 5px;
@@ -2415,6 +2524,11 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   align-items: center;
   gap: 6px;
   border-color: #665136;
+}
+
+.modal-actions button.is-active {
+  border-color: #665136;
+  color: var(--accent);
 }
 
 .modal-actions button:hover {
@@ -2473,15 +2587,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 /* Earned placements on result cards */
-.result-badges {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  z-index: 2;
-  display: flex;
-  gap: 3px;
-  pointer-events: none;
-}
+
 
 .result-badge {
   padding: 3px 6px;
@@ -2517,7 +2623,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   font-size: 0.6rem;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  opacity: 0;
   pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.result-card:hover .scene-more,
+.result-card:focus-within .scene-more,
+.result-card.has-details .scene-more {
+  opacity: 1;
 }
 
 /* Result modal: story and scene evidence (search v2) */

@@ -86,3 +86,25 @@ test("Labs renders the workspace cleanup notice as status and rejected deletion 
   assert.deepEqual(app.names(), ["Edit first", "Edit second"]);
   assert.deepEqual(app.removedKeys, []);
 });
+
+test("frozen experiments stay openable but are listed last and labeled Frozen", async () => {
+  const experiments = [
+    { id: "transitions", name: "Transitions", description: "Old lab", route: "/lab/transitions", status: "frozen" },
+    { id: "music-sketch", name: "AI Music Video", description: "Make an edit", route: "/lab/music-sketch", status: "experimental" },
+  ];
+  const hooks = [], exported = {}; let cursor = 0, effect;
+  vm.runInNewContext(compiled, { exports: exported, AbortController, Date, Promise, URLSearchParams, window: { location: { search: "" } }, require(name) {
+    if (name === "react") return {
+      useState(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (value) => hooks[index] = value]; },
+      useEffect(callback) { effect ??= callback; },
+    };
+    if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
+    if (name === "@/lib/lab") return { experimentName: (_, fallback) => fallback, labRequest: async (route) => route === "/projects" ? { projects: [] } : { experiments } };
+    return { default: name };
+  } });
+  exported.default(); effect(); for (let i = 0; i < 5; i++) await Promise.resolve(); cursor = 0;
+  const entries = nodes(exported.default()).filter((node) => node.props?.["aria-label"]?.startsWith("Open "));
+  assert.deepEqual(entries.map((node) => node.props.href), ["/lab/music-sketch", "/lab/transitions"]);
+  assert.match(text(entries[1]), /TransitionsFrozen/);
+  assert.doesNotMatch(text(entries[0]), /Frozen/);
+});

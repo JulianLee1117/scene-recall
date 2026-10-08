@@ -12,6 +12,10 @@ const film = (id = "film-a", evidence = 23) => ({ film_id: id, unit_id: `${id}_0
 const compiled = ts.transpileModule(fs.readFileSync(path.join(__dirname, "VideoModal.tsx"), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
+const reasons = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, "../lib/matchReasons.ts"), "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: reasons, require: () => ({ formatTime: (value) => `${value}s` }) });
 
 function harness({ shot = film(), apiUrl = "http://api.invalid" } = {}) {
   const hooks = [], requests = [], listeners = new Map(), elements = new Map(), bookmarks = [];
@@ -57,6 +61,7 @@ function harness({ shot = film(), apiUrl = "http://api.invalid" } = {}) {
       if (name === "react/jsx-runtime") return { jsx: (type, props, key) => ({ type, props, key }), jsxs: (type, props, key) => ({ type, props, key }) };
       if (name === "@/lib/format") return { filmLabel: String, formatTime: (value) => `${value}s` };
       if (name === "@/lib/searchRecipe") return { FACET_LABELS: {} };
+      if (name === "@/lib/matchReasons") return reasons;
       return { default: name };
     },
   });
@@ -219,5 +224,30 @@ test("media errors retry URL resolution and restore the original evidence seek",
     await app.resolve(1, { url: "/video/film-a?representation=aaaaaaaaaaaaaaaaaaaaaaaa" });
     app.video().props.onCanPlay();
     assert.equal(app.video().props.ref.current.currentTime, 22);
+  } finally { app.dispose(); }
+});
+
+test("one action bar offers Save, Related, Match cuts at the playhead and Copy time, and explains matches in words", async () => {
+  const shot = { ...film(), unit_id: "film-a_0001", keyframe_index: 2, matched_text_view: "facets", matched_text: "framing: close_up; time of day: dawn_dusk",
+    matches: [{ clause_id: "main", facet: "all", evidence: { type: "text", view: "caption", text: "A woman waits on a rooftop" } },
+      { clause_id: "composition", facet: "composition", evidence: { type: "frame", timestamp: 23 } }] };
+  const app = harness({ shot });
+  try {
+    await app.resolve(0, { url: "/video/film-a" });
+    const link = app.find((node) => node.type === "a" && text(node) === "Match cuts");
+    assert.equal(link.props.href, "/match?unit_id=film-a_0001&time=23.000");
+    assert.equal(link.props.target, "_blank");
+    app.video().props.onTimeUpdate({ currentTarget: { currentTime: 26.5 } }); await app.flush();
+    assert.equal(app.find((node) => node.type === "a" && text(node) === "Match cuts").props.href, "/match?unit_id=film-a_0001&time=26.500", "match cuts start from the playhead within the shot");
+    app.video().props.onTimeUpdate({ currentTarget: { currentTime: 95 } }); await app.flush();
+    assert.equal(app.find((node) => node.type === "a" && text(node) === "Match cuts").props.href, "/match?unit_id=film-a_0001&time=23.000", "outside the shot they fall back to the retrieved moment");
+    assert.ok(app.button("Save"));
+    assert.ok(app.button("Copy time"));
+    const why = text(app.find((node) => node.props?.className === "modal-reasons"));
+    assert.match(why, /Why it matched/);
+    assert.match(why, /Your description · DescriptionA woman waits on a rooftop/);
+    assert.match(why, /FramingPicture matches at 23s/);
+    assert.match(why, /Shot detailsShot: close-up · Time: dawn or dusk/);
+    assert.doesNotMatch(text(app.state), /Save and Find related use/);
   } finally { app.dispose(); }
 });

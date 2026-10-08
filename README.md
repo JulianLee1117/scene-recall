@@ -100,7 +100,10 @@ The check reports the CUDA device when available and accepts CPU fallback.
 
 `paths.state_dir` stores durable user-authored state such as saved scenes. Keep
 it outside the replaceable `assets_dir` and include it in normal backups. Older
-configs default it to a `state` directory beside `films`.
+configs default it to a `state` directory beside `films`. Its
+`interactions.sqlite3` is a local taste log of the searches, plays and saves
+you make in the web app; scripts and agents calling the API are not recorded,
+and nothing ranks with it yet.
 
 The default annotator uses OpenAI `gpt-5.6-luna`. Annotation sends up to three
 derived keyframes per shot with response storage disabled. Set
@@ -304,9 +307,13 @@ text categories open directly to a text field and **Apply**. Existing references
 open their preview and actions; **Use text instead** preserves the reference until
 nonempty text is applied. **Change scene** opens a clearly labeled reference
 lookup independent of the main query. **Remove** lives in the editor. Drag a
-search result onto a category or use its **Related** menu. Saved cards keep
-playback, bookmarks and Related without dragging or a drag badge. The player
-distinguishes its retrieved frame from the current playback time.
+search result onto a category to add it to the current search, or use its
+**Related** menu to start a new search from that scene (movie scope and preset
+stay). Saved cards keep playback, bookmarks and Related without dragging or a
+drag badge. The player distinguishes its retrieved frame from the current
+playback time; its action bar saves the scene, finds related scenes, opens
+**Match cuts** at the playhead in a new tab and copies the film and time.
+**Details** shows each result's description and, in plain words, why it matched.
 
 ### AI Music Video and Match Cuts
 
@@ -1401,8 +1408,8 @@ discovery without adding another search mode or control.
 The main bar remains a broad scene search. The **Match** chips combine up to three
 inputs across the main bar and the explicit **Scene**, **Words**, **Look**,
 **Framing**, and **Mood** facets. Type into a facet, drag a result onto one,
-or use a result's **Related** menu. Results supported by more inputs
-rise.
+or use a result's **Related** menu to start over from it. Results supported by
+more inputs rise.
 Drag a selected scene directly from its category chip to another category to
 move that reference, including out of Framing. Dropping onto an occupied category
 replaces its clue; moving a reference still works when all three inputs are in use.
@@ -1414,7 +1421,7 @@ scene**, **Use text instead** where supported, or **Remove**. **Change aspect**
 provides a keyboard/touch alternative to dragging: choose the destination,
 then **Move to…** or **Replace…** if it already has a clue. Selecting or cancelling
 does not apply a change. The source/frame identity is preserved, and uploaded
-images can move only between Look and Framing. With ranking details enabled, its
+images can move only between Look and Framing. With **Details** on, its
 **Matched evidence** disclosure shows the exact caption, dialogue/OCR, or
 mood/energy text it contributes. Look and
 Framing sources remain explicitly visual rather than being translated into

@@ -296,6 +296,8 @@ export interface LabExperiment {
   route?: string;
   project_route?: string | null;
   persistence?: "project" | "session";
+  /** Frozen experiments stay runnable but get no new work; Labs lists them last. */
+  status?: "experimental" | "frozen";
 }
 
 export interface NextSceneOptions {

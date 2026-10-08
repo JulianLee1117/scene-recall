@@ -53,10 +53,10 @@ export default function LabHome() {
         );
       }
       if (experimentResult.status === "fulfilled") {
-        setExperiments(experimentResult.value.experiments.map((experiment) => ({
-          ...experiment,
-          name: experimentName(experiment.id, experiment.name),
-        })));
+        const frozen = (experiment: LabExperiment) => (experiment.status === "frozen" ? 1 : 0);
+        setExperiments(experimentResult.value.experiments
+          .map((experiment) => ({ ...experiment, name: experimentName(experiment.id, experiment.name) }))
+          .sort((a, b) => frozen(a) - frozen(b)));
       } else {
         setExperimentError(
           experimentResult.reason?.message || "Could not load experiments.",
@@ -120,7 +120,7 @@ export default function LabHome() {
             {experiments.map((experiment, index) => (
               <li key={experiment.id}>
                 <Link
-                  className={styles.experiment}
+                  className={`${styles.experiment}${experiment.status === "frozen" ? ` ${styles.frozen}` : ""}`}
                   href={experiment.route || `/lab/${experiment.id}`}
                   aria-label={`Open ${experiment.name}`}
                 >
@@ -128,7 +128,12 @@ export default function LabHome() {
                     {String(index + 1).padStart(2, "0")}
                   </span>
                   <div className={styles.experimentDescription}>
-                    <h3>{experiment.name}</h3>
+                    <h3>
+                      {experiment.name}
+                      {experiment.status === "frozen" && (
+                        <span className={styles.frozenTag} title="Still runnable, but no new work is planned">Frozen</span>
+                      )}
+                    </h3>
                     <p>{experiment.description}</p>
                   </div>
                   <span className={styles.open} aria-hidden="true">

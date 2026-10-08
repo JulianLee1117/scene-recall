@@ -1,6 +1,7 @@
 "use client";
 
 import ShotCard from "./ShotCard";
+import { useFrameAspects } from "@/hooks/useFrameAspects";
 import type {
   BookmarkRecord,
   RecipeMatchFacet,
@@ -31,6 +32,7 @@ export default function SavedView({
   onToggleBookmark,
   onRemoveBookmark,
 }: SavedViewProps) {
+  const { tileStyle, learnAspect } = useFrameAspects();
   return (
     <section className="saved-view" aria-labelledby="saved-heading">
       <header className="saved-heading">
@@ -75,13 +77,14 @@ export default function SavedView({
         <ol className="result-grid saved-grid" aria-label="Saved scenes">
           {bookmarks.map((bookmark, index) =>
             bookmark.scene ? (
-              <li className="result-grid-item" key={bookmark.bookmark_id}>
+              <li className="result-grid-item" key={bookmark.bookmark_id} style={tileStyle(bookmark.scene.film_id)}>
                 <ShotCard
                   shot={bookmark.scene}
+                  onFrameLoad={learnAspect}
                   position={index + 1}
                   showRank={false}
                   allowSourceDrag={false}
-                  debug={false}
+                  showDetails={false}
                   onClick={onShotClick}
                   onUseInSearch={onUseInSearch}
                   disabledUseFacets={disabledUseFacets}

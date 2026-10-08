@@ -397,7 +397,7 @@ test("opening Refine hides idle suggestions and incoming scene drags reveal all 
 
 test("Search without Framing closes its reference editor but preserves another category editor", () => {
   for (const overrides of [{ drafts: { composition: source("composition") } }, { image: image("composition") }]) {
-    const app = setup(overrides);
+    const app = setup({ hasMainText: true, ...overrides });
     try {
       app.chip("composition").props.onClick(); app.render();
       app.button("Search without Framing").props.onClick(); app.render();
@@ -516,20 +516,28 @@ test("IME Enter confirms composition without committing a detail, while ordinary
 });
 
 test("uploaded Look discloses its visual gate and removal leaves unrelated reference editing alone", () => {
-  const app = setup({ image: image("look"), drafts: { composition: source("composition"), mood: source("mood") } });
+  const app = setup({ hasMainText: true, image: image("look"), drafts: { composition: source("composition"), mood: source("mood") } });
   try {
     const notices = nodes(app.find((node) => node.type === "section")).filter((node) => node.props?.className === "clues-framing-note");
     assert.equal(notices.length, 2);
-    assert.ok(notices.some((node) => /uploaded Look image keeps a visual shortlist/.test(text(node))));
+    assert.ok(notices.some((node) => /Look image picks the visual shortlist/.test(text(node))));
     assert.ok(app.button("Search without Framing"));
     app.chip("mood").props.onClick(); app.render();
     app.button("Search without Look image").props.onClick(); app.render();
     assert.deepEqual(app.calls, [["remove-image"]]);
     assert.equal(app.chip("mood").props["aria-expanded"], true);
   } finally { app.cleanup(); }
-  const indexed = setup({ drafts: { look: source("look") } });
+  const indexed = setup({ hasMainText: true, drafts: { look: source("look") } });
   try {
     assert.equal(indexed.button("Search without Look image"), undefined);
     assert.equal(indexed.find((node) => node.props?.className === "clues-framing-note"), undefined, "indexed Look is a preference, not an uploaded-image gate");
   } finally { indexed.cleanup(); }
+});
+
+test("the shortlist note appears only once a description orders the shortlist", () => {
+  const app = setup({ drafts: { composition: source("composition") } });
+  try {
+    assert.equal(app.find((node) => node.props?.className === "clues-framing-note"), undefined, "a Framing-only search has nothing to order");
+    assert.equal(app.button("Search without Framing"), undefined);
+  } finally { app.cleanup(); }
 });

@@ -45,19 +45,14 @@ const PLACEHOLDERS: Record<TextMatchFacet, string> = {
   look: "Blue light, warm grain, silhouettes…",
   mood: "Dreamlike, tense, joyful…",
 };
-const SHORT_COPY: Record<RecipeMatchFacet, string> = {
-  scene: "People, actions & setting",
-  words: "Dialogue & on-screen text",
-  look: "Color, light & texture",
-  composition: "Subject positions & layout",
-  mood: "Feeling & energy",
-};
 interface MatchByRailProps {
   clauseCount: number;
   drafts: MatchDrafts;
   image?: RecipeImageInput | null;
   sourceEvidence?: Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>;
-  debug?: boolean;
+  showDetails?: boolean;
+  /** The Framing/Look shortlist note only makes sense once a description orders it. */
+  hasMainText?: boolean;
   onCommitText?: (facet: TextMatchFacet, text: string) => void;
   onRemove?: (facet: RecipeMatchFacet) => void;
   onBrowse?: (facet: RecipeMatchFacet) => void;
@@ -164,7 +159,8 @@ export default function MatchByRail({
   drafts,
   image,
   sourceEvidence = {},
-  debug = false,
+  showDetails = false,
+  hasMainText = false,
   onCommitText,
   onRemove,
   onBrowse,
@@ -605,7 +601,7 @@ export default function MatchByRail({
                     ? `${FACET_LABELS[facet]}: ${title} · Drag to another category`
                     : title
                       ? `${FACET_LABELS[facet]}: ${title}`
-                      : SHORT_COPY[facet]
+                      : SEARCH_CLUE_COPY[facet].description
                 }
 
                 onClick={() => selectFacet(facet)}
@@ -644,7 +640,7 @@ export default function MatchByRail({
                 <>
                   <header className="clue-editor-heading">
                     <div>
-                      <strong>{editorMode === "reference" ? `${FACET_LABELS[editorFacet]} reference` : SHORT_COPY[editorFacet]}</strong>
+                      <strong>{editorMode === "reference" ? `${FACET_LABELS[editorFacet]} reference` : SEARCH_CLUE_COPY[editorFacet].description}</strong>
                     </div>
 
                     <button
@@ -776,7 +772,7 @@ export default function MatchByRail({
                     )}
                   </div>
 
-                  {editorMode === "reference" && debug && evidenceMatches && evidence.effective_text && (
+                  {editorMode === "reference" && showDetails && evidenceMatches && evidence.effective_text && (
                     <details className="clue-evidence">
                       <summary>Matched evidence</summary>
                       {evidence.effective_text}
@@ -790,7 +786,7 @@ export default function MatchByRail({
 
       {!panelOpen && idleContent}
 
-      {!dragActive && gatedReferences.map((gate) => (
+      {!dragActive && hasMainText && gatedReferences.map((gate) => (
         <p className="clues-framing-note" key={gate.facet}>
           {gate.description}{" "}
           <button

@@ -3,22 +3,22 @@
 import { useState, useRef, useCallback, useId } from "react";
 import UseInSearchMenu from "./UseInSearchMenu";
 import FacetIcon from "./FacetIcon";
+import BookmarkIcon from "./BookmarkIcon";
 import { FACET_LABELS, sourceDraftFromShot, writeSceneSourceDrag } from "@/lib/searchRecipe";
 import { useScenePointerDrag } from "@/hooks/useScenePointerDrag";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
-import type {
-  RecipeMatchFacet,
-  SearchMatch,
-  SearchResult,
-} from "@/types/api";
+import { matchReasons, matchedClauseLabels, readableEvidence, TEXT_VIEW_LABELS } from "@/lib/matchReasons";
+import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { formatTime, filmLabel } from "@/lib/format";
 
 interface ShotCardProps {
   shot: SearchResult;
   position: number;
-  debug: boolean;
+  showDetails: boolean;
   showRank?: boolean;
   allowSourceDrag?: boolean;
+  /** Reports the keyframe's natural size so the grid can keep the film's frame shape. */
+  onFrameLoad?: (filmId: string, width: number, height: number) => void;
   onClick: (shot: SearchResult) => void;
   onUseInSearch?: (shot: SearchResult, facet: RecipeMatchFacet) => void;
   disabledUseFacets?: ReadonlySet<RecipeMatchFacet>;
@@ -29,60 +29,15 @@ interface ShotCardProps {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const CHANNEL_LABELS = {
-  img: "img",
-  txt: "txt",
-  lex: "lex",
-  spatial: "framing",
-} as const;
-const TEXT_VIEW_LABELS: Record<string, string> = {
-  caption: "Visual description",
-  dialogue: "Dialogue",
-  ocr: "On-screen text",
-  facets: "Scene detail",
-  mood: "Mood",
-  story: "Story",
-  scene: "Scene",
-};
 const BADGE_LABELS = { iconic: "Iconic", gem: "Hidden gem" } as const;
-
-function unitSuffix(unitId: string): string {
-  const separator = unitId.lastIndexOf("_");
-  if (separator >= 0 && separator < unitId.length - 1) {
-    return unitId.slice(separator + 1);
-  }
-  return unitId.slice(-8);
-}
-
-function formatScore(score: number | undefined): string {
-  return typeof score === "number" && Number.isFinite(score)
-    ? score.toFixed(4)
-    : "—";
-}
-
-function matchEvidenceText(match: SearchMatch): string {
-  const label = `${FACET_LABELS[match.facet]} #${match.rank}`;
-  if (match.evidence?.type === "text") {
-    const viewLabel =
-      TEXT_VIEW_LABELS[match.evidence.view] ?? match.evidence.view;
-    return `${label} · ${viewLabel}: ${match.evidence.text}`;
-  }
-  if (match.evidence?.type === "frame") {
-    const timestamp =
-      typeof match.evidence.timestamp === "number"
-        ? ` at ${formatTime(match.evidence.timestamp)}`
-        : "";
-    return `${label} · frame ${match.evidence.frame_index + 1}${timestamp}`;
-  }
-  return label;
-}
 
 export default function ShotCard({
   shot,
   position,
-  debug,
+  showDetails,
   showRank = true,
   allowSourceDrag = true,
+  onFrameLoad,
   onClick,
   onUseInSearch,
   disabledUseFacets,
@@ -95,18 +50,18 @@ export default function ShotCard({
   const [dragging, setDragging] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const suppressClickRef = useRef(false);
-  const debugDescriptionId = useId();
+  const detailsId = useId();
   const displayedRank = shot.rank ?? position;
   const evidenceTime =
     shot.matched_line?.t_start ?? shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
+  const filmTitle = shot.film_title ?? filmLabel(shot.film_id);
   const sceneMore = shot.scene_alternatives?.length ?? 0;
   const matchedTextLabel = shot.matched_text_view
     ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
     : null;
-  const matchedFacetLabels = Array.from(
-    new Set((shot.matches ?? []).map((match) => FACET_LABELS[match.facet])),
-  );
+  const clauseLabels = matchedClauseLabels(shot);
   const sourceAvailable = Number.isInteger(shot.keyframe_index);
+  // Scenes are modular: drag one onto a search category, or use its Related menu.
   const canDragSource = Boolean(
     allowSourceDrag && !sourceReferenceFacet && onUseInSearch && sourceAvailable,
   );
@@ -137,7 +92,7 @@ export default function ShotCard({
 
   return (
     <article
-      className={`result-card${debug ? " result-card-debug" : ""}${sourceReferenceFacet ? " is-source-reference-result" : ""}${dragging ? " is-dragging" : ""}`}
+      className={`result-card${showDetails ? " has-details" : ""}${sourceReferenceFacet ? " is-source-reference-result" : ""}${dragging ? " is-dragging" : ""}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -156,8 +111,8 @@ export default function ShotCard({
           suppressClickRef.current = true;
           handleMouseLeave();
           setNativeDragPreview(event.dataTransfer, {
-            eyebrow: "Scene", title: shot.film_title ?? filmLabel(shot.film_id),
-            detail: formatTime(evidenceTime), imageUrl: `${API_URL}${shot.keyframe_url}`,
+            eyebrow: "Scene", title: filmTitle, detail: formatTime(evidenceTime),
+            imageUrl: `${API_URL}${shot.keyframe_url}`,
           });
           setDragging(true);
         }}
@@ -169,21 +124,18 @@ export default function ShotCard({
         onFocus={handleMouseEnter}
         onBlur={handleMouseLeave}
         title={shot.caption}
-        aria-label={`Result ${displayedRank}: ${shot.caption}, ${formatTime(evidenceTime)}`}
-        aria-describedby={debug ? debugDescriptionId : undefined}
+        aria-label={`Result ${displayedRank}: ${filmTitle} at ${formatTime(evidenceTime)}. ${shot.caption}`}
+        aria-describedby={showDetails ? detailsId : undefined}
       >
-        <span
-          className="result-card-media"
-        >
+        <span className="result-card-media">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${API_URL}${shot.thumbnail_url ?? shot.keyframe_url}`}
             alt=""
             loading="lazy"
             draggable={false}
-            style={{
-              opacity: hovered ? 0 : 1,
-            }}
+            onLoad={(event) => onFrameLoad?.(shot.film_id, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+            style={{ opacity: hovered ? 0 : 1 }}
           />
 
           <video
@@ -195,21 +147,18 @@ export default function ShotCard({
             preload="none"
             aria-hidden="true"
             draggable={false}
-            style={{
-              opacity: hovered ? 1 : 0,
-            }}
+            style={{ opacity: hovered ? 1 : 0 }}
           />
 
-          {showRank && (
-            <span className="rank-badge" aria-hidden="true">
-              {displayedRank}
-            </span>
-          )}
-
-          {(shot.badges?.length ?? 0) > 0 && (
-            <span className="result-badges">
+          {(showRank || (shot.badges?.length ?? 0) > 0) && (
+            <span className="result-card-marks">
+              {showRank && (
+                <span className="rank-badge" aria-hidden="true">
+                  {displayedRank}
+                </span>
+              )}
               {shot.badges?.map((badge) => (
-                <span key={badge} className={`result-badge result-badge-${badge}`}>
+                <span key={badge} className={`result-badge result-badge-${badge}`} title={BADGE_LABELS[badge]}>
                   {BADGE_LABELS[badge]}
                 </span>
               ))}
@@ -219,18 +168,13 @@ export default function ShotCard({
           {sceneMore > 0 && (
             <span
               className="scene-more"
-              title={`${sceneMore} more matching shot${sceneMore === 1 ? "" : "s"} from this film`}
+              title={`${sceneMore} more matching shot${sceneMore === 1 ? "" : "s"} from this scene`}
             >
               +{sceneMore}
             </span>
           )}
 
-          <span
-            className="result-card-overlay"
-            style={{
-              opacity: hovered ? 1 : 0,
-            }}
-          >
+          <span className="result-card-overlay" style={{ opacity: hovered ? 1 : 0 }}>
             {shot.matched_line ? (
               <span className="result-match-evidence">
                 <span>Line</span>
@@ -238,8 +182,8 @@ export default function ShotCard({
               </span>
             ) : matchedTextLabel && shot.matched_text ? (
               <span className="result-match-evidence">
-                <span>{matchedTextLabel} match</span>
-                <span>{shot.matched_text}</span>
+                <span>{matchedTextLabel}</span>
+                <span>{readableEvidence(shot.matched_text_view ?? "", shot.matched_text)}</span>
               </span>
             ) : shot.action ? (
               <span className="result-match-evidence">
@@ -247,75 +191,19 @@ export default function ShotCard({
                 <span>{shot.action}</span>
               </span>
             ) : null}
-            {matchedFacetLabels.length > 0 && (
-              <span
-                className="result-match-facets"
-                aria-label={`Matched by ${matchedFacetLabels.join(", ")}`}
-              >
-                {matchedFacetLabels.map((label) => (
+            {clauseLabels.length > 0 && (
+              <span className="result-match-facets" aria-label={`Matched by ${clauseLabels.join(", ")}`}>
+                {clauseLabels.map((label) => (
                   <span key={label}>{label}</span>
                 ))}
               </span>
             )}
-            <span className="result-film">
-              {shot.film_title ?? filmLabel(shot.film_id)}
-            </span>
+            <span className="result-film">{filmTitle}</span>
             <span className="result-time">{formatTime(evidenceTime)}</span>
           </span>
         </span>
 
-        {debug && (
-          <span className="result-debug" id={debugDescriptionId}>
-            <span className="result-debug-caption">
-              {shot.caption || "No caption"}
-            </span>
-            <span className="result-debug-line">
-              <span>
-                {formatTime(shot.t_start)} · …{unitSuffix(shot.unit_id)}
-              </span>
-              <span>score {formatScore(shot.debug?.final_score)}</span>
-            </span>
-            {typeof shot.matched_frame_index === "number" && (
-              <span className="result-debug-line">
-                <span>matched frame {shot.matched_frame_index + 1}</span>
-                <span>
-                  {typeof shot.matched_frame_timestamp === "number"
-                    ? formatTime(shot.matched_frame_timestamp)
-                    : "time unavailable"}
-                </span>
-              </span>
-            )}
-            {shot.debug?.query_ranks && (
-              <span className="result-debug-line">
-                <span>
-                  composition #{shot.debug.query_ranks.reference ?? "—"}
-                </span>
-                <span>text #{shot.debug.query_ranks.text ?? "—"}</span>
-              </span>
-            )}
-            {(shot.matches?.length ?? 0) > 0 && (
-              <span className="result-debug-matches">
-                {shot.matches?.map((match) => (
-                  <span key={match.clause_id} title={matchEvidenceText(match)}>
-                    {matchEvidenceText(match)}
-                  </span>
-                ))}
-              </span>
-            )}
-            <span className="result-debug-channels">
-              {(Object.keys(CHANNEL_LABELS) as Array<
-                keyof typeof CHANNEL_LABELS
-              >).map((channel) => (
-                <span key={channel}>
-                  {CHANNEL_LABELS[channel]}{" "}
-                  {shot.debug?.channels?.[channel]
-                    ? `#${shot.debug?.channels?.[channel]?.rank}`
-                    : "—"}
-                </span>
-              ))}
-            </span>
-          </span>
-        )}
+        {showDetails && <ResultDetails id={detailsId} shot={shot} />}
       </button>
 
       {(onToggleBookmark || onUseInSearch) && (
@@ -329,26 +217,11 @@ export default function ShotCard({
               onFocus={handleMouseEnter}
               onBlur={handleMouseLeave}
               onDragStart={(event) => event.preventDefault()}
-              aria-label={
-                bookmarked
-                  ? `Remove result ${displayedRank} from Saved`
-                  : `Save result ${displayedRank}`
-              }
+              aria-label={bookmarked ? `Remove result ${displayedRank} from Saved` : `Save result ${displayedRank}`}
               aria-pressed={bookmarked}
               title={bookmarked ? "Remove from Saved" : "Save scene"}
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill={bookmarked ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z" />
-              </svg>
+              <BookmarkIcon filled={bookmarked} />
             </button>
           )}
           {onUseInSearch && sourceReferenceFacet ? (
@@ -377,5 +250,29 @@ export default function ShotCard({
         </div>
       )}
     </article>
+  );
+}
+
+/** The description and why the scene matched, in plain words. */
+function ResultDetails({ id, shot }: { id: string; shot: SearchResult }) {
+  // The description is already shown above; reasons add only what it doesn't say.
+  const reasons = matchReasons(shot).filter((reason) => reason.text !== shot.caption);
+  return (
+    <span className="result-details" id={id}>
+      <span className="result-details-caption">{shot.caption || "No description yet"}</span>
+      {reasons.length > 0 && (
+        <span className="result-details-reasons">
+          {reasons.map((reason) => (
+            <span key={`${reason.label}:${reason.text}`}>
+              <strong>{reason.label}</strong>
+              <span>{reason.text}</span>
+            </span>
+          ))}
+        </span>
+      )}
+      <span className="result-details-time">
+        {formatTime(shot.t_start)} – {formatTime(shot.t_end)}
+      </span>
+    </span>
   );
 }

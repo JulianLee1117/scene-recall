@@ -1455,10 +1455,15 @@ def interaction_event_endpoint(event: InteractionEvent, request: Request) -> Res
     return Response(status_code=204)
 
 
+# The web app marks its own requests; scripts and agents calling the same
+# endpoints stay out of the taste log.
+APP_CLIENT_HEADER = "x-scene-recall-client"
+
+
 def _log_interaction(request: Request, kind: str, **fields: Any) -> None:
     """Best effort: the taste log must never fail a user request."""
     log = getattr(request.app.state, "interactions", None)
-    if log is None:
+    if log is None or request.headers.get(APP_CLIENT_HEADER) != "app":
         return
     try:
         log.record(kind, **fields)

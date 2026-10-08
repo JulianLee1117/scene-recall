@@ -173,6 +173,7 @@ function harness() {
       if (name === "@/lib/searchRecipe") return recipe;
       if (name === "@/lib/movieSuggestions") return movieHelpers;
       if (name === "@/lib/movieMentions") return mentionHelpers;
+      if (name === "@/lib/appClient") return { APP_CLIENT_HEADERS: { "X-Scene-Recall-Client": "app" } };
       if (name === "@/components/MovieSearchInput") return movieInputExports;
       if (name === "@/hooks/useSearchFilms") return { useSearchFilms: () => films };
       if (name === "@/hooks/useBookmarks") return { useBookmarks: () => bookmarks };
@@ -518,5 +519,22 @@ test("Info navigation mounts its own view without search UI or a search request"
     assert.ok(app.find((node) => node.props?.["aria-label"] === "Describe a scene"));
     assert.equal(app.find((node) => node.type === "InfoView"), undefined);
     assert.equal(app.requests.length, 0);
+  } finally { app.dispose(); }
+});
+
+test("Related starts a fresh search from the chosen scene and marks the request as the app's own", async () => {
+  const app = harness();
+  const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
+  try {
+    await app.search("women running", "composition");
+    assert.equal(app.requests[0].init.headers["X-Scene-Recall-Client"], "app", "only app requests reach the taste log");
+    const scene = { ...result("chosen"), keyframe_index: 4, matched_frame_timestamp: 12 };
+    await app.resolve(0, response([scene]));
+    app.grid().props.onUseInSearch(scene, "look"); await app.flush();
+    const body = JSON.parse(app.requests[1].init.body);
+    assert.equal(input().value, "", "typed text clears");
+    assert.deepEqual(body.clauses.map((clause) => clause.facet), ["look"], "earlier references clear; only the chosen scene remains");
+    assert.equal(body.clauses[0].source.unit_id, "chosen");
+    assert.equal(app.requests[1].init.headers["X-Scene-Recall-Client"], "app");
   } finally { app.dispose(); }
 });

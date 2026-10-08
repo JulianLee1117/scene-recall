@@ -173,7 +173,7 @@ export function buildGuide(config: ProjectInfo | null): GuideSection[] {
         },
         {
           id: "processes", title: "App state & workers", summary: "Keep the interface responsive while durable queues do the work.",
-          detail: ["The Next.js interface calls the FastAPI service. SQLite-backed state keeps bookmarks, saved projects, job records and acquisition intent outside replaceable index data.", "The acquisition monitor handles downloads independently. Ingestion and editor workers claim their own job roles, with shared resource/publication locks where needed. Source preparation, interactive retrieval and editing remain distinct responsibilities."],
+          detail: ["The Next.js interface calls the FastAPI service. SQLite-backed state keeps bookmarks, saved projects, job records and acquisition intent outside replaceable index data.", "A local taste log keeps the searches, plays and saves you make in this app, for future personal ranking; nothing ranks with it yet, and scripts or agents calling the API are not recorded.", "The acquisition monitor handles downloads independently. Ingestion and editor workers claim their own job roles, with shared resource/publication locks where needed. Source preparation, interactive retrieval and editing remain distinct responsibilities."],
           method: "Next.js → FastAPI → durable state; separate acquisition, ingestion and editor processes.",
           output: "Persistent user work and restartable queues, independent of derived media and model caches.",
           sources: ["pipeline/api/main.py", "pipeline/acquisition/worker.py", "pipeline/lab/worker.py", "pipeline/lab/store.py"],

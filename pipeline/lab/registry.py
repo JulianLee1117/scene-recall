@@ -29,6 +29,7 @@ EXPERIMENTS = (
         "persistence": "session",
         "description": "Shape swipes, luma reveals and flashes between your clips, then compare variants.",
         "capabilities": ["transitions", "render"],
-        "status": "experimental",
+        # Kept runnable without new investment (ADR-0106); listed last in Labs.
+        "status": "frozen",
     },
 )

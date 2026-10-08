@@ -42,7 +42,8 @@ def test_timeline_has_frame_exact_tracks_on_the_original_media(films):
     first, _gap, last = video["children"]
     assert first["name"] == "Film a" and last["name"] == "Film b: a door opens"
     assert first["source_range"]["start_time"]["value"] == pytest.approx(2400.0)
-    assert first["media_reference"]["target_url"].startswith("file:///") and first["media_reference"]["target_url"].endswith("a.mkv")
+    target = first["media_reference"]["target_url"]
+    assert not target.startswith("file:") and "%20" not in target and Path(target).is_absolute() and target.endswith("a.mkv")
     assert last["metadata"]["scene_recall"]["crop"]["width"] == 0.5
     assert music["children"][0]["source_range"]["start_time"]["value"] == pytest.approx(240.0)
     assert [item["OTIO_SCHEMA"] for item in dialogue["children"]] == ["Gap.1", "Clip.1"]

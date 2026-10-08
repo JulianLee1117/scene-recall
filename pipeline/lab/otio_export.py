@@ -27,7 +27,9 @@ def _range(start: float, duration: float, rate: float) -> dict[str, Any]:
 
 
 def _reference(path: str) -> dict[str, Any]:
-    return {"OTIO_SCHEMA": "ExternalReference.1", "target_url": Path(path).resolve().as_uri(),
+    # Plain native paths: Resolve 21.1 does not match percent-encoded file://
+    # URLs to its media pool and falls back to timecode, linking the wrong film.
+    return {"OTIO_SCHEMA": "ExternalReference.1", "target_url": str(Path(path).resolve()),
             "available_range": None, "metadata": {}, "name": Path(path).name}
 
 

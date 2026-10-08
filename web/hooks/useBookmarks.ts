@@ -6,6 +6,7 @@ import type {
   BookmarkResponse,
   SearchResult,
 } from "@/types/api";
+import { APP_CLIENT_HEADERS } from "@/lib/appClient";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -133,7 +134,7 @@ export function useBookmarks() {
       try {
         const response = await fetch(
           `${API_URL}/bookmarks/${encodeURIComponent(bookmark.bookmark_id)}`,
-          { method: "DELETE" },
+          { method: "DELETE", headers: APP_CLIENT_HEADERS },
         );
         // DELETE is idempotent from the user's perspective. A prior request
         // may have committed even if its response was lost.
@@ -190,7 +191,7 @@ export function useBookmarks() {
           `${API_URL}/bookmarks/${encodeURIComponent(shot.unit_id)}`,
           {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...APP_CLIENT_HEADERS, "Content-Type": "application/json" },
             body: JSON.stringify({
               evidence_timestamp: evidenceTimestamp,
               frame_index: frameIndex,

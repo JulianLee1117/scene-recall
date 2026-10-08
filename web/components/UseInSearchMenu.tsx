@@ -136,7 +136,7 @@ export default function UseInSearchMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        title="Find related…"
+        title="Find scenes related to this one"
         onClick={() => {
           const firstEnabled = MATCH_FACETS.findIndex(
             (facet) => !disabledFacets?.has(facet),
@@ -159,7 +159,7 @@ export default function UseInSearchMenu({
           <circle cx="10.5" cy="10.5" r="6.5" />
           <path d="m15.5 15.5 4 4M10.5 7.5v6M7.5 10.5h6" />
         </svg>
-        <span>{variant === "modal" ? "Find related…" : "Related"}</span>
+        <span>Related</span>
       </button>
 
       {open && position && createPortal(
@@ -174,6 +174,7 @@ export default function UseInSearchMenu({
             if (!event.currentTarget.contains(event.relatedTarget) && !rootRef.current?.contains(event.relatedTarget)) setOpen(false);
           }}
         >
+          <p className="use-in-search-menu-title" aria-hidden="true">Find scenes with similar…</p>
           {MATCH_FACETS.map((facet, index) => (
             <button
               key={facet}
@@ -183,7 +184,7 @@ export default function UseInSearchMenu({
               tabIndex={
                 !disabledFacets?.has(facet) && index === activeIndex ? 0 : -1
               }
-              aria-label={`Use scene for ${FACET_LABELS[facet]}`}
+              aria-label={`Similar ${FACET_LABELS[facet]}`}
               title={
                 disabledFacets?.has(facet)
                   ? "Remove a clue to add this one"
@@ -199,7 +200,7 @@ export default function UseInSearchMenu({
             >
               <FacetIcon facet={facet} size={15} />
               <span>
-                <strong>{SEARCH_CLUE_COPY[facet].related}</strong>
+                <strong>{FACET_LABELS[facet]}</strong>
                 <small>{SEARCH_CLUE_COPY[facet].description}</small>
               </span>
             </button>

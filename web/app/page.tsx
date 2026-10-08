@@ -23,6 +23,7 @@ import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useSearchFilms } from "@/hooks/useSearchFilms";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
+import { APP_CLIENT_HEADERS } from "@/lib/appClient";
 import {
   FACET_LABELS,
   MATCH_FACETS,
@@ -150,7 +151,7 @@ export default function Home() {
     Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>
   >({});
   const [activeShot, setActiveShot] = useState<SearchResult | null>(null);
-  const [debug, setDebug] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [preset, setPreset] = useState<RankingPreset>("balanced");
   const presetRef = useRef<RankingPreset>("balanced");
   const [resultWindow, setResultWindow] = useState<{
@@ -249,9 +250,9 @@ export default function Home() {
           browsingFilm ? { signal: controller.signal } : {
             method: "POST",
             ...(formData
-              ? { body: formData }
+              ? { body: formData, headers: APP_CLIENT_HEADERS }
               : {
-                  headers: { "Content-Type": "application/json" },
+                  headers: { ...APP_CLIENT_HEADERS, "Content-Type": "application/json" },
                   body: JSON.stringify(request),
                 }),
             signal: controller.signal,
@@ -309,7 +310,7 @@ export default function Home() {
       setActiveShot(shot);
       void fetch(`${API_URL}/events`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...APP_CLIENT_HEADERS, "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "play",
           film_id: shot.film_id,
@@ -554,6 +555,9 @@ export default function Home() {
     onComplete: handleVoiceComplete,
   });
 
+  // Related starts a new search from the chosen scene: "more like this".
+  // The movie scope and preset stay; typed text, other references and an
+  // uploaded image clear. Dragging a scene onto a category adds it instead.
   const handleUseInSearch = useCallback(
     (shot: SearchResult, facet: RecipeMatchFacet) => {
       speech.cancel();
@@ -562,9 +566,24 @@ export default function Home() {
         setError("This scene does not have an exact searchable frame.");
         return;
       }
-      applySourceFacet(facet, draft);
+      cancelPendingScopeSearch();
+      facetSourceSearch.close();
+      const scopeOnly = setMovieScope(EMPTY_MOVIE_DRAFT, selectedFilmIds, films);
+      commitMovieDraft(scopeOnly);
+      const previousImage = mainImageRef.current;
+      mainImageRef.current = null;
+      setMainImage(null);
+      revokeImageInput(previousImage);
+      const nextDrafts: MatchDrafts = { [facet]: draft };
+      setMatchDrafts(nextDrafts);
+      setRecipeNotice(null);
+      setHasCompletedSearch(false);
+      setActiveTab("search");
+      setActiveShot(null);
+      void runRecipe(compileMovieDraft(scopeOnly).query, nextDrafts, selectedFilmIds, null);
+      if (typeof window.scrollTo === "function") window.scrollTo({ top: 0, behavior: "smooth" });
     },
-    [applySourceFacet, speech],
+    [cancelPendingScopeSearch, commitMovieDraft, facetSourceSearch, films, runRecipe, selectedFilmIds, speech],
   );
 
   const handleBrowseFacet = useCallback(
@@ -1185,7 +1204,8 @@ export default function Home() {
                 drafts={matchDrafts}
                 image={mainImage}
                 sourceEvidence={sourceEvidenceByFacet}
-                debug={debug}
+                showDetails={showDetails}
+                hasMainText={query.trim().length > 0}
                 onCommitText={handleFacetTextCommit}
                 onRemove={handleRemoveFacet}
                 onImageFile={handleMainImageFile}
@@ -1209,8 +1229,8 @@ export default function Home() {
                       onChange={handlePresetChange}
                     />
                     <SearchOptions
-                      showRankingDetails={debug}
-                      onShowRankingDetailsChange={setDebug}
+                      showDetails={showDetails}
+                      onShowDetailsChange={setShowDetails}
                     />
                   </div>
                 }
@@ -1327,7 +1347,7 @@ export default function Home() {
                           bookmarkedUnitIds={bookmarkedUnitIds}
                           pendingBookmarkUnitIds={pendingBookmarkUnitIds}
                           bookmarkDisabled={bookmarksLoading}
-                          debug={false}
+                          showDetails={false}
                         />
                       </div>
                     </section>
@@ -1431,7 +1451,7 @@ export default function Home() {
               bookmarkedUnitIds={bookmarkedUnitIds}
               pendingBookmarkUnitIds={pendingBookmarkUnitIds}
               bookmarkDisabled={bookmarksLoading}
-              debug={debug}
+              showDetails={showDetails}
             />
           </div>
         </>

@@ -195,6 +195,12 @@ the absolute final boundary of a film deterministically falls back to its last
 unit. Missing or temporarily unavailable source/index data leaves an explicit
 unavailable bookmark rather than silently rebinding or deleting user state.
 
+The interaction (taste) log, `state_dir/interactions.sqlite3`, records only
+searches, plays and saves made in the web app. The app marks its requests with
+`X-Scene-Recall-Client: app`; unmarked API calls from scripts and agents are
+served normally but not recorded. The log is local and append-only, and no
+ranking reads it yet.
+
 ## Dataflow
 
 ### Search and Lab application boundary
@@ -272,14 +278,16 @@ callbacks as dragging. Selecting a destination is inert until **Move to…** or
 can change among the existing facets; uploads can move only between Look and
 Framing. Moves preserve source/frame identity, replace the destination explicitly
 and obey the existing clause limit. IME composition Enter does not commit a text
-detail. Both Framing and uploaded Look expose their mandatory visual-gate
-explanation/removal action; indexed Look remains a relevance preference.
+detail. When a description orders their shortlist, Framing and uploaded Look
+expose their mandatory visual-gate explanation/removal action; indexed Look
+remains a relevance preference.
 A dragged thumbnail follows the cursor, the source dims and the destination
 highlights without floating instruction labels. Search cards remain draggable
 without a drag badge; Saved cards expose no dragging. Their playback, bookmark
 and Related actions remain available. The existing typed recipe remains the
-backend contract. Pointer gestures and the keyboard-accessible Related menu use
-the same typed clue operations.
+backend contract. Dragging adds a scene reference to the current recipe;
+the keyboard-accessible Related menu starts a new recipe from that reference,
+keeping only movie scope and preset. Both use the same typed clue operations.
 If no current Framing result also has main-description evidence, the interface
 explains the missing overlap within that result set and offers removal of Framing
 or deeper retrieval when available. Returned scenes and paging remain visible;

@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import ShotCard from "./ShotCard";
+import { useFrameAspects } from "@/hooks/useFrameAspects";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 
 const MIN_VISIBLE_ROWS = 3;
@@ -24,16 +25,23 @@ interface ResultGridProps {
   bookmarkedUnitIds?: ReadonlySet<string>;
   pendingBookmarkUnitIds?: ReadonlySet<string>;
   bookmarkDisabled?: boolean;
-  debug: boolean;
+  showDetails: boolean;
 }
 
 function resolvedColumnCount(grid: HTMLOListElement): number | null {
   // A temporarily hidden recipe grid keeps its reveal state while a facet
   // reference search is visible. Do not reinterpret display:none as one column.
   if (grid.getBoundingClientRect().width === 0) return null;
-  const template = window.getComputedStyle(grid).gridTemplateColumns.trim();
-  if (!template || template === "none") return 1;
-  return Math.max(1, template.split(/\s+/).length);
+  // Rows are justified by frame shape, so count the scenes in the first row.
+  const items = grid.querySelectorAll<HTMLElement>(".result-grid-item");
+  if (items.length === 0) return 1;
+  const firstTop = items[0].offsetTop;
+  let count = 0;
+  for (const item of items) {
+    if (item.offsetTop !== firstTop) break;
+    count += 1;
+  }
+  return Math.max(1, count);
 }
 
 export default function ResultGrid({
@@ -51,9 +59,10 @@ export default function ResultGrid({
   bookmarkedUnitIds = EMPTY_UNIT_IDS,
   pendingBookmarkUnitIds = EMPTY_UNIT_IDS,
   bookmarkDisabled = false,
-  debug,
+  showDetails,
 }: ResultGridProps) {
   const gridRef = useRef<HTMLOListElement>(null);
+  const { tileStyle, learnAspect } = useFrameAspects();
   const [columnCount, setColumnCount] = useState(1);
   const [visibleItemFloor, setVisibleItemFloor] = useState(0);
   const hasResults = results.length > 0;
@@ -133,11 +142,12 @@ export default function ResultGrid({
         aria-label={`${visibleResults.length} of ${results.length} ${order === "chronological" ? "scenes in source order" : "ranked search results"} shown`}
       >
         {visibleResults.map((shot, index) => (
-          <li className="result-grid-item" key={shot.unit_id}>
+          <li className="result-grid-item" key={shot.unit_id} style={tileStyle(shot.film_id)}>
             <ShotCard
               shot={shot}
               position={index + 1}
-              debug={debug}
+              showDetails={showDetails}
+              onFrameLoad={learnAspect}
               onClick={onShotClick}
               onUseInSearch={onUseInSearch}
               disabledUseFacets={disabledUseFacets}
