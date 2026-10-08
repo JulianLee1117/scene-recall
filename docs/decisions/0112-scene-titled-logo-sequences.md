@@ -35,6 +35,15 @@ logo, credit or title-card terms, for example "Opening Production Logos",
 Credits", "Opening Title Sequence") do not qualify. Their individual shots
 remain subject to the caption rules.
 
+Amended the same day: a company name of up to four capitalized words may
+precede or surround the logo phrase ("Focus Features Opening Logo",
+"Universal Pictures Opening Logo", "MGM Studio Logo"), and the card terms
+include title credits, main titles, other named cards, a feature
+presentation card and a blackout. That raised matches from 101 to 118 of
+14,757 scenes with none lost. Mixed titles ("Studio Logos and Prologue",
+"Opening Logos and Aerial LA", La La Land's "Mia's Script and Seb's Logo")
+still do not match.
+
 The table uses the existing query overrides: a query that asks for logos or
 studio idents keeps them. One helper,
 `_units_in_unrequested_junk_scenes`, applies the rule wherever compiled

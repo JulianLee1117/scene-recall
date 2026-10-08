@@ -294,11 +294,22 @@ _JUNK_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
 # NEON". Each category is one title pattern and uses the same query overrides
 # as the caption categories. Opening credits and title sequences without logos
 # often play over real footage, so they are not scene-level junk.
-_SCENE_JUNK_TERM = (
-    r"(?:(?:opening|closing|end|final|studio|production|distribution|distributor|company)\s+)*"
-    r"(?:(?:[\w'-]+\s+)?logos?|idents?|credits|title\s+cards?|titles|intertitles?|title\s+sequence)"
+# A company name: up to four capitalized words ("Focus Features", "20th Century
+# Fox", "Warner Bros."); lowercase story words never qualify.
+_SCENE_NAME = r"(?:(?-i:[A-Z0-9])[\w.&'-]*\s+){0,4}"
+_SCENE_MODIFIER = (
+    r"(?:(?:opening|closing|end|final|main|studio|production|distribution|distributor|company)"
+    r"(?:\s+and)?\s+)*"
 )
+_SCENE_LOGO = rf"{_SCENE_NAME}{_SCENE_MODIFIER}{_SCENE_NAME}(?:logos?|idents?)"
+_SCENE_CARD = (
+    rf"{_SCENE_MODIFIER}{_SCENE_NAME}(?:title\s+credits|credits|title\s+cards?|cards?|titles?"
+    r"|intertitles?|title\s+sequence|feature\s+presentation|blackout)"
+)
+_SCENE_JUNK_TERM = rf"(?:{_SCENE_LOGO}|{_SCENE_CARD})"
 _SCENE_JUNK_TITLES: dict[str, re.Pattern[str]] = {
+    # Only logos and the cards around them: any story phrase in the title
+    # ("Studio Logos and Prologue", "Mia's Script and Seb's Logo") keeps it.
     "logos": re.compile(
         rf"^(?=.*\b(?:logos?|idents?)\b)\s*{_SCENE_JUNK_TERM}"
         rf"(?:\s*(?:,|&|\band\b)\s*{_SCENE_JUNK_TERM})*\s*$",

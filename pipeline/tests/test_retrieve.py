@@ -4647,6 +4647,10 @@ def test_api_video_file_missing_on_disk_returns_404(tmp_path: Path, config: Conf
         ("Opening Logos and Title Card", True),
         ("Closing Credits and Studio Logo", True),
         ("Opening Titles and Mosfilm Logo", True),
+        ("Focus Features Opening Logo", True),  # Eternal Sunshine, found by "deep focus"
+        ("Studio and Distributor Logos", True),
+        ("Opening Studio Logos and CinemaScope Card", True),
+        ("Opening Logos and Main Titles", True),
         # Credits and title sequences often play over real footage.
         ("Opening Title Sequence", False),  # Raging Bull, Seven
         ("Opening Credits", False),
@@ -4654,6 +4658,9 @@ def test_api_video_file_missing_on_disk_returns_404(tmp_path: Path, config: Conf
         ("Studio Logos and Prologue", False),
         ("Walking into the Sunset and End Credits", False),
         ("Meeting President Kennedy", False),
+        ("Mia's Script and Seb's Logo", False),  # La La Land story scene
+        ("Opening Logos and Aerial LA", False),
+        ("Walking Past the Logo", False),
         ("", False),
     ],
 )
