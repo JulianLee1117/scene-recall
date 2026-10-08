@@ -7,7 +7,8 @@ import BookmarkIcon from "./BookmarkIcon";
 import { FACET_LABELS, sourceDraftFromShot, writeSceneSourceDrag } from "@/lib/searchRecipe";
 import { useScenePointerDrag } from "@/hooks/useScenePointerDrag";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
-import { matchReasons, matchedClauseLabels, readableEvidence, TEXT_VIEW_LABELS } from "@/lib/matchReasons";
+import { foundBy, readableEvidence, TEXT_VIEW_LABELS } from "@/lib/matchReasons";
+import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { formatTime, filmLabel } from "@/lib/format";
 
@@ -59,7 +60,7 @@ export default function ShotCard({
   const matchedTextLabel = shot.matched_text_view
     ? (TEXT_VIEW_LABELS[shot.matched_text_view] ?? "Text")
     : null;
-  const clauseLabels = matchedClauseLabels(shot);
+  const finders = foundBy(shot);
   const sourceAvailable = Number.isInteger(shot.keyframe_index);
   // Scenes are modular: drag one onto a search category, or use its Related menu.
   const canDragSource = Boolean(
@@ -191,9 +192,9 @@ export default function ShotCard({
                 <span>{shot.action}</span>
               </span>
             ) : null}
-            {clauseLabels.length > 0 && (
-              <span className="result-match-facets" aria-label={`Matched by ${clauseLabels.join(", ")}`}>
-                {clauseLabels.map((label) => (
+            {finders.length > 0 && (
+              <span className="result-match-facets" aria-label={`Found by ${finders.join(", ")}`}>
+                {finders.map((label) => (
                   <span key={label}>{label}</span>
                 ))}
               </span>
@@ -253,26 +254,17 @@ export default function ShotCard({
   );
 }
 
-/** The description and why the scene matched, in plain words. */
+/** The description and why the scene ranked here, finder by finder. */
 function ResultDetails({ id, shot }: { id: string; shot: SearchResult }) {
-  // The description is already shown above; reasons add only what it doesn't say.
-  const reasons = matchReasons(shot).filter((reason) => reason.text !== shot.caption);
   return (
     <span className="result-details" id={id}>
       <span className="result-details-caption">{shot.caption || "No description yet"}</span>
-      {reasons.length > 0 && (
-        <span className="result-details-reasons">
-          {reasons.map((reason) => (
-            <span key={`${reason.label}:${reason.text}`}>
-              <strong>{reason.label}</strong>
-              <span>{reason.text}</span>
-            </span>
-          ))}
-        </span>
-      )}
-      <span className="result-details-time">
-        {formatTime(shot.t_start)} – {formatTime(shot.t_end)}
-      </span>
+      <MatchBreakdown
+        shot={shot}
+        compact
+        omitDetail={shot.caption}
+        aside={`${formatTime(shot.t_start)} – ${formatTime(shot.t_end)}`}
+      />
     </span>
   );
 }

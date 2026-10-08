@@ -2393,9 +2393,10 @@ def search_semantic_views(
     scoped_film_ids = _normalise_film_ids(film_ids)
     profile = _ready_text_profile(config, db)
     if profile is None:
+        # Shown to the user as-is (HTTP 503): say what works, not the internals.
         raise SemanticTextProfileUnavailable(
-            "Facet search requires the complete semantic-text profile; "
-            "general search remains available"
+            "Scene, Words and Mood are unavailable while the library's text "
+            "index catches up with new films. The main search still works."
         )
     try:
         rows = _semantic_text_search_rows(

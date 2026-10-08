@@ -81,6 +81,8 @@ interface ClueDragSource {
   facet: RecipeMatchFacet;
   title: string;
   thumbnail: string | null;
+  /** A native drag that ended on no drop target, at the release point. */
+  onDropNowhere?: (x: number, y: number) => void;
 }
 function useClueSourceDrag({
   draft,
@@ -88,6 +90,7 @@ function useClueSourceDrag({
   facet,
   title,
   thumbnail,
+  onDropNowhere,
 }: ClueDragSource) {
   const [dragging, setDragging] = useState(false);
   const source = !image && draft?.kind === "source" ? draft : null;
@@ -122,7 +125,10 @@ function useClueSourceDrag({
       });
       setDragging(true);
     },
-    onDragEnd() { setDragging(false); },
+    onDragEnd(event: DragEvent<HTMLElement>) {
+      setDragging(false);
+      if (event.dataTransfer?.dropEffect === "none") onDropNowhere?.(event.clientX, event.clientY);
+    },
   };
 }
 function ClueChip({
@@ -191,6 +197,10 @@ export default function MatchByRail({
   const [dragKind, setDragKind] = useState<"scene" | "image">("scene");
   const [movingReference, setMovingReference] = useState(false);
   const [dragOver, setDragOver] = useState<RecipeMatchFacet | null>(null);
+  // Dragging a reference out of the Refine area removes it, with an undo.
+  const [dragOrigin, setDragOrigin] = useState<RecipeMatchFacet | null>(null);
+  const [dragRemoving, setDragRemoving] = useState(false);
+  const [removed, setRemoved] = useState<{ facet: RecipeMatchFacet; draft?: MatchDraft; file?: File } | null>(null);
   const panelId = useId();
   const openFacet = targetFacet ?? editorFacet;
   const panelOpen = refineOpen || Boolean(openFacet) || dragActive;
@@ -202,6 +212,32 @@ export default function MatchByRail({
       matchDraftHasClause(drafts[facet]) ||
       clauseCount < MAX_RECIPE_CLAUSES,
     );
+  const outsideRail = (x: number, y: number) => {
+    const bounds = railRef.current?.getBoundingClientRect();
+    return !bounds || x < bounds.left || x > bounds.left + bounds.width || y < bounds.top || y > bounds.bottom;
+  };
+  const removeByDrag = (facet: RecipeMatchFacet) => {
+    const removedImage = image?.facet === facet ? image : null;
+    const draft = drafts[facet];
+    if (!removedImage && draft?.kind !== "source") return;
+    setRefineOpen(false);
+    setEditorFacet(null);
+    setAspectTarget(null);
+    setRemoved({ facet, draft: removedImage ? undefined : draft, file: removedImage?.file });
+    if (removedImage) onRemoveImage?.();
+    else onRemove?.(facet);
+  };
+  const undoRemove = () => {
+    if (!removed) return;
+    setRemoved(null);
+    if (removed.file && imageFacet(removed.facet)) onImageFile?.(removed.file, removed.facet);
+    else if (removed.draft) onSource?.(removed.facet, removed.draft);
+  };
+  useEffect(() => {
+    if (!removed) return;
+    const timer = window.setTimeout(() => setRemoved(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [removed]);
   useEffect(() => {
     if (editorFacet && editorMode === "text") textRef.current?.focus();
   }, [editorFacet, editorMode]);
@@ -277,6 +313,8 @@ export default function MatchByRail({
       if (detail.phase === "end") {
         setDragActive(false);
         setDragOver(null);
+        setDragOrigin(null);
+        setDragRemoving(false);
         return;
       }
       if (detail.phase === "start") {
@@ -288,6 +326,7 @@ export default function MatchByRail({
         );
         setDragKind("scene");
         setMovingReference(Boolean(detail.originFacet));
+        setDragOrigin(detail.originFacet ?? null);
         setDragActive(true);
         return;
       }
@@ -298,24 +337,29 @@ export default function MatchByRail({
       const valid =
         facet && MATCH_FACETS.includes(facet) && facet !== detail.originFacet;
       const allowed = valid && (canUse(facet) || Boolean(detail.originFacet));
+      const removing = Boolean(detail.originFacet) && !facet && outsideRail(detail.x, detail.y);
       if (detail.phase === "move") {
         setDragOver(allowed ? facet : null);
+        setDragRemoving(removing);
+        document.querySelector?.(".scene-pointer-ghost")?.classList.toggle("is-removing", removing);
         return;
       }
       setDragActive(false);
       setDragOver(null);
+      setDragRemoving(false);
       if (allowed) {
         setRefineOpen(false);
         setEditorFacet(null);
         setAspectTarget(null);
         if (targetFacet) onCloseReference?.();
         onSource?.(facet, detail.draft, detail.originFacet);
-      } else if (valid) onLimit?.();
+      } else if (removing && detail.originFacet) removeByDrag(detail.originFacet);
+      else if (valid) onLimit?.();
     };
     document.addEventListener(SCENE_POINTER_EVENT, handlePointerScene);
     return () =>
       document.removeEventListener(SCENE_POINTER_EVENT, handlePointerScene);
-  }, [clauseCount, drafts, image, onSource, onLimit, targetFacet, onCloseReference]);
+  }, [clauseCount, drafts, image, onSource, onLimit, onRemove, onRemoveImage, targetFacet, onCloseReference]);
   const accepts = (facet: RecipeMatchFacet, transfer: DataTransfer) => {
     if (transfer.types.includes(SCENE_SOURCE_MIME))
       return canUse(facet) || transfer.effectAllowed === "move";
@@ -504,7 +548,7 @@ export default function MatchByRail({
               : draft?.kind === "source" && draft.display?.keyframeUrl ? `${API_URL}${draft.display.keyframeUrl}` : null;
             return <ClueChip
               key={facet}
-              source={{ draft, image: hasImage, facet, title, thumbnail }}
+              source={{ draft, image: hasImage, facet, title, thumbnail, onDropNowhere: (x, y) => { if (outsideRail(x, y)) removeByDrag(facet); } }}
               type="button"
               className="clue-summary"
               aria-label={`Edit ${FACET_LABELS[facet]}: ${title}`}
@@ -519,6 +563,13 @@ export default function MatchByRail({
             </ClueChip>;
           })}
         </div>
+      )}
+
+      {removed && (
+        <p className="clues-removed" role="status">
+          <span>{FACET_LABELS[removed.facet]} reference removed</span>
+          <button type="button" onClick={undoRemove}>Undo</button>
+        </p>
       )}
 
       <div
@@ -586,7 +637,7 @@ export default function MatchByRail({
               onDrop={(event) => drop(event, facet)}
             >
               <ClueChip
-                source={{ draft, image: hasImage, facet, title, thumbnail }}
+                source={{ draft, image: hasImage, facet, title, thumbnail, onDropNowhere: (x, y) => { if (outsideRail(x, y)) removeByDrag(facet); } }}
                 type="button"
                 className="clue-chip"
                 data-browse-facet={facet}
@@ -627,7 +678,15 @@ export default function MatchByRail({
         )}
       </div>
 
-      {!openFacet && <p className="clues-panel-hint">Choose a detail to describe, or drag in a scene to match it.</p>}
+      {dragActive && movingReference ? (
+        <p className={`clues-panel-hint clues-drag-hint${dragRemoving ? " is-removing" : ""}`} aria-hidden="true">
+          {dragRemoving
+            ? `Release to remove ${dragOrigin ? FACET_LABELS[dragOrigin] : "this reference"}`
+            : "Drop on another category to move it, or outside this panel to remove it."}
+        </p>
+      ) : !openFacet && (
+        <p className="clues-panel-hint">Describe a detail, or drag a scene onto a category. Drag a reference out to remove it.</p>
+      )}
 
       {openFacet && (
         <div

@@ -274,9 +274,14 @@ def _run_pipeline_locked(
             film_id=film.film_id,
         )
         state = "active" if text_result.activated else "shadow"
+        healed = (
+            f", repaired {len(text_result.healed_films)} other film(s)"
+            if text_result.healed_films
+            else ""
+        )
         print(
             f"[text-features] {text_result.embedded} embedded "
-            f"({state})",
+            f"({state}{healed})",
             flush=True,
         )
     except Exception as exc:

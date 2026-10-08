@@ -1,5 +1,5 @@
 .home {
-  max-width: 960px;
+  max-width: 1120px;
   margin: 0 auto;
   padding: 24px 32px 80px;
   color: var(--fg);
@@ -67,75 +67,80 @@
   color: #aaaaaa;
 }
 .experiments,
-.projectList {
+.projectGrid {
   list-style: none;
   margin: 0;
   padding: 0;
 }
+
+/* Experiments: compact tiles, each with its own mark. */
 .experiments {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 10px;
+}
+
+.experiments > li {
+  display: flex;
 }
 
 .experiment {
   display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 17px 24px;
-  border: 1px solid #363636;
-  border-radius: 7px;
-  background: #151515;
+  flex: 1;
+  min-height: 168px;
+  padding: 16px 16px 14px;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid #2e2e2e;
+  border-radius: 8px;
+  background: linear-gradient(160deg, #181715, #121212 60%);
   color: inherit;
   text-decoration: none;
   transition:
     border-color 0.15s,
-    background 0.15s;
+    background 0.15s,
+    transform 0.15s;
 }
 
 .experiment:hover {
   border-color: color-mix(in srgb, var(--accent) 44%, #242424);
-  background: #1b1b1b;
+  background: linear-gradient(160deg, #1f1c17, #151515 60%);
+  transform: translateY(-1px);
 }
 
-.number {
+.glyph {
   display: grid;
   place-items: center;
-  flex: 0 0 42px;
-  width: 42px;
-  height: 42px;
-  border: 1px solid #363636;
-  border-radius: 6px;
-  color: #aaaaaa;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 8px;
+  border-radius: 9px;
+  background: #1f1d19;
+  color: var(--accent);
 }
 
-.experimentDescription {
-  flex: 1;
-  min-width: 0;
-}
 .experiment h3 {
-  margin: 0 0 5px;
-  font-size: 17px;
+  margin: 0;
+  font-size: 15px;
   font-weight: 500;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
+
 .experiment p {
   margin: 0;
-  color: #aaaaaa;
+  color: #9a9a9a;
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.5;
 }
+
 .open {
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex-shrink: 0;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 10px;
   color: var(--accent);
-  font-size: 12px;
-}
-.open > span {
-  font-size: 18px;
+  font-size: 11px;
 }
 
 /* Frozen: still runnable, visibly not where new work happens. */
@@ -143,97 +148,200 @@
   border-style: dashed;
   border-color: #2a2a2a;
   background: transparent;
-  opacity: 0.62;
+  opacity: 0.6;
 }
 .frozen:hover {
+  background: transparent;
   opacity: 0.9;
 }
+.frozen .glyph {
+  background: #191919;
+  color: #8a8a8a;
+}
 .frozenTag {
-  margin-left: 9px;
+  margin-left: 8px;
   padding: 2px 6px;
   border: 1px solid #3a3a3a;
   border-radius: 999px;
   color: #8a8a8a;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   vertical-align: 2px;
 }
+
+/* Saved edits: a gallery of contact sheets, all shown. */
 .projects {
-  margin-top: 28px;
+  margin-top: 40px;
 }
 
-.showAll,
-.error button {
-  background: none;
-  border: 0;
-  padding: 5px 0;
-  color: #c5b394;
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
+.headingNote {
+  margin-left: 8px;
+  color: #8a8a8a;
+  font-weight: 400;
 }
 
-.showAll:hover,
-.error button:hover {
-  color: #efd3a6;
-}
-.projectList {
-  border-top: 1px solid #2b2b2b;
-}
-
-.projectRow {
+.projectTools {
   display: flex;
   align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid #2b2b2b;
+  gap: 10px;
+}
+
+.filter {
+  width: 180px;
+  padding: 6px 10px;
+  border: 1px solid #2e2e2e;
+  border-radius: 999px;
+  background: #121212;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.filter:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, #2e2e2e);
+  outline: none;
+}
+
+.newEdit {
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, #2e2e2e);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.newEdit:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.notice {
+  margin: 0 0 12px;
+  color: #aaaaaa;
+  font-size: 12px;
+}
+
+.projectGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 18px 12px;
+}
+
+.projectCard {
+  position: relative;
+  min-width: 0;
 }
 
 .project {
   display: flex;
-  align-items: center;
-  gap: 22px;
-  padding: 16px 4px;
-  flex: 1;
-  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: inherit;
   text-decoration: none;
-  color: #aaaaaa;
 }
 
-.project > div {
-  flex: 1;
-  min-width: 0;
-}
-.project strong {
-  display: block;
-  color: var(--fg);
-  font-weight: 450;
-  white-space: nowrap;
+.sheet {
+  display: grid;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 6px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  border-radius: 6px;
+  background: #1a1a1a;
+  transition: filter 0.15s;
 }
-.project div > span {
-  display: block;
-  margin-top: 4px;
-  font-size: 11px;
-  color: #aaaaaa;
+
+.sheet > img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: cover;
+  background: #0d0d0d;
 }
-.project time {
-  font-size: 11px;
-  white-space: nowrap;
+
+.sheetSingle {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
 }
-.resume {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--accent);
+
+.sheetEmpty {
+  display: grid;
+  place-items: center;
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  color: #555555;
 }
-.project:hover strong,
-.project:hover .resume {
+
+.project:hover .sheet {
+  filter: brightness(1.12);
+}
+
+.project strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.project:hover strong {
   color: color-mix(in srgb, var(--accent) 86%, white);
 }
+
+.projectSong {
+  overflow: hidden;
+  color: #a99a84;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  color: #8a8a8a;
+  font-size: 11px;
+}
+
+.projectMeta > * + *::before {
+  content: "·";
+  margin-right: 6px;
+  color: #555555;
+}
+
+.busy {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.projectDelete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.projectCard:hover .projectDelete,
+.projectCard:focus-within .projectDelete {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .projectDelete {
+    opacity: 1;
+  }
+}
+
 .empty {
   padding: 20px 0;
   border-top: 1px solid #363636;
@@ -254,6 +362,16 @@
 }
 .error button {
   flex-shrink: 0;
+  padding: 5px 0;
+  border: 0;
+  background: none;
+  color: #c5b394;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.error button:hover {
+  color: #efd3a6;
 }
 .home a:focus-visible,
 .home button:focus-visible {
@@ -263,7 +381,7 @@
 
 @media (max-width: 600px) {
   .home {
-    padding: 16px 20px 50px;
+    padding: 16px 16px 50px;
   }
   .header {
     margin: 26px 0 24px;
@@ -271,50 +389,32 @@
   .header h1 {
     font-size: 31px;
   }
-  .header p {
-    max-width: 270px;
-    font-size: 13px;
+  .experiments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .experiment {
-    padding: 16px;
-    gap: 14px;
+    min-height: 0;
+  }
+  .experiment p {
+    display: none;
+  }
+  .sectionHeading {
     flex-wrap: wrap;
   }
-  .number {
-    width: 34px;
-    height: 34px;
-    flex-basis: 34px;
-    align-self: flex-start;
-    margin-top: 2px;
+  .filter {
+    width: 140px;
   }
-  .experimentDescription {
-    flex-basis: calc(100% - 48px);
-  }
-  .experiment h3 {
-    font-size: 16px;
-  }
-  .open {
-    margin-left: 48px;
-    font-size: 11px;
-    gap: 9px;
-  }
-  .projects {
-    margin-top: 26px;
-  }
-  .project {
-    gap: 12px;
-  }
-  .resume {
-    font-size: 0;
-    gap: 0;
-  }
-  .resume > span {
-    font-size: 16px;
+  .projectGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .experiment {
+  .experiment,
+  .sheet {
     transition: none;
+  }
+  .experiment:hover {
+    transform: none;
   }
 }

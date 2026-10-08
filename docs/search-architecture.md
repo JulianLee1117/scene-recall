@@ -17,7 +17,7 @@ records.
 |---|---|---|---|
 | Evidence: per-film artifacts, compiled tables | Evidence v2 | `pipeline/evidence/` | 0001, 0093, 0095, 0098, 0099 |
 | Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080, 0102 |
-| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, with 0002-0021 and 0082-0087 where not superseded |
+| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, with 0002-0021 and 0082-0087 where not superseded |
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
@@ -282,7 +282,8 @@ detail. When a description orders their shortlist, Framing and uploaded Look
 expose their mandatory visual-gate explanation/removal action; indexed Look
 remains a relevance preference.
 A dragged thumbnail follows the cursor, the source dims and the destination
-highlights without floating instruction labels. Search cards remain draggable
+highlights. Releasing a reference outside the Refine area removes it through
+the same typed removal, with a short-lived undo. Search cards remain draggable
 without a drag badge; Saved cards expose no dragging. Their playback, bookmark
 and Related actions remain available. The existing typed recipe remains the
 backend contract. Dragging adds a scene reference to the current recipe;
@@ -2223,7 +2224,11 @@ legacy PE `units.txt_vec` representation. Partial generations are never mixed.
 Existing films build or repair this profile with the idempotent `index-text`
 command documented in `README.md` (`python -m pipeline.evidence compile` runs it
 after compiling evidence). New ingestion attempts the same derivation after
-publication; failure leaves the film searchable through the fallback.
+publication; failure leaves the film searchable through the fallback. A film
+ingest, or an evidence refresh holding the ingest lock, also reconciles other
+films' missing or stale views when the library-wide gap is at most 25,000
+views, then activates the profile. Larger gaps (migrations) stay an explicit
+`index-text` run (ADR-0111).
 
 Evidence-v2 search inputs activate per film: compiled rows exist only for films
 with artifacts, and every consumer treats a missing row as "no evidence"

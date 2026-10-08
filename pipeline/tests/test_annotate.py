@@ -1426,3 +1426,56 @@ def test_v1_annotation_cache_is_a_clean_miss(
         (cache_dir / f"{shot.shot_id}.json").read_text(encoding="utf-8")
     )
     assert legacy["schema_version"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Caption language: one retry for a caption in another script
+# ---------------------------------------------------------------------------
+
+
+def _response(caption: str) -> MagicMock:
+    response = MagicMock()
+    response.text = json.dumps({**FAKE_ANNOTATION, "caption": caption})
+    return response
+
+
+def test_caption_in_another_script_is_requested_once_more(tmp_path: Path, config: Config) -> None:
+    from pipeline.ingest.annotate import annotate_shot
+
+    client = _make_mock_client()
+    client.models.generate_content.side_effect = [
+        _response("静かで広い湖面を、前景の水草越しに捉えたワイドショット。"),
+        _response("A wide shot of a calm lake seen through hanging branches."),
+    ]
+    with patch("pipeline.ingest.annotate.genai.Client", return_value=client):
+        result = annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+    assert result["caption"].startswith("A wide shot of a calm lake")
+    assert client.models.generate_content.call_count == 2
+
+
+def test_a_second_foreign_caption_is_kept_rather_than_failing(tmp_path: Path, config: Config) -> None:
+    from pipeline.ingest.annotate import annotate_shot
+
+    client = _make_mock_client()
+    client.models.generate_content.side_effect = [
+        _response("静かで広い湖面を捉えたワイドショット。"),
+        _response("湖面のワイドショット。"),
+    ]
+    with patch("pipeline.ingest.annotate.genai.Client", return_value=client):
+        result = annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+    assert result["caption"].startswith("静か")
+
+
+def test_english_caption_quoting_other_scripts_is_not_retried(tmp_path: Path, config: Config) -> None:
+    from pipeline.ingest.annotate import annotate_shot
+
+    client = _make_mock_client(json.dumps({
+        **FAKE_ANNOTATION,
+        "caption": "A black title card with centered white Russian text reading Зеркало.",
+    }))
+    with patch("pipeline.ingest.annotate.genai.Client", return_value=client):
+        annotate_shot(_make_shot(), [_make_jpeg(tmp_path)], [], config)
+
+    assert client.models.generate_content.call_count == 1

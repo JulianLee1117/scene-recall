@@ -6,7 +6,8 @@ import FacetIcon from "./FacetIcon";
 import BookmarkIcon from "./BookmarkIcon";
 import { filmLabel, formatTime } from "@/lib/format";
 import { FACET_LABELS } from "@/lib/searchRecipe";
-import { matchReasons } from "@/lib/matchReasons";
+import { matchBreakdown } from "@/lib/matchReasons";
+import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 
 interface VideoModalProps {
@@ -50,8 +51,7 @@ export default function VideoModal({
   // A matched subtitle line is the most precise moment to start from.
   const seekTarget = Math.max(0, (shot.matched_line?.t_start ?? evidenceTime) - 1);
   const filmTitle = shot.film_title ?? filmLabel(shot.film_id);
-  const reasons = matchReasons(shot);
-  const captionShown = reasons.some((reason) => reason.text === shot.caption);
+  const hasBreakdown = matchBreakdown(shot).rows.length > 0;
   // Match cuts start from what is on screen while it is still this shot.
   const matchTime = playheadTime >= shot.t_start && playheadTime <= shot.t_end ? playheadTime : evidenceTime;
   const matchCutsHref = `/match?unit_id=${encodeURIComponent(shot.unit_id)}&time=${matchTime.toFixed(3)}`;
@@ -283,16 +283,11 @@ export default function VideoModal({
             </p>
           )}
           {shot.famous_line && <p className="modal-famous-line">“{shot.famous_line}”</p>}
-          {shot.caption && !captionShown && <p className="modal-caption">{shot.caption}</p>}
-          {reasons.length > 0 && (
-            <section className="modal-reasons" aria-label="Why this scene matched">
-              <h3>Why it matched</h3>
-              {reasons.map((reason) => (
-                <div key={`${reason.label}:${reason.text}`} className="modal-match-evidence">
-                  <span>{reason.label}</span>
-                  <span>{reason.text}</span>
-                </div>
-              ))}
+          {shot.caption && <p className="modal-caption">{shot.caption}</p>}
+          {hasBreakdown && (
+            <section className="modal-reasons" aria-label="Why this scene ranked here">
+              <h3>Why it&apos;s here</h3>
+              <MatchBreakdown shot={shot} omitDetail={shot.caption} />
             </section>
           )}
           {(shot.scene_alternatives?.length ?? 0) > 0 && (

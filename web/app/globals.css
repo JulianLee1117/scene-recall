@@ -915,6 +915,12 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-visual { display: flex; width: 22px; height: 18px; align-items: center; justify-content: center; }
 .clue-visual img { width: 22px; height: 18px; border-radius: 2px; object-fit: cover; pointer-events: none; }
 .clues-active { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.clues-drag-hint { color: #cdb48d; }
+.clues-drag-hint.is-removing { color: #e59a8c; }
+.clues-removed { display: flex; justify-content: center; align-items: center; gap: 10px; margin: 9px 0 0; color: #a99a84; font-size: .72rem; }
+.clues-removed button { padding: 3px 9px; border: 1px solid #4a4134; border-radius: 999px; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+.clues-removed button:hover { border-color: var(--accent); }
+.clues-removed button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .clue-summary { display: inline-flex; min-width: 0; max-width: min(100%, 270px); align-items: center; gap: 7px; padding: 5px 9px; border: 1px solid #403528; border-radius: 5px; background: #bb94590c; color: #d6c2a3; font: inherit; font-size: .72rem; cursor: pointer; }
 .clue-summary:hover { border-color: #7b6240; background: #bb945916; }
 .clue-summary img { width: 24px; height: 18px; flex: 0 0 24px; border-radius: 2px; object-fit: cover; }
@@ -1028,6 +1034,23 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 .scene-drag-preview.has-image {
   grid-template-columns: 72px minmax(0, 1fr);
+}
+
+/* Outside the Refine area, a dragged reference shows it will be removed. */
+.scene-drag-preview.is-removing {
+  border-color: #b5675b;
+  opacity: 0.82;
+}
+
+.scene-drag-preview.is-removing::after {
+  content: "Release to remove";
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  color: #f0a597;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
 }
 
 .scene-drag-preview > img {
@@ -2073,11 +2096,11 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 .result-details {
   display: flex;
-  height: 8.5rem;
+  height: 9.25rem;
   overflow: hidden;
-  padding: 10px 11px 11px;
+  padding: 9px 11px 10px;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   border-top: 1px solid #1d1d1d;
   background: #0e0e0e;
 }
@@ -2086,42 +2109,82 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   display: -webkit-box;
   overflow: hidden;
   color: #cfcfcf;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   line-height: 1.4;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.result-details-reasons {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.result-details-reasons > span {
-  display: -webkit-box;
-  overflow: hidden;
-  color: #9a9a9a;
-  font-size: 0.68rem;
-  line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.result-details-reasons strong {
-  margin-right: 6px;
-  color: #c8ab7f;
-  font-size: 0.6rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+/* Why a scene ranked here: overall fit, then one row per finder. */
+.match-breakdown {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
 }
 
-.result-details-time {
-  margin-top: auto;
+.match-fit,
+.match-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.match-fit-word {
+  color: #e2c597;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.match-aside {
+  margin-left: auto;
   color: #6f6f6f;
   font-size: 0.64rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.match-label {
+  flex: 0 0 5.6rem;
+  overflow: hidden;
+  color: #a99a84;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.match-meter {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+
+.match-meter > span {
+  width: 9px;
+  height: 3px;
+  border-radius: 1px;
+  background: #2b2924;
+}
+
+.match-meter > span.is-on {
+  background: var(--accent);
+}
+
+.match-detail {
+  min-width: 0;
+  color: #9a9a9a;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.match-breakdown.is-compact .match-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .search-options-trigger {
@@ -2393,26 +2456,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   line-height: 1.5;
 }
 
-.modal-match-evidence {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.modal-match-evidence > span:first-child {
-  color: #b89461;
-  font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.modal-match-evidence > span:last-child {
-  color: #d2d2d2;
-  font-size: 0.82rem;
-  line-height: 1.45;
-}
-
 .modal-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2467,6 +2510,16 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   margin: 4px 0 2px;
   flex-direction: column;
   gap: 8px;
+}
+
+.modal-reasons .match-row {
+  align-items: baseline;
+}
+
+.modal-reasons .match-detail {
+  color: #c9c9c9;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
 .modal-reasons h3 {

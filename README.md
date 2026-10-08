@@ -306,14 +306,17 @@ moving the search bar; example searches hide while any category is open. Empty
 text categories open directly to a text field and **Apply**. Existing references
 open their preview and actions; **Use text instead** preserves the reference until
 nonempty text is applied. **Change scene** opens a clearly labeled reference
-lookup independent of the main query. **Remove** lives in the editor. Drag a
+lookup independent of the main query. **Remove** lives in the editor, or drag a
+reference out of the Refine area to remove it (with **Undo**). Drag a
 search result onto a category to add it to the current search, or use its
 **Related** menu to start a new search from that scene (movie scope and preset
 stay). Saved cards keep playback, bookmarks and Related without dragging or a
 drag badge. The player distinguishes its retrieved frame from the current
 playback time; its action bar saves the scene, finds related scenes, opens
 **Match cuts** at the playhead in a new tab and copies the film and time.
-**Details** shows each result's description and, in plain words, why it matched.
+**Details** shows each result's description, its overall fit, and each finder
+that ranked it (Picture, a text view such as Story or Dialogue, Exact words, a
+quoted Line, or a reference category) with a five-step meter and what matched.
 
 ### AI Music Video and Match Cuts
 
@@ -1413,6 +1416,7 @@ more inputs rise.
 Drag a selected scene directly from its category chip to another category to
 move that reference, including out of Framing. Dropping onto an occupied category
 replaces its clue; moving a reference still works when all three inputs are in use.
+Releasing it outside the Refine area removes it; **Undo** restores it.
 A thumbnail follows the cursor while the source dims and the destination
 highlights. There are no floating instruction labels or drag badges on result
 cards. Saved cards do not drag; their **Related** menu remains available.

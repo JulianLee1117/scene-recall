@@ -342,6 +342,19 @@ def annotate_shot(
             raw, request_variant = _annotate_openai(keyframes, config, prompt=prompt)
         else:
             raw = _annotate_gemini(keyframes, config, prompt=prompt)
+        if not _caption_is_english(raw):
+            # Captions are English evidence (one shot in 216k came back in
+            # Japanese). Ask once more; keep the first answer rather than fail
+            # the film if the retry fails or drifts again.
+            try:
+                if provider == "openai":
+                    retry, retry_variant = _annotate_openai(keyframes, config, prompt=prompt)
+                else:
+                    retry, retry_variant = _annotate_gemini(keyframes, config, prompt=prompt), None
+            except AnnotationError:
+                retry = None
+            if retry is not None and _caption_is_english(retry):
+                raw, request_variant = retry, retry_variant
 
         annotation = _validate_annotation(raw, provider)
         if cache_dir is not None:
@@ -376,6 +389,20 @@ def annotate_shot(
     ).strip()
 
     return {**annotation, "searchable_text": searchable_text}
+
+
+_LATIN_LETTER = re.compile(r"[A-Za-zÀ-ɏ]")
+
+
+def _caption_is_english(raw: dict) -> bool:
+    """Whether a caption is written mostly in Latin script.
+
+    English captions may quote a few words of Cyrillic or Japanese on-screen
+    text; a caption mostly in another script is a provider language slip.
+    """
+    letters = [char for char in str(raw.get("caption") or "") if char.isalpha()]
+    foreign = sum(1 for char in letters if not _LATIN_LETTER.match(char))
+    return foreign * 2 <= len(letters)
 
 
 def _validate_annotation(raw: dict, provider: str) -> dict:

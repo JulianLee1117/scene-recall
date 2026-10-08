@@ -261,6 +261,54 @@ def test_scoped_backfill_does_not_activate_partial_library(
     assert resolve_ready_text_profile(config, open_db(config)) is None
 
 
+def test_ingest_backfill_heals_a_film_an_earlier_failure_left_behind(
+    tmp_path: Path,
+    config: Config,
+) -> None:
+    from pipeline.index.backfill_text import backfill_text_features_during_ingest
+    from pipeline.index.text_features import resolve_ready_text_profile
+    from pipeline.index.writer import open_db
+
+    # film_a was published but its text derivation never ran (e.g. GPU OOM).
+    _write_unit(config, tmp_path, "film_a")
+    _write_unit(config, tmp_path, "film_b")
+    with patch(
+        "pipeline.index.backfill_text.embed_semantic_documents",
+        side_effect=_fake_embeddings,
+    ):
+        result = backfill_text_features_during_ingest(config, film_id="film_b")
+
+    assert result.healed_films == ("film_a",)
+    assert result.activated is True
+    assert resolve_ready_text_profile(config, open_db(config)) is not None
+
+
+def test_ingest_backfill_leaves_large_gaps_to_an_explicit_run(
+    tmp_path: Path,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pipeline.index import backfill_text
+    from pipeline.index.text_features import resolve_ready_text_profile
+    from pipeline.index.writer import open_db
+
+    monkeypatch.setattr(backfill_text, "INGEST_HEAL_VIEW_LIMIT", 1)
+    _write_unit(config, tmp_path, "film_a")
+    _write_unit(config, tmp_path, "film_b")
+    with patch(
+        "pipeline.index.backfill_text.embed_semantic_documents",
+        side_effect=_fake_embeddings,
+    ):
+        result = backfill_text.backfill_text_features_during_ingest(
+            config,
+            film_id="film_b",
+        )
+
+    assert result.healed_films == ()
+    assert result.activated is False
+    assert resolve_ready_text_profile(config, open_db(config)) is None
+
+
 def test_units_change_invalidates_active_manifest(
     tmp_path: Path,
     config: Config,

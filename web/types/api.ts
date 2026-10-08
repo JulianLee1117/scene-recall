@@ -1,4 +1,4 @@
-export type SearchChannel = "img" | "txt" | "lex" | "spatial";
+export type SearchChannel = "img" | "txt" | "lex" | "quote" | "spatial";
 export type SearchFacet =
   | "all"
   | "scene"
@@ -114,21 +114,28 @@ export interface SearchChannelDebug {
   };
 }
 
-export interface SearchDebug {
-  mode?: "reference_image" | "reference_image_text";
+/** The cross-encoder's verdict on how well a scene fits the description (0-1). */
+export interface SearchRerankDebug {
+  log_odds?: number;
+  verdict?: number;
+}
+
+export type SearchChannelsDebug = Partial<Record<SearchChannel, SearchChannelDebug>> & {
+  rerank?: SearchRerankDebug;
+};
+
+export interface SearchClauseDebug {
+  mode?: string;
+  final_score?: number;
+  relevance?: number | null;
+  channels?: SearchChannelsDebug;
+}
+
+/** Diagnostic ranking detail; recipe searches key `clauses` by clause id. */
+export interface SearchDebug extends SearchClauseDebug {
   final_score: number;
-  channels?: Partial<Record<SearchChannel, SearchChannelDebug>>;
   query_ranks?: Partial<Record<"reference" | "text", number>>;
-  clauses?: Partial<
-    Record<
-      "reference" | "text",
-      {
-        mode?: string;
-        final_score?: number;
-        channels?: Partial<Record<SearchChannel, SearchChannelDebug>>;
-      }
-    >
-  >;
+  clauses?: Partial<Record<string, SearchClauseDebug>>;
 }
 
 export interface SearchResult {

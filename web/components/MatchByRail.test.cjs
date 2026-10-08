@@ -60,7 +60,7 @@ function setup(overrides = {}) {
     vm.runInNewContext(compiled, {
       exports, document, performance: { now: () => 1000 }, process: { env: {} },
       window: {
-        innerWidth: 1200, innerHeight: 800, requestAnimationFrame: (fn) => fn(), setTimeout: (fn) => fn(),
+        innerWidth: 1200, innerHeight: 800, requestAnimationFrame: (fn) => fn(), setTimeout: (fn) => fn(), clearTimeout() {},
         addEventListener(name, fn) { if (!windowListeners.has(name)) windowListeners.set(name, new Set()); windowListeners.get(name).add(fn); },
         removeEventListener(name, fn) { windowListeners.get(name)?.delete(fn); },
       },
@@ -539,5 +539,50 @@ test("the shortlist note appears only once a description orders the shortlist", 
   try {
     assert.equal(app.find((node) => node.props?.className === "clues-framing-note"), undefined, "a Framing-only search has nothing to order");
     assert.equal(app.button("Search without Framing"), undefined);
+  } finally { app.cleanup(); }
+});
+
+test("dragging a reference out of the Refine area removes it, and Undo puts it back", () => {
+  const draft = source("look");
+  const app = setup({ drafts: { look: draft } });
+  try {
+    const chip = app.chip("look");
+    const pointer = { currentTarget: chip.element, pointerId: 3, button: 0, isPrimary: true };
+    chip.props.onPointerDown(event({ ...pointer, clientX: 400, clientY: 120 }));
+    chip.props.onPointerMove(event({ ...pointer, clientX: 400, clientY: 600 }));
+    app.render();
+    assert.match(text(app.find((node) => node.props?.className?.includes?.("clues-drag-hint"))), /Release to remove Look/);
+    chip.props.onPointerUp(event({ ...pointer, clientX: 400, clientY: 600 }));
+    assert.deepEqual(app.calls, [["remove", "look"]]);
+    app.render();
+    assert.match(text(app.find((node) => node.props?.className === "clues-removed")), /Look reference removed/);
+    app.button("Undo").props.onClick();
+    assert.deepEqual(app.calls[1], ["source", "look", draft], "undo restores the same scene reference");
+  } finally { app.cleanup(); }
+});
+
+test("releasing a dragged reference inside the Refine area but off any category changes nothing", () => {
+  const app = setup({ drafts: { look: source("look") } });
+  try {
+    const chip = app.chip("look");
+    const pointer = { currentTarget: chip.element, pointerId: 4, button: 0, isPrimary: true };
+    chip.props.onPointerDown(event({ ...pointer, clientX: 400, clientY: 120 }));
+    chip.props.onPointerMove(event({ ...pointer, clientX: 600, clientY: 130 }));
+    chip.props.onPointerUp(event({ ...pointer, clientX: 600, clientY: 130 }));
+    assert.deepEqual(app.calls, []);
+  } finally { app.cleanup(); }
+});
+
+test("an uploaded image dragged out natively is removed and Undo re-adds the same file", () => {
+  const still = image("composition");
+  const app = setup({ image: still, onImageFile: (file, facet) => app.calls.push(["image-file", facet, file]) });
+  try {
+    const chip = app.chip("composition"), dataTransfer = transfer();
+    chip.props.onDragStart(event({ dataTransfer }));
+    chip.props.onDragEnd(event({ dataTransfer, clientX: 400, clientY: 700 }));
+    assert.deepEqual(app.calls, [["remove-image"]]);
+    app.render();
+    app.button("Undo").props.onClick();
+    assert.deepEqual(app.calls[1], ["image-file", "composition", still.file]);
   } finally { app.cleanup(); }
 });

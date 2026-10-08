@@ -108,3 +108,32 @@ test("frozen experiments stay openable but are listed last and labeled Frozen", 
   assert.match(text(entries[1]), /TransitionsFrozen/);
   assert.doesNotMatch(text(entries[0]), /Frozen/);
 });
+
+test("every saved edit is listed with its song and clip count, and the filter narrows them", async () => {
+  const projects = Array.from({ length: 10 }, (_, i) => ({
+    id: `p${i}`, name: i === 3 ? "Dracula night" : `Edit ${i}`, experiment_id: "music-sketch", revision: 1, updated_at: 100 + i,
+    document: { track: { id: "t", name: i === 5 ? "Halloween Song" : "Song", duration: 30 }, clips: [{ id: "c", film_id: "f", unit_id: `u${i}`, title: "", source_start: 0, source_end: 1, locked: false }] },
+  }));
+  const experiments = [{ id: "music-sketch", name: "AI Music Video", description: "Make an edit", route: "/lab/music-sketch" }];
+  const hooks = [], exported = {}; let cursor = 0, effect;
+  vm.runInNewContext(compiled, { exports: exported, AbortController, Date, Promise, URLSearchParams, window: { location: { search: "" } }, require(name) {
+    if (name === "react") return {
+      useState(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (value) => { hooks[index] = typeof value === "function" ? value(hooks[index]) : value; }]; },
+      useEffect(callback) { effect ??= callback; },
+    };
+    if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
+    if (name === "@/lib/lab") return { experimentName: (_, fallback) => fallback, mediaUrl: (path) => path, labRequest: async (route) => route === "/projects" ? { projects } : { experiments } };
+    return { default: name };
+  } });
+  const render = () => { cursor = 0; return exported.default(); };
+  render(); effect(); for (let i = 0; i < 5; i++) await Promise.resolve();
+  let tree = render();
+  const edits = () => nodes(tree).filter((node) => node.props?.href?.startsWith("/lab/music-sketch?project="));
+  assert.equal(edits().length, 10, "no View all: every edit is shown");
+  assert.equal(nodes(tree).some((node) => /View all/.test(text(node))), false);
+  assert.match(text(edits()[0]), /Edit 9Song1 clip/);
+  assert.equal(nodes(tree).find((node) => text(node) === "New edit" && node.props?.href).props.href, "/lab/music-sketch");
+  nodes(tree).find((node) => node.type === "input").props.onChange({ target: { value: "halloween" } });
+  tree = render();
+  assert.deepEqual(edits().map((node) => node.props.href), ["/lab/music-sketch?project=p5"], "the filter matches song names too");
+});
