@@ -314,11 +314,13 @@ stay). Saved cards keep playback, bookmarks and Related without dragging or a
 drag badge. The player distinguishes its retrieved frame from the current
 playback time; its action bar saves the scene, finds related scenes, opens
 **Match cuts** at the playhead in a new tab and copies the film and time.
-**Details** shows each result's description and how each finder ranked it. Every
-card in a search lists the same finders in a fixed order: Picture, Text (with the
-view it matched, such as Story or On-screen text), Exact words, Spoken line, any
-categories, then the Rerank score. A finder that did not return the scene shows
-"–" and why, for example that it ranked below that finder's top 600.
+**Details** shows each result's description and how each retrieval channel ranked
+it. Every card in a search lists the same rows in a fixed order: Visual (image-text
+embedding), Semantic (text embedding, with the view it matched such as Story or
+On-screen text), Lexical (BM25 keywords; it needs two of your words and shows the
+ones it shares), Quote (spoken lines), any categories, then the Rerank score. Each
+channel keeps only its top few hundred scenes; one that did not return a scene shows
+"–" and, for example, "not in its top 600".
 
 ### AI Music Video and Match Cuts
 

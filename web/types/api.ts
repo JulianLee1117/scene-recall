@@ -105,6 +105,8 @@ export interface SearchChannelDebug {
   score: number;
   distance: number | null;
   source?: string;
+  /** Lexical channel: the query words this scene's text shares. */
+  terms?: string[];
   matched_frame?: MatchedFrameDebug;
   matched_text?: {
     feature_id?: string;

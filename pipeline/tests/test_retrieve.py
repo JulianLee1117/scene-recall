@@ -4671,3 +4671,14 @@ def test_logo_scenes_drop_unless_the_query_asks_for_logos() -> None:
     with patch.object(retrieve._priors, "load_scenes", return_value=scenes):
         assert retrieve._units_in_unrequested_junk_scenes(None, evidence, set()) == {"logo_shot"}
         assert retrieve._units_in_unrequested_junk_scenes(None, evidence, {"logos"}) == set()
+
+
+def test_lexical_hits_name_the_query_words_they_share() -> None:
+    from pipeline.search.retrieve import _shared_query_terms
+
+    row = {"caption": "A boy walks down a quiet street past parked cars.", "dialogue": "", "searchable_text": ""}
+    assert _shared_query_terms("boy in blue shirt walking on street next to grass with a ball", row) == [
+        "boy",
+        "walking",
+        "street",
+    ]

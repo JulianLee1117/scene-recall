@@ -403,6 +403,25 @@ def _unique_query_terms(value: Any) -> list[str]:
     return list(dict.fromkeys(_query_tokens(value)))[:_MAX_LEXICAL_QUERY_TERMS]
 
 
+def _light_stem(token: str) -> str:
+    """Fold common English endings so "walking" and "walk" compare equal."""
+    for suffix in ("ing", "ed", "es", "s"):
+        if len(token) > len(suffix) + 2 and token.endswith(suffix):
+            return token[: -len(suffix)]
+    return token
+
+
+def _shared_query_terms(query: str, row: dict[str, Any]) -> list[str]:
+    """The query's meaningful words a lexical hit's text contains, in query order.
+
+    Native full-text search stems with its own tokenizer; this light fold is
+    for explaining a match, never for ranking it.
+    """
+    text = " ".join(str(row.get(field) or "") for field in ("searchable_text", "caption", "dialogue"))
+    stems = {_light_stem(token) for token in _tokens(text)}
+    return [term for term in _unique_query_terms(query) if _light_stem(term) in stems]
+
+
 def _is_explicitly_quoted_query(value: str) -> bool:
     """Return whether the complete query is enclosed in visible quote marks."""
     query = value.strip()
@@ -1993,6 +2012,10 @@ def search(
                     channel_evidence["matched_text"] = matched_text
                 else:
                     channel_evidence["source"] = "legacy_combined_text"
+            elif channel == "lex":
+                # Lexical needs any two of the query's meaningful words, so
+                # name the ones this scene shares.
+                channel_evidence["terms"] = _shared_query_terms(query, row)
             elif channel == "quote":
                 channel_evidence["source"] = "dialogue_line"
                 candidate["row"]["_matched_line"] = row.get("_matched_line")

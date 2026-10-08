@@ -23,24 +23,24 @@ const typed = (channels, extra = {}) => ({
 test("every card in a search lists the same finders in the same fixed order", () => {
   const picture = typed({ img: { rank: 2, score: 0.3, distance: 0.7, matched_frame: { timestamp: 90 } }, rerank: { verdict: 0.52 } });
   const words = typed(
-    { txt: { rank: 18, score: 0.6, distance: 0.4, source: "ocr", matched_text: { view: "ocr", text: "LOVE" } }, lex: { rank: 3, score: 1, distance: null }, quote: { rank: 1, score: 1, distance: null } },
+    { txt: { rank: 18, score: 0.6, distance: 0.4, source: "ocr", matched_text: { view: "ocr", text: "LOVE" } }, lex: { rank: 3, score: 1, distance: null, terms: ["love", "neon"] }, quote: { rank: 1, score: 1, distance: null } },
     { matched_line: { t_start: 4, t_end: 5, text: "love." } },
   );
   const columns = plain(lib.matchColumns([picture, words]));
   assert.deepEqual(columns, ["img", "txt", "lex", "quote", "rerank"]);
   assert.deepEqual(table(picture, columns), [
-    ["Picture", "#2", "frame 90s"],
-    ["Text", "–", "below its top 600"],
-    ["Exact words", "–", "your words are not in its text"],
-    ["Spoken line", "–", "no matching line spoken"],
+    ["Visual", "#2", "frame 90s"],
+    ["Semantic", "–", "not in its top 600"],
+    ["Lexical", "–", "fewer than two of your words in its text"],
+    ["Quote", "–", "no matching spoken line"],
     ["Rerank", "0.52", ""],
   ]);
   assert.deepEqual(table(words, columns), [
-    ["Picture", "–", "below its top 600"],
-    ["Text", "#18", "On-screen text · LOVE"],
-    ["Exact words", "#3", ""],
-    ["Spoken line", "#1", "“love.”"],
-    ["Rerank", "–", "only the top 40 are reranked"],
+    ["Visual", "–", "not in its top 600"],
+    ["Semantic", "#18", "On-screen text · LOVE"],
+    ["Lexical", "#3", "shares love, neon"],
+    ["Quote", "#1", "“love.”"],
+    ["Rerank", "–", "not in the top 40 it scores"],
   ]);
   assert.equal(lib.matchBreakdown(picture, columns).score, 0.9);
 });
@@ -57,8 +57,8 @@ test("a recipe adds a row per category after the description's finders", () => {
     } } } },
   };
   assert.deepEqual(table(shot, plain(lib.matchColumns([shot]))), [
-    ["Picture", "–", "below its top 600"],
-    ["Text", "#39", "Story · Caleb clinks his beer bottle."],
+    ["Visual", "–", "not in its top 600"],
+    ["Semantic", "#39", "Story · Caleb clinks his beer bottle."],
     ["Words", "#25", "Dialogue · Cheers."],
     ["Look", "#2", "frame 90s"],
   ]);
@@ -73,5 +73,5 @@ test("the caption shown above is not repeated, and shot details and mood read as
 
 test("the hover label names the finders that ranked the scene in their top 30", () => {
   const shot = typed({ img: { rank: 1, score: 0.3, distance: 0.7 }, txt: { rank: 12, score: 0.6, distance: 0.4, source: "scene", matched_text: { view: "scene", text: "x" } } });
-  assert.deepEqual(plain(lib.foundBy(shot)), ["Picture", "Scene"]);
+  assert.deepEqual(plain(lib.foundBy(shot)), ["Visual", "Scene"]);
 });

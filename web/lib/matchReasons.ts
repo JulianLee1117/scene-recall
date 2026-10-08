@@ -67,18 +67,19 @@ export function readableEvidence(view: string, text: string): string {
 
 /**
  * The finders a search can report, in the fixed order Details lists them.
- * A typed description is ranked by Picture, Text, Exact words and Spoken
- * line, then checked by Rerank; each category adds its own finder.
+ * A typed description is ranked by four retrieval channels (Visual, Semantic,
+ * Lexical, Quote) and then checked by the Rerank model; each category adds
+ * its own finder.
  */
 export type MatchColumn = "img" | "txt" | "lex" | "quote" | "scene" | "words" | "look" | "composition" | "mood" | "rerank";
 
 const COLUMN_ORDER: MatchColumn[] = ["img", "txt", "lex", "quote", "scene", "words", "look", "composition", "mood", "rerank"];
 
 const COLUMN_LABELS: Record<MatchColumn, string> = {
-  img: "Picture",
-  txt: "Text",
-  lex: "Exact words",
-  quote: "Spoken line",
+  img: "Visual",
+  txt: "Semantic",
+  lex: "Lexical",
+  quote: "Quote",
   scene: "Scene",
   words: "Words",
   look: "Look",
@@ -88,16 +89,16 @@ const COLUMN_LABELS: Record<MatchColumn, string> = {
 };
 
 const COLUMN_HINTS: Record<MatchColumn, string> = {
-  img: "Rank among frames whose picture is closest to your words",
-  txt: "Rank among scenes whose description, dialogue or story means the closest thing to your words",
-  lex: "Rank among scenes whose description or dialogue contains your exact words",
-  quote: "Rank among spoken lines that match your words",
+  img: "Visual: image-text embedding. Rank among frames whose picture is closest to your words.",
+  txt: "Semantic: text embedding. Rank among scenes whose description, dialogue, on-screen text, story or mood means the closest thing to your words.",
+  lex: "Lexical: keyword search (BM25). A scene qualifies when its description or dialogue contains at least two of your words; rank by how well they match.",
+  quote: "Quote: rank among spoken lines that match your words.",
   scene: "Rank in the Scene category",
   words: "Rank in the Words category",
   look: "Rank in the Look category",
   composition: "Rank in the Framing category",
   mood: "Rank in the Mood category",
-  rerank: "A second model's score for how well the scene fits your words, 0 to 1",
+  rerank: "Rerank: a cross-encoder's score for how well the top results fit your words, 0 to 1.",
 };
 
 /** One finder's verdict on a scene: where it ranked it, and on what. */
@@ -172,7 +173,8 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
   const main = (shot.matches ?? []).find((match) => match.facet === "all");
   const mainDebug = main ? clauseDebug(shot, main) : undefined;
   const channels = mainDebug?.channels;
-  const below = (depth?: number) => (depth ? `below its top ${depth}` : "below its cutoff");
+  // Each channel keeps only its top N scenes; a scene ranked lower is absent there.
+  const below = (depth?: number) => (depth ? `not in its top ${depth}` : "not in its top results");
   const score = typeof mainDebug?.relevance === "number" ? mainDebug.relevance : undefined;
   const row = (column: MatchColumn, found: Partial<MatchRow> & { matched: boolean; detail: string }): MatchRow => ({
     column,
@@ -204,21 +206,22 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
     }
     if (column === "lex") {
       const lex = channels?.lex;
+      const terms = lex?.terms ?? [];
       return lex
-        ? row(column, { value: `#${lex.rank}`, rank: lex.rank, matched: true, detail: "" })
-        : row(column, { matched: false, detail: "your words are not in its text" });
+        ? row(column, { value: `#${lex.rank}`, rank: lex.rank, matched: true, detail: terms.length ? `shares ${terms.join(", ")}` : "" })
+        : row(column, { matched: false, detail: "fewer than two of your words in its text" });
     }
     if (column === "quote") {
       const quote = channels?.quote;
       return quote && shot.matched_line
         ? row(column, { value: `#${quote.rank}`, rank: quote.rank, matched: true, detail: `“${shot.matched_line.text}”` })
-        : row(column, { matched: false, detail: "no matching line spoken" });
+        : row(column, { matched: false, detail: "no matching spoken line" });
     }
     if (column === "rerank") {
       const verdict = channels?.rerank?.verdict;
       return typeof verdict === "number"
         ? row(column, { value: verdict.toFixed(2), matched: true, detail: "" })
-        : row(column, { matched: false, detail: "only the top 40 are reranked" });
+        : row(column, { matched: false, detail: "not in the top 40 it scores" });
     }
     const match = (shot.matches ?? []).find((item) => item.facet === column);
     return match
