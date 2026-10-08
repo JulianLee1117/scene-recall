@@ -53,7 +53,7 @@ export default function AcquisitionPanel({ onLibraryChange, jobs = [], films = [
       <article className={`film-row ${job.status === "running" ? "film-row--running" : "film-row--queued"} ${styles.row}`} key={job.job_id}>
         <div className="film-row-copy">
           <div className={styles.rowHeading}><h3>{title}</h3><span className={styles.state}>{job.status === "running" ? "Preparing for search" : waitingLabel(job)}</span></div>
-          {job.status === "running" && <p className={styles.note}>{preparationProgress(job.progress)}</p>}
+          {job.status === "running" && <p className={styles.note}>{preparationProgress(job.progress, job.log)}</p>}
           {job.progress && <details className={styles.details}><summary>Details</summary><p>{job.progress}</p></details>}
         </div>
       </article>

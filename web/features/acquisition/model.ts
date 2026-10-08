@@ -78,13 +78,45 @@ export function waitingLabel(job?: IngestJob): string {
     : job?.queue_position ? `Waiting · #${job.queue_position}` : "Waiting to prepare";
 }
 
-export function preparationProgress(progress?: string | null): string {
-  const stage = progress?.match(/^\[([^\]]+)\]/)?.[1]?.toLowerCase();
-  const label = ({ probe: "Checking the film", dialogue: "Preparing dialogue", shots: "Finding scenes",
-    media: "Creating previews", keyframes: "Preparing scene images", embed: "Preparing visual search",
-    annotate: "Describing scenes", publish: "Making scenes searchable", text: "Preparing text search",
-  } as Record<string, string>)[stage ?? ""] ?? "Preparing scenes for search";
-  const count = progress?.match(/\b(\d+)\s*\/\s*(\d+)\b/);
+// Stages before the film is searchable.
+const INGEST_STAGES: Record<string, string> = {
+  probe: "Checking the film", dialogue: "Preparing dialogue", shots: "Finding scenes",
+  media: "Creating previews", keyframes: "Preparing scene images", embed: "Preparing visual search",
+  annotate: "Describing scenes", frames: "Making scenes searchable", publish: "Making scenes searchable",
+  text: "Preparing text search", "text-features": "Preparing text search",
+  "embed+annotate+write": "Making scenes searchable",
+};
+
+// Evidence passes run after the film is already searchable.
+const EVIDENCE_STAGES: Record<string, string> = {
+  metadata: "Looking up film details", subtitles: "Syncing subtitles",
+  understanding: "Understanding the story", highlights: "Picking key moments",
+  measure: "Measuring camera, subjects and color", moments: "Indexing moments for match cuts",
+  hero: "Choosing the best frames", synthesis: "Ranking iconic moments and hidden gems",
+  compile: "Assembling scene details", "text-views": "Updating text search",
+  "match-index": "Updating match cuts", evidence: "Finishing scene details",
+};
+
+/** A pipeline line that names a known stage, e.g. "[understanding] Elf part 7/11"; never a timestamp or library warning. */
+function stageOf(line: string): string | null {
+  const stage = line.match(/^\[([a-z][a-z0-9+_-]*)\]/)?.[1] ?? null;
+  return stage && (INGEST_STAGES[stage] || EVIDENCE_STAGES[stage]) ? stage : null;
+}
+
+/**
+ * What a running ingest is doing, in words. The pipeline also prints model
+ * warnings, so read the newest line that names a stage rather than the last line.
+ */
+export function preparationProgress(progress?: string | null, log: readonly string[] = []): string {
+  const line = [progress ?? "", ...[...log].reverse()].find((candidate) => stageOf(candidate)) ?? "";
+  const stage = stageOf(line) ?? "";
+  if (EVIDENCE_STAGES[stage]) {
+    // Gemini watches the film in chunks; its count is parts, not scenes.
+    const part = stage === "understanding" ? line.match(/\bpart\s+(\d+)\s*\/\s*(\d+)\b/i) : null;
+    return `Searchable · ${EVIDENCE_STAGES[stage]}${part ? ` · part ${part[1]} of ${part[2]}` : ""}`;
+  }
+  const label = INGEST_STAGES[stage] ?? "Preparing scenes for search";
+  const count = line.match(/\b(\d+)\s*\/\s*(\d+)\b/);
   return count && Number(count[2]) > 0 ? `${label} · ${Number(count[1]).toLocaleString()} of ${Number(count[2]).toLocaleString()}` : label;
 }
 

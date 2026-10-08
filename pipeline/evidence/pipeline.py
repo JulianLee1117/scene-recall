@@ -29,6 +29,7 @@ def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = 
     summary: dict[str, Any] = {}
 
     def step(name: str, action: Callable[[], Any]) -> None:
+        progress(f"[{name.replace('_', '-')}] starting")
         try:
             summary[name] = action()
         except Exception as exc:  # noqa: BLE001 - later passes still run on what exists

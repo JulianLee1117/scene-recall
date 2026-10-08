@@ -121,6 +121,13 @@ test("unmanaged jobs keep their real queue positions and progress describes a st
   assert.equal(model.waitingLabel(jobs[1]), "Next in queue");
   assert.equal(model.preparationProgress("[media] 200/1266"), "Creating previews · 200 of 1,266");
   assert.equal(model.preparationProgress("[unknown] raw internal detail"), "Preparing scenes for search");
+  // Model warnings are skipped in favor of the newest stage line.
+  const warning = "  cells.append(patch.reshape(batch, -1, 2).median(dim=1).values)";
+  assert.equal(model.preparationProgress(warning, ["[understanding] Elf (2003) part 7/11: 156/156 shots", "[2026-10-08 00:35:52] [INFO] rf-detr - File", warning]),
+    "Searchable · Understanding the story · part 7 of 11");
+  assert.equal(model.preparationProgress(warning, ["[measure] starting", warning]), "Searchable · Measuring camera, subjects and color");
+  assert.equal(model.preparationProgress("[transformers] `torch_dtype` is deprecated", ["[annotate] 900/1393", "[transformers] `torch_dtype` is deprecated"]),
+    "Describing scenes · 900 of 1,393", "tagged library warnings are not stages");
 });
 
 test("multipart upload lets the browser supply its boundary and server validation explains failures", async () => {
