@@ -1587,7 +1587,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 /* Rows show whole; only the final row of all results keeps natural widths. */
 .result-grid.is-end::after,
-.saved-grid::after {
+.saved-grid:not(.is-rows)::after {
   content: "";
   flex: 1000 1 0;
 }

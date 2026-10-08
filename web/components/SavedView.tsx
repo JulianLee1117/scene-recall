@@ -1,7 +1,9 @@
 "use client";
 
+import type { CSSProperties, RefObject } from "react";
 import ShotCard from "./ShotCard";
-import { useFrameAspects } from "@/hooks/useFrameAspects";
+import BookmarkIcon from "./BookmarkIcon";
+import { rowStarts, useJustifiedRows } from "@/hooks/useJustifiedRows";
 import type {
   BookmarkRecord,
   RecipeMatchFacet,
@@ -32,7 +34,50 @@ export default function SavedView({
   onToggleBookmark,
   onRemoveBookmark,
 }: SavedViewProps) {
-  const { tileStyle, learnAspect } = useFrameAspects();
+  // Unavailable bookmarks have no scene; they take a default 16:9 tile.
+  const scenes = bookmarks.map((bookmark) => bookmark.scene ?? { unit_id: bookmark.bookmark_id, film_id: bookmark.film_id });
+  const { ref, frame, layout, tileStyle, learnAspect } = useJustifiedRows(scenes);
+
+  const tile = (bookmark: BookmarkRecord, index: number) =>
+    bookmark.scene ? (
+      <ShotCard
+        shot={bookmark.scene}
+        onFrameLoad={learnAspect}
+        position={index + 1}
+        showRank={false}
+        allowSourceDrag={false}
+        showDetails={false}
+        onClick={onShotClick}
+        onUseInSearch={onUseInSearch}
+        disabledUseFacets={disabledUseFacets}
+        onToggleBookmark={onToggleBookmark}
+        bookmarked
+        bookmarkDisabled={
+          pendingUnitIds.has(bookmark.source_unit_id) ||
+          pendingUnitIds.has(bookmark.scene.unit_id)
+        }
+      />
+    ) : (
+      <article className="saved-unavailable">
+        <div>
+          <span>Scene unavailable</span>
+          <strong>
+            {displayTitle(bookmark.film_title || filmLabel(bookmark.film_id))}
+          </strong>
+          <span>{formatTime(bookmark.evidence_timestamp)}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => onRemoveBookmark(bookmark)}
+          disabled={pendingUnitIds.has(bookmark.source_unit_id)}
+        >
+          Remove
+        </button>
+      </article>
+    );
+
+  const starts = layout ? rowStarts(layout.sizes) : [];
+
   return (
     <section className="saved-view" aria-labelledby="saved-heading">
       <header className="saved-heading">
@@ -59,64 +104,38 @@ export default function SavedView({
         </p>
       ) : bookmarks.length === 0 ? (
         <div className="saved-empty">
-          <svg
-            width="25"
-            height="25"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.75L6 21V4.75Z" />
-          </svg>
+          <BookmarkIcon filled={false} size={25} />
           <p>Scenes you bookmark will appear here.</p>
         </div>
-      ) : (
-        <ol className="result-grid saved-grid" aria-label="Saved scenes">
-          {bookmarks.map((bookmark, index) =>
-            bookmark.scene ? (
-              <li className="result-grid-item" key={bookmark.bookmark_id} style={tileStyle(bookmark.scene)}>
-                <ShotCard
-                  shot={bookmark.scene}
-                  onFrameLoad={learnAspect}
-                  position={index + 1}
-                  showRank={false}
-                  allowSourceDrag={false}
-                  showDetails={false}
-                  onClick={onShotClick}
-                  onUseInSearch={onUseInSearch}
-                  disabledUseFacets={disabledUseFacets}
-                  onToggleBookmark={onToggleBookmark}
-                  bookmarked
-                  bookmarkDisabled={
-                    pendingUnitIds.has(bookmark.source_unit_id) ||
-                    pendingUnitIds.has(bookmark.scene.unit_id)
-                  }
-                />
-              </li>
-            ) : (
-              <li className="result-grid-item" key={bookmark.bookmark_id}>
-                <article className="saved-unavailable">
-                  <div>
-                    <span>Scene unavailable</span>
-                    <strong>
-                      {displayTitle(bookmark.film_title || filmLabel(bookmark.film_id))}
-                    </strong>
-                    <span>{formatTime(bookmark.evidence_timestamp)}</span>
+      ) : layout ? (
+        <div
+          ref={ref as RefObject<HTMLDivElement>}
+          role="list"
+          className="result-grid saved-grid is-rows"
+          style={{ "--row-h": `${frame?.rowHeight}px` } as CSSProperties}
+          aria-label="Saved scenes"
+        >
+          {layout.sizes.map((rowSize, row) => {
+            const first = starts[row];
+            const short = layout.lastIsShort && row === layout.sizes.length - 1;
+            return (
+              <div key={bookmarks[first].bookmark_id} role="presentation" className={`result-row${short ? " is-short" : ""}`}>
+                {bookmarks.slice(first, first + rowSize).map((bookmark, offset) => (
+                  <div role="listitem" className="result-grid-item" key={bookmark.bookmark_id} style={tileStyle(scenes[first + offset])}>
+                    {tile(bookmark, first + offset)}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onRemoveBookmark(bookmark)}
-                    disabled={pendingUnitIds.has(bookmark.source_unit_id)}
-                  >
-                    Remove
-                  </button>
-                </article>
-              </li>
-            ),
-          )}
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <ol ref={ref as RefObject<HTMLOListElement>} className="result-grid saved-grid" aria-label="Saved scenes">
+          {bookmarks.map((bookmark, index) => (
+            <li className="result-grid-item" key={bookmark.bookmark_id} style={tileStyle(scenes[index])}>
+              {tile(bookmark, index)}
+            </li>
+          ))}
         </ol>
       )}
     </section>

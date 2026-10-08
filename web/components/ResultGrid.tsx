@@ -1,15 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useState, type CSSProperties, type RefObject } from "react";
 import ShotCard from "./ShotCard";
-import { useFrameAspects } from "@/hooks/useFrameAspects";
-import { cssAspect, layoutRows, rowHeightFor, visibleTileCount, type RowSize } from "@/lib/justifiedRows";
+import { ROW_GAP, rowStarts, useJustifiedRows } from "@/hooks/useJustifiedRows";
+import { visibleTileCount, type RowSize } from "@/lib/justifiedRows";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 
 const MIN_VISIBLE_ROWS = 3;
 const ROWS_PER_REVEAL = 2;
-const ROW_GAP = 2;
-const VIEWPORT_BOTTOM_GUTTER = 24;
 const UNMEASURED_COUNT = 12;
 const EMPTY_UNIT_IDS: ReadonlySet<string> = new Set();
 
@@ -33,12 +31,6 @@ interface ResultGridProps {
   size?: RowSize;
 }
 
-interface GridFrame {
-  width: number;
-  rowHeight: number;
-  /** Space below the grid's top edge in the viewport, for the first reveal. */
-  room: number;
-}
 
 export default function ResultGrid({
   results,
@@ -58,9 +50,7 @@ export default function ResultGrid({
   showDetails,
   size = "large",
 }: ResultGridProps) {
-  const gridRef = useRef<HTMLElement>(null);
-  const { tileStyle, learnAspect, aspectOf } = useFrameAspects();
-  const [frame, setFrame] = useState<GridFrame | null>(null);
+  const { ref: gridRef, frame, layout, tileStyle, learnAspect } = useJustifiedRows(results, size);
   // How many scenes the user has seen; a resize never hides them again.
   const [visibleItemFloor, setVisibleItemFloor] = useState(0);
   const hasResults = results.length > 0;
@@ -69,39 +59,6 @@ export default function ResultGrid({
     setVisibleItemFloor(0);
   }, [streamKey]);
 
-  useLayoutEffect(() => {
-    const grid = gridRef.current;
-    if (!grid || !hasResults) return;
-
-    const measure = () => {
-      const bounds = grid.getBoundingClientRect();
-      // A temporarily hidden recipe grid keeps its reveal state while a facet
-      // reference search is visible. Do not lay rows out at zero width.
-      if (bounds.width === 0) return;
-      const style = window.getComputedStyle(grid);
-      const next: GridFrame = {
-        width: bounds.width - (Number.parseFloat(style.paddingLeft) || 0) - (Number.parseFloat(style.paddingRight) || 0),
-        rowHeight: rowHeightFor(window.innerWidth, size),
-        room: window.innerHeight - bounds.top - VIEWPORT_BOTTOM_GUTTER,
-      };
-      setFrame((current) =>
-        current && current.width === next.width && current.rowHeight === next.rowHeight ? current : next);
-    };
-
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(grid);
-    window.addEventListener("resize", measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-    // Re-attach once rows replace the unmeasured list element.
-  }, [hasResults, size, frame !== null]);
-
-  const layout = frame
-    ? layoutRows(results.map((shot) => cssAspect(aspectOf(shot))), frame.width, frame.rowHeight, ROW_GAP)
-    : null;
   let minRows = MIN_VISIBLE_ROWS;
   if (layout && frame) {
     let filled = 0;
@@ -126,6 +83,7 @@ export default function ResultGrid({
   const movieCount = new Set(visibleResults.map((result) => result.film_id)).size;
   const sceneLabel = visibleResults.length === 1 ? "scene" : "scenes";
   const movieLabel = movieCount === 1 ? "movie" : "movies";
+  const starts = layout ? rowStarts(layout.sizes) : [];
   const listLabel = `${visibleResults.length} of ${results.length} ${order === "chronological" ? "scenes in source order" : "ranked search results"} shown`;
   const card = (shot: SearchResult, index: number) => (
     <ShotCard
@@ -169,7 +127,7 @@ export default function ResultGrid({
           aria-label={listLabel}
         >
           {layout.sizes.slice(0, shown.rows).map((rowSize, row) => {
-            const first = layout.sizes.slice(0, row).reduce((sum, size) => sum + size, 0);
+            const first = starts[row];
             const short = shown.atEnd && layout.lastIsShort && row === layout.sizes.length - 1;
             return (
               <div key={visibleResults[first]?.unit_id ?? row} role="presentation" className={`result-row${short ? " is-short" : ""}`}>
