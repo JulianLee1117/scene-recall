@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { getMovieMentionRange, getMovieSuggestions, type MovieSuggestion } from "@/lib/movieSuggestions";
 import { acceptMovieMention, movieCompletionText, removeMovieMention, validMovieMentions, type MovieMention } from "@/lib/movieMentions";
 import type { LibraryFilm } from "@/types/api";
@@ -16,14 +16,7 @@ interface Props {
   onChange: (value: string, caret?: number, composing?: boolean) => void;
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
   onMovieSelect: (suggestion: MovieSuggestion) => void;
-  /** Example searches the empty bar shows in its placeholder, once, while it has focus. */
-  hints?: readonly string[];
 }
-
-/** How long the placeholder, then each example, holds; then the closing fade back. */
-const HINT_FIRST_MS = 2600;
-const HINT_MS = 2200;
-const HINT_SETTLE_MS = 600;
 
 /** Native text editing, with a visual mention layer and a floating catalog picker. */
 export default function MovieSearchInput(props: Props) {
@@ -42,14 +35,6 @@ export default function MovieSearchInput(props: Props) {
   const [completionCancelled, setCompletionCancelled] = useState(false);
   const [choice, setChoice] = useState<{ key: string; filmId: string } | null>(null);
   const [position, setPosition] = useState<{ left: number; top: number; width: number } | null>(null);
-  // Examples crossfade through the placeholder once while the empty bar has
-  // focus, starting and ending on the placeholder itself (step 0 and the last
-  // step). Typing or leaving the bar stops them; reduced motion keeps it still.
-  const [hintStep, setHintStep] = useState(-1);
-  const hintsDone = useRef(false);
-  const hintCount = props.hints?.length ?? 0;
-  const canHint = focused && !composing && !value && hintCount > 0;
-  const hintText = (step: number) => (step === 0 || step > hintCount ? props.placeholder : props.hints![step - 1]);
   const caret = selection.value === value ? selection.start : value.length;
   const collapsed = selection.value !== value || selection.start === selection.end;
   const key = `${value}\u0000${caret}`;
@@ -63,35 +48,6 @@ export default function MovieSearchInput(props: Props) {
   const activeIndex = chosenIndex >= 0 ? chosenIndex : mention && choice?.key !== key && suggestions.length ? 0 : -1;
   const active = open && activeIndex >= 0 ? suggestions[activeIndex] : undefined;
   const optionId = (filmId: string) => `${id}-${filmId}`;
-
-  // Autofocus can land before hydration, when no focus event reaches React.
-  useLayoutEffect(() => {
-    const input = inputRef.current;
-    if (input && input.ownerDocument?.activeElement === input) setFocused(true);
-  }, [inputRef]);
-
-  useEffect(() => {
-    if (!canHint) {
-      if (hintStep >= 0) {
-        hintsDone.current = true;
-        setHintStep(-1);
-      }
-      return;
-    }
-    if (hintsDone.current) return;
-    if (hintStep < 0) {
-      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) hintsDone.current = true;
-      else setHintStep(0);
-      return;
-    }
-    const last = hintStep > hintCount;
-    const timer = window.setTimeout(() => {
-      if (!last) return setHintStep(hintStep + 1);
-      hintsDone.current = true;
-      setHintStep(-1);
-    }, hintStep === 0 ? HINT_FIRST_MS : last ? HINT_SETTLE_MS : HINT_MS);
-    return () => window.clearTimeout(timer);
-  }, [canHint, hintStep, hintCount]);
 
   function syncSelection(input: HTMLInputElement) {
     const next = { value: input.value, start: input.selectionStart ?? input.value.length, end: input.selectionEnd ?? input.value.length };
@@ -241,16 +197,12 @@ export default function MovieSearchInput(props: Props) {
   painted.push(value.slice(paintedEnd));
 
   return (
-    <div className={`movie-search-input${composing ? " is-composing" : ""}${hintStep >= 0 ? " is-hinting" : ""}`} ref={wrapperRef}>
+    <div className={`movie-search-input${composing ? " is-composing" : ""}`} ref={wrapperRef}>
       <div className="movie-input-paint" aria-hidden="true">
         <span className="movie-caret-measure" ref={measureRef}>{value.slice(0, caret)}</span>
         <span className="movie-input-text" style={{ transform: `translateX(${-scrollLeft}px)` }}>
           {painted}
         </span>
-        {hintStep > 0 && <span key={`out-${hintStep}`} className="movie-input-hint is-leaving">{hintText(hintStep - 1)}</span>}
-        {hintStep >= 0 && (
-          <span key={`in-${hintStep}`} className={`movie-input-hint${hintStep === 0 ? " is-still" : ""}`}>{hintText(hintStep)}</span>
-        )}
       </div>
       <input
         ref={inputRef} className="search-main-input" type="text" value={value} maxLength={500}

@@ -20,7 +20,7 @@ const films = [film("sunrise", "Before Sunrise (1995)"), film("rain", "Before Ra
 
 // This harness checks state and event contracts. Native layout/selection paint
 // and pointer focus ordering still require the browser smoke check.
-function setup(initial = "", overrides = {}, geometry = null, globals = {}) {
+function setup(initial = "", overrides = {}, geometry = null) {
   const hooks = [], accepted = [], forwarded = [];
   const observers = new Set();
   let cursor = 0, output, scheduled = false, disposed = false, effects = [];
@@ -60,7 +60,6 @@ function setup(initial = "", overrides = {}, geometry = null, globals = {}) {
       const i = cursor++; if (!hooks[i] || !same(deps, hooks[i].deps)) hooks[i] = { value: factory(), deps };
       return hooks[i].value;
     },
-    useEffect(effect, deps) { return react.useLayoutEffect(effect, deps); },
     useLayoutEffect(effect, deps) {
       const i = cursor++;
       if (!hooks[i] || !same(deps, hooks[i].deps)) {
@@ -74,7 +73,7 @@ function setup(initial = "", overrides = {}, geometry = null, globals = {}) {
     if (geometry && props.className === "movie-caret-measure") props.ref.current = { offsetWidth: props.children.length };
     return { type, props };
   };
-  vm.runInNewContext(compiled, { ...globals, exports, ResizeObserver: class {
+  vm.runInNewContext(compiled, { exports, ResizeObserver: class {
     constructor(callback) { this.callback = callback; }
     observe() { observers.add(this.callback); }
     disconnect() { observers.delete(this.callback); }
@@ -358,78 +357,5 @@ test("continuing after acceptance keeps the mention and duplicate explicit menti
     await app.key("Enter");
     assert.equal(app.props.mentions.length, 2);
     assert.deepEqual(Array.from(mentionHelpers.compileMovieDraft({ text: app.props.value, mentions: app.props.mentions }).filmIds), ["sunrise"]);
-  } finally { app.dispose(); }
-});
-
-function clock(reduceMotion = false) {
-  const timers = new Map();
-  let next = 0;
-  return {
-    window: {
-      setTimeout(callback) { const id = ++next; timers.set(id, callback); return id; },
-      clearTimeout(id) { timers.delete(id); },
-      matchMedia: () => ({ matches: reduceMotion }),
-    },
-    async tick(app) { const pending = [...timers.values()]; timers.clear(); pending.forEach((callback) => callback()); await app.flush(); },
-  };
-}
-const hints = ["neon in the rain", "dancing alone"];
-const showing = (app) => nodes(app.find((node) => node.props?.className === "movie-input-paint"))
-  .filter((node) => node.props?.className?.startsWith("movie-input-hint") && !node.props.className.includes("is-leaving"))
-  .map((node) => node.props.children);
-
-test("the focused empty bar plays its examples through the placeholder once, starting and ending on the placeholder", async () => {
-  const time = clock();
-  const app = setup("", { hints }, null, { window: time.window });
-  try {
-    assert.deepEqual(showing(app), [], "nothing plays before the bar has focus");
-    await app.focus();
-    assert.deepEqual(showing(app), ["Describe a scene, or @ a movie"]);
-    await time.tick(app);
-    assert.deepEqual(showing(app), ["neon in the rain"]);
-    await time.tick(app);
-    assert.deepEqual(showing(app), ["dancing alone"]);
-    await time.tick(app);
-    assert.deepEqual(showing(app), ["Describe a scene, or @ a movie"]);
-    await time.tick(app);
-    assert.deepEqual(showing(app), [], "the native placeholder takes over again");
-    await time.tick(app);
-    assert.deepEqual(showing(app), [], "it plays once");
-  } finally { app.dispose(); }
-});
-
-test("typing stops the examples for good, and reduced motion keeps the placeholder still", async () => {
-  const time = clock();
-  const app = setup("", { hints }, null, { window: time.window });
-  try {
-    await app.focus();
-    await time.tick(app);
-    assert.deepEqual(showing(app), ["neon in the rain"]);
-    await app.type("r");
-    assert.deepEqual(showing(app), []);
-    await app.type("");
-    await time.tick(app);
-    assert.deepEqual(showing(app), []);
-  } finally { app.dispose(); }
-
-  const still = clock(true);
-  const calm = setup("", { hints }, null, { window: still.window });
-  try {
-    await calm.focus();
-    await still.tick(calm);
-    assert.deepEqual(showing(calm), []);
-  } finally { calm.dispose(); }
-});
-
-test("a bar the browser focused before hydration still plays its examples", async () => {
-  const time = clock();
-  const native = { value: "", selectionStart: 0, selectionEnd: 0, scrollLeft: 0, clientWidth: 0, scrollWidth: 0, focus() {}, setSelectionRange() {} };
-  native.ownerDocument = { activeElement: native };
-  const app = setup("", { hints, inputRef: { current: native } }, null, { window: time.window });
-  try {
-    await app.flush();
-    assert.deepEqual(showing(app), ["Describe a scene, or @ a movie"], "no focus event needed");
-    await time.tick(app);
-    assert.deepEqual(showing(app), ["neon in the rain"]);
   } finally { app.dispose(); }
 });

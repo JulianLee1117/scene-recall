@@ -729,6 +729,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   caret-color: #e9bb78;
   font: inherit;
   line-height: 34px;
+  text-overflow: ellipsis;
   transition:
     padding 0.3s ease,
     border-color 0.15s ease,
@@ -775,13 +776,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .movie-keyword { background: transparent; color: #f0c383; text-shadow: 0 0 16px #e8ae5745; text-decoration: underline; text-decoration-color: #d6a05c60; text-underline-offset: 5px; text-decoration-thickness: 1px; }
 .movie-keyword-confirmed { border-radius: 3px; background: #bc884f24; box-shadow: 0 0 0 2px #bc884f10; text-decoration-color: #d6a05c; }
 .movie-caret-measure { position: absolute; left: 0; top: 0; width: max-content; white-space: pre; visibility: hidden; pointer-events: none; }
-/* Examples crossfade through the empty bar's placeholder, matching its text exactly. */
-.movie-search-input.is-hinting .search-main-input::placeholder { color: transparent; }
-.movie-input-hint { position: absolute; left: 0; top: 0; white-space: pre; color: #85817a; animation: movie-hint-in .55s ease both; }
-.movie-input-hint.is-still { animation: none; }
-.movie-input-hint.is-leaving { animation: movie-hint-out .4s ease both; }
-@keyframes movie-hint-in { from { opacity: 0; filter: blur(3px); } }
-@keyframes movie-hint-out { to { opacity: 0; filter: blur(3px); } }
 .search-main-input::selection { color: #fff; background: #725635; }
 .movie-autocomplete { position: absolute; z-index: 80; box-sizing: border-box; width: min(304px, calc(100vw - 32px)); padding: 5px; border: 1px solid #564532; border-radius: 11px; background: linear-gradient(155deg, #26221c, #191817 65%); box-shadow: 0 14px 40px #0009, 0 2px 8px #0006, inset 0 1px 0 #f7d7a80b; font-size: .8rem; line-height: 1.4; }
 .movie-autocomplete-heading { display: flex; align-items: center; gap: 7px; padding: 7px 8px 9px; color: #dbc6a8; font-size: .7rem; }
@@ -801,7 +795,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 @media (forced-colors: active) {
   .search-main-input { color: CanvasText; }
   .movie-input-paint { visibility: hidden; }
-  .movie-search-input.is-hinting .search-main-input::placeholder { color: GrayText; }
   .movie-autocomplete { border-color: ButtonText; background: Canvas; }
   .movie-autocomplete-option[aria-selected="true"] { outline: 1px solid Highlight; }
 }

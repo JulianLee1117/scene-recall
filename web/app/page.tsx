@@ -22,6 +22,7 @@ import { useBookmarks } from "@/hooks/useBookmarks";
 import { useFacetSourceSearch } from "@/hooks/useFacetSourceSearch";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useSearchFilms } from "@/hooks/useSearchFilms";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useShotFacets } from "@/hooks/useShotFacets";
 import { useGlide } from "@/hooks/useGlide";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
@@ -115,17 +116,6 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "saved", label: "Saved" },
   { id: "library", label: "Films" },
   { id: "info", label: "Info" },
-];
-
-// Each example shows a different way in: a spoken line, light and color, a
-// mood, a kind of shot, an action. All were checked against the library. The
-// empty bar plays them through its placeholder once.
-const SEARCH_EXAMPLES = [
-  "“you talkin’ to me?”",
-  "neon in the rain",
-  "quietly unsettling",
-  "symmetrical hallway",
-  "dancing alone",
 ];
 
 function focusFacetBrowse(facet: RecipeMatchFacet) {
@@ -871,18 +861,9 @@ export default function Home() {
   const heroRef = useRef<HTMLDivElement>(null);
   const searchFormRef = useRef<HTMLFormElement>(null);
   useGlide(heroRef, searchFormRef, isHome);
+  // Phones get a placeholder that fits their narrower bar.
+  const compactBar = useMediaQuery("(max-width: 600px)");
   const clauseCount = recipeClauseCount(query, matchDrafts, mainImage);
-  const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
-  // Before the first search, with nothing else in play, the bar shows examples.
-  const offerExamples = Boolean(
-    isHome &&
-    selectedFilmIds.length === 0 &&
-    !hasFacetDrafts &&
-    !mainImage &&
-    !sourceReferenceFacet &&
-    speech.status === "idle" &&
-    !speech.error,
-  );
   const disabledUseFacets = useMemo(
     () =>
       clauseCount < MAX_RECIPE_CLAUSES
@@ -910,7 +891,7 @@ export default function Home() {
   const activeError = error;
   const hasNoResults = results.length === 0 && hasCompletedSearch;
   const filterScope = narrowScope(selectedFilmIds, filterable, filmFilters);
-  const orderChip = !offerExamples && preset !== DEFAULT_VIEW.order
+  const orderChip = !isHome && preset !== DEFAULT_VIEW.order
     ? ORDER_OPTIONS.find((option) => option.value === preset)?.label
     : undefined;
   const filtersExcludeAll = (clauseCount > 0 || selectedFilmIds.length > 0) && filterScope.excludesAll;
@@ -1128,8 +1109,10 @@ export default function Home() {
                   onChange={handleQueryChange}
                   onKeyDown={handleKeyDown}
                   onMovieSelect={handleMovieSuggestion}
-                  hints={offerExamples ? SEARCH_EXAMPLES : undefined}
-                  placeholder={selectedFilmIds.length ? "Describe a scene, or @ another movie…" : "Describe a scene, or @ a movie…"}
+                  // The placeholder names the ways in: a description, a spoken line, a movie.
+                  placeholder={compactBar
+                    ? "Describe a scene…"
+                    : `Describe a scene, quote a line, or @ ${selectedFilmIds.length ? "another" : "a"} movie…`}
                   describedBy={voiceStatus ? voiceStatusId : undefined}
                 />
                 </div>
@@ -1314,7 +1297,7 @@ export default function Home() {
                 controls={
                   // Home keeps Refine and Filter alone; the first search adds
                   // the View menu as the bar glides up.
-                  offerExamples ? null : (
+                  isHome ? null : (
                     <ViewMenu open={viewOpen} onOpenChange={setViewOpen} view={view} onChange={handleViewChange} />
                   )
                 }
