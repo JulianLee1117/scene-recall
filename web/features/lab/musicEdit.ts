@@ -11,7 +11,6 @@ import type {
   MusicRecipeFacet,
   MusicSearchCapabilities,
   MusicMatchEvidence,
-  MusicFeedback,
 } from "@/types/lab";
 
 /** Explicit shot work keeps these cuts authoritative for later generation. */
@@ -45,22 +44,6 @@ export function searchInputProblem(
     }
   }
   return null;
-}
-
-export function setSlotFeedback(
-  document: LabDocument,
-  id: string,
-  feedback: MusicFeedback | null,
-): LabDocument {
-  const plan = planOf(document);
-  const slot = plan?.slots.find((item) => item.id === id);
-  if (!plan || !slot || (slot.feedback ?? null) === feedback ||
-    document.clips.some((clip) => clip.id === slot.clip_id && clip.locked)) return document;
-  return {
-    ...document,
-    music_timeline: { ...plan, provisional_timing: null, slots: plan.slots.map((item) =>
-      item.id === id ? { ...item, feedback, needs_direction: true } : item) },
-  };
 }
 
 export function changeMusicPassage(
@@ -226,60 +209,6 @@ function sectionFor(
     }
   });
   return selected;
-}
-
-export function resetSlotDirection(
-  document: LabDocument,
-  id: string,
-): LabDocument {
-  const plan = planOf(document);
-  const slot = plan?.slots.find((item) => item.id === id);
-  if (!plan || !slot) return document;
-  type Moment = MusicDirection & Pick<MusicSection, "start" | "end">;
-  const raw = document.analysis?.edit_beats;
-  const moments = Array.isArray(raw)
-    ? (raw as Moment[]).filter(
-        (moment) =>
-          typeof moment?.query === "string" &&
-          !!moment.query.trim() &&
-          Number.isFinite(moment.start) &&
-          Number.isFinite(moment.end) &&
-          moment.end > moment.start,
-      )
-    : [];
-  const moment = moments[sectionFor(slot.start, slot.end, moments)];
-  const inherited = moment
-    ? {
-        query: moment.query,
-        search_facet: moment.search_facet ?? "all",
-        purpose: moment.purpose ?? "",
-        music_cue: moment.music_cue ?? "",
-        timing_note: moment.timing_note ?? "",
-      }
-    : directionOf(document, { ...slot, direction: null });
-  const direction = inherited.query.trim() ? inherited : null;
-  return {
-    ...document,
-    music_timeline: {
-      ...plan,
-      provisional_timing: null,
-      slots: plan.slots.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              direction,
-              direction_source: direction ? "ai" : null,
-              needs_direction: false,
-              alternatives: [],
-              reason: null,
-              search_error: null,
-              resolved_search: null,
-              search_evidence: null,
-            }
-          : item,
-      ),
-    },
-  };
 }
 
 export function planOf(document: LabDocument): MusicPlan | null {

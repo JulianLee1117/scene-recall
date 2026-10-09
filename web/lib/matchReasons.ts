@@ -1,5 +1,5 @@
 import { formatTime } from "./format";
-import type { SearchChannelsDebug, SearchMatch, SearchResult } from "@/types/api";
+import type { SearchMatch, SearchResult } from "@/types/api";
 
 /** Plain names for the text views a result can match. Product copy only. */
 export const TEXT_VIEW_LABELS: Record<string, string> = {
@@ -11,16 +11,6 @@ export const TEXT_VIEW_LABELS: Record<string, string> = {
   story: "Story",
   scene: "Scene",
   legacy_combined_text: "Text",
-};
-
-/** What each search clause is called when explaining a match. */
-const CLAUSE_LABELS: Record<string, string> = {
-  all: "Your description",
-  scene: "Scene",
-  words: "Words",
-  look: "Look",
-  composition: "Framing",
-  mood: "Mood",
 };
 
 const VALUE_WORDS: Record<string, string> = {

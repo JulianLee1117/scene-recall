@@ -87,13 +87,11 @@ test("manual starter-cut movement, splitting and joining fix the resulting timin
   }
 });
 
-test("manual scene placement, written direction and feedback claim starter timing", () => {
+test("manual scene placement and written direction claim starter timing", () => {
   const source = fixture().clips[0];
   for (const update of [
     (doc) => helpers.placeClip(doc, "shot-a", source),
     (doc) => helpers.editSlotDirection(doc, "shot-a", { query: "The lights go out" }),
-    (doc) => helpers.setSlotFeedback(doc, "shot-a", "wrong_energy"),
-    (doc) => helpers.resetSlotDirection(doc, "shot-a"),
     (doc) => helpers.keepCutPlan(doc),
   ]) {
     const original = starter();
@@ -109,7 +107,6 @@ test("no-op edits preserve starter eligibility and old timelines never acquire i
   for (const same of [
     helpers.moveCut(document, 1, 24, {}),
     helpers.editSlotDirection(document, "shot-a", { query: "" }),
-    helpers.setSlotFeedback(document, "shot-a", null),
     helpers.clearSlot(document, "shot-a"),
   ]) assert.equal(same, document);
   const old = fixture();

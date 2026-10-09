@@ -199,7 +199,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 .film-filename,
 .film-meta,
-.film-progress-copy,
 .film-row-error {
   margin: 0;
   overflow: hidden;
@@ -220,35 +219,10 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   color: #535353;
 }
 
-.film-progress-copy {
-  max-width: 560px;
-  margin-top: 4px;
-  color: #937747;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-}
-
 .film-row-error {
   max-width: 600px;
   margin-top: 4px;
   color: #bd675f;
-}
-
-.film-progress-track {
-  width: 62px;
-  height: 3px;
-  flex: 0 0 auto;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #24201a;
-}
-
-.film-progress-track > span {
-  display: block;
-  width: 36%;
-  height: 100%;
-  border-radius: inherit;
-  background: #c18c42;
-  animation: film-progress-slide 1.6s ease-in-out infinite;
 }
 
 .film-status {
@@ -634,19 +608,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   gap: 8px;
 }
 
-@keyframes film-progress-slide {
-  from {
-    transform: translateX(-110%);
-  }
-
-  to {
-    transform: translateX(380%);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .films-button,
-  .film-progress-track > span {
+  .films-button {
     animation: none;
     transition: none;
   }
@@ -668,10 +631,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
   .film-row-copy {
     flex-basis: calc(100% - 100px);
-  }
-
-  .film-progress-track {
-    display: none;
   }
 
   .film-status {
@@ -936,10 +895,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clues-tools > * { animation: clues-tools-in .24s ease-out; }
 @keyframes clues-tools-in { from { opacity: 0; } }
 .clues-tools .search-controls { margin-left: 0; justify-content: center; }
-.clues-tools .movie-scope-trigger { max-width: min(180px, 26vw); border-color: transparent; background: transparent; }
-.clues-tools .movie-scope-popover { z-index: 40; }
-.clues-tools .movie-scope-options { max-height: min(300px, 45dvh); }
-.search-hero.is-home .movie-scope-options { max-height: max(120px, min(340px, calc(100dvh - var(--home-top) - 400px))); }
 .clue-editor-close { display: grid; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #8f8980; cursor: pointer; font-size: 1rem; }
 .clue-editor-close:hover { color: #fff; background: #ffffff0c; }
 .clues-framing-note { margin: 8px auto 0; max-width: 620px; color: #857d70; font-size: .7rem; line-height: 1.6; text-align: center; }
@@ -1004,8 +959,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   .clues-toolbar { column-gap: 8px; }
   /* The right group may wrap to its own line here; a divider would dangle. */
   .clues-tools { padding-left: 0; border-left: 0; }
-  .clues-tools .movie-scope { position: static; }
-  .clues-tools .movie-scope-popover { left: 50%; right: auto; transform: translateX(-50%); }
   .clue-editor { padding: 12px 3px; }
   .clue-reference-results .result-grid { --row-h: 76px; }
   .clue-reference-results { max-height: 42dvh; }

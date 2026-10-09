@@ -34,10 +34,8 @@ test("a crop of the content fills the box and letterbox bars in the video frame 
   close(place.top, -(0.128 + 0.25 * 0.744) / (0.5 * 0.744) * 100, "top");
 });
 
-test("vertical crops take the full height of a widescreen picture", () => {
-  const crop = lib.baseCrop(2.39, "vertical");
-  close(crop[2], (9 / 16) / 2.39, "width");
-  close(crop[3], 1, "height");
+test("a crop fits a format only in that format's shape", () => {
+  const crop = [0.38, 0, (9 / 16) / 2.39, 1];                // full height of a widescreen picture
   assert.equal(lib.cropFits(crop, 2.39, "vertical"), true);
   assert.equal(lib.cropFits(crop, 2.39, "landscape"), false);
   assert.equal(lib.cropFits([0.1, 0.1, 0.6, 0.6], 2.39, "landscape"), true);    // a uniform zoom keeps the picture's shape

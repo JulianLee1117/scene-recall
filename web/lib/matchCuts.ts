@@ -58,20 +58,6 @@ export interface MatchSettings {
   includeSameFilm: boolean;
 }
 
-export interface MatchSearchBody {
-  unit_id: string;
-  time: number;
-  direction?: "next" | "previous";
-  focus: MatchFocus;
-  output: OutputFormat;
-  reframe: boolean;
-  outgoing_crop?: Crop | null;
-  include_same_film: boolean;
-  exclude_unit_ids: string[];
-  min_seconds?: number;
-  limit?: number;
-}
-
 /** One clip of a match-cut chain: a source window seen through a crop. */
 export interface ChainLink {
   unit_id: string;
@@ -138,19 +124,11 @@ export function settingsFrom(params: URLSearchParams): MatchSettings {
   const focus = params.get("focus") as MatchFocus | null;
   const output = params.get("output") as OutputFormat | null;
   return {
-    focus: focus && focus in FOCUS_LABELS ? focus : "auto",
-    output: output && output in OUTPUT_ASPECT ? output : "landscape",
+    focus: focus && focus in FOCUS_LABELS ? focus : DEFAULT_SETTINGS.focus,
+    output: output && output in OUTPUT_ASPECT ? output : DEFAULT_SETTINGS.output,
     reframe: params.get("reframe") === "1",
     includeSameFilm: params.get("same_film") === "1",
   };
-}
-
-/** The largest crop of the output's shape a picture offers, centred (the whole picture for landscape). */
-export function baseCrop(aspect: number, output: OutputFormat): Crop {
-  if (output === "landscape") return [0, 0, 1, 1];
-  const width = Math.min(1, OUTPUT_ASPECT[output] / aspect);
-  const height = Math.min(1, aspect / OUTPUT_ASPECT[output]);
-  return [(1 - width) / 2, (1 - height) / 2, width, height];
 }
 
 export interface Placement { left: number; top: number; width: number; height: number }
@@ -174,15 +152,6 @@ export function placement(crop: Crop | null, frameAspect: number, contentBox: Co
   const offsetX = (1 - shownWidth) / 2, offsetY = (1 - shownHeight) / 2;
   const width = shownWidth / rw, height = shownHeight / rh;
   return { left: (offsetX - rx * width) * 100, top: (offsetY - ry * height) * 100, width: width * 100, height: height * 100 };
-}
-
-/** The visible window (percent of the output box) where the crop lands; outside it is letterbox. */
-export function visibleWindow(crop: Crop | null, contentAspect: number, outputAspect: number): Placement {
-  const [, , cw, ch] = crop ?? [0, 0, 1, 1];
-  const regionAspect = contentAspect * cw / ch;
-  const width = regionAspect >= outputAspect ? 1 : regionAspect / outputAspect;
-  const height = regionAspect >= outputAspect ? outputAspect / regionAspect : 1;
-  return { left: (1 - width) / 2 * 100, top: (1 - height) / 2 * 100, width: width * 100, height: height * 100 };
 }
 
 /** Whether a crop has the output's shape (a chain keeps its crops only while the format stays the same). */

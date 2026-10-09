@@ -25,20 +25,11 @@
 .sourcePlaceholder > span:first-child { font-size: 25px; color: #9d8868; font-weight: 300; margin-bottom: 8px; }
 .sourcePlaceholder small { color: #85857f; font-size: 10px; }
 .sourcePlaceholder:hover { border-color: #8a7352; }
-.sourceTitle { display: block; font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 9px 0 7px; }
 .trim { display: flex; gap: 9px; align-items: center; font-size: 10px; color: #969691; }
 .trim label { display: flex; gap: 5px; align-items: center; min-width: 0; flex: 1; }
 .trim input { width: 100%; min-width: 0; background: #191919; border: 1px solid #343434; border-radius: 4px; color: #d4d4cf; padding: 4px; font-variant-numeric: tabular-nums; }
 .trim > span { white-space: nowrap; }
 .preview { margin-top: 23px; padding: 17px; border: 1px solid #292929; border-radius: 8px; background: #101010; }
-.previewEmpty { min-height: 245px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0b0b0b; border-radius: 5px; padding: 12px 10px; }
-.previewEmpty > section { margin: 0; padding: 18px 8px; }
-.previewEmpty > section h2 { font-size: 16px; }
-.previewEmpty > section p { max-width: 390px; font-size: 12px; }
-.previewGlyph { display: flex; gap: 13px; align-items: center; }
-.previewGlyph i { width: 50px; height: 34px; border: 1px solid #4a4234; border-radius: 3px; background: linear-gradient(135deg, #2b261f, #10100f); transform: rotate(-7deg); }
-.previewGlyph i:last-child { transform: rotate(7deg); background: linear-gradient(135deg, #171c1b, #29302a); border-color: #353e37; }
-.previewGlyph span { font-size: 22px; color: var(--accent); }
 .renderPlayer { min-width: 0; }
 .previewReceipt { margin: -3px 0 14px; font-size: 10px; color: #aaa18f; }
 .previewReceipt > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -50,8 +41,6 @@
 .previewState { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 9px; border: 1px solid #30352b; border-radius: 4px; color: #a7b494; background: #161b13; }
 .previewState[data-dirty=true] { border-color: #68512c; color: #ddbd86; background: #292114; }
 .previewState button { flex-shrink: 0; border: 0; background: transparent; padding: 2px 0; color: #dac394; font-size: 10px; text-decoration: underline; text-underline-offset: 3px; }
-.pendingVersion { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; margin-bottom: 12px; border-left: 2px solid #a18454; background: #201d15; color: #c7b187; font-size: 10px; }
-.pendingVersion button { border: 0; background: none; color: #c2a97d; padding: 2px; font-size: 10px; }
 .variantRail { border-top: 1px solid #302e25; margin-top: 17px; padding-top: 12px; }
 .variantRail > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
 .variantRail strong { color: #c8b594; font-size: 11px; font-weight: 500; }
@@ -66,8 +55,6 @@
 .variantChips button + button { border-top: 1px solid #3a3325; padding: 5px 10px; font-size: 9px; color: #c5af85; }
 .renderPlayer > video { display: block; width: 100%; max-height: 420px; aspect-ratio: 16/9; background: #050505; border-radius: 4px; }
 .playerLabel { color: #c8bba5; margin-bottom: 7px; font-size: 11px; }
-.seamRail { height: 5px; background: #292929; position: relative; margin: 8px 0; overflow: hidden; border-radius: 3px; }
-.seamRail span { height: 100%; position: absolute; background: var(--accent); }
 .playTools { display: flex; align-items: center; gap: 5px; color: #acaca7; font-size: 10px; flex-wrap: wrap; }
 .playTools button, .playTools select { background: #1d1d1b; color: #c4c4be; border: 1px solid #33332f; border-radius: 4px; padding: 4px 8px; }
 .playTools button[aria-pressed=true] { color: var(--accent); border-color: #8b7351; }
@@ -78,14 +65,9 @@
 .compareLabel { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-top: 13px; color: #a2a29b; font-size: 11px; }
 .compareLabel select { background: #191919; border: 1px solid #353532; border-radius: 4px; padding: 5px; max-width: 66%; color: #ccc; }
 .comparePlayers { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.renderWaiting { min-height: 280px; display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center; padding: 22px; gap: 10px; }
-.renderWaiting p { color: #a0a099; max-width: 440px; }
-.renderWaiting strong { font-weight: 500; font-size: 17px; }
 .failureDetails { width: 100%; max-width: 500px; text-align: left; color: #b8a48b; font-size: 11px; }
 .failureDetails summary { cursor: pointer; }
 .failureDetails pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; color: #b6aaa4; margin: 12px 0; font-size: 10px; }
-.spinner { width: 25px; height: 25px; border: 2px solid #333; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
 .settings { background: #111; border: 1px solid #2d2d2a; border-radius: 8px; padding: 17px; position: sticky; top: 14px; }
 .presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .presets button { border: 1px solid #30302d; border-radius: 5px; padding: 5px 5px 8px; background: #161615; color: #aaa9a3; min-width: 0; }
@@ -147,17 +129,10 @@
 .historyEmpty, .loading { color: #9d9a91; padding: 25px 0; font-size: 12px; }
 .ai { padding: 0 0 15px; }
 .ai > p { color: #a29f96; max-width: 700px; font-size: 12px; }
-.aiGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 20px; }
 .endpoints { display: flex; gap: 10px; margin-bottom: 17px; }
 .endpoints a { flex: 1; min-width: 0; color: #ceb58e; text-decoration: none; font-size: 10px; }
 .endpoints img { display: block; width: 100%; height: 130px; object-fit: contain; background: #050505; border: 1px solid #39332a; border-radius: 4px; margin-bottom: 5px; }
 .ai .selectLabel input { width: 70%; }
-.promptLabel { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; font-size: 11px; color: #c5c0b4; }
-.promptLabel textarea { resize: vertical; background: #151513; color: #c2bfb4; border: 1px solid #38352c; border-radius: 5px; padding: 10px; width: 100%; }
-.providerNote { padding: 16px; background: #161613; border: 1px solid #323129; border-radius: 6px; margin-bottom: 20px; font-size: 12px; color: #a29e90; }
-.providerNote strong { color: #d0c5ad; font-weight: 500; }
-.providerNote p { margin: 8px 0; }
-.providerNote a { color: #cbb18a; font-size: 11px; }
 .aiEmpty { border: 1px dashed #3b3529; border-radius: 5px; padding: 24px; color: #a99d85; margin-bottom: 20px; }
 .returnedVideo { margin-top: 15px; }
 .returnedVideo video { width: 100%; max-height: 350px; background: #050505; border-radius: 5px; }
@@ -177,20 +152,11 @@
 .sourceTransport small { margin-left: auto; font-size: 9px; }
 .sourceTransport .sourceCutJump { border-color: transparent; background: transparent; padding-left: 2px; padding-right: 2px; color: #a7987b; font-size: 9px; }
 .sourceTransport > span { margin-left: auto; }
-.sourceScrub { margin: 9px 0 10px; }
-.sourceScrub input { display: block; width: 100%; height: 4px; accent-color: #b59761; cursor: pointer; }
-.sourceScrub > div { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-top: 5px; color: #7f7a6f; font-size: 8px; font-variant-numeric: tabular-nums; }
 .cutNudge { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; margin: 8px 0 0; color: #8f897c; font-size: 9px; }
 .cutNudge > span { margin-right: auto; }
 .cutNudge button { border: 0; border-radius: 3px; background: #1d1c16; padding: 4px 5px; color: #b2a183; font-size: 9px; }
 .cutNudge button:last-child { background: transparent; color: #a99b81; padding-right: 0; }
-.framingControls { border-top: 1px solid #292924; margin-top: 12px; padding-top: 9px; }
-.framingControls summary, .beatControls summary, .advancedControls summary, .audioAudition summary, .variantNotes summary, .saveRecipe summary, .savedRecipes summary { cursor: pointer; color: #c8b99d; font-size: 11px; }
-.framingControls > .segmented { margin-top: 12px; font-size: 10px; }
-.anchorAndZoom { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 15px; margin: 14px 0; }
-.anchorGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
-.anchorGrid button { aspect-ratio: 1; border: 1px solid #33342b; border-radius: 2px; background: #1c1c18; color: #655e50; padding: 0; font-size: 7px; }
-.anchorGrid button[aria-pressed=true] { color: #e3c28f; border-color: #b1976d; background: #433723; }
+.beatControls summary, .advancedControls summary, .audioAudition summary, .variantNotes summary, .saveRecipe summary, .savedRecipes summary { cursor: pointer; color: #c8b99d; font-size: 11px; }
 .framingAxes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
 .framingAxes .slider { font-size: 10px; gap: 6px; }
 .recipeGroups { display: flex; gap: 3px; border-bottom: 1px solid #303029; margin: 0 0 13px; }
@@ -225,12 +191,6 @@
 .presetArt[data-effect="afterimage-flash"] i { opacity: .55; filter: blur(1px); box-shadow: 10px 0 #d1be8e77, 20px 0 #a7b39a44; }
 .presetArt[data-effect="highlight-bloom"] i, .presetArt[data-effect="film-burn"] i, .presetArt[data-effect="lens-sweep"] i, .presetArt[data-effect="shutter-flash"] i { display: none; }
 .timingControls { background: #191813; border: 1px solid #3a3325; border-radius: 6px; padding: 12px; }
-.frameDuration { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: #d3c8b4; }
-.frameDuration > div { display: flex; align-items: center; gap: 5px; margin-left: auto; }
-.frameDuration input { width: 39px; padding: 4px 0; text-align: center; border: 0; border-bottom: 1px solid #766249; color: #f3d7a9; background: transparent; font-variant-numeric: tabular-nums; appearance: textfield; }
-.frameDuration input::-webkit-inner-spin-button { appearance: none; }
-.frameDuration button { width: 22px; height: 24px; padding: 0; border: 1px solid #4a3e2e; border-radius: 3px; background: #272217; color: #c7ae86; }
-.frameDuration > small { width: 100%; color: #999082; font-size: 10px; }
 .quickFrames { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-top: 11px; }
 .quickFrames button { border: 1px solid #3b3427; border-radius: 3px; padding: 4px 0; color: #b4a486; background: #211d16; font-size: 10px; }
 .quickFrames button[aria-pressed=true] { border-color: #ac8b54; color: #f0cc90; background: #3b2f1b; }
@@ -290,10 +250,9 @@
 .savedRecipes strong, .savedRecipes small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; font-size: 11px; }
 .savedRecipes small { color: #8d8576; font-size: 10px; margin-top: 3px; }
 @media (max-width: 1000px) { .workspace { padding: 16px 22px 50px; } .workbench { gap: 17px; grid-template-columns: minmax(0, 1fr) 280px; } .settings { padding: 13px; } .source { padding: 9px; } .trim { flex-wrap: wrap; } .trim > span { display: none; } .comparePlayers { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .workspace { padding: 12px 16px 40px; } .workbench { display: flex; flex-direction: column; } .stage, .settings { width: 100%; } .settings { position: static; } .presets { grid-template-columns: repeat(4, minmax(0, 1fr)); } .history, .aiGrid { grid-template-columns: 1fr; } .intro { margin: 22px 0; } .badge { display: none; } .preview { padding: 12px; } .sourcePlaceholder { min-height: 130px; } .sourcePlaceholder small { display: none; } .sourcePlaceholder > span { font-size: 10px; } .sourceHeading { gap: 5px; } .sourceHeading button { font-size: 9px; } .sectionTitle { margin-top: 4px; } .renderActions { gap: 10px; } .historySource { max-width: 230px; } }
-@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-@media (max-width: 760px) { .presets { grid-template-columns: repeat(3, minmax(0, 1fr)); } .framingAxes { grid-template-columns: 1fr; } .sourceTransport small { display: none; } .savedRecipes > div { grid-template-columns: 1fr; } .framingControls .segmented { flex-direction: column; } .framingStage { min-height: 90px; } .anchorAndZoom { grid-template-columns: 44px minmax(0, 1fr); gap: 8px; } .anchorAndZoom .slider { font-size: 10px; gap: 5px; } .sourceTransport { gap: 5px; } .sourceTransport button { padding: 4px 6px; } }
-@media (max-width: 500px) { .previewState { align-items: flex-start; } .variantRail > div:first-child { display: block; } .variantRail > div:first-child small { display: block; margin-top: 3px; } .sourceTransport > span { width: 100%; margin-left: 0; } .source .trim { flex-direction: column; align-items: stretch; gap: 6px; } .source .trim label { flex: auto; } .cutNudge > span { width: 100%; } .sourceScrub > div > span:nth-child(2) { display: none; } }
+@media (max-width: 760px) { .workspace { padding: 12px 16px 40px; } .workbench { display: flex; flex-direction: column; } .stage, .settings { width: 100%; } .settings { position: static; } .presets { grid-template-columns: repeat(4, minmax(0, 1fr)); } .history { grid-template-columns: 1fr; } .intro { margin: 22px 0; } .badge { display: none; } .preview { padding: 12px; } .sourcePlaceholder { min-height: 130px; } .sourcePlaceholder small { display: none; } .sourcePlaceholder > span { font-size: 10px; } .sourceHeading { gap: 5px; } .sourceHeading button { font-size: 9px; } .sectionTitle { margin-top: 4px; } .renderActions { gap: 10px; } .historySource { max-width: 230px; } }
+@media (max-width: 760px) { .presets { grid-template-columns: repeat(3, minmax(0, 1fr)); } .framingAxes { grid-template-columns: 1fr; } .sourceTransport small { display: none; } .savedRecipes > div { grid-template-columns: 1fr; } .framingStage { min-height: 90px; } .sourceTransport { gap: 5px; } .sourceTransport button { padding: 4px 6px; } }
+@media (max-width: 500px) { .previewState { align-items: flex-start; } .variantRail > div:first-child { display: block; } .variantRail > div:first-child small { display: block; margin-top: 3px; } .sourceTransport > span { width: 100%; margin-left: 0; } .source .trim { flex-direction: column; align-items: stretch; gap: 6px; } .source .trim label { flex: auto; } .cutNudge > span { width: 100%; } }
 
 .modeSwitch { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 14px; }
 .modeSwitch button { display: flex; align-items: baseline; gap: 14px; padding: 9px 14px; border: 1px solid #37332a; border-radius: 7px; background: #13130f; color: #a79d88; text-align: left; }

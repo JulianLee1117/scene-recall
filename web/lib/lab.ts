@@ -36,7 +36,6 @@ export async function labRequest<T>(path: string, init?: RequestInit): Promise<T
   return response.json();
 }
 
-export const durationOf = (clips: LabClip[]) => clips.reduce((total, clip) => total + clip.source_end - clip.source_start, 0);
 export function seconds(value: number): string {
   if (!Number.isFinite(value)) return "0:00.00";
   const hundredths = Math.round(Math.max(0, value) * 100);

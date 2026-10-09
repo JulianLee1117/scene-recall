@@ -149,10 +149,6 @@
   color: #aaaaaa;
   font-size: 11px;
 }
-.advancedActions {
-  color: #aaaaaa;
-  font-size: 11px;
-}
 .songTools { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
 .songTools .trackButton { max-width: 100%; min-width: 0; flex: 1; }
 .songTools > button:last-child:not(.trackButton) { flex: none; color: #aaa; background: transparent; border-color: transparent; font-size: 11px; }
@@ -166,8 +162,6 @@
 .musicAnalysis details p { margin-top: 10px; }
 .clipOptions { display: grid; gap: 7px; }
 .clipOptions button { justify-content: flex-start; }
-.workspaceTools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 0 0 7px; }
-.workspace .workspaceTools > button { padding: 5px 8px; border-color: transparent; background: transparent; color: #aaa; font-size: 10.5px; }
 .outputSettings label { display: grid; gap: 7px; margin-bottom: 15px; color: #bbb; font-size: 11px; }
 .outputSettings input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
 .outputSettings select { width: 100%; padding: 7px; border: 1px solid #424242; border-radius: 4px; background: #151515; color: #ddd; }
@@ -175,24 +169,6 @@
 .outputSettings :global(.movie-scope) { width: 100%; }
 .outputSettings :global(.movie-scope-trigger) { width: 100%; }
 .outputSettings :global(.movie-scope-popover) { position: static; width: 100%; max-width: none; margin-top: 7px; box-sizing: border-box; box-shadow: none; }
-.advancedActions p {
-  margin: 0 0 9px;
-}
-.advancedActions > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.shotAdvancedActions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.advancedActions small {
-  display: block;
-  margin-top: 9px;
-  line-height: 1.6;
-  color: #aaaaaa;
-}
-.shotAdvancedActions {
-  margin: 12px 0;
-}
 .statusLine {
   min-height: 28px;
   display: flex;
@@ -210,18 +186,6 @@
   border: 0;
   font-size: 11px;
   color: #c9c9c9;
-}
-.busyDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: pulse 1.3s ease-in-out infinite;
-}
-@keyframes pulse {
-  50% {
-    opacity: 0.3;
-  }
 }
 .workbench {
   display: grid;
@@ -278,41 +242,6 @@
   color: var(--fg);
   border-color: var(--accent);
 }
-.inspectorTabs {
-  display: flex;
-  border-bottom: 1px solid #363636;
-  gap: 2px;
-  padding: 0 8px;
-}
-.inspectorTabs button > span {
-  margin-left: 6px;
-  font-size: 10px;
-  color: #c9c9c9;
-}
-.processDetails {
-  margin: 0;
-  color: #c9c9c9;
-  font-size: 11px;
-  line-height: 1.55;
-}
-.processDetails ol { padding-left: 18px; margin: 0 0 10px; }
-.processDetails li + li { margin-top: 6px; }
-.processDetails p { margin: 8px 0; }
-.processDetails strong { font-weight: 550; color: var(--fg); }
-.workspace .inspectorTabs button {
-  flex: 1;
-  font-size: 11px;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  padding: 9px 3px;
-  color: #aaaaaa;
-  border-bottom: 2px solid transparent;
-}
-.workspace .inspectorTabs button[aria-selected="true"] {
-  border-bottom-color: var(--accent);
-  color: var(--fg);
-}
 .inspectorBody {
   overflow-y: auto;
   padding: 10px;
@@ -321,9 +250,7 @@
   scrollbar-width: thin;
   scrollbar-gutter: stable;
 }
-.inspectorTitle,
-.inspectorTabs,
-.inspectorFooter {
+.inspectorTitle {
   flex-shrink: 0;
 }
 .workspace label {
@@ -402,10 +329,6 @@
   font-size: 12px;
   line-height: 1.7;
   color: #aaaaaa;
-}
-.workspace .danger {
-  color: #c79483;
-  border-color: #503c30;
 }
 .timeline {
   --clip-height: 112px;
@@ -1041,9 +964,6 @@
   padding: 5px 8px;
   font-size: 11px;
 }
-.overallGrid {
-  display: block;
-}
 .scope {
   display: flex;
   align-items: center;
@@ -1162,29 +1082,6 @@
   font-size: 20px;
   font-weight: 450;
 }
-.inspectorFooter {
-  padding: 8px 12px;
-  border-top: 1px solid #363636;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 6px;
-}
-.workspace .inspectorFooter > button {
-  width: auto;
-  min-width: 0;
-  padding: 6px 7px;
-  line-height: 1.35;
-  white-space: normal;
-  min-height: 34px;
-  font-size: 11px;
-}
-.inspectorFooter > p {
-  grid-column: 1 / -1;
-  margin: 0 0 3px;
-  color: #c9c9c9;
-  font-size: 11px;
-  line-height: 1.5;
-}
 .inspectorBody label + label {
   margin-top: 8px;
 }
@@ -1197,97 +1094,8 @@
 .workspace .inspectorBody label textarea {
   font-size: 13px;
 }
-.musicCue {
-  padding: 10px 12px;
-  border-left: 2px solid var(--accent);
-  background: #1b1b1b;
-  border-radius: 0 4px 4px 0;
-}
-.musicCue > span {
-  color: var(--fg);
-  font-size: 10px;
-}
-.musicCue p {
-  color: #aaaaaa;
-  font-size: 11px;
-  line-height: 1.6;
-  margin: 4px 0 0;
-}
-.directionDetails {
-  margin-top: 14px;
-  border-top: 1px solid #363636;
-  padding-top: 12px;
-}
-.directionDetails summary {
-  font-size: 11px;
-  color: #c9c9c9;
-  cursor: pointer;
-  margin-bottom: 12px;
-}
-.visualPlanSummary {
-  color: #c9c9c9;
-}
-.visualPlanSummary > span {
-  font-size: 10px;
-  color: #aaaaaa;
-}
-.visualPlanSummary p {
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 5px 0 9px;
-  white-space: pre-wrap;
-}
-.visualPlanSummary p strong {
-  font-weight: 500;
-}
-.workspace .visualPlanSummary button {
-  font-size: 11px;
-  padding: 5px 9px;
-}
-.shotFeedback {
-  border: 0;
-  border-top: 1px solid #343434;
-  padding: 10px 0 0;
-  margin: 14px 0 2px;
-  min-width: 0;
-}
-.shotFeedback legend {
-  font-size: 10px;
-  color: #c9c9c9;
-  padding: 0 6px 0 0;
-}
-.shotFeedback>div {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-.workspace .shotFeedback button {
-  font-size: 9px;
-  padding: 5px 7px;
-  border-radius: 4px;
-  background: #222222;
-  border-color: #343434;
-  color: #c9c9c9;
-}
-.workspace .shotFeedback button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 24%, #141414);
-  color: var(--fg);
-}
-.shotFeedback p {
-  font-size: 9px;
-  line-height: 1.6;
-  color: #aaaaaa;
-  margin: 9px 0 0;
-}
 .workspace:has(.timelineExpanded) {
   --workbench-height: 220px;
-}
-.promptReview {
-  margin: 0 0 8px;
-  font-size: 10px;
-  line-height: 1.45;
-  color: #c5ae83;
 }
 @media (min-width: 1500px) {
   .workbench {
@@ -1333,9 +1141,6 @@
     padding-block: 3px;
   }
   .inspectorTitle {
-    padding-block: 6px;
-  }
-  .workspace .inspectorTabs button {
     padding-block: 6px;
   }
 }
@@ -1394,10 +1199,6 @@
   .timelineTools label {
     font-size: 9px;
     margin-right: 3px;
-  }
-  .overallGrid {
-    grid-template-columns: 1fr;
-    gap: 20px;
   }
   .workspace dialog {
     margin: auto;
@@ -1487,19 +1288,6 @@
   }
   .cutSelection {
     flex-wrap: wrap;
-  }
-  .workspace .inspectorTabs button {
-    min-height: 38px;
-    font-size: 12px;
-  }
-  .workspace .inspectorFooter > button {
-    min-height: 40px;
-    font-size: 12px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .busyDot {
-    animation: none;
   }
 }
 

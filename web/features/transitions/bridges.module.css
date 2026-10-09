@@ -1,7 +1,6 @@
 .form { display: grid; gap: 13px; }
-.templates { display: flex; flex-wrap: wrap; gap: 6px; margin: 13px 0; }
-.templates button, .transport button { border: 1px solid #413b30; border-radius: 4px; padding: 6px 9px; background: #1d1b17; color: #c9b695; font-size: 11px; }
-.templates button:hover, .transport button:hover { border-color: #baa077; }
+.transport button { border: 1px solid #413b30; border-radius: 4px; padding: 6px 9px; background: #1d1b17; color: #c9b695; font-size: 11px; }
+.transport button:hover { border-color: #baa077; }
 .transport button[aria-pressed=true] { border-color: #b49360; background: #251f16; color: #eddbba; }
 .file { border: 1px dashed #504637; border-radius: 5px; padding: 14px; display: grid; gap: 9px; color: #c0b59f; font-size: 12px; overflow-wrap: anywhere; }
 .file input { max-width: 100%; font-size: 11px; }

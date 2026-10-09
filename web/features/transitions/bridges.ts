@@ -18,16 +18,6 @@ export interface BridgeJob {
     transition_start: number; transition_end: number; fps: number; width: number; height: number } | null;
 }
 
-export interface ProviderStatus {
-  provider: string;
-  model: string;
-  configured: boolean;
-  credential_environment: string;
-  live_verified: boolean;
-  capabilities: { first_last_frames: boolean; min_seconds: number; max_seconds: number };
-  pricing: { verified_on: string; credits_per_second: Record<string, number>; min_credits: number; max_request_credits: number };
-}
-
 export const MAX_BRIDGE_UPLOAD = 128 * 1024 * 1024;
 export const bridgePending = (job: BridgeJob) => job.status === "queued" || job.status === "running";
 export const bridgeSourceTimingProblem = (retime?: { mode?: string }) => retime?.mode && retime.mode !== "off"

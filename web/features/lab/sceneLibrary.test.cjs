@@ -8,36 +8,16 @@ const helpers = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, "sceneLibrary.ts"), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, { exports: helpers });
-const row = { unit_id: "shot", film_id: "film", t_start: 90, t_end: 110,
-  caption: "A figure turns", keyframe_index: 2, matched_frame_index: 2, matched_frame_timestamp: 100 };
+const clip = { id: "clip", film_id: "film", unit_id: "shot", title: "A figure turns", source_start: 98, source_end: 102, locked: false };
 
-test("library preview uses a legal window centered on the retrieved frame", () => {
-  const result = helpers.libraryAlternative(row, 4);
-  assert.equal(result.clip.source_start, 98);
-  assert.equal(result.clip.source_end, 102);
-  assert.equal(result.search_evidence.matched_frame_index, 2);
-  const edge = helpers.libraryAlternative({ ...row, matched_frame_timestamp: 109.8 }, 4);
-  assert.equal(edge.clip.source_start, 106);
-  assert.equal(edge.clip.source_end, 110);
-});
-
-test("short results retain their real duration rather than inventing footage", () => {
-  const result = helpers.libraryAlternative({ ...row, t_start: 99, t_end: 101 }, 4);
-  assert.equal(result.clip.source_start, 99);
-  assert.equal(result.clip.source_end, 101);
-});
-
-test("a shorter timeline drop retains the retrieved moment and original source bounds", () => {
-  const result = helpers.libraryAlternative(row, 4);
-  const fitted = helpers.fitDraggedScene(result.clip, 1, result.search_evidence);
+test("a shorter timeline drop keeps the retrieved moment inside the source bounds", () => {
+  const fitted = helpers.fitDraggedScene(clip, 1, { matched_frame_timestamp: 100 });
   assert.equal(fitted.source_start, 99.5);
   assert.equal(fitted.source_end, 100.5);
-  assert.equal(result.clip.source_start, 98, "fitting must not mutate the library preview");
+  assert.equal(clip.source_start, 98, "fitting must not mutate the dropped clip");
 });
 
-test("missing or out-of-range visual timestamps do not invent a matched moment", () => {
-  const result = helpers.libraryAlternative({ ...row, matched_frame_timestamp: undefined }, 4);
-  assert.equal(result.clip.source_start, 98);
-  assert.equal(result.search_evidence.matched_frame_timestamp, null);
-  assert.equal(helpers.fitDraggedScene(result.clip, 1, null), result.clip);
+test("a missing or out-of-range moment leaves the drop as it is", () => {
+  assert.equal(helpers.fitDraggedScene(clip, 1, null), clip);
+  assert.equal(helpers.fitDraggedScene(clip, 1, { matched_frame_timestamp: 120 }), clip);
 });

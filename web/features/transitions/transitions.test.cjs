@@ -201,7 +201,6 @@ async function workspaceHarness({ renders = [], failure = null, postFailureAt = 
           const created = postHandler ? postHandler(JSON.parse(options.body), count) : { ...savedJob, id: `created-${count}`, status: postStatus, result: postStatus === "completed" ? result : null, request: JSON.parse(options.body) };
           stored.set(created.id, created); return created;
         }
-        if (route === "/workers") return { workers: [] };
         if (route.startsWith("/transitions/renders/")) { const id = route.split("/").at(-1); if (stored.has(id)) return stored.get(id); if (detailHandler) return detailHandler(id); }
         throw new Error(`Unexpected request ${route}`);
       } };

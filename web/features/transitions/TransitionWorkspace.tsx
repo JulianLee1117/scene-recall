@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { labRequest, mediaUrl, seconds } from "@/lib/lab";
-import type { WorkerStatus } from "@/types/lab";
+import { labRequest, mediaUrl } from "@/lib/lab";
 import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/LabWorkspaceHeader";
 import SourceBrowser from "@/features/lab/SourceBrowser";
 import { DEFAULT_RETIME, restoredRetime, speedTitle, cutSpeedTitle, fileSize, renderFileSummary, qualityTitle, activeRender, matchingSourceEndpoints, mergeRenderHistory, recipeTitle, restoredRecipe, samePair, sourceFromResult, sourcePayload, timingSweep, validatePair, variantTiming, workingChanges,
@@ -36,7 +35,6 @@ export default function TransitionWorkspace() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [workers, setWorkers] = useState<WorkerStatus | null>(null);
   const [mode, setMode] = useState<"local" | "ai">("local");
   const [monitorSide, setMonitorSide] = useState<"a" | "b" | null>(null);
   const [sourceInspection, setSourceInspection] = useState<{ side: "a" | "b"; film: string; time: number; token: number } | null>(null);
@@ -104,7 +102,6 @@ export default function TransitionWorkspace() {
       timer = setTimeout(poll, 1600);
     }
     void poll();
-    void labRequest<WorkerStatus>("/workers", { signal: abort.signal }).then((status) => { if (!abort.signal.aborted) setWorkers(status); }).catch(() => {});
     return () => { abort.abort(); clearTimeout(timer); };
   }, [pendingIds]);
 
@@ -117,7 +114,6 @@ export default function TransitionWorkspace() {
   const sourceEndpoints = matchingSourceEndpoints(rendered, currentRequest);
   const comparable = rendered ? jobs.filter((job) => job.id !== rendered.id && job.status === "completed" && job.result && samePair(job.request, rendered.request)) : [];
   const compare = comparable.find((job) => job.id === compareId);
-  const editorWorker = workers?.workers.find((worker) => worker.role === "editor");
   const differences = rendered ? workingChanges(rendered.request, currentRequest, definition) : [];
   const olderRender = !!rendered && !!catalog?.renderer_version && rendered.result!.renderer_version !== catalog.renderer_version;
   const pendingPreview = previewIntent ? jobs.find((job) => job.id === previewIntent.id) : null;
