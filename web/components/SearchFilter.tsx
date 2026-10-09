@@ -236,9 +236,13 @@ function SectionList({
               title={option.selected || option.count ? name : `${name}: no movies with your other filters`}
               onClick={() => onToggle(option.value)}
             >
-              <span className="toolbar-menu-check" aria-hidden="true">{option.selected ? "✓" : ""}</span>
               <span className="toolbar-menu-label">{name}</span>
-              {section.counted && <span className="toolbar-menu-tally">{option.count}</span>}
+              {/* Selected shows a check where the count was; nothing reserves space on the left. */}
+              {option.selected ? (
+                <svg className="toolbar-menu-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m5 12.5 4.5 4.5L19 7.5" />
+                </svg>
+              ) : section.counted && <span className="toolbar-menu-tally">{option.count}</span>}
             </button>
           );
         })}

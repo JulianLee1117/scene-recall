@@ -200,7 +200,8 @@
 }
 
 .filter:focus {
-  border-color: color-mix(in srgb, var(--accent) 55%, #2e2e2e);
+  border-color: var(--field-border-focus);
+  box-shadow: var(--field-ring);
   outline: none;
 }
 

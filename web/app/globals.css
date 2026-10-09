@@ -6,6 +6,9 @@
   --accent: #d4a96a;
   --muted: #6b6b6b;
   --gap: 3px;
+  /* Text fields on focus: a warmer border and a faint halo, never an outline. */
+  --field-border-focus: #6e5a3f;
+  --field-ring: 0 0 0 3px #d4a96a12;
 }
 
 html,
@@ -733,8 +736,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 .search-text-entry:focus-within {
-  border-color: #756044;
-  box-shadow: 0 0 0 3px #d4a96a09;
+  border-color: var(--field-border-focus);
+  box-shadow: var(--field-ring);
 }
 
 .search-main-input::placeholder { color: #85817a; }
@@ -904,7 +907,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-editor-heading strong, .clue-reference-picker > header strong { color: #cbbda7; font-size: .78rem; font-weight: 500; line-height: 22px; }
 .clue-editor-heading p, .clue-reference-picker > header p { margin: 3px 0 0; color: #928779; font-size: .7rem; line-height: 1.5; }
 .clue-text-editor, .clue-reference-search { display: flex; gap: 8px; margin-top: 9px; }
-.clue-input, .clue-reference-search > input { box-sizing: border-box; flex: 1; width: 100%; min-width: 0; height: 38px; padding: 8px 10px; border: 1px solid #413b32; border-radius: 4px; background: #10100f; color: #e8dfd0; font: inherit; font-size: .8rem; }
+.clue-input, .clue-reference-search > input { box-sizing: border-box; flex: 1; width: 100%; min-width: 0; height: 38px; padding: 8px 11px; border: 1px solid #36312a; border-radius: 7px; background: #10100f; color: #e8dfd0; font: inherit; font-size: .8rem; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.clue-input:focus, .clue-reference-search > input:focus { border-color: var(--field-border-focus); box-shadow: var(--field-ring); }
 .clue-input::placeholder { color: #756d62; }
 .clue-editor-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
 .clue-editor-footer > .clue-text-button { padding: 2px 0; border-color: transparent; background: transparent; color: #a3937d; }
@@ -944,7 +948,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-reference-results .result-count { font-size: .68rem; }
 .clue-reference-status, .clue-reference-error { margin: 0; padding: 0 0 3px; color: #b9aa95; font-size: .72rem; }
 .clue-reference-error { color: #efa89a; }
-.search-clues button:focus-visible, .search-clues input:focus-visible { outline: 2px solid #c8a373; outline-offset: 3px; }
+.search-clues button:focus-visible { outline: 2px solid #c8a373; outline-offset: 3px; }
 .search-no-overlap { box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 12px 12px 8px; padding: 8px 0; border-bottom: 1px solid #302b25; }
 .search-no-overlap p { flex: 1 1 420px; min-width: 0; margin: 0; color: #9d9180; font-size: .74rem; line-height: 1.5; overflow-wrap: anywhere; }
 .search-no-overlap > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -1292,7 +1296,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 .movie-scope-search-wrap:focus-within {
-  border-color: #4b4030;
+  border-color: var(--field-border-focus);
+  box-shadow: var(--field-ring);
   color: #8d7758;
 }
 
@@ -1415,12 +1420,12 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-list { display: flex; min-height: 0; padding: 0 4px 4px; flex-direction: column; }
 .toolbar-menu-list.is-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
 .toolbar-menu-title { margin: 0 0 6px; color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-.toolbar-menu-row, .toolbar-menu-option { display: flex; width: 100%; min-height: 32px; padding: 6px 8px; align-items: center; gap: 8px; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .76rem; text-align: left; cursor: pointer; }
+.toolbar-menu-row, .toolbar-menu-option { display: flex; width: 100%; min-height: 32px; padding: 6px 10px; align-items: center; gap: 10px; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .76rem; text-align: left; cursor: pointer; }
 .toolbar-menu-row:hover, .toolbar-menu-option:hover:not(:disabled) { background: #ffffff0a; }
 .toolbar-menu-row > span:first-child { flex: 0 0 auto; }
 .toolbar-menu-value { min-width: 0; flex: 1; overflow: hidden; color: #6f6a62; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar-menu-value.is-set { color: #e2c49b; }
-.toolbar-menu-check { width: 12px; flex: 0 0 12px; color: var(--accent); font-size: .72rem; text-align: center; }
+.toolbar-menu-check { flex: 0 0 auto; color: var(--accent); }
 .toolbar-menu-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar-menu-tally { flex: 0 0 auto; color: #6f6a62; font-size: .68rem; font-variant-numeric: tabular-nums; }
 .toolbar-menu-option[aria-pressed="true"] { color: #f0dcc0; }
@@ -1432,8 +1437,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-back:hover svg { color: #e2c49b; }
 .toolbar-menu-link { padding: 4px 6px; border: 0; border-radius: 4px; background: transparent; color: #a99a84; font: inherit; font-size: .7rem; cursor: pointer; }
 .toolbar-menu-link:hover { color: #e8dece; }
-.toolbar-menu-find { display: flex; height: 30px; margin: 2px 8px 6px; padding: 0 9px; align-items: center; gap: 7px; border: 1px solid #262320; border-radius: 6px; background: #0b0b0b; color: #6f6a62; }
-.toolbar-menu-find:focus-within { border-color: #4a4134; }
+.toolbar-menu-find { display: flex; height: 30px; margin: 2px 8px 6px; padding: 0 9px; align-items: center; gap: 7px; border: 1px solid #2a2622; border-radius: 7px; background: #0b0b0b; color: #6f6a62; transition: border-color .15s ease, box-shadow .15s ease; }
+.toolbar-menu-find:focus-within { border-color: var(--field-border-focus); box-shadow: var(--field-ring); color: #a99a84; }
 .toolbar-menu-find input { min-width: 0; flex: 1; border: 0; background: transparent; color: #e6e1d8; font: inherit; font-size: .74rem; outline: none; }
 .toolbar-menu-find input::placeholder { color: #5f5a52; }
 .toolbar-menu-find input::-webkit-search-cancel-button { display: none; }
@@ -1451,7 +1456,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-toggle:hover { background: #ffffff06; }
 .toolbar-menu-toggle[aria-checked="true"] .toolbar-menu-switch { background: #b88a4766; }
 .toolbar-menu-toggle[aria-checked="true"] .toolbar-menu-switch::after { background: #f0dcc0; transform: translateX(11px); }
-.toolbar-menu-row:focus-visible, .toolbar-menu-option:focus-visible, .toolbar-menu-back:focus-visible, .toolbar-menu-link:focus-visible, .toolbar-menu-segmented button:focus-visible, .toolbar-menu-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.toolbar-menu-row:focus-visible, .toolbar-menu-option:focus-visible, .toolbar-menu-toggle:focus-visible { outline: none; background: #ffffff0e; box-shadow: inset 0 0 0 1px var(--field-border-focus); }
+.toolbar-menu-back:focus-visible, .toolbar-menu-link:focus-visible, .toolbar-menu-segmented button:focus-visible { outline: 1px solid var(--field-border-focus); outline-offset: 1px; }
 /* Active settings join the refinements row: one chip each, every value visible. */
 .active-chip { display: inline-flex; min-width: 0; max-width: min(100%, 320px); align-items: stretch; border: 1px solid #403528; border-radius: 5px; background: #bb94590c; color: #d6c2a3; font-size: .72rem; transition: border-color .15s ease, background .15s ease; }
 .active-chip:hover { border-color: #7b6240; background: #bb945916; }
