@@ -422,15 +422,22 @@ def _light_stem(token: str) -> str:
     return token
 
 
-def _shared_query_terms(query: str, row: dict[str, Any]) -> list[str]:
-    """The query's meaningful words a lexical hit's text contains, in query order.
+def _shared_query_terms(query: str, row: dict[str, Any]) -> dict[str, list[str]]:
+    """The query's meaningful words a lexical hit contains, and where.
 
-    Native full-text search stems with its own tokenizer; this light fold is
-    for explaining a match, never for ranking it.
+    ``terms`` keeps query order. ``fields`` names the parts of the indexed
+    text (caption, dialogue) that hold any of them. Native full-text search
+    stems with its own tokenizer; this light fold is for explaining a match,
+    never for ranking it.
     """
-    text = " ".join(str(row.get(field) or "") for field in ("searchable_text", "caption", "dialogue"))
-    stems = {_light_stem(token) for token in _tokens(text)}
-    return [term for term in _unique_query_terms(query) if _light_stem(term) in stems]
+    def stems(value: Any) -> set[str]:
+        return {_light_stem(token) for token in _tokens(value)}
+
+    by_field = {field: stems(row.get(field)) for field in ("caption", "dialogue")}
+    anywhere = stems(row.get("searchable_text")).union(*by_field.values())
+    terms = [term for term in _unique_query_terms(query) if _light_stem(term) in anywhere]
+    fields = [field for field, found in by_field.items() if any(_light_stem(term) in found for term in terms)]
+    return {"terms": terms, "fields": fields}
 
 
 def _is_explicitly_quoted_query(value: str) -> bool:
@@ -2025,8 +2032,8 @@ def search(
                     channel_evidence["source"] = "legacy_combined_text"
             elif channel == "lex":
                 # Lexical needs any two of the query's meaningful words, so
-                # name the ones this scene shares.
-                channel_evidence["terms"] = _shared_query_terms(query, row)
+                # name the ones this scene shares and where they appear.
+                channel_evidence.update(_shared_query_terms(query, row))
             elif channel == "quote":
                 channel_evidence["source"] = "dialogue_line"
                 candidate["row"]["_matched_line"] = row.get("_matched_line")

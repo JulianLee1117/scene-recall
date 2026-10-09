@@ -317,8 +317,9 @@ playback time; its action bar saves the scene, finds related scenes, opens
 **Details** shows each result's description and how each retrieval channel ranked
 it. Every card in a search lists the same rows in a fixed order: Visual (image-text
 embedding), Semantic (text embedding, with the view it matched such as Story or
-On-screen text), Lexical (BM25 keywords; it needs two of your words and shows the
-ones it shares), Quote (spoken lines), any categories, then the Rerank score. Each
+On-screen text), Lexical (BM25 keywords over the description and subtitles; it needs
+two of your words and shows the ones it shares and where), Quote (spoken lines), any
+categories, then the Rerank score. Each
 channel keeps only its top few hundred scenes; one that did not return a scene shows
 "–" and, for example, "not in its top 600".
 

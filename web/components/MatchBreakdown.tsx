@@ -5,6 +5,7 @@ import type { SearchResult } from "@/types/api";
 /**
  * How each finder ranked a scene, as an aligned table: finder, its rank (or
  * the rerank score), and what it matched. Spans only, so it can sit in a button.
+ * Lexical's shared words are tokens, so they never read as a quoted line.
  */
 export default function MatchBreakdown({
   shot,
@@ -28,7 +29,10 @@ export default function MatchBreakdown({
         <span key={row.column} className={`match-row${row.matched ? "" : " is-unmatched"}`}>
           <span className="match-label" title={row.hint}>{row.label}</span>
           <span className="match-value">{row.value}</span>
-          <span className="match-detail" title={row.detail}>{row.detail}</span>
+          <span className="match-detail" title={detailTitle(row.terms, row.detail)}>
+            {row.terms?.map((term) => <span key={term} className="match-term">{term}</span>)}
+            {row.detail}
+          </span>
         </span>
       ))}
       {(aside || score !== undefined) && (
@@ -39,4 +43,8 @@ export default function MatchBreakdown({
       )}
     </span>
   );
+}
+
+function detailTitle(terms: string[] | undefined, detail: string): string {
+  return terms?.length ? `Shares ${terms.map((term) => `“${term}”`).join(", ")} ${detail}`.trim() : detail;
 }

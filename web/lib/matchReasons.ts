@@ -112,6 +112,8 @@ export interface MatchRow {
   matched: boolean;
   /** What matched (frame time, text view and words), or why nothing did. */
   detail: string;
+  /** Lexical: the query words the scene's text shares, shown as tokens before the detail. */
+  terms?: string[];
   /** Short name for hover labels: Picture, Story, Dialogue, Look… */
   short: string;
   /** What this finder measures, for the label's tooltip. */
@@ -206,10 +208,15 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
     }
     if (column === "lex") {
       const lex = channels?.lex;
-      const terms = lex?.terms ?? [];
-      return lex
-        ? row(column, { value: `#${lex.rank}`, rank: lex.rank, matched: true, detail: terms.length ? `shares ${terms.join(", ")}` : "" })
-        : row(column, { matched: false, detail: "fewer than two of your words in its text" });
+      if (!lex) return row(column, { matched: false, detail: "fewer than two of your words in its description or dialogue" });
+      const fields = (lex.fields ?? []).map((field) => (TEXT_VIEW_LABELS[field] ?? field).toLowerCase());
+      return row(column, {
+        value: `#${lex.rank}`,
+        rank: lex.rank,
+        matched: true,
+        terms: lex.terms ?? [],
+        detail: fields.length ? `in ${fields.join(" and ")}` : "",
+      });
     }
     if (column === "quote") {
       const quote = channels?.quote;

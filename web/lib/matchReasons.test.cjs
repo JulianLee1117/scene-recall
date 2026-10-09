@@ -11,7 +11,8 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, "matc
 }).outputText, { exports: lib, require: () => ({ formatTime: (value) => `${value}s` }) });
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
-const table = (shot, columns) => plain(lib.matchBreakdown(shot, columns).rows).map((row) => [row.label, row.value, row.detail]);
+const table = (shot, columns) => plain(lib.matchBreakdown(shot, columns).rows)
+  .map((row) => (row.terms ? [row.label, row.value, row.terms, row.detail] : [row.label, row.value, row.detail]));
 
 const typed = (channels, extra = {}) => ({
   caption: "A caption.",
@@ -23,7 +24,7 @@ const typed = (channels, extra = {}) => ({
 test("every card in a search lists the same finders in the same fixed order", () => {
   const picture = typed({ img: { rank: 2, score: 0.3, distance: 0.7, matched_frame: { timestamp: 90 } }, rerank: { verdict: 0.52 } });
   const words = typed(
-    { txt: { rank: 18, score: 0.6, distance: 0.4, source: "ocr", matched_text: { view: "ocr", text: "LOVE" } }, lex: { rank: 3, score: 1, distance: null, terms: ["love", "neon"] }, quote: { rank: 1, score: 1, distance: null } },
+    { txt: { rank: 18, score: 0.6, distance: 0.4, source: "ocr", matched_text: { view: "ocr", text: "LOVE" } }, lex: { rank: 3, score: 1, distance: null, terms: ["love", "neon"], fields: ["caption", "dialogue"] }, quote: { rank: 1, score: 1, distance: null } },
     { matched_line: { t_start: 4, t_end: 5, text: "love." } },
   );
   const columns = plain(lib.matchColumns([picture, words]));
@@ -31,14 +32,14 @@ test("every card in a search lists the same finders in the same fixed order", ()
   assert.deepEqual(table(picture, columns), [
     ["Visual", "#2", "frame 90s"],
     ["Semantic", "–", "not in its top 600"],
-    ["Lexical", "–", "fewer than two of your words in its text"],
+    ["Lexical", "–", "fewer than two of your words in its description or dialogue"],
     ["Quote", "–", "no matching spoken line"],
     ["Rerank", "0.52", ""],
   ]);
   assert.deepEqual(table(words, columns), [
     ["Visual", "–", "not in its top 600"],
     ["Semantic", "#18", "On-screen text · LOVE"],
-    ["Lexical", "#3", "shares love, neon"],
+    ["Lexical", "#3", ["love", "neon"], "in description and dialogue"],
     ["Quote", "#1", "“love.”"],
     ["Rerank", "–", "not in the top 40 it scores"],
   ]);

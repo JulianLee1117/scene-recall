@@ -2177,6 +2177,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   color: #9a9a9a;
 }
 
+/* Lexical's shared words: tokens, so they never read as a quoted line. */
+.match-term {
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(230, 210, 176, 0.1);
+  color: #d9c6a6;
+}
+
 .match-row.is-unmatched > span {
   color: #555555;
 }

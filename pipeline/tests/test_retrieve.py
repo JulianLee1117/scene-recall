@@ -4684,8 +4684,10 @@ def test_lexical_hits_name_the_query_words_they_share() -> None:
     from pipeline.search.retrieve import _shared_query_terms
 
     row = {"caption": "A boy walks down a quiet street past parked cars.", "dialogue": "", "searchable_text": ""}
-    assert _shared_query_terms("boy in blue shirt walking on street next to grass with a ball", row) == [
-        "boy",
-        "walking",
-        "street",
-    ]
+    assert _shared_query_terms("boy in blue shirt walking on street next to grass with a ball", row) == {
+        "terms": ["boy", "walking", "street"],
+        "fields": ["caption"],
+    }
+    # Subtitles are part of the lexical text, so a quote also shares words.
+    row = {"caption": "Travis faces a mirror.", "dialogue": '["You talkin\' to me?"]', "searchable_text": ""}
+    assert _shared_query_terms("you talkin to me", row) == {"terms": ["you", "talkin", "me"], "fields": ["dialogue"]}

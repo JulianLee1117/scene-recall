@@ -107,6 +107,8 @@ export interface SearchChannelDebug {
   source?: string;
   /** Lexical channel: the query words this scene's text shares. */
   terms?: string[];
+  /** Lexical channel: where those words are, "caption" and/or "dialogue". */
+  fields?: string[];
   matched_frame?: MatchedFrameDebug;
   matched_text?: {
     feature_id?: string;
