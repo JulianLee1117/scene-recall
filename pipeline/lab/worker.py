@@ -110,6 +110,10 @@ def execute_job(job, config, db, store, *, ingest_runner=None, role="all"):
             from pipeline.transitions.jobs import run
             result = run(job, config, db, store, progress, cancelled)
             return store.finish(job["id"], result=result)
+        if job["kind"] == "algmods-render":
+            from pipeline.algmods.jobs import run
+            result = run(job, config, db, store, progress, cancelled)
+            return store.finish(job["id"], result=result)
         if job["kind"] == "transition-bridge":
             from pipeline.transitions.bridges import run
             result = run(job, config, db, store, progress, cancelled)

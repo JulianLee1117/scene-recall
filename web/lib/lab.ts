@@ -9,6 +9,7 @@ export function experimentName(id: string, fallback?: string): string {
     case "music-sketch": return "AI Music Video";
     case "visual-rhymes": return "Match Cuts";
     case "transitions": return "Transitions";
+    case "alg-mods": return "Alg Mods";
     default: return fallback || id.replaceAll("-", " ");
   }
 }

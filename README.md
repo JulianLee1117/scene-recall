@@ -624,6 +624,55 @@ Provider contracts: [OpenAI audio input](https://developers.openai.com/api/docs/
 [Gemini audio understanding](https://ai.google.dev/gemini-api/docs/audio),
 and [Beat This!](https://github.com/CPJKU/beat_this).
 
+### Alg Mods
+
+Open **Labs → Alg Mods** at [/lab/alg-mods](http://localhost:3000/lab/alg-mods)
+to try every treatment on every scene. The board has scenes down and
+treatments across (**Painted dots** with **Vivid** after Yoon Hyup or **Pastel**
+after alg.comp.mod, **Time stripes**, **Mosaic**, **Quadtree**); a cell is the latest render
+of that pair. **Add scene** searches the library; open a cell to play it, set
+**In** and **Out** (0.2–12 s), adjust the treatment's controls (**Fine tune**
+shows the rest) and **Render**; the pair's variants are listed under the
+player. Scenes pinned before their first render are kept in the browser. Renders are durable jobs on the
+editor worker; each variant stays listed with a download and a receipt.
+The worker needs the OpenCV extra, and the `measure` extra for subject
+detection (crop centring and keeping the subject real):
+
+```bash
+uv sync --dev --extra algmods --extra measure
+```
+
+The mosaic needs its tile bank, built once from the indexed keyframes (about
+25 minutes for 176 films, 51 MB at `<assets>/algmods/`); rebuild after large
+ingests to include new films:
+
+```bash
+uv run python -m pipeline.algmods.tiles build
+```
+
+What makes each treatment work, with the numbers that held and what failed, is in
+[`docs/experiments/alg-mods-craft.md`](docs/experiments/alg-mods-craft.md).
+**Tiles from** chooses what the mosaic is made of: the whole library, the film
+itself, or a search (**Search for**: comma-separated queries, pinned when you
+render). **Where** confines the mosaic to the segmented subject or its background.
+**Live layer** keeps part of the frame as untouched film inside the treatment:
+the subject, the background, or the nearest or farthest share of the frame by
+depth (**Live share of depth** under Fine tune). People are cut by a video
+matte with hair-level edges. Depth and the matte each download a small model
+(Depth Anything V2, Robust Video Matting, about 15 MB each) into
+`<assets>/models/` on first use. **Ground** picks the colour behind the dots
+(the scene's own shadow colour, navy, or black); **Colour variety**, **Bigger
+marks on flat areas** and **Dashes along structure** are the round-10 dots
+controls.
+
+The same renderer runs from the command line for batch study:
+
+```bash
+uv run --extra algmods --extra measure python -m pipeline.algmods render \
+  --film "Fallen Angels" --start 4753.7 --end 4758.1 --mod dots \
+  --param style=vivid --out out.mp4 --side-by-side
+```
+
 ### Transitions
 
 Open **Labs → Transitions** at [/lab/transitions](http://localhost:3000/lab/transitions)

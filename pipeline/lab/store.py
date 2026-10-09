@@ -357,6 +357,48 @@ class LabStore:
             return [self._job(row, private=True) for row in con.execute(
                 "SELECT * FROM jobs WHERE kind='transition-render' ORDER BY created_at DESC,id DESC LIMIT ?", (limit,))]
 
+    @staticmethod
+    def _algmods_snapshot(proposal):
+        from pipeline.algmods.contracts import MODS_VERSION, RenderRequest
+        proposal = {**proposal, "request": RenderRequest.model_validate(proposal["request"]).model_dump(mode="json")}
+        if proposal["version"] != MODS_VERSION or "source" not in proposal:
+            raise ValueError("Invalid Alg Mods render snapshot")
+        encoded = json.dumps({"algmods_render": proposal}, allow_nan=False, sort_keys=True)
+        key = "algmods-render:" + hashlib.sha256(encoded.encode()).hexdigest()
+        return encoded, key
+
+    def completed_algmods_renders(self, proposal):
+        """Bounded exact candidates; their files must be verified by the caller."""
+        _encoded, key = self._algmods_snapshot(proposal)
+        with self.connection() as con:
+            return [self._job(row, private=True) for row in con.execute(
+                "SELECT * FROM jobs WHERE kind='algmods-render' AND path_key=? AND status='completed' "
+                "AND cancel_requested=0 ORDER BY created_at DESC,id DESC LIMIT 5", (key,))]
+
+    def enqueue_algmods_render(self, proposal, *, reusable=None):
+        """Persist a validated treatment request, or reuse a caller-verified immutable result."""
+        encoded, key = self._algmods_snapshot(proposal)
+        with self.connection() as con:
+            con.execute("BEGIN IMMEDIATE")
+            if reusable is not None:
+                saved = con.execute("SELECT * FROM jobs WHERE id=? AND kind='algmods-render' AND path_key=? "
+                                    "AND status='completed' AND cancel_requested=0", (reusable["id"], key)).fetchone()
+                if (saved is not None and saved["snapshot"] == encoded
+                        and json.loads(saved["result"]) == reusable.get("result")):
+                    return self._job(saved)
+            previous = con.execute("SELECT * FROM jobs WHERE kind='algmods-render' AND path_key=? AND status IN ('queued','running') AND cancel_requested=0", (key,)).fetchone()
+            if previous is not None:
+                return self._job(previous)
+            identity = str(uuid.uuid4())
+            con.execute("INSERT INTO jobs (id,kind,status,snapshot,created_at,path_key) VALUES (?,?,?,?,?,?)",
+                        (identity, "algmods-render", "queued", encoded, time.time(), key))
+        return self.get_job(identity)
+
+    def algmods_renders(self, limit=20):
+        with self.connection() as con:
+            return [self._job(row, private=True) for row in con.execute(
+                "SELECT * FROM jobs WHERE kind='algmods-render' ORDER BY created_at DESC,id DESC LIMIT ?", (limit,))]
+
     def enqueue_transition_bridge(self, proposal):
         """Attach a validated imported asset to its preallocated job identity."""
         from pipeline.transitions.bridges import BRIDGE_VERSION, BridgeImportRequest

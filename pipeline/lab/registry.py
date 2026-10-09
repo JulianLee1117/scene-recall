@@ -32,4 +32,14 @@ EXPERIMENTS = (
         # Kept runnable without new investment (ADR-0106); listed last in Labs.
         "status": "frozen",
     },
+    {
+        "id": "alg-mods",
+        "name": "Alg Mods",
+        "route": "/lab/alg-mods",
+        "project_route": "/lab/alg-mods",
+        "persistence": "session",
+        "description": "Redraw a film window as tracked painted dots; tune the look and compare variants.",
+        "capabilities": ["render"],
+        "status": "experimental",
+    },
 )

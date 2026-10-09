@@ -104,6 +104,7 @@ from pipeline.lab.api import router as lab_router
 from pipeline.matching.api import router as matching_router
 from pipeline.matching.moments.api import router as match_moments_router
 from pipeline.transitions.api import router as transitions_router
+from pipeline.algmods.api import router as algmods_router
 from pipeline.acquisition.api import router as acquisition_router
 from pipeline.project_info import router as project_info_router
 from pipeline.acquisition.service import AcquisitionService
@@ -335,6 +336,7 @@ app.include_router(lab_router)
 app.include_router(matching_router)
 app.include_router(match_moments_router)
 app.include_router(transitions_router)
+app.include_router(algmods_router)
 app.include_router(acquisition_router)
 app.include_router(project_info_router)
 

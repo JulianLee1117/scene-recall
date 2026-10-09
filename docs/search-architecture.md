@@ -24,6 +24,9 @@ records.
 | Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103, 0104, 0105 |
 | Render effects (feature-locked overlays, hard crops, panels, masks, screens) | Effects | `pipeline/lab/effects.py`, `pipeline/lab/screens.py`, `pipeline/lab/media.py` | 0106, 0107, 0108, 0099 |
 | Generated sources (AI clips placed as shots) | Generated sources | `pipeline/lab/generated.py` | 0109 |
+| Alg Mods (treatments on one film window; tile bank) | Alg Mods Lab | `pipeline/algmods/`, `web/features/algmods/` | 0110 (0070 pattern) |
+| Regions (masking spec shared by treatments; subject by video matte, box, near/far by depth) | Alg Mods Lab | `pipeline/lab/regions.py`, `pipeline/lab/matte.py`, `pipeline/lab/depth.py` | 0110 |
+| Grafts (landmark-aligned pieces of other shots, as plans) | Alg Mods Lab | `pipeline/lab/grafts.py`, `pipeline/algmods/composite.py` | 0110 (landmarks from 0099) |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
 | Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067 |
 
@@ -370,6 +373,7 @@ and entry `persistence` (`project` or `session`). AI Music Video uses
 `/lab/music-sketch`; Match Cuts enters the projectless `/match` session, while
 existing edits retain `/lab/visual-rhymes` and the `visual-rhymes` identifier.
 Transitions enters the projectless `/lab/transitions` workspace (ADR-0070).
+Alg Mods enters the projectless `/lab/alg-mods` session (ADR-0110).
 All workspace states use `LabWorkspaceHeader` with one Labs return control,
 including loading, empty and error states. Project editors compose
 `ProjectActions` and `useLabProject`; sessions do not acquire project controls.
@@ -1557,6 +1561,35 @@ table for `gen-` IDs only, so validation, renders, effects, OTIO export and the
 player work unchanged; the API streams the original bytes. Search, ingestion
 and the `films` table never include generated clips. The editor does not
 choose, request or pay for them.
+
+### Alg Mods Lab
+
+`/lab/alg-mods` is a projectless session (ADR-0110) on the ADR-0070 pattern:
+one indexed film window of 0.2-12 s from the shared source browser, one
+treatment with bounded parameters (painted dots with a `vivid` or `pastel`
+style, time stripes, a quadtree, or a mosaic from the `tiles-v1` bank of every
+keyframe, sourced from the library, the film itself or a search pinned at request
+time; the workspace is a scenes-by-treatments board whose cells are the latest
+render of each pair). Where a treatment applies is a region spec resolved to
+per-frame masks by `pipeline/lab/regions.py`, shared by treatments; `near` and
+`far` regions come from monocular depth (`pipeline/lab/depth.py`), person
+regions from a video matte (`pipeline/lab/matte.py`), and every
+per-shot treatment carries a `live` region through which the film shows
+unchanged). A graft
+(`pipeline/lab/grafts.py`) sets a landmark-aligned piece of another shot on the
+host from a plain-data plan: window, donor, light, timing and entrance; landmarks
+come from the moments index. The craft
+that held per treatment is kept in `docs/experiments/alg-mods-craft.md`,
+and explicit renders as durable
+`algmods-render` jobs on the editor worker. A job freezes source identity,
+window and parameters under `algmods-v10`; exact completed requests are
+reused after their artifacts verify; variants stay listed. Output is a 720x1280
+H.264 preview (optionally beside the original) and a manifest. The renderer is
+`pipeline/algmods/` (OpenCV dense flow and a global fit move the dots, a
+light-and-colour map places them; the `algmods` extra; RF-DETR subject detection
+from the `measure` extra centres the crop, paints the subject and can keep it real).
+It is a treatment lab: no effect kind, search model, embedding profile,
+evidence derivation, paid call or library-wide pass.
 
 ### Transitions Lab
 

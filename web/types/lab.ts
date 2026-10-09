@@ -290,7 +290,7 @@ export interface LabJob {
   result?: { output_url?: string; [key: string]: unknown } | null;
 }
 export interface LabExperiment {
-  id: ExperimentId | "transitions";
+  id: ExperimentId | "transitions" | "alg-mods";
   name: string;
   description: string;
   route?: string;
