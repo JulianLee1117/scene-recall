@@ -51,8 +51,12 @@ not change.
   stay a draft, previewed by the counts, and apply together when the menu
   closes (Apply, or a click away), rerunning the search once like an edited
   query: the current scenes stay until the filtered ones arrive. (Amended
-  2026-10-09: applying each change at once ran a search per click.) Picking a movie still appends its @mention, which remains a scope
-  change. Going home clears the filters. The Lab
+  2026-10-09: applying each change at once ran a search per click.) Movie
+  is a facet like the others, keyed by title, shown as a chip and cleared
+  the same way. (Amended 2026-10-09: picking a movie used to append an
+  @mention to the search text, which cluttered it and outlived Clear.)
+  Typed @mentions still scope the search and are narrowed by the filters.
+  Going home clears the filters. The Lab
   keeps its own movie picker.
 
 ## Consequences

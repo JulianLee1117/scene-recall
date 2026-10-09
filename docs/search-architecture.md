@@ -246,8 +246,7 @@ and the union of confirmed film IDs; surrounding visible wording is preserved.
 Backspace immediately after a mention or Delete immediately before it removes
 the whole mention. Edits inside or across a title invalidate its confirmation;
 other editing remains native. Repeated mentions retain scope until the final
-one is removed. The movie picker appends new mentions; deselection removes their
-@ markers and keeps the title words as ordinary text. Native undo may restore
+one is removed. Native undo may restore
 words without restoring invalidated scope; confirmation is never guessed.
 Scope changes cancel
 stale requests and clear previously displayed scenes from the old scope.
@@ -255,14 +254,15 @@ No result recovery silently broadens these filters. Ambiguous versions display
 their catalog years; common-word and style-reference guards avoid obvious
 misreadings without claiming general natural-language intent recognition.
 
-Film filters (ADR-0113) narrow that scope by era, genre family and director.
+Film filters (ADR-0113) narrow that scope by era, genre family, director and
+title.
 `/library` reports each indexed film's year, directors and genre families
 (`pipeline/search/film_facets.py`); the browser resolves the filters to
 `film_ids`, so retrieval and ranking are unchanged. Values within a facet are
 alternatives and facets combine; @mentioned movies are narrowed too. Filters
 that leave no movie run no search and say so. One **Filter** control beside
-Refine, home screen included, opens a menu of the facets and the movie picker,
-one section at a time; active filters show as one chip per section beside
+Refine, home screen included, opens a menu of the facets (Movie among them; it
+never writes @mentions), one section at a time; active filters show as one chip per section beside
 the result count, and each option is counted against the other facets. A
 **View** menu holds presentation only: the ranking preset, row size and
 Details, remembered in the browser, with a non-default preset shown as a chip

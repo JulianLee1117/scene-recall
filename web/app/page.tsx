@@ -26,7 +26,7 @@ import { useGlide } from "@/hooks/useGlide";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
-import { filterableFilms, narrowScope, sameFilmIds, sameFilters, type FilmFilters, type FilterSelection } from "@/lib/filmFilters";
+import { filterableFilms, narrowScope, sameFilters, type FilmFilters } from "@/lib/filmFilters";
 import { DEFAULT_VIEW, ORDER_OPTIONS, loadViewPrefs, saveViewPrefs, type ViewPrefs } from "@/lib/viewPrefs";
 import {
   FACET_LABELS,
@@ -558,6 +558,7 @@ export default function Home() {
 
   const handleFiltersChange = useCallback(
     (next: FilmFilters) => {
+      if (sameFilters(next, filmFiltersRef.current)) return;
       filmFiltersRef.current = next;
       setFilmFilters(next);
       scheduleSearch();
@@ -573,23 +574,6 @@ export default function Home() {
     handleMovieScopeChange(next.filmIds, next.query);
     inputRef.current?.focus();
   }, [commitMovieDraft, handleMovieScopeChange]);
-
-  const handleMoviePickerChange = useCallback((filmIds: string[]) => {
-    compositionScopePendingRef.current = false;
-    const draft = setMovieScope(movieDraftRef.current, filmIds, films);
-    const next = compileMovieDraft(draft);
-    commitMovieDraft(draft);
-    handleMovieScopeChange(next.filmIds, next.query);
-  }, [commitMovieDraft, films, handleMovieScopeChange]);
-
-  // The Filter menu applies its choices together: one search, whatever changed.
-  const handleFilterApply = useCallback((selection: FilterSelection) => {
-    if (!sameFilters(selection.filters, filmFiltersRef.current)) handleFiltersChange(selection.filters);
-    // A movie change is a scope change; it replaces the search just scheduled.
-    if (!sameFilmIds(selection.filmIds, compileMovieDraft(movieDraftRef.current).filmIds)) {
-      handleMoviePickerChange([...selection.filmIds]);
-    }
-  }, [handleFiltersChange, handleMoviePickerChange]);
 
   const handleVoiceTranscript = useCallback(
     (transcript: string) => {
@@ -1303,8 +1287,9 @@ export default function Home() {
                     view={filterView}
                     onViewChange={setFilterView}
                     films={films}
-                    applied={{ filters: filmFilters, filmIds: selectedFilmIds }}
-                    onApply={handleFilterApply}
+                    applied={filmFilters}
+                    onApply={handleFiltersChange}
+                    mentionedFilmIds={selectedFilmIds}
                   />
                 }
                 controls={

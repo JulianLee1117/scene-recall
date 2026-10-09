@@ -7,30 +7,27 @@ import {
   activeFacets,
   clearFacet,
   facetOptions,
-  filterFilms,
   filterableFilms,
   hasFilters,
   narrowScope,
-  sameSelection,
+  sameFilters,
   toggleFilter,
   type FacetOption,
   type FilmFacetKey,
-  type FilterSelection,
+  type FilmFilters,
 } from "@/lib/filmFilters";
-import { displayFilmTitle } from "@/lib/movieSuggestions";
-import { displayTitle } from "@/lib/format";
 import { useDismiss } from "@/hooks/useDismiss";
 import DirectionIcon from "./DirectionIcon";
 
 /** What the Filter menu shows: its overview, or one section's values. */
-export type FilterView = "menu" | FilmFacetKey | "movie";
+export type FilterView = "menu" | FilmFacetKey;
 
 interface Section {
-  key: FilmFacetKey | "movie";
+  key: FilmFacetKey;
   label: string;
   long: boolean;
   options: FacetOption[];
-  /** Counts mean something for facets; every movie counts once. */
+  /** Counts mean something for shared values; every movie counts once. */
   counted: boolean;
 }
 
@@ -40,12 +37,12 @@ interface SearchFilterProps {
   onViewChange: (view: FilterView | null) => void;
   films: LibraryFilm[];
   /** What the search uses now. */
-  applied: FilterSelection;
+  applied: FilmFilters;
   /** Runs the search once with the menu's choices. */
-  onApply: (selection: FilterSelection) => void;
+  onApply: (filters: FilmFilters) => void;
+  /** Movies @mentioned in the search text, which the filters narrow too. */
+  mentionedFilmIds: readonly string[];
 }
-
-const NO_SELECTION: FilterSelection = { filters: {}, filmIds: [] };
 
 /**
  * Narrows a search to movies by era, genre, director or title. The menu
@@ -54,17 +51,17 @@ const NO_SELECTION: FilterSelection = { filters: {}, filmIds: [] };
  * and apply together when the menu closes (Apply, or a click away), so
  * quick toggling runs one search rather than many.
  */
-export default function SearchFilter({ view, onViewChange, films, applied, onApply }: SearchFilterProps) {
+export default function SearchFilter({ view, onViewChange, films, applied, onApply, mentionedFilmIds }: SearchFilterProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const catalog = useMemo(() => filterableFilms(films), [films]);
-  const [draft, setDraft] = useState<FilterSelection | null>(null);
-  const working = draft ?? applied;
-  const changed = !sameSelection(working, applied);
+  const [draft, setDraft] = useState<FilmFilters | null>(null);
+  const filters = draft ?? applied;
+  const changed = !sameFilters(filters, applied);
   const finish = () => {
-    if (changed) onApply(working);
+    if (changed) onApply(filters);
     setDraft(null);
     onViewChange(null);
   };
@@ -76,44 +73,20 @@ export default function SearchFilter({ view, onViewChange, films, applied, onApp
     else if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus();
   }, [view]);
 
-  const active = activeFacets(applied.filters);
+  const active = activeFacets(applied);
   if (catalog.length === 0 && active.length === 0) return null;
 
-  const { filters, filmIds } = working;
-  const scope = narrowScope(filmIds, catalog, filters);
+  const scope = narrowScope(mentionedFilmIds, catalog, filters);
   const searched = scope.excludesAll ? 0 : scope.filmIds.length || catalog.length;
   const summary = searched === catalog.length ? `All ${catalog.length} movies` : `${searched} of ${catalog.length} movies`;
-
-  // Movies are a section too: those passing the filters can be picked.
-  const passing = new Set(filterFilms(catalog, filters).map((film) => film.id));
-  const chosen = new Set(filmIds);
-  const movieOptions: FacetOption[] = catalog
-    .map((film) => ({
-      value: film.id,
-      label: displayTitle(displayFilmTitle(film.film)),
-      count: passing.has(film.id) ? 1 : 0,
-      selected: chosen.has(film.id),
-    }))
-    .sort((a, b) => (a.label ?? "").localeCompare(b.label ?? "", undefined, { sensitivity: "base" }));
-  const sections: Section[] = [
-    ...FILM_FACETS.map((facet) => ({
-      key: facet.key,
-      label: facet.label,
-      long: Boolean(facet.long),
-      options: facetOptions(catalog, filters, facet.key),
-      counted: true,
-    })),
-    { key: "movie", label: "Movie", long: true, options: movieOptions, counted: false },
-  ];
+  const sections: Section[] = FILM_FACETS.map((facet) => ({
+    key: facet.key,
+    label: facet.label,
+    long: Boolean(facet.long),
+    options: facetOptions(catalog, filters, facet.key),
+    counted: !facet.perFilm,
+  }));
   const open = sections.find((section) => section.key === view);
-
-  const edit = (next: Partial<FilterSelection>) => setDraft({ ...working, ...next });
-  const toggle = (section: Section, value: string) =>
-    section.key === "movie"
-      ? edit({ filmIds: chosen.has(value) ? filmIds.filter((id) => id !== value) : [...filmIds, value] })
-      : edit({ filters: toggleFilter(filters, section.key, value) });
-  const clear = (section: Section) =>
-    section.key === "movie" ? edit({ filmIds: [] }) : edit({ filters: clearFacet(filters, section.key) });
 
   return (
     <div className="toolbar-menu-root" ref={rootRef}>
@@ -142,18 +115,18 @@ export default function SearchFilter({ view, onViewChange, films, applied, onApp
               key={open.key}
               section={open}
               onBack={() => onViewChange("menu")}
-              onToggle={(value) => toggle(open, value)}
-              onClear={() => clear(open)}
+              onToggle={(value) => setDraft(toggleFilter(filters, open.key, value))}
+              onClear={() => setDraft(clearFacet(filters, open.key))}
             />
           ) : (
             <div className="toolbar-menu-list">
               {sections.map((section) => {
-                const picked = section.options.filter((option) => option.selected);
+                const picked = filters[section.key] ?? [];
                 return (
                   <button key={section.key} type="button" className="toolbar-menu-row" onClick={() => onViewChange(section.key)}>
                     <span>{section.label}</span>
                     <span className={`toolbar-menu-value${picked.length ? " is-set" : ""}`}>
-                      {picked.length ? picked.map((option) => option.label ?? option.value).join(", ") : "Any"}
+                      {picked.length ? picked.join(", ") : "Any"}
                     </span>
                     <DirectionIcon name="chevron-right" className="toolbar-menu-chevron" size={12} />
                   </button>
@@ -163,8 +136,8 @@ export default function SearchFilter({ view, onViewChange, films, applied, onApp
           )}
           <footer className="toolbar-menu-foot">
             <span role="status">{summary}</span>
-            {!open && (hasFilters(filters) || filmIds.length > 0) && (
-              <button type="button" className="toolbar-menu-link" onClick={() => setDraft(NO_SELECTION)}>
+            {!open && hasFilters(filters) && (
+              <button type="button" className="toolbar-menu-link" onClick={() => setDraft({})}>
                 Clear all
               </button>
             )}
@@ -198,7 +171,7 @@ function SectionList({
   // Long lists leave out values no movie can match; short ones dim them.
   const shown = section.options.filter((option) =>
     (option.selected || !section.long || option.count > 0) &&
-    (!needle || fold(option.label ?? option.value).includes(needle)));
+    (!needle || fold(option.value).includes(needle)));
 
   return (
     <>
@@ -229,7 +202,7 @@ function SectionList({
       )}
       <div className="toolbar-menu-list is-scroll" role="group" aria-label={section.label}>
         {shown.map((option) => {
-          const name = option.label ?? option.value;
+          const name = option.value;
           return (
             <button
               key={option.value}

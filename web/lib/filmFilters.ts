@@ -1,13 +1,15 @@
 import type { LibraryFilm } from "@/types/api";
+import { displayTitle } from "./format";
+import { displayFilmTitle } from "./movieSuggestions";
 
 /**
- * Film filters narrow a search to movies by era, genre and director. They
- * resolve to the film IDs the search API already scopes by, so ranking is
- * unchanged. Values within a facet are alternatives (1990s or 2000s); facets
- * combine (1990s and Crime). Movies chosen by name stay @mentions in the
- * search text and are narrowed by these filters too.
+ * Film filters narrow a search to movies by era, genre, director or title.
+ * They resolve to the film IDs the search API already scopes by, so ranking
+ * is unchanged. Values within a facet are alternatives (1990s or 2000s);
+ * facets combine (1990s and Crime). Movies @mentioned in the search text are
+ * narrowed by these filters too.
  */
-export type FilmFacetKey = "era" | "genre" | "director";
+export type FilmFacetKey = "era" | "genre" | "director" | "movie";
 export type FilmFilters = Partial<Record<FilmFacetKey, readonly string[]>>;
 
 export interface FilmFacet {
@@ -15,6 +17,8 @@ export interface FilmFacet {
   label: string;
   /** A long list gets a search field and leaves out values no movie can match. */
   long?: boolean;
+  /** Each film is its own value (its title), so counts say nothing. */
+  perFilm?: boolean;
 }
 
 /** The filter menu's sections, in order. A new facet is one entry plus its values below. */
@@ -22,6 +26,7 @@ export const FILM_FACETS: readonly FilmFacet[] = [
   { key: "era", label: "Era" },
   { key: "genre", label: "Genre", long: true },
   { key: "director", label: "Director", long: true },
+  { key: "movie", label: "Movie", long: true, perFilm: true },
 ];
 
 /** An indexed film with its filter values worked out once. */
@@ -33,8 +38,6 @@ export interface FilterableFilm {
 
 export interface FacetOption {
   value: string;
-  /** Shown instead of the value, e.g. a movie's title for its ID. */
-  label?: string;
   /** Films with this value that also pass the other facets' filters. */
   count: number;
   selected: boolean;
@@ -80,6 +83,7 @@ export function filterableFilms(films: readonly LibraryFilm[]): FilterableFilm[]
       era: film.year ? [eraLabel(film.year, boundary)] : [],
       genre: film.genres ?? [],
       director: film.directors ?? [],
+      movie: [displayTitle(displayFilmTitle(film))],
     },
   }));
 }
@@ -107,6 +111,7 @@ const OPTION_ORDER: Record<FilmFacetKey, (a: FacetOption, b: FacetOption) => num
   era: (a, b) => eraRank(a.value) - eraRank(b.value),
   genre: byName,
   director: (a, b) => b.count - a.count || byName(a, b),
+  movie: byName,
 };
 
 /**
@@ -147,27 +152,12 @@ export function hasFilters(filters: FilmFilters): boolean {
   return activeFacets(filters).length > 0;
 }
 
-/** Everything the Filter menu applies at once: facet filters and movies chosen by name. */
-export interface FilterSelection {
-  filters: FilmFilters;
-  /** The search text's @mentions. */
-  filmIds: readonly string[];
-}
-
-const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((item) => b.includes(item));
-
 /** Whether two filter sets choose the same values, whatever the order. */
 export function sameFilters(a: FilmFilters, b: FilmFilters): boolean {
-  return FILM_FACETS.every(({ key }) => sameSet(a[key] ?? [], b[key] ?? []));
-}
-
-/** Whether two lists name the same movies, whatever the order. */
-export function sameFilmIds(a: readonly string[], b: readonly string[]): boolean {
-  return sameSet(a, b);
-}
-
-export function sameSelection(a: FilterSelection, b: FilterSelection): boolean {
-  return sameFilters(a.filters, b.filters) && sameFilmIds(a.filmIds, b.filmIds);
+  return FILM_FACETS.every(({ key }) => {
+    const left = a[key] ?? [], right = b[key] ?? [];
+    return left.length === right.length && left.every((value) => right.includes(value));
+  });
 }
 
 /**

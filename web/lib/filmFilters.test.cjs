@@ -5,10 +5,15 @@ const vm = require("node:vm");
 const { test } = require("node:test");
 const ts = require("typescript");
 
-const lib = {};
-vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, "filmFilters.ts"), "utf8"), {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-}).outputText, { exports: lib });
+const load = (file, require) => {
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, file), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { exports, require });
+  return exports;
+};
+const helpers = { "./format": load("format.ts"), "./movieSuggestions": load("movieSuggestions.ts") };
+const lib = load("filmFilters.ts", (name) => helpers[name]);
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const film = (id, year, genres, directors = []) => ({ film_id: id, title: id, filename: `${id}.mkv`, status: "indexed", year, genres, directors });
@@ -79,6 +84,11 @@ test("selections compare by value, whatever the order of their choices", () => {
   assert.equal(lib.sameFilters({ genre: ["Crime", "Drama"] }, { genre: ["Drama", "Crime"] }), true);
   assert.equal(lib.sameFilters({ genre: ["Crime"] }, { genre: ["Crime"], era: [] }), true);
   assert.equal(lib.sameFilters({ genre: ["Crime"] }, { era: ["1990s"] }), false);
-  assert.equal(lib.sameSelection({ filters: {}, filmIds: ["a", "b"] }, { filters: {}, filmIds: ["b", "a"] }), true);
-  assert.equal(lib.sameSelection({ filters: {}, filmIds: ["a"] }, { filters: {}, filmIds: [] }), false);
+  assert.equal(lib.sameFilters({ movie: ["Heat (1995)"] }, {}), false);
+});
+
+test("a movie is a facet of its own title, without counts", () => {
+  assert.deepEqual(plain(films.find((item) => item.id === "heat").values.movie), ["heat"]);
+  assert.deepEqual(plain(lib.filterFilms(films, { movie: ["heat", "elf"] }).map((item) => item.id)), ["heat", "elf"]);
+  assert.equal(lib.FILM_FACETS.find((facet) => facet.key === "movie").perFilm, true);
 });
