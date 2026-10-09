@@ -1430,7 +1430,8 @@ Use **Filter**, beside Refine, to narrow a search by era, genre, director or
 movie, before your first search or after. Its menu lists each section with its
 current choice and opens one section at a time; long sections have a search
 field. Choices within a section are alternatives (1990s or 2000s); sections
-combine (1990s and Crime). Choices stay in the menu, where the counts preview
+combine (1990s and Crime). A section's **Exclude** switch leaves its choices out
+instead ("Genre not Animation"). Choices stay in the menu, where the counts preview
 the result and keep you from choosing a combination with no movie, then apply
 together with **Apply** (or a click away): one search however fast you pick.
 Movies picked in its Movie section are a filter like the others, shown as a

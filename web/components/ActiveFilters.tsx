@@ -1,6 +1,6 @@
 "use client";
 
-import { activeFacets, clearFacet } from "@/lib/filmFilters";
+import { activeFacets, clearFacet, describeFacet } from "@/lib/filmFilters";
 import { activeShotFacets, clearShotFacet, type ShotFacet } from "@/lib/shotFilters";
 import ActiveChip from "./ActiveChip";
 import type { FilterView, SearchFilters } from "./SearchFilter";
@@ -23,13 +23,13 @@ export default function ActiveFilters({
 }) {
   return (
     <>
-      {activeFacets(filters.film).map(({ key, label, values }) => (
+      {activeFacets(filters.film).map((facet) => (
         <ActiveChip
-          key={key}
-          label={label}
-          value={values.join(", ")}
-          onEdit={() => onEdit(key)}
-          onClear={() => onFiltersChange({ film: clearFacet(filters.film, key) })}
+          key={facet.key}
+          label={facet.label}
+          value={describeFacet(facet)}
+          onEdit={() => onEdit(facet.key)}
+          onClear={() => onFiltersChange({ film: clearFacet(filters.film, facet.key) })}
         />
       ))}
       {activeShotFacets(filters.shot, shotFacets).map(({ key, label, values }) => (

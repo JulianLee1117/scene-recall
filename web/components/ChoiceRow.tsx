@@ -13,12 +13,16 @@ export default function ChoiceRow<T extends string>({
   value,
   defaultValue,
   onChange,
+  bare = false,
 }: {
+  /** Names the choices; shown beside them unless `bare`. */
   label: string;
   options: ReadonlyArray<{ value: T; label: string }>;
   value: T;
   defaultValue: T;
   onChange: (value: T) => void;
+  /** The choices span the row, with the label left to screen readers. */
+  bare?: boolean;
 }) {
   const groupRef = useRef<HTMLDivElement>(null);
   // Like a native segmented control, Tab enters at the choice and the arrow
@@ -33,8 +37,8 @@ export default function ChoiceRow<T extends string>({
   };
 
   return (
-    <div className="toolbar-menu-setting">
-      <span>{label}</span>
+    <div className={`toolbar-menu-setting${bare ? " is-bare" : ""}`}>
+      {!bare && <span>{label}</span>}
       <div ref={groupRef} className="toolbar-menu-choices" role="radiogroup" aria-label={label}>
         {options.map((option, index) => {
           const chosen = option.value === value;

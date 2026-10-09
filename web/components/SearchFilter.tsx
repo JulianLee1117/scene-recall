@@ -6,9 +6,12 @@ import {
   FILM_FACETS,
   activeFacets,
   clearFacet,
+  describeFacet,
+  excludeFacet,
   facetOptions,
   filterableFilms,
   hasFilters,
+  isExcluded,
   narrowScope,
   sameFilters,
   toggleFilter,
@@ -31,6 +34,8 @@ import DirectionIcon from "./DirectionIcon";
 
 /** Every shot facet starts here: no narrowing. */
 const ANY = { value: "", label: "Any" };
+/** A Movies section keeps its values, or leaves them out. */
+const MODES = [{ value: "include", label: "Include" }, { value: "exclude", label: "Exclude" }] as const;
 
 /** What the Filter menu shows: its overview, or one movie section's values. */
 export type FilterView = "menu" | FilmFacetKey;
@@ -159,9 +164,11 @@ export default function SearchFilter({
                 <SectionList
                   key={open.key}
                   section={open}
+                  exclude={isExcluded(filters, open.key)}
                   onBack={() => onViewChange("menu")}
                   onToggle={(value) => edit((current) => ({ ...current, film: toggleFilter(current.film, open.key, value) }))}
-                  onClear={() => edit((current) => ({ ...current, film: clearFacet(current.film, open.key) }))}
+                  onExclude={(exclude) => edit((current) => ({ ...current, film: excludeFacet(current.film, open.key, exclude) }))}
+                  onClear={() => edit((current) => ({ ...current, film: clearFacet(current.film, open.key, true) }))}
                 />
               ) : (
                 <div className="toolbar-menu-list is-scroll">
@@ -173,7 +180,7 @@ export default function SearchFilter({
                         <span className="toolbar-menu-row-text">
                           <span>{section.label}</span>
                           <span className={`toolbar-menu-value${picked.length ? " is-set" : ""}`}>
-                            {picked.length ? picked.join(", ") : "Any"}
+                            {picked.length ? describeFacet({ values: picked, exclude: isExcluded(filters, section.key) }) : "Any"}
                           </span>
                         </span>
                         <DirectionIcon name="chevron-right" className="toolbar-menu-chevron" size={12} />
@@ -223,13 +230,17 @@ const fold = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLo
 /** One section's values as a checklist; long lists get a search field. */
 function SectionList({
   section,
+  exclude,
   onBack,
   onToggle,
+  onExclude,
   onClear,
 }: {
   section: Section;
+  exclude: boolean;
   onBack: () => void;
   onToggle: (value: string) => void;
+  onExclude: (exclude: boolean) => void;
   onClear: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -251,6 +262,14 @@ function SectionList({
           <button type="button" className="toolbar-menu-link" onClick={onClear}>Clear</button>
         )}
       </header>
+      <ChoiceRow
+        bare
+        label={`${section.label}: include or exclude`}
+        options={MODES}
+        value={exclude ? "exclude" : "include"}
+        defaultValue="include"
+        onChange={(mode) => onExclude(mode === "exclude")}
+      />
       {section.long && (
         <label className="toolbar-menu-find">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -281,10 +300,10 @@ function SectionList({
               onClick={() => onToggle(option.value)}
             >
               <span className="toolbar-menu-label">{name}</span>
-              {/* Selected shows a check where the count was; nothing reserves space on the left. */}
+              {/* Selected shows a check (or, excluded, a no-entry mark) where the count was. */}
               {option.selected ? (
                 <svg className="toolbar-menu-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="m5 12.5 4.5 4.5L19 7.5" />
+                  {exclude ? <><circle cx="12" cy="12" r="7.5" /><path d="m6.8 17.2 10.4-10.4" /></> : <path d="m5 12.5 4.5 4.5L19 7.5" />}
                 </svg>
               ) : section.counted && <span className="toolbar-menu-tally">{option.count}</span>}
             </button>

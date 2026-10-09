@@ -1468,6 +1468,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 /* A setting: its label in a fixed column, then its choices from one shared
    left edge, so every setting in both menus lines up. */
 .toolbar-menu-setting { display: grid; min-height: 32px; padding: 2px 10px; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 8px; color: #d8d0c4; font-size: .78rem; }
+.toolbar-menu-setting.is-bare { padding: 2px 8px 6px; grid-template-columns: minmax(0, 1fr); }
 /* Choices sit on a faint track that spans the row. The choice shows on a
    quiet thumb; one that differs from the default turns gold, like a set
    movie filter. */

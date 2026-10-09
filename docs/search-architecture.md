@@ -259,7 +259,8 @@ title.
 `/library` reports each indexed film's year, directors and genre families
 (`pipeline/search/film_facets.py`); the browser resolves the filters to
 `film_ids`, so retrieval and ranking are unchanged. Values within a facet are
-alternatives and facets combine; @mentioned movies are narrowed too. Filters
+alternatives, or with the section set to Exclude, left out; facets combine;
+@mentioned movies are narrowed too. Filters
 that leave no movie run no search and say so. One **Filter** control beside
 Refine, home screen included, opens a menu of the facets (Movie among them; it
 never writes @mentions), one section at a time; active filters show as one chip per section beside

@@ -5,12 +5,16 @@ import { displayFilmTitle } from "./movieSuggestions";
 /**
  * Film filters narrow a search to movies by era, genre, director or title.
  * They resolve to the film IDs the search API already scopes by, so ranking
- * is unchanged. Values within a facet are alternatives (1990s or 2000s);
- * facets combine (1990s and Crime). Movies @mentioned in the search text are
+ * is unchanged. Values within a facet are alternatives (1990s or 2000s); a
+ * facet set to exclude keeps the movies with none of them (not Animation).
+ * Facets combine (1990s and Crime). Movies @mentioned in the search text are
  * narrowed by these filters too.
  */
 export type FilmFacetKey = "era" | "genre" | "director" | "movie";
-export type FilmFilters = Partial<Record<FilmFacetKey, readonly string[]>>;
+export type FilmFilters = Partial<Record<FilmFacetKey, readonly string[]>> & {
+  /** Facets whose values are left out rather than kept. */
+  exclude?: readonly FilmFacetKey[];
+};
 
 export interface FilmFacet {
   key: FilmFacetKey;
@@ -88,10 +92,13 @@ export function filterableFilms(films: readonly LibraryFilm[]): FilterableFilm[]
   }));
 }
 
+export const isExcluded = (filters: FilmFilters, key: FilmFacetKey) => Boolean(filters.exclude?.includes(key));
+
 function passes(film: FilterableFilm, filters: FilmFilters, except?: FilmFacetKey): boolean {
   return FILM_FACETS.every(({ key }) => {
     const chosen = filters[key];
-    return key === except || !chosen?.length || chosen.some((value) => film.values[key].includes(value));
+    if (key === except || !chosen?.length) return true;
+    return chosen.some((value) => film.values[key].includes(value)) !== isExcluded(filters, key);
   });
 }
 
@@ -130,33 +137,54 @@ export function facetOptions(films: readonly FilterableFilm[], filters: FilmFilt
     .sort(OPTION_ORDER[key]);
 }
 
-export function toggleFilter(filters: FilmFilters, key: FilmFacetKey, value: string): FilmFilters {
-  const current = filters[key] ?? [];
-  const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
-  const rest = clearFacet(filters, key);
-  return next.length ? { ...rest, [key]: next } : rest;
-}
-
-export function clearFacet(filters: FilmFilters, key: FilmFacetKey): FilmFilters {
+/** With *key* holding *values*, or none; its include or exclude setting stays. */
+function withValues(filters: FilmFilters, key: FilmFacetKey, values: readonly string[]): FilmFilters {
   const rest = { ...filters };
   delete rest[key];
-  return rest;
+  return values.length ? { ...rest, [key]: values } : rest;
+}
+
+export function toggleFilter(filters: FilmFilters, key: FilmFacetKey, value: string): FilmFilters {
+  const current = filters[key] ?? [];
+  return withValues(filters, key, current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+}
+
+/** Whether *key* leaves out its values (true) or keeps them (false). */
+export function excludeFacet(filters: FilmFilters, key: FilmFacetKey, exclude: boolean): FilmFilters {
+  const others = (filters.exclude ?? []).filter((item) => item !== key);
+  const next: FilmFilters = { ...filters, exclude: exclude ? [...others, key] : others };
+  if (!next.exclude?.length) delete next.exclude;
+  return next;
+}
+
+/** Without *key*'s values; *keepMode* leaves its include or exclude setting as it was. */
+export function clearFacet(filters: FilmFilters, key: FilmFacetKey, keepMode = false): FilmFilters {
+  const cleared = withValues(filters, key, []);
+  return keepMode ? cleared : excludeFacet(cleared, key, false);
 }
 
 /** Active filters grouped by facet in panel order: one summary chip each. */
-export function activeFacets(filters: FilmFilters): Array<FilmFacet & { values: readonly string[] }> {
-  return FILM_FACETS.flatMap((facet) => (filters[facet.key]?.length ? [{ ...facet, values: filters[facet.key]! }] : []));
+export function activeFacets(filters: FilmFilters): Array<FilmFacet & { values: readonly string[]; exclude: boolean }> {
+  return FILM_FACETS.flatMap((facet) => (filters[facet.key]?.length
+    ? [{ ...facet, values: filters[facet.key]!, exclude: isExcluded(filters, facet.key) }]
+    : []));
+}
+
+/** A facet's chosen values as one line: "1990s, 2000s", or "not Animation" when excluded. */
+export function describeFacet({ values, exclude }: { values: readonly string[]; exclude: boolean }): string {
+  return `${exclude ? "not " : ""}${values.join(", ")}`;
 }
 
 export function hasFilters(filters: FilmFilters): boolean {
   return activeFacets(filters).length > 0;
 }
 
-/** Whether two filter sets choose the same values, whatever the order. */
+/** Whether two filter sets narrow the same way: same values and, where any, the same mode. */
 export function sameFilters(a: FilmFilters, b: FilmFilters): boolean {
   return FILM_FACETS.every(({ key }) => {
     const left = a[key] ?? [], right = b[key] ?? [];
-    return left.length === right.length && left.every((value) => right.includes(value));
+    return left.length === right.length && left.every((value) => right.includes(value))
+      && (!left.length || isExcluded(a, key) === isExcluded(b, key));
   });
 }
 

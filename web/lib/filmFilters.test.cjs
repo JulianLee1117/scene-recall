@@ -92,3 +92,22 @@ test("a movie is a facet of its own title, without counts", () => {
   assert.deepEqual(plain(lib.filterFilms(films, { movie: ["heat", "elf"] }).map((item) => item.id)), ["heat", "elf"]);
   assert.equal(lib.FILM_FACETS.find((facet) => facet.key === "movie").perFilm, true);
 });
+
+test("a facet set to exclude keeps the movies with none of its values", () => {
+  const library = lib.filterableFilms([
+    { film_id: "akira", title: "Akira", filename: "a.mkv", status: "indexed", year: 1988, genres: ["Animation", "Science fiction"], directors: [] },
+    { film_id: "alien", title: "Alien", filename: "b.mkv", status: "indexed", year: 1979, genres: ["Horror", "Science fiction"], directors: [] },
+    { film_id: "heat", title: "Heat", filename: "c.mkv", status: "indexed", year: 1995, genres: ["Crime"], directors: [] },
+  ]);
+  const picked = lib.toggleFilter({}, "genre", "Animation");
+  const excluded = lib.excludeFacet(picked, "genre", true);
+  assert.deepEqual(plain(lib.narrowScope([], library, excluded).filmIds), ["alien", "heat"]);
+  assert.equal(lib.describeFacet(lib.activeFacets(excluded)[0]), "not Animation");
+  const withHorror = lib.toggleFilter(excluded, "genre", "Horror");
+  assert.deepEqual(plain(lib.narrowScope([], library, withHorror).filmIds), ["heat"], "toggling keeps the mode");
+  assert.equal(lib.facetOptions(library, excluded, "genre").find((option) => option.value === "Animation").count, 1);
+  assert.equal(lib.sameFilters(picked, excluded), false);
+  assert.equal(lib.sameFilters(lib.excludeFacet({}, "genre", true), {}), true, "a mode without values changes nothing");
+  assert.equal(lib.isExcluded(lib.clearFacet(excluded, "genre", true), "genre"), true, "clearing in the section keeps the mode");
+  assert.deepEqual(plain(lib.clearFacet(excluded, "genre")), {}, "clearing the chip resets it");
+});
