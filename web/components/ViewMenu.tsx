@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef } from "react";
-import { ORDER_OPTIONS, SIZE_OPTIONS, type ViewPrefs } from "@/lib/viewPrefs";
+import { DEFAULT_VIEW, ORDER_OPTIONS, SIZE_OPTIONS, type ViewPrefs } from "@/lib/viewPrefs";
 import { useDismiss } from "@/hooks/useDismiss";
+import { useMenuFit } from "@/hooks/useMenuFit";
+import ChoiceRow from "./ChoiceRow";
 import DirectionIcon from "./DirectionIcon";
 
 /**
@@ -26,8 +28,9 @@ export default function ViewMenu({
   const panelId = useId();
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
   useDismiss(open, rootRef, close, triggerRef);
+  useMenuFit(open, panelRef);
   useEffect(() => {
-    if (open) panelRef.current?.focus();
+    if (open) panelRef.current?.focus({ preventScroll: true });
   }, [open]);
 
   return (
@@ -55,8 +58,20 @@ export default function ViewMenu({
       {open && (
         <div ref={panelRef} id={panelId} className="toolbar-menu" role="dialog" aria-label="View options" tabIndex={-1}>
           <div className="toolbar-menu-list">
-            <Segmented label="Order" options={ORDER_OPTIONS} value={view.order} onChange={(order) => onChange({ order })} />
-            <Segmented label="Size" options={SIZE_OPTIONS} value={view.size} onChange={(size) => onChange({ size })} />
+            <ChoiceRow
+              label="Order"
+              options={ORDER_OPTIONS}
+              value={view.order}
+              defaultValue={DEFAULT_VIEW.order}
+              onChange={(order) => onChange({ order })}
+            />
+            <ChoiceRow
+              label="Size"
+              options={SIZE_OPTIONS}
+              value={view.size}
+              defaultValue={DEFAULT_VIEW.size}
+              onChange={(size) => onChange({ size })}
+            />
             <button
               type="button"
               className="toolbar-menu-toggle"
@@ -70,37 +85,6 @@ export default function ViewMenu({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function Segmented<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: ReadonlyArray<{ value: T; label: string }>;
-  value: T;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div className="toolbar-menu-setting">
-      <span>{label}</span>
-      <div className="toolbar-menu-segmented" role="radiogroup" aria-label={label}>
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={value === option.value}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

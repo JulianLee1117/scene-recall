@@ -16,11 +16,12 @@ const facets = [
   { key: "color", label: "Color", values: [{ value: "color", label: "Color", count: 1 }, { value: "bw", label: "B&W", count: 1 }] },
 ];
 
-test("toggling adds and removes values, dropping empty facets", () => {
-  const once = lib.toggleShotFilter({}, "size", "close");
-  assert.deepEqual(plain(once), { size: ["close"] });
-  assert.deepEqual(plain(lib.toggleShotFilter(once, "size", "close")), {});
-  assert.deepEqual(plain(lib.clearShotFacet({ size: ["close"], color: ["bw"] }, "size")), { color: ["bw"] });
+test("choosing a value replaces the facet's choice, and Any drops the facet", () => {
+  const close = lib.chooseShotFilter({ color: ["bw"] }, "size", "close");
+  assert.deepEqual(plain(close), { color: ["bw"], size: ["close"] });
+  assert.deepEqual(plain(lib.chooseShotFilter(close, "size", "wide")), { color: ["bw"], size: ["wide"] });
+  assert.deepEqual(plain(lib.chooseShotFilter(close, "size", "")), { color: ["bw"] });
+  assert.deepEqual(plain(lib.clearShotFacet(close, "color")), { size: ["close"] });
 });
 
 test("filters compare by value and send only chosen facets", () => {

@@ -2,9 +2,9 @@
  * Shot filters narrow a search to shots by what is in them: dialogue, size,
  * people, camera, color, time and place (ADR-0114). The server defines the
  * facets (GET /search/shot-facets) and applies them inside retrieval; the
- * page only keeps the choices and sends them with each search. Values within
- * a facet are alternatives; facets combine, with each other and with film
- * filters.
+ * page only keeps the choices and sends them with each search. The menu picks
+ * one value per facet (the API also takes several, as alternatives); facets
+ * combine, with each other and with film filters.
  */
 export type ShotFilters = Readonly<Record<string, readonly string[]>>;
 
@@ -14,17 +14,15 @@ export interface ShotFacet {
   values: ReadonlyArray<{ value: string; label: string; count: number }>;
 }
 
-export function toggleShotFilter(filters: ShotFilters, key: string, value: string): ShotFilters {
-  const current = filters[key] ?? [];
-  const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
-  return clearShotFacet(filters, key, next);
-}
-
-/** Without *key*, or with *key* set to *values* when there are any. */
-export function clearShotFacet(filters: ShotFilters, key: string, values: readonly string[] = []): ShotFilters {
+/** With *key* narrowed to *value*, or without *key* when *value* is "" (Any). */
+export function chooseShotFilter(filters: ShotFilters, key: string, value: string): ShotFilters {
   const rest: Record<string, readonly string[]> = { ...filters };
   delete rest[key];
-  return values.length ? { ...rest, [key]: values } : rest;
+  return value ? { ...rest, [key]: [value] } : rest;
+}
+
+export function clearShotFacet(filters: ShotFilters, key: string): ShotFilters {
+  return chooseShotFilter(filters, key, "");
 }
 
 export function hasShotFilters(filters: ShotFilters): boolean {

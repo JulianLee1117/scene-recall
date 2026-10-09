@@ -280,9 +280,9 @@ table version; `GET /search/shot-facets` lists them. A recipe's
 `shot_filters` bind a `UnitScope` to its search execution: resident channels
 mask rows before top-k, database paths drop out-of-scope rows in
 `_rows_in_scope`, and the keyword and quote channels read deeper in
-proportion to the scope's narrowness. Browsing takes the same filters. In the
-Filter menu shot facets form a Shots group that toggles in place and applies
-with the film filters.
+proportion to the scope's narrowness. Browsing takes the same filters. The
+Filter menu shows Shots beside Movies; each shot facet starts at Any and picks
+one value (the API also takes several), applied with the film filters.
 
 With only movie scope supplied, `GET /library/scenes` browses selected published
 films in request order and source chronology using the usual bounded result

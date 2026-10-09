@@ -1413,18 +1413,30 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-count { display: inline-grid; min-width: 17px; height: 17px; place-items: center; border-radius: 50%; background: #c8a37323; color: #e2c49b; font-size: .64rem; }
 .toolbar-menu-chevron { flex: 0 0 auto; color: #857c6f; transition: transform .15s ease; }
 .toolbar-menu-trigger[aria-expanded="true"] .toolbar-menu-chevron { transform: rotate(180deg); }
-.toolbar-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; display: flex; width: 300px; max-width: calc(100vw - 32px); max-height: min(460px, calc(100dvh - 220px)); flex-direction: column; overflow: hidden; padding-top: 4px; border: 1px solid #2c2822; border-radius: 10px; background: #121110; box-shadow: 0 18px 44px rgba(0, 0, 0, .55); outline: none; animation: toolbar-menu-in .12s ease-out; }
-.search-hero.is-home .toolbar-menu { max-height: max(240px, min(460px, calc(100dvh - var(--home-top) - 200px))); }
+.toolbar-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; margin-left: var(--menu-nudge, 0px); display: flex; width: 330px; max-width: calc(100vw - 32px); max-height: min(460px, var(--menu-room, calc(100dvh - 220px))); flex-direction: column; overflow: hidden; padding-top: 4px; border: 1px solid #2c2822; border-radius: 10px; background: #121110; box-shadow: 0 18px 44px rgba(0, 0, 0, .55); outline: none; animation: toolbar-menu-in .12s ease-out; }
 @keyframes toolbar-menu-in { from { opacity: 0; transform: translateY(-3px); } }
 .toolbar-menu-list { display: flex; min-height: 0; padding: 0 4px 4px; flex-direction: column; }
+/* Filter: Movies and Shots side by side, so every filter shows at once in a
+   short menu. The Movies pane takes the Shots pane's height (size
+   containment), so opening one of its sections never resizes the menu. */
+.toolbar-menu.has-shots { width: 580px; }
+.toolbar-menu-panes { display: grid; min-height: 0; flex: 0 1 auto; grid-template-rows: minmax(0, 1fr); }
+.toolbar-menu.has-shots .toolbar-menu-panes { grid-template-columns: 250px minmax(0, 1fr); }
+.toolbar-menu-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+.toolbar-menu.has-shots .toolbar-menu-pane:first-child { contain: size; }
+.toolbar-menu.has-shots .toolbar-menu-pane:first-child > .toolbar-menu-list { flex: 1 1 auto; }
+.toolbar-menu.has-shots .toolbar-menu-row { flex: 1 0 auto; }
+.toolbar-menu-pane.is-shots { border-left: 1px solid #23201c; }
 .toolbar-menu-list.is-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
 /* Filter overview groups: Movies drill in, Shots toggle in place. */
 .toolbar-menu-heading { margin: 8px 10px 3px; color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .toolbar-menu-heading:first-child { margin-top: 2px; }
-.toolbar-menu-row, .toolbar-menu-option { display: flex; width: 100%; min-height: 32px; padding: 6px 10px; align-items: center; gap: 10px; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .76rem; text-align: left; cursor: pointer; }
+.toolbar-menu-row, .toolbar-menu-option { display: flex; width: 100%; min-height: 30px; padding: 5px 10px; align-items: center; gap: 10px; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .78rem; text-align: left; cursor: pointer; }
 .toolbar-menu-row:hover, .toolbar-menu-option:hover:not(:disabled) { background: #ffffff0a; }
-.toolbar-menu-row > span:first-child { flex: 0 0 auto; }
-.toolbar-menu-value { min-width: 0; flex: 1; overflow: hidden; color: #6f6a62; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+/* A Movies row: its label, with the chosen values (or Any) beneath. */
+.toolbar-menu-row { min-height: 46px; }
+.toolbar-menu-row-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.toolbar-menu-value { overflow: hidden; color: #6f6a62; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar-menu-value.is-set { color: #e2c49b; }
 .toolbar-menu-check { flex: 0 0 auto; color: var(--accent); }
 .toolbar-menu-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1433,7 +1445,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-option:disabled { color: #4d4943; cursor: default; }
 .toolbar-menu-option:disabled .toolbar-menu-tally { color: #3d3a35; }
 .toolbar-menu-head { display: flex; padding: 0 8px 0 4px; align-items: center; justify-content: space-between; }
-.toolbar-menu-back { display: inline-flex; min-height: 32px; padding: 6px 6px 6px 2px; align-items: center; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: #e8dece; font: inherit; font-size: .78rem; font-weight: 600; cursor: pointer; }
+.toolbar-menu-back { display: inline-flex; min-height: 30px; padding: 5px 6px 5px 2px; align-items: center; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: #e8dece; font: inherit; font-size: .78rem; font-weight: 600; cursor: pointer; }
 .toolbar-menu-back svg { color: #857c6f; }
 .toolbar-menu-back:hover svg { color: #e2c49b; }
 .toolbar-menu-link { padding: 4px 6px; border: 0; border-radius: 4px; background: transparent; color: #a99a84; font: inherit; font-size: .7rem; cursor: pointer; }
@@ -1452,19 +1464,28 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-apply.is-primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
 /* A setting: its label in a fixed column, its control filling the rest, so
    every control in both menus shares one left and right edge. */
-.toolbar-menu-setting { display: grid; min-height: 32px; padding: 2px 10px; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 8px; color: #d8d0c4; font-size: .76rem; }
-.toolbar-menu-segmented { display: flex; min-width: 0; padding: 2px; gap: 2px; border: 1px solid #262320; border-radius: 7px; background: #0b0b0b; }
-.toolbar-menu-segmented button { min-width: 0; min-height: 22px; flex: 1 1 auto; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: #8f887d; font: inherit; font-size: .7rem; white-space: nowrap; cursor: pointer; transition: background .15s ease, color .15s ease; }
-.toolbar-menu-segmented button:hover { color: #e8dece; }
-.toolbar-menu-segmented button[aria-checked="true"], .toolbar-menu-segmented button[aria-pressed="true"] { background: #221d17; color: var(--accent); }
+/* A setting: its label in a fixed column, then its choices from one shared
+   left edge, so every setting in both menus lines up. */
+.toolbar-menu-setting { display: grid; min-height: 32px; padding: 2px 10px; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 8px; color: #d8d0c4; font-size: .78rem; }
+/* Choices sit on a faint track that spans the row. The choice shows on a
+   quiet thumb; one that differs from the default turns gold, like a set
+   movie filter. */
+.toolbar-menu-choices { display: flex; min-width: 0; padding: 2px; gap: 2px; border-radius: 7px; background: #ffffff08; }
+.toolbar-menu-choices button { min-width: 0; min-height: 24px; flex: 1 1 auto; padding: 0 8px; overflow: hidden; border: 0; border-radius: 5px; background: transparent; color: #8f887d; font: inherit; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: background .15s ease, color .15s ease; }
+.toolbar-menu-choices button:hover { color: #e8dece; }
+.toolbar-menu-choices button[aria-checked="true"] { background: #ffffff14; box-shadow: 0 1px 2px #00000059; color: #e6ded1; }
+.toolbar-menu-choices button.is-set { background: #c8a3732e; color: #e2c49b; }
+/* Shot facets: Any is one column down the pane, the values share the rest. */
+.toolbar-menu-pane.is-shots .toolbar-menu-choices button { flex: 1 1 0; padding: 0 4px; }
+.toolbar-menu-pane.is-shots .toolbar-menu-choices button:first-child { flex: 0 0 44px; }
 .toolbar-menu-switch { position: relative; width: 26px; height: 15px; flex: 0 0 26px; border-radius: 999px; background: #2a2723; transition: background .15s ease; }
 .toolbar-menu-switch::after { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #8f887d; content: ""; transition: transform .15s ease, background .15s ease; }
-.toolbar-menu-toggle { display: flex; width: 100%; min-height: 32px; padding: 2px 10px; align-items: center; justify-content: space-between; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .76rem; text-align: left; cursor: pointer; }
+.toolbar-menu-toggle { display: flex; width: 100%; min-height: 32px; padding: 2px 10px; align-items: center; justify-content: space-between; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .78rem; text-align: left; cursor: pointer; }
 .toolbar-menu-toggle:hover { background: #ffffff0a; }
 .toolbar-menu-toggle[aria-checked="true"] .toolbar-menu-switch { background: #b88a4766; }
 .toolbar-menu-toggle[aria-checked="true"] .toolbar-menu-switch::after { background: #f0dcc0; transform: translateX(11px); }
 .toolbar-menu-row:focus-visible, .toolbar-menu-option:focus-visible, .toolbar-menu-toggle:focus-visible { outline: none; background: #ffffff0e; box-shadow: inset 0 0 0 1px var(--field-border-focus); }
-.toolbar-menu-back:focus-visible, .toolbar-menu-link:focus-visible, .toolbar-menu-segmented button:focus-visible, .toolbar-menu-apply:focus-visible { outline: 1px solid var(--field-border-focus); outline-offset: 1px; }
+.toolbar-menu-back:focus-visible, .toolbar-menu-link:focus-visible, .toolbar-menu-choices button:focus-visible, .toolbar-menu-apply:focus-visible { outline: 1px solid var(--field-border-focus); outline-offset: 1px; }
 /* Active settings join the refinements row: one chip each, every value visible. */
 .active-chip { display: inline-flex; min-width: 0; max-width: min(100%, 320px); align-items: stretch; border: 1px solid #403528; border-radius: 5px; background: #bb94590c; color: #d6c2a3; font-size: .72rem; transition: border-color .15s ease, background .15s ease; }
 .active-chip:hover { border-color: #7b6240; background: #bb945916; }
@@ -1480,7 +1501,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .result-toolbar .active-chip .active-chip-clear { width: 20px; }
 @media (max-width: 600px) {
   .toolbar-menu-root { position: static; }
-  .toolbar-menu { left: 50%; max-height: min(460px, calc(100dvh - 300px)); transform: translateX(-50%); animation: none; }
+  .toolbar-menu { left: 50%; transform: translateX(-50%); animation: none; }
+  .toolbar-menu.has-shots { width: min(360px, calc(100vw - 24px)); max-width: none; }
+  .toolbar-menu.has-shots .toolbar-menu-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: max-content; overflow-y: auto; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
+  .toolbar-menu.has-shots .toolbar-menu-pane:first-child { contain: none; }
+  .toolbar-menu-pane.is-shots { border-left: 0; }
+  .toolbar-menu-panes .toolbar-menu-list.is-scroll { overflow: visible; }
+  .toolbar-menu.is-section .toolbar-menu-pane.is-shots { display: none; }
+  .toolbar-menu.is-section .toolbar-menu-panes { grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+  .toolbar-menu.is-section .toolbar-menu-list.is-scroll { overflow-y: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   .toolbar-menu { animation: none; }

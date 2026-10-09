@@ -18,14 +18,19 @@ import {
 } from "@/lib/filmFilters";
 import {
   activeShotFacets,
+  chooseShotFilter,
   hasShotFilters,
   sameShotFilters,
-  toggleShotFilter,
   type ShotFacet,
   type ShotFilters,
 } from "@/lib/shotFilters";
 import { useDismiss } from "@/hooks/useDismiss";
+import { useMenuFit } from "@/hooks/useMenuFit";
+import ChoiceRow from "./ChoiceRow";
 import DirectionIcon from "./DirectionIcon";
+
+/** Every shot facet starts here: no narrowing. */
+const ANY = { value: "", label: "Any" };
 
 /** What the Filter menu shows: its overview, or one movie section's values. */
 export type FilterView = "menu" | FilmFacetKey;
@@ -92,11 +97,12 @@ export default function SearchFilter({
     onViewChange(null);
   };
   useDismiss(view !== null, rootRef, finish, triggerRef);
+  useMenuFit(view !== null, panelRef);
   // Closed from outside (going home) drops the draft; opening or changing
   // sections moves focus into the menu, unless a search field took it.
   useEffect(() => {
     if (view === null) setDraft(null);
-    else if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus();
+    else if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus({ preventScroll: true });
   }, [view]);
 
   const activeCount = activeFacets(applied.film).length + activeShotFacets(applied.shot, shotFacets).length;
@@ -138,53 +144,66 @@ export default function SearchFilter({
       </button>
 
       {view && (
-        <div ref={panelRef} id={panelId} className="toolbar-menu" role="dialog" aria-label="Filter the search" tabIndex={-1}>
-          {open ? (
-            <SectionList
-              key={open.key}
-              section={open}
-              onBack={() => onViewChange("menu")}
-              onToggle={(value) => edit((current) => ({ ...current, film: toggleFilter(current.film, open.key, value) }))}
-              onClear={() => edit((current) => ({ ...current, film: clearFacet(current.film, open.key) }))}
-            />
-          ) : (
-            <div className="toolbar-menu-list is-scroll">
-              <p className="toolbar-menu-heading">Movies</p>
-              {sections.map((section) => {
-                const picked = filters[section.key] ?? [];
-                return (
-                  <button key={section.key} type="button" className="toolbar-menu-row" onClick={() => onViewChange(section.key)}>
-                    <span>{section.label}</span>
-                    <span className={`toolbar-menu-value${picked.length ? " is-set" : ""}`}>
-                      {picked.length ? picked.join(", ") : "Any"}
-                    </span>
-                    <DirectionIcon name="chevron-right" className="toolbar-menu-chevron" size={12} />
-                  </button>
-                );
-              })}
-              {shotFacets.length > 0 && <p className="toolbar-menu-heading">Shots</p>}
-              {shotFacets.map((facet) => (
-                <div key={facet.key} className="toolbar-menu-setting">
-                  <span>{facet.label}</span>
-                  <div className="toolbar-menu-segmented" role="group" aria-label={facet.label}>
-                    {facet.values.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        aria-pressed={(shot[facet.key] ?? []).includes(option.value)}
-                        onClick={() => edit((current) => ({ ...current, shot: toggleShotFilter(current.shot, facet.key, option.value) }))}
-                      >
-                        {option.label}
+        <div
+          ref={panelRef}
+          id={panelId}
+          className={`toolbar-menu${shotFacets.length ? " has-shots" : ""}${open ? " is-section" : ""}`}
+          role="dialog"
+          aria-label="Filter the search"
+          tabIndex={-1}
+        >
+          {/* Movies and Shots side by side; a Movies section opens in its own pane. */}
+          <div className="toolbar-menu-panes">
+            <div className="toolbar-menu-pane">
+              {open ? (
+                <SectionList
+                  key={open.key}
+                  section={open}
+                  onBack={() => onViewChange("menu")}
+                  onToggle={(value) => edit((current) => ({ ...current, film: toggleFilter(current.film, open.key, value) }))}
+                  onClear={() => edit((current) => ({ ...current, film: clearFacet(current.film, open.key) }))}
+                />
+              ) : (
+                <div className="toolbar-menu-list is-scroll">
+                  <p className="toolbar-menu-heading">Movies</p>
+                  {sections.map((section) => {
+                    const picked = filters[section.key] ?? [];
+                    return (
+                      <button key={section.key} type="button" className="toolbar-menu-row" onClick={() => onViewChange(section.key)}>
+                        <span className="toolbar-menu-row-text">
+                          <span>{section.label}</span>
+                          <span className={`toolbar-menu-value${picked.length ? " is-set" : ""}`}>
+                            {picked.length ? picked.join(", ") : "Any"}
+                          </span>
+                        </span>
+                        <DirectionIcon name="chevron-right" className="toolbar-menu-chevron" size={12} />
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              ))}
+              )}
             </div>
-          )}
+            {shotFacets.length > 0 && (
+              <div className="toolbar-menu-pane is-shots">
+                <div className="toolbar-menu-list is-scroll">
+                  <p className="toolbar-menu-heading">Shots</p>
+                  {shotFacets.map((facet) => (
+                    <ChoiceRow
+                      key={facet.key}
+                      label={facet.label}
+                      options={[ANY, ...facet.values]}
+                      value={shot[facet.key]?.[0] ?? ANY.value}
+                      defaultValue={ANY.value}
+                      onChange={(value) => edit((current) => ({ ...current, shot: chooseShotFilter(current.shot, facet.key, value) }))}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           <footer className="toolbar-menu-foot">
             <span role="status">{summary}</span>
-            {!open && (hasFilters(filters) || hasShotFilters(shot)) && (
+            {(hasFilters(filters) || hasShotFilters(shot)) && (
               <button type="button" className="toolbar-menu-link" onClick={() => setDraft({ film: {}, shot: {} })}>
                 Clear all
               </button>

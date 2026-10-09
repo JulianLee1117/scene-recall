@@ -51,10 +51,11 @@ would keep a handful of results while better matches sat deeper.
   channels, which can only filter after ranking, read deeper in proportion to
   how narrow the scope is (capped at 25 times). Browsing a movie in source
   order or by highlights takes the same filters (`shot` query pairs).
-- **Interface.** The Filter menu adds a Shots group under Movies. Each shot
-  facet has a few values, so they toggle in place; choices join the same
-  draft and apply with Apply. Active shot filters show as chips beside the
-  result count.
+- **Interface.** The Filter menu shows Shots beside Movies, so every filter
+  is visible at once. Each shot facet is a row of choices that starts at Any
+  and picks one value (the API also accepts several, for agents); choices
+  join the same draft and apply with Apply. Active shot filters show as chips
+  beside the result count.
 
 ## Consequences
 
