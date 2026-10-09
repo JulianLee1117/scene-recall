@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import DirectionIcon from "@/components/DirectionIcon";
 import { acquisitionRequest, messageOf } from "./api";
 import { formatBytes, metadataFromFields } from "./model";
@@ -8,13 +8,15 @@ import { releaseMetadata } from "./releaseMetadata";
 import type { AcquisitionStatus, Release } from "./types";
 import styles from "./addFilmForm.module.css";
 
-type Source = "search" | "magnet" | "torrent";
+type Source = "search" | "magnet" | "torrent" | "downloaded";
 interface Props {
   status: AcquisitionStatus | null;
   busy: boolean;
   requestError?: string | null;
   onClearRequestError?: () => void;
   onQueue: (path: string, body: object | FormData) => Promise<boolean>;
+  downloadedFiles?: ReactNode;
+  initialSource?: "downloaded";
 }
 
 function ReleaseDetails({ release }: { release: Release }) {
@@ -30,8 +32,10 @@ function ReleaseSummary({ release }: { release: Release }) {
   </>;
 }
 
-export default function AddFilmForm({ status, busy, requestError, onClearRequestError, onQueue }: Props) {
-  const [source, setSource] = useState<Source>(() => status?.search.available ? "search" : "magnet");
+export default function AddFilmForm({ status, busy, requestError, onClearRequestError, onQueue, downloadedFiles, initialSource }: Props) {
+  const hasDownloadedFiles = downloadedFiles != null;
+  const [source, setSource] = useState<Source>(() => initialSource === "downloaded" && hasDownloadedFiles
+    ? "downloaded" : status?.search.available ? "search" : "magnet");
   const [title, setTitle] = useState("");
   const [year, setYear] = useState("");
   const [edition, setEdition] = useState("");
@@ -50,6 +54,7 @@ export default function AddFilmForm({ status, busy, requestError, onClearRequest
   const titleRef = useRef<HTMLInputElement>(null);
   const queryRef = useRef<HTMLInputElement>(null);
   const magnetRef = useRef<HTMLInputElement>(null);
+  const downloadedRef = useRef<HTMLButtonElement>(null);
   const resultsRef = useRef<HTMLFieldSetElement>(null);
   const edited = useRef({ title: false, year: false });
   const submitting = useRef(false);
@@ -63,6 +68,7 @@ export default function AddFilmForm({ status, busy, requestError, onClearRequest
     if (source === "search") queryRef.current?.focus({ preventScroll: true });
     if (source === "magnet") magnetRef.current?.focus({ preventScroll: true });
     if (source === "torrent") fileRef.current?.focus({ preventScroll: true });
+    if (source === "downloaded") downloadedRef.current?.focus({ preventScroll: true });
   }, [source]);
 
   useEffect(() => {
@@ -115,7 +121,7 @@ export default function AddFilmForm({ status, busy, requestError, onClearRequest
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || submitting.current) return;
+    if (busy || submitting.current || source === "downloaded") return;
     clearError();
     try {
       const metadata = metadataFromFields(title, year, edition);
@@ -148,18 +154,29 @@ export default function AddFilmForm({ status, busy, requestError, onClearRequest
     } finally { submitting.current = false; }
   }
 
-  const showConfirmation = source !== "search" || selected !== null;
+  const showConfirmation = source !== "downloaded" && (source !== "search" || selected !== null);
   const downloadAvailable = status?.downloader.configured;
+  const connectionNote = !status || source === "downloaded" ? null
+    : !status.downloader.configured ? "Set up downloads in Queue → Download settings before adding films online."
+    : !status.downloader.available ? "The downloader is unavailable. Check Queue → Download settings."
+    : !status.monitor.running ? "Downloads are queued until the monitor starts. See Queue → Download settings."
+    : null;
   const visibleError = error || requestError;
   return (
     <div className={styles.addForm} id="acquisition-add-form">
-      <div className={styles.sourceChoices} role="group" aria-label="Film source">
-        {([["search", "Search releases"], ["magnet", "Magnet link"], ["torrent", "Torrent file"]] as const).map(([value, label]) => (
-          <button key={value} type="button" aria-pressed={source === value} disabled={busy}
+      <div className={`${styles.sourceChoices} ${hasDownloadedFiles ? styles.hasDownloadedFiles : ""}`} role="group" aria-label="Film source">
+        {([
+          ["search", "Search releases"], ["magnet", "Magnet link"], ["torrent", "Torrent file"],
+          ...(hasDownloadedFiles ? [["downloaded", "Downloaded files"]] : []),
+        ] as [Source, string][]).map(([value, label]) => (
+          <button key={value} ref={value === "downloaded" ? downloadedRef : undefined} type="button" aria-pressed={source === value} disabled={busy}
             className={`films-button ${source === value ? "films-button--secondary" : "films-button--quiet"}`}
             onClick={() => { controllerRef.current?.abort(); setSearching(false); setSource(value); clearError(); }}>{label}</button>
         ))}
       </div>
+
+      {source === "downloaded" && downloadedFiles}
+      {connectionNote && <p className={styles.note} role="status">{connectionNote}</p>}
 
       {source === "search" && <div className={styles.search}>
         <form onSubmit={(event) => void search(event)} className={styles.searchForm}>

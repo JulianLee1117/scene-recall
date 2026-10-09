@@ -30,6 +30,7 @@ const nodes = (node) => node == null || typeof node !== "object" ? [] : Array.is
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const same = (a, b) => a && b && a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
 const status = { downloader: { configured: true, available: true }, search: { configured: true, available: true }, monitor: { running: true } };
+const emptyQueue = () => ({ status, items: [], busy: null, error: null, loading: false, clearMutationError() {}, refresh: async () => {}, execute: async () => true });
 
 function harness(file, renderEntry, modules = {}, globals = {}) {
   const hooks = [];
@@ -64,6 +65,23 @@ function harness(file, renderEntry, modules = {}, globals = {}) {
     input: (label) => nodes(nodes(output).find((node) => node.type === "label" && text(node).startsWith(label))).find((node) => node.type === "input"),
     dispose() { disposed = true; hooks.forEach((hook) => hook.cleanup?.()); },
   };
+}
+
+function libraryHarness({ queue = emptyQueue(), films = [], incoming = [], jobs = [], fetch: fetchOverride, onReconcile = () => {}, globals = {} } = {}) {
+  return harness("../../components/LibraryView.tsx", (exports) => exports.default(), {
+    "@/features/acquisition/AcquisitionPanel": { default: "AcquisitionPanel" },
+    "@/features/acquisition/AddFilmForm": { default: "AddFilmForm" },
+    "@/features/acquisition/useAcquisitionQueue": { useAcquisitionQueue: (reconcile) => { onReconcile(reconcile); return queue; } },
+    "@/features/acquisition/model": model,
+    "./LibraryStorage": { default: "LibraryStorage" },
+  }, {
+    fetch: fetchOverride ?? (async (url) => {
+      assert.ok(["/incoming", "/library", "/ingest/jobs"].includes(url));
+      return { ok: true, json: async () => url === "/incoming" ? incoming : url === "/library" ? films : jobs };
+    }),
+    window: { requestAnimationFrame: (callback) => callback(), setTimeout: () => 1, clearTimeout() {} },
+    ...globals,
+  });
 }
 
 test("film metadata requires an explicit valid title/year and preserves optional edition", () => {
@@ -224,6 +242,8 @@ for (const scenario of [
     };
     const app = harness("../../components/LibraryView.tsx", (exports) => exports.default(), {
       "@/features/acquisition/AcquisitionPanel": { default: "AcquisitionPanel" },
+      "@/features/acquisition/AddFilmForm": { default: "AddFilmForm" },
+      "@/features/acquisition/useAcquisitionQueue": { useAcquisitionQueue: emptyQueue },
       "@/features/acquisition/model": model,
       "./LibraryStorage": { default: "LibraryStorage" },
     }, {
@@ -240,7 +260,9 @@ for (const scenario of [
     });
     try {
       await app.flush();
-      app.button("Review & add").props.onClick(); await app.flush();
+      app.button("Add films").props.onClick(); await app.flush();
+      const downloaded = app.find((node) => node.type === "AddFilmForm").props.downloadedFiles;
+      nodes(downloaded).find((node) => node.type === "button" && text(node) === "Review & add").props.onClick(); await app.flush();
       if (scenario.candidates) {
         assert.equal(app.input("Automatic").props.checked, true);
         assert.match(text(app.state), /Check dialogue coverage/);
@@ -251,21 +273,27 @@ for (const scenario of [
       }
       app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); await app.flush();
       assert.equal(calls.length, 0, "automatic subtitles do not waive source-move confirmation");
+      assert.ok(app.find((node) => node.type === "AddFilmForm"), "validation keeps the source form available");
       app.input("Torrenting and seeding are finished.").props.onChange({ target: { checked: true } }); await app.flush();
       app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); await app.flush();
       assert.equal(calls.length, 1);
       assert.deepEqual(calls[0].subtitle_decision, scenario.expected);
       assert.equal(calls[0].confirm_finished, true);
       assert.equal(calls[0].ingest, true);
+      assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined);
+      assert.equal(app.find((node) => node.props?.id === "films-queue-view").props["aria-pressed"], true);
     } finally { app.dispose(); }
   });
 }
 
 test("storage refresh waits for the catalog and only invalidates on changed data or explicit Refresh", async () => {
   let films = [{ path: "V:/films/Film.mkv", filename: "Film.mkv", title: "Film", size_gb: 2, status: "indexed", film_id: "film", duration: 90 }];
+  let reconcile;
   const requests = [];
   const app = harness("../../components/LibraryView.tsx", (exports) => exports.default(), {
     "@/features/acquisition/AcquisitionPanel": { default: "AcquisitionPanel" },
+    "@/features/acquisition/AddFilmForm": { default: "AddFilmForm" },
+    "@/features/acquisition/useAcquisitionQueue": { useAcquisitionQueue: (onLibraryChange) => { reconcile = onLibraryChange; return emptyQueue(); } },
     "@/features/acquisition/model": model,
     "./LibraryStorage": { default: "LibraryStorage" },
   }, {
@@ -276,29 +304,29 @@ test("storage refresh waits for the catalog and only invalidates on changed data
     },
   });
   const storage = () => app.find((node) => node.type === "LibraryStorage");
-  const queue = () => app.find((node) => node.type === "AcquisitionPanel");
   try {
     assert.equal(storage(), undefined, "storage mounts after the initial catalog completes");
     await app.flush();
     const initialKey = storage().props.refreshKey;
     assert.equal(initialKey, 0, "the first storage read may reuse the backend cache");
 
-    await queue().props.onLibraryChange(); await app.flush();
+    await reconcile(); await app.flush();
     assert.equal(storage().props.refreshKey, initialKey, "late acquisition reconciliation does not force an identical catalog scan");
 
     films = [...films, { ...films[0], path: "V:/films/New film.mkv", filename: "New film.mkv", title: "New film", film_id: "new-film" }];
-    await queue().props.onLibraryChange(); await app.flush();
+    await reconcile(); await app.flush();
     assert.equal(storage().props.refreshKey, initialKey + 1, "a changed library invalidates its storage measurement");
     assert.match(text(app.state), /New film/);
 
-    await queue().props.onRefresh(); await app.flush();
+    app.find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith("Queue")).props.onClick(); await app.flush();
+    app.button("Refresh").props.onClick(); await app.flush();
     assert.equal(storage().props.refreshKey, initialKey + 2, "an explicit Refresh measures storage even when catalog data is unchanged");
     assert.equal(requests.length, 12);
   } finally { app.dispose(); }
 });
 
-test("the film queue hides completed history while preserving active work, failures, cancellations and library records", async () => {
-  const received = [], calls = [];
+test("the film queue hides completed history while preserving active work, failures and cancellations", async () => {
+  const calls = [];
   const queue = {
     status, busy: null, error: null, loading: false,
     items: [
@@ -309,9 +337,8 @@ test("the film queue hides completed history while preserving active work, failu
     ],
     execute: async (...args) => { calls.push(args); return true; },
   };
-  const onItemsChange = (items) => received.push(items);
-  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {}, onItemsChange }), {
-    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
+  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ queue }), {
+    "./AcquisitionReview": { default: "AcquisitionReview" },
   });
   try {
     assert.doesNotMatch(text(app.state), /History|Completed film/);
@@ -319,14 +346,15 @@ test("the film queue hides completed history while preserving active work, failu
     assert.match(text(app.state), /Downloading film/);
     assert.match(text(app.state), /Failed film/);
     assert.match(text(app.state), /Connection lost/);
-    assert.equal(received[0], queue.items, "hidden history still reaches the library reconciliation callback");
     assert.equal(queue.items.length, 4);
     // A cancelled acquisition keeps its info_hash reserved forever, so its
     // only way back is retrying this same record, not re-adding it.
     const tryAgainButtons = nodes(app.state).filter((node) => node.type === "button" && text(node) === "Try again");
     assert.equal(tryAgainButtons.length, 2);
-    tryAgainButtons[0].props.onClick(); await app.flush();
-    tryAgainButtons[1].props.onClick(); await app.flush();
+    for (const title of ["Stopped film", "Failed film"]) {
+      const row = app.find((node) => node.type === "article" && text(node).includes(title));
+      nodes(row).find((node) => node.type === "button" && text(node) === "Try again").props.onClick(); await app.flush();
+    }
     assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
       ["cancelled", "/cancelled/retry", { revision: 3 }],
       ["failed", "/failed/retry", { revision: 7 }],
@@ -355,8 +383,8 @@ test("collapsed queue rows keep stalled downloads, errors and recovery actions v
       { id: "review", title: "Review film", year: 1983, status: "needs_review", review: {} },
     ],
   };
-  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {} }), {
-    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
+  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ queue }), {
+    "./AcquisitionReview": { default: "AcquisitionReview" },
   });
   try {
     const collapsed = collapsedContent(app.state);
@@ -366,6 +394,28 @@ test("collapsed queue rows keep stalled downloads, errors and recovery actions v
     assert.match(text(collapsed), /Connection lost/);
     const buttons = nodes(collapsed).filter((node) => node.type === "button").map(text);
     for (const label of ["Review", "Try again", "Dismiss", "Cancel"]) assert.ok(buttons.includes(label), label);
+  } finally { app.dispose(); }
+});
+
+test("the queue surfaces attention first and orders managed and manual waiting films together", () => {
+  const jobs = [
+    { job_id: "later", path: "later.mkv", filename: "Later.mkv", status: "queued", queue_position: 2 },
+    { job_id: "next", path: "next.mkv", filename: "Next.mkv", status: "queued", queue_position: 1 },
+    { job_id: "running", path: "running.mkv", filename: "Running.mkv", status: "running" },
+  ];
+  const queue = { ...emptyQueue(), items: [
+    { id: "later", title: "Later", year: 1980, status: "ingest_queued", ingest_job_id: "later" },
+    { id: "cancelled", title: "Cancelled", year: 1981, status: "cancelled" },
+    { id: "failed", title: "Failed", year: 1982, status: "failed" },
+  ] };
+  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ queue, jobs }), {
+    "./AcquisitionReview": { default: "AcquisitionReview" },
+  });
+  try {
+    const headings = nodes(app.state).filter((node) => node.type === "article").map((row) => text(nodes(row).find((node) => node.type === "h3")));
+    assert.deepEqual(headings.map((heading) => heading.match(/^(Failed|Running|Next|Later|Cancelled)/)?.[0]), ["Failed", "Running", "Next", "Later", "Cancelled"]);
+    assert.match(headings[2], /Next in queue/);
+    assert.match(headings[3], /Waiting · #2/);
   } finally { app.dispose(); }
 });
 
@@ -379,14 +429,16 @@ test("Dismiss forgets a cancelled or failed row, freeing its release for a fresh
     ],
     execute: async (...args) => { calls.push(args); return true; },
   };
-  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {} }), {
-    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
+  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ queue }), {
+    "./AcquisitionReview": { default: "AcquisitionReview" },
   });
   try {
     const dismissButtons = nodes(app.state).filter((node) => node.type === "button" && text(node) === "Dismiss");
     assert.equal(dismissButtons.length, 2);
-    dismissButtons[0].props.onClick(); await app.flush();
-    dismissButtons[1].props.onClick(); await app.flush();
+    for (const title of ["Stopped film", "Failed film"]) {
+      const row = app.find((node) => node.type === "article" && text(node).includes(title));
+      nodes(row).find((node) => node.type === "button" && text(node) === "Dismiss").props.onClick(); await app.flush();
+    }
     assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
       ["cancelled", "/cancelled/dismiss", { revision: 3 }],
       ["failed", "/failed/dismiss", { revision: 7 }],
@@ -405,8 +457,8 @@ test("cancel accepts failed acquisitions, reports pending cleanup, and keeps the
       return true;
     },
   };
-  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {} }), {
-    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
+  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ queue }), {
+    "./AcquisitionReview": { default: "AcquisitionReview" },
   });
   try {
     const cancel = app.button("Cancel");
@@ -438,18 +490,23 @@ test("cancel accepts failed acquisitions, reports pending cleanup, and keeps the
 });
 
 test("a rejected cancellation does not announce acceptance or cleanup", async () => {
+  let showError;
   const queue = {
     status, busy: null, error: null, loading: false,
     items: [{ id: "film", revision: 1, title: "Film", year: 1980, status: "downloading" }],
     execute: async () => { queue.error = "Queue item changed. Refresh and try again."; return false; },
   };
-  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {} }), {
-    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
+  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ queue, showError }), {
+    "./AcquisitionReview": { default: "AcquisitionReview" },
   });
   try {
     app.button("Cancel").props.onClick(); await app.flush(); app.render();
     assert.match(text(app.state), /Queue item changed/);
     assert.doesNotMatch(text(app.state), /Cancellation requested|were cleaned up/);
+    showError = false; app.render();
+    assert.doesNotMatch(text(app.state), /Queue item changed/, "an open Add films form owns the shared error");
+    showError = true; app.render();
+    assert.match(text(app.state), /Queue item changed/, "hiding the duplicate error does not clear it");
   } finally { app.dispose(); }
 });
 
@@ -457,8 +514,8 @@ test("closing review restores keyboard focus without scrolling and setup disting
   const focus = [];
   const trigger = { isConnected: true, focus: (options) => focus.push(options) };
   const queue = { status, items: [{ id: "review", revision: 1, title: "Film", year: 1968, status: "needs_review", review: {} }], busy: null, error: null, loading: false };
-  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {} }), {
-    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
+  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ queue }), {
+    "./AcquisitionReview": { default: "AcquisitionReview" },
   }, { window: { requestAnimationFrame: (callback) => callback() } });
   try {
     app.button("Review").props.onClick({ currentTarget: trigger }); await app.flush();
@@ -471,14 +528,20 @@ test("closing review restores keyboard focus without scrolling and setup disting
 
 test("explicit Refresh updates both downloads and existing ingestion jobs and waits for both", async () => {
   const download = deferred(), library = deferred();
-  const calls = [];
-  const queue = { status, items: [], busy: null, error: null, loading: false, refresh: () => { calls.push("download"); return download.promise; } };
-  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {}, onRefresh: () => { calls.push("library"); return library.promise; } }), {
-    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
-  });
+  const calls = []; let initial = true;
+  const queue = { ...emptyQueue(), refresh: () => { calls.push("download"); return download.promise; } };
+  const app = libraryHarness({ queue, fetch: async (url) => {
+    if (!initial) {
+      calls.push(url);
+      if (url === "/library") await library.promise;
+    }
+    return { ok: true, json: async () => [] };
+  } });
   try {
+    await app.flush(); initial = false;
+    app.find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith("Queue")).props.onClick(); await app.flush();
     app.button("Refresh").props.onClick(); await app.flush();
-    assert.deepEqual(calls, ["download", "library"]);
+    assert.deepEqual(calls.slice().sort(), ["download", "/incoming", "/library", "/ingest/jobs"].sort());
     download.resolve(); await app.flush();
     assert.equal(app.button("Refreshing…").props.disabled, true);
     library.resolve(); await app.flush();
@@ -486,26 +549,137 @@ test("explicit Refresh updates both downloads and existing ingestion jobs and wa
   } finally { app.dispose(); }
 });
 
-test("adding returns to the queue only after success and keeps failures beside the form", async () => {
-  const focus = [], scroll = [];
-  let succeeds = false;
-  const queue = { status, items: [], busy: null, error: null, loading: false, execute: async () => succeeds };
-  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {} }), {
-    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
-  }, { window: { requestAnimationFrame: (callback) => callback() } });
+test("Films defaults to Library, keeps one queue mounted, and does not switch views on background updates", async () => {
+  const queue = emptyQueue();
+  const app = libraryHarness({ queue });
+  const switcher = (name) => app.find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith(name));
+  const queueContainer = () => app.find((node) => node.props?.hidden !== undefined && nodes(node).some((child) => child.type === "AcquisitionPanel"));
   try {
-    app.find((node) => node.type === "h2").props.ref.current = { focus: (value) => focus.push(value), scrollIntoView: (value) => scroll.push(value) };
+    await app.flush();
+    assert.equal(switcher("Library").props["aria-pressed"], true);
+    assert.equal(queueContainer().props.hidden, true);
+    assert.equal(app.find((node) => node.type === "AcquisitionPanel").props.queue, queue);
+    switcher("Queue").props.onClick(); await app.flush();
+    assert.equal(queueContainer().props.hidden, false);
+    switcher("Library").props.onClick(); await app.flush();
+    queue.items = [{ id: "new", title: "New film", year: 1980, status: "downloading" }];
+    app.render(); await app.flush();
+    assert.equal(switcher("Library").props["aria-pressed"], true);
+    assert.equal(queueContainer().props.hidden, true);
+    const panels = nodes(app.state).filter((node) => node.type === "AcquisitionPanel");
+    assert.equal(panels.length, 1);
+    assert.equal(panels[0].props.queue, queue, "the queue controller survives every view change");
+  } finally { app.dispose(); }
+});
+
+test("workspace counts reconcile managed jobs once and keep attention visible from Library", async () => {
+  const films = [
+    { path: "V:/films/Ready.mkv", filename: "Ready.mkv", title: "Ready", status: "indexed" },
+    { path: "V:/films/Managed.mkv", filename: "Managed.mkv", title: "Managed", status: "not_indexed" },
+    { path: "V:/films/Manual.mkv", filename: "Manual.mkv", title: "Manual", status: "not_indexed" },
+  ];
+  const jobs = [
+    { job_id: "managed", path: films[1].path, filename: films[1].filename, status: "running" },
+    { job_id: "manual", path: films[2].path, filename: films[2].filename, status: "queued", queue_position: 1 },
+  ];
+  const queue = { ...emptyQueue(), items: [
+    { id: "managed", title: "Managed", status: "ingesting", ingest_job_id: "managed", film_path: films[1].path },
+    { id: "failed", title: "Failed", status: "failed", error: "Download failed" },
+    { id: "review", title: "Review", status: "needs_review", review: {} },
+    { id: "ready", title: "Ready", status: "ready", film_path: films[0].path },
+  ] };
+  const app = libraryHarness({ queue, films, jobs });
+  const switcher = (name) => app.find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith(name));
+  try {
+    await app.flush();
+    assert.match(text(switcher("Library")), /Library\s*1/);
+    assert.match(text(switcher("Queue")), /Queue\s*3/);
+    assert.match(text(switcher("Queue")), /2.*attention/i);
+    queue.items = queue.items.filter((item) => !["failed", "review"].includes(item.id));
+    app.render(); await app.flush();
+    assert.match(text(switcher("Queue")), /Queue\s*2/);
+    assert.doesNotMatch(text(switcher("Queue")), /attention/i);
+    assert.equal(switcher("Library").props["aria-pressed"], true);
+  } finally { app.dispose(); }
+});
+
+test("a manual preparation failure signals Library without moving the selected Queue view", async () => {
+  const films = [
+    { path: "V:/films/Manual.mkv", filename: "Manual.mkv", title: "Manual", status: "not_indexed" },
+    { path: "V:/films/Managed.mkv", filename: "Managed.mkv", title: "Managed", status: "not_indexed" },
+  ];
+  let jobs = [{ job_id: "manual", path: films[0].path, filename: films[0].filename, status: "running" }];
+  let reconcile;
+  const queue = { ...emptyQueue(), items: [
+    { id: "managed", title: "Managed", status: "failed", error: "Download failed", film_path: films[1].path },
+  ] };
+  const app = libraryHarness({ queue, onReconcile: (callback) => { reconcile = callback; }, fetch: async (url) => ({
+    ok: true, json: async () => url === "/library" ? films : url === "/ingest/jobs" ? jobs : [],
+  }) });
+  const switcher = (name) => app.find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith(name));
+  try {
+    await app.flush();
+    assert.match(text(switcher("Library")), /Library\s*0/);
+    assert.doesNotMatch(text(switcher("Library")), /attention/i);
+    switcher("Queue").props.onClick(); await app.flush();
+    jobs = [{ ...jobs[0], status: "error", error: "Scene preparation failed" }];
+    await reconcile(); await app.flush();
+    assert.equal(switcher("Queue").props["aria-pressed"], true, "a background failure never changes the selected view");
+    assert.match(text(switcher("Library")), /Library\s*1/);
+    assert.match(text(switcher("Library")), /1 needs attention/);
+    assert.match(text(switcher("Queue")), /1 needs attention/, "Queue retains only its managed failure");
+    assert.doesNotMatch(text(switcher("Queue")), /2 need attention/);
+    const library = app.find((node) => node.props?.id === "films-library-panel");
+    assert.equal(library.props.hidden, true);
+    const rows = nodes(library).filter((node) => node.type === "article");
+    assert.equal(rows.length, 1);
+    assert.match(text(rows[0]), /Manual.*Scene preparation failed/);
+    assert.ok(nodes(rows[0]).some((node) => node.type === "button" && text(node) === "Try again"));
+    switcher("Library").props.onClick(); await app.flush();
+    assert.equal(app.find((node) => node.props?.id === "films-library-panel").props.hidden, false);
+  } finally { app.dispose(); }
+});
+
+test("downloaded files stay behind Add films and their shortcut opens that source", async () => {
+  const candidate = { relative_path: "Film.mkv", filename: "Film.mkv", suggested_filename: "Film (1985).mkv", suggested_title: "Film", suggested_year: 1985, size_gb: 1, subtitle_review_candidates: [] };
+  const app = libraryHarness({ incoming: [candidate] });
+  try {
+    await app.flush();
+    assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined);
+    assert.equal(app.button("Review & add"), undefined);
+    app.button("1 downloaded file to review").props.onClick(); await app.flush();
+    const form = app.find((node) => node.type === "AddFilmForm");
+    assert.equal(form.props.initialSource, "downloaded");
+    assert.match(text(form.props.downloadedFiles), /Film\.mkv/);
+    assert.ok(nodes(form.props.downloadedFiles).some((node) => node.type === "button" && text(node) === "Review & add"));
+  } finally { app.dispose(); }
+});
+
+test("adding returns to the queue only after success and keeps failures beside the form", async () => {
+  const focus = [], scroll = [], calls = [];
+  let succeeds = false;
+  const queue = { ...emptyQueue(), execute: async (...args) => { calls.push(args); return succeeds; } };
+  const app = libraryHarness({ queue });
+  const switcher = (name) => app.find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith(name));
+  try {
+    await app.flush();
+    switcher("Queue").props.ref.current = { focus: (value) => focus.push(value), scrollIntoView: (value) => scroll.push(value) };
     app.button("Add films").props.onClick(); await app.flush();
     queue.error = "A film with this name is already queued.";
     assert.equal(await app.find((node) => node.type === "AddFilmForm").props.onQueue("/release", {}), false);
     app.render(); await app.flush();
     assert.equal(app.find((node) => node.type === "AddFilmForm").props.requestError, queue.error);
+    assert.equal(app.find((node) => node.type === "AcquisitionPanel").props.showError, false);
+    assert.equal(switcher("Library").props["aria-pressed"], true);
     assert.equal(focus.length, 0);
     succeeds = true; queue.error = null;
     assert.equal(await app.find((node) => node.type === "AddFilmForm").props.onQueue("/release", {}), true);
     await app.flush();
     assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined);
-    assert.equal(focus.length, 1); assert.equal(scroll[0].block, "nearest");
+    assert.equal(app.find((node) => node.type === "AcquisitionPanel").props.showError, true);
+    assert.equal(switcher("Queue").props["aria-pressed"], true);
+    assert.equal(focus.length, 1); assert.equal(focus[0].preventScroll, true); assert.equal(scroll[0].block, "nearest");
+    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["add", "/release", {}], ["add", "/release", {}]]);
     assert.match(text(app.state), /Film added to the queue/);
   } finally { app.dispose(); }
 });

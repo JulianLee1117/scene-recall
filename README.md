@@ -850,8 +850,8 @@ already downloaded yourself. Selected SRTs remain beside their films as reusable
 dialogue evidence. The configured paths can change; `state` is internal app
 storage and the evidence archive is not an additional ingestion stage.
 
-The **Films** header shows a compact storage total, its split across drives,
-and films versus supporting data. Hover the supporting total for its breakdown:
+The **Films** header shows a compact storage total. Expand it for the split across
+drives and films versus supporting data. Hover the supporting total for its breakdown:
 derived media, indexes, downloads, release archives, saved app data and the
 configured models' local caches. Refresh storage independently with its small
 refresh button; catalog refreshes also update it. These are deduplicated file
@@ -871,7 +871,8 @@ as the torrent client's download directory. Keep each finalized movie file
 directly inside `films` because source discovery is not recursive.
 
 For manually downloaded releases, download and seed in `incoming`. After seeding is finished and the torrent is
-removed, open **Films** in the frontend. **Review & add** suggests the main
+removed, open **Films → Add films → Downloaded files** in the frontend.
+**Review & add** suggests the main
 video in each release (the largest supported file), a title, year, and final
 `Title (Year) [Edition].ext` filename. Confirm that downloading/seeding has
 finished, then add it to the library and optionally queue ingestion. The move
@@ -922,14 +923,20 @@ the title as a quoted phrase in the same movie category. Some indexers return
 empty broad searches even when that phrase finds the film. If both attempts
 are empty, try the title and release year; a magnet bypasses release search.
 
-After a successful addition, the form closes and **Film queue** shows progress.
-Downloads and existing ingestion jobs share this view, with actual queue
-positions and plain preparation stages. Other waiting films, technical details
-and download settings can be expanded when needed. Completed and cancelled
-acquisitions do not add a History dropdown; their durable records are retained.
-An active film appears once in the queue; completed films appear in **Library**,
-which can be filtered by title. **Refresh** updates both downloads and ingestion
-status. Manually downloaded files remain available under **From incoming**.
+**Films** opens to **Library**, with a title filter and a **Queue** view beside it.
+The queue's active count and any items needing attention remain visible in either
+view; switching views keeps live updates running. After a successful addition,
+the form closes and **Queue** shows progress. Downloads and existing ingestion
+jobs share this view, with items needing attention first, then work in progress
+and waiting films in queue order. Row details and download settings expand when
+needed. Completed acquisitions leave the queue; failed and cancelled ones retain
+their recovery actions without a separate History dropdown. Durable records are
+retained. An active film appears once in the queue; completed films appear in
+**Library**. **Refresh** in Queue updates both downloads and ingestion status.
+Manually downloaded files are under **Add films → Downloaded files**, with a
+shortcut on the page when files are available to review. Library counts listed
+films; Queue counts active work, with attention indicators shown separately.
+These counts do not add up to a separate file total.
 
 Enable qBittorrent's Web UI, bind its management interface to `127.0.0.1`, keep
 authentication enabled and disable external-program completion hooks. Connect

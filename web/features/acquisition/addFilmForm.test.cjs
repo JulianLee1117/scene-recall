@@ -171,6 +171,85 @@ test("source changes abort pending searches so late results cannot replace the c
   } finally { app.dispose(); }
 });
 
+test("downloaded files opens independently of downloader availability and only when provided", () => {
+  const downloadedFiles = { type: "section", props: { children: "Incoming files to review" } };
+  const app = harness({ initialProps: {
+    status: { ...status, downloader: { configured: false, available: false } },
+    initialSource: "downloaded", downloadedFiles,
+  } });
+  const withoutSlot = harness({ initialProps: { initialSource: "downloaded" } });
+  try {
+    assert.equal(app.button("Downloaded files").props["aria-pressed"], true);
+    assert.match(text(app.state), /Incoming files to review/);
+    assert.equal(app.find((node) => node.type === "form"), undefined);
+    assert.equal(app.input("Film title"), undefined);
+    assert.equal(app.button("Queue film"), undefined);
+    assert.equal(app.focused.length, 1);
+    assert.equal(app.focused[0].type, "button", "incoming shortcut transfers focus to the selected source button");
+    assert.equal(app.focused[0].options.preventScroll, true);
+    assert.equal(withoutSlot.button("Downloaded files"), undefined);
+    assert.ok(withoutSlot.input("Search movie releases"), "missing incoming content retains the usual source");
+  } finally { app.dispose(); withoutSlot.dispose(); }
+});
+
+test("switching to downloaded files cancels searches, clears errors and preserves deliberate download edits", async () => {
+  const pending = deferred(); let signal, queued = 0;
+  const app = harness({
+    request: (_url, init) => { signal = init.signal; return pending.promise; },
+    onQueue: async () => { queued++; return true; },
+    initialProps: {
+      downloadedFiles: { type: "section", props: { children: "Incoming files to review" } },
+      onClearRequestError: () => { void app.update({ requestError: null }); },
+    },
+  });
+  try {
+    await app.search();
+    await app.update({ requestError: "Previous download failed." });
+    const focusCount = app.focused.length;
+    app.button("Downloaded files").props.onClick(); await app.flush();
+    assert.equal(signal.aborted, true);
+    assert.equal(app.find((node) => node.props?.role === "alert"), undefined);
+    assert.equal(app.focused.length, focusCount + 1);
+    assert.equal(app.focused.at(-1).type, "button", "source selection keeps focus on the activated source button");
+    pending.resolve({ results: releases }); await app.flush();
+    assert.match(text(app.state), /Incoming files to review/);
+    app.button("Search releases").props.onClick(); await app.flush();
+    assert.equal(app.find((node) => node.props?.["data-release-id"]), undefined);
+    app.button("Magnet link").props.onClick(); await app.flush();
+    app.input("Magnet link").props.onChange({ target: { value: "magnet:?xt=urn:btih:example" } });
+    app.input("Film title").props.onChange({ target: { value: "Corrected title" } }); await app.flush();
+    app.button("Downloaded files").props.onClick(); await app.flush();
+    assert.equal(app.button("Queue film"), undefined);
+    app.button("Magnet link").props.onClick(); await app.flush();
+    assert.equal(app.input("Film title").props.value, "Corrected title");
+    assert.equal(app.input("Magnet link").props.value, "magnet:?xt=urn:btih:example");
+    assert.equal(queued, 0, "browsing incoming files never submits a download");
+  } finally { app.dispose(); }
+});
+
+test("online sources explain download setup and connection issues without blocking downloaded files", async () => {
+  for (const [connection, message, disabled] of [
+    [{ ...status, downloader: { configured: false, available: false } }, /Set up downloads/, true],
+    [{ ...status, downloader: { configured: true, available: false } }, /downloader is unavailable/, false],
+    [{ ...status, monitor: { running: false } }, /queued until the monitor starts/, false],
+  ]) {
+    const app = harness({ initialProps: {
+      status: connection,
+      downloadedFiles: { type: "section", props: { children: "Incoming files to review" } },
+    } });
+    try {
+      assert.match(text(app.state), message);
+      assert.match(text(app.state), /Queue → Download settings/);
+      app.button("Magnet link").props.onClick(); await app.flush();
+      assert.equal(app.button("Queue film").props.disabled, disabled);
+      app.button("Downloaded files").props.onClick(); await app.flush();
+      assert.doesNotMatch(text(app.state), /Queue → Download settings/);
+      assert.match(text(app.state), /Incoming files to review/);
+      assert.equal(app.button("Downloaded files").props.disabled, false);
+    } finally { app.dispose(); }
+  }
+});
+
 test("empty release searches suggest a title and year and clear that guidance when edited", async () => {
   const calls = [];
   const app = harness({ request: async (url) => { calls.push(url); return { results: [] }; } });

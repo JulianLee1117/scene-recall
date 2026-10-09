@@ -105,8 +105,9 @@ test("initial scanning never fabricates a size, polls cached status, and stops o
     const breakdown = app.find((node) => node.props?.title?.includes("Downloads:"));
     assert.match(breakdown.props.title, /Downloads: 12 GB/);
     assert.match(breakdown.props.title, /Release archives: 4 GB/);
-    assert.match(app.find((node) => node.type === "strong").props.title, /Combined file sizes; shared files counted once/);
-    assert.match(app.find((node) => node.type === "strong").props.title, /Excludes: unrelated model cache entries/);
+    const measurement = app.find((node) => node.props?.title?.includes("Combined file sizes"));
+    assert.match(measurement.props.title, /Combined file sizes; shared files counted once/);
+    assert.match(measurement.props.title, /Excludes: unrelated model cache entries/);
     assert.match(app.find((node) => node.props?.title?.includes("V: 796")).props.title, /Free space unavailable/);
   } finally { app.dispose(); }
 });
@@ -116,6 +117,7 @@ test("an initial request failure stays local, exposes retry, and never starts a 
   try {
     app.requests[0].resolve({ ok: false, status: 503 }); await app.flush();
     assert.match(app.text, /Storage unavailable/);
+    assert.equal(text(app.find((node) => node.type === "summary")), "Storage unavailable");
     assert.doesNotMatch(app.text, /0 B/);
     assert.equal(app.timers.size, 0);
     assert.equal(app.refresh().props.disabled, false);
@@ -123,6 +125,29 @@ test("an initial request failure stays local, exposes retry, and never starts a 
     assert.equal(app.requests[1].url, "/library/storage?refresh=true");
     app.resolve(1, "ready", snapshot()); await app.flush();
     assert.match(app.text, /820 GB storage/);
+  } finally { app.dispose(); }
+});
+
+test("storage starts collapsed with only its total, while measurement details and refresh stay inside", async () => {
+  const app = setup();
+  try {
+    app.resolve(0, "ready", snapshot()); await app.flush();
+    const disclosure = app.find((node) => node.type === "details");
+    const summary = app.find((node) => node.type === "summary");
+    assert.ok(disclosure);
+    assert.equal(disclosure.props.open, undefined);
+    assert.equal(text(summary), "820 GB storage");
+    assert.equal(nodes(summary).some((node) => node.type === "button"), false);
+    assert.equal(app.refresh().props["aria-label"], "Refresh storage measurement");
+    assert.match(app.text, /100 GB free · 1 TB capacity/);
+    assert.doesNotMatch(app.text, /Shared files counted once|Excludes:/i);
+    assert.match(app.text, /Measured .* · 300 files/);
+    assert.equal(nodes(summary).some((node) => node.props?.title?.includes("Shared files") || node.props?.["aria-label"]?.includes("Shared files")), false);
+
+    app.refresh().props.onClick(); await app.flush();
+    app.resolve(1, "error", null, "Scan failed"); await app.flush();
+    assert.match(text(app.find((node) => node.type === "summary")), /820 GB storageUpdate unavailable/);
+    assert.match(app.text, /Scan failed/);
   } finally { app.dispose(); }
 });
 
@@ -160,6 +185,8 @@ test("incomplete measurements disclose lower bounds and unmount cancels pending 
   app.resolve(0, "ready", partial); await app.flush();
   assert.match(app.text, /At least 820 GB storage/);
   assert.match(app.text, /Some locations unavailable/);
+  assert.match(text(app.find((node) => node.type === "summary")), /At least 820 GB storageSome locations unavailable/);
+  assert.match(app.find((node) => node.props?.title?.includes("Combined file sizes")).props["aria-label"], /V:\/incoming: Access denied/);
   assert.match(app.text, /Supporting ≥ 40 GB/);
   app.refresh().props.onClick(); await app.flush();
   app.resolve(1, "scanning", partial); await app.flush();

@@ -18,8 +18,9 @@ import type {
   SubtitleImportDecision,
 } from "@/types/api";
 import AcquisitionPanel from "@/features/acquisition/AcquisitionPanel";
-import type { Acquisition } from "@/features/acquisition/types";
-import { belongsInLibrary } from "@/features/acquisition/model";
+import AddFilmForm from "@/features/acquisition/AddFilmForm";
+import { useAcquisitionQueue } from "@/features/acquisition/useAcquisitionQueue";
+import { belongsInLibrary, independentJobs, isActive } from "@/features/acquisition/model";
 import styles from "./libraryView.module.css";
 import chrome from "./pageChrome.module.css";
 import LibraryStorage from "./LibraryStorage";
@@ -106,7 +107,9 @@ export default function LibraryView() {
   const [films, setFilms] = useState<LibraryFilm[]>([]);
   const [incoming, setIncoming] = useState<IncomingFilm[]>([]);
   const [jobs, setJobs] = useState<IngestJob[]>([]);
-  const [acquisitions, setAcquisitions] = useState<Acquisition[]>([]);
+  const [view, setView] = useState<"library" | "queue">("library");
+  const [adding, setAdding] = useState<"online" | "downloaded" | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [storageRevision, setStorageRevision] = useState(0);
@@ -135,6 +138,24 @@ export default function LibraryView() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const yearInputRef = useRef<HTMLInputElement>(null);
   const confirmationRef = useRef<HTMLInputElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const queueButtonRef = useRef<HTMLButtonElement>(null);
+  const libraryButtonRef = useRef<HTMLButtonElement>(null);
+
+  const showView = useCallback((next: "library" | "queue") => {
+    setView(next);
+    window.requestAnimationFrame(() => {
+      const target = next === "queue" ? queueButtonRef.current : libraryButtonRef.current;
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "nearest" });
+    });
+  }, []);
+
+  function closeAdd() {
+    if (queue.busy || importing) return;
+    setAdding(null);
+    addButtonRef.current?.focus({ preventScroll: true });
+  }
 
   const fetchLibrary = useCallback(async () => {
     const data = await getJson<LibraryFilm[]>(
@@ -194,14 +215,24 @@ export default function LibraryView() {
     await Promise.all([refreshCatalog(forceStorage), fetchJobs()]);
   }, [fetchJobs, refreshCatalog]);
 
+  // Own the live queue here so changing views never stops updates or loses
+  // the acquisition ownership used to reconcile films in the library.
+  const queue = useAcquisitionQueue(refreshAcquiredFilms);
+  const acquisitions = queue.items;
+
   const handleQueueRefresh = useCallback(async () => {
+    setRefreshing(true);
     try {
-      await refreshAcquiredFilms(true);
+      const results = await Promise.allSettled([queue.refresh(), refreshAcquiredFilms(true)]);
+      const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failure) throw failure.reason;
       setPageError(null);
     } catch (error) {
       setPageError(errorMessage(error, "Could not refresh Films. Try Refresh again."));
+    } finally {
+      setRefreshing(false);
     }
-  }, [refreshAcquiredFilms]);
+  }, [queue.refresh, refreshAcquiredFilms]);
 
   useEffect(() => {
     let cancelled = false;
@@ -292,13 +323,13 @@ export default function LibraryView() {
     return result;
   }, [jobs]);
 
-  const indexedCount = films.filter((film) => {
-    const job = jobsByPath.get(pathKey(film.path));
-    return film.status === "indexed" || job?.status === "done";
-  }).length;
-
-  const activeCount = jobs.filter(isActiveJob).length;
+  const activeCount = acquisitions.filter(isActive).length + independentJobs(jobs, acquisitions).length;
+  const attentionCount = acquisitions.filter((item) => item.status !== "ready" && item.status !== "cancelled"
+    && (item.status === "failed" || item.status === "needs_review" || Boolean(item.error))).length;
+  const libraryLoading = loading || queue.loading;
   const libraryFilms = films.filter((film) => belongsInLibrary(film, jobs, acquisitions));
+  const libraryAttentionCount = libraryFilms.filter((film) => !pendingIngestPaths.has(pathKey(film.path))
+    && jobsByPath.get(pathKey(film.path))?.status === "error").length;
   const visibleFilms = libraryFilms.filter((film) => `${film.title} ${film.filename}`.toLowerCase().includes(libraryQuery.trim().toLowerCase()));
 
   const handleRescan = useCallback(async () => {
@@ -411,6 +442,8 @@ export default function LibraryView() {
         const importedTitle = cleanTitle;
         dialogRef.current?.close();
         setSelectedCandidate(null);
+        setAdding(null);
+        showView(ingest ? "queue" : "library");
         setNotice(
           ingest
             ? `${importedTitle} was added to the queue. It will become searchable automatically.`
@@ -449,6 +482,7 @@ export default function LibraryView() {
       mergeJob,
       refreshCatalog,
       selectedCandidate,
+      showView,
       subtitleDecision,
       title,
       year,
@@ -491,6 +525,7 @@ export default function LibraryView() {
           // The accepted POST remains successful; the status refresh below can recover.
         }
         if (queuedJob) mergeJob(queuedJob);
+        showView("queue");
         setNotice(`${film.title || film.filename} was added to the queue.`);
 
         try {
@@ -514,7 +549,7 @@ export default function LibraryView() {
         });
       }
     },
-    [fetchJobs, mergeJob],
+    [fetchJobs, mergeJob, showView],
   );
 
   const preview = selectedCandidate
@@ -523,20 +558,46 @@ export default function LibraryView() {
   const subtitleReviewCandidates =
     selectedCandidate?.subtitle_review_candidates ?? [];
   const incomingEmpty = !loading && incoming.length === 0;
+  const downloadedFiles = (
+    <section className={styles.incoming} aria-labelledby="incoming-heading">
+      <div className="films-section-header">
+        <div>
+          <h3 id="incoming-heading">Downloaded files{incoming.length > 0 ? ` · ${incoming.length}` : ""}</h3>
+          <p>{incomingEmpty ? "Place finished downloads in your incoming folder, then rescan." : "Review files once downloading and seeding have finished."}</p>
+        </div>
+        <button type="button" className="films-button films-button--quiet" onClick={() => void handleRescan()} disabled={loading || rescanning}>
+          {rescanning ? "Scanning…" : "Rescan"}
+        </button>
+      </div>
+      {loading ? <p className={styles.incomingNote}>Scanning incoming…</p>
+        : incomingEmpty ? <p className={styles.incomingNote}>No downloaded files to review.</p>
+        : <div className="films-list">{incoming.map((candidate) => (
+          <article className="film-row film-row--incoming" key={candidate.relative_path}>
+            <div className="film-row-copy">
+              <h3>{candidate.suggested_title || candidate.filename}</h3>
+              <p className="film-filename" title={candidate.filename}>{candidate.filename}</p>
+              <p className="film-meta">{candidate.size_gb} GB{candidate.extra_video_count > 0 && <>
+                <span aria-hidden="true"> · </span>Main movie selected · {candidate.extra_video_count} other video{candidate.extra_video_count === 1 ? "" : "s"} ignored
+              </>}</p>
+            </div>
+            <button type="button" className="films-button films-button--secondary" onClick={() => openReview(candidate)}>Review &amp; add</button>
+          </article>
+        ))}</div>}
+    </section>
+  );
 
   return (
     <div className={`${chrome.page} ${chrome.workspace} ${styles.page}`}>
       <header className={`${chrome.header} ${chrome.headerRow}`}>
-        <div>
-          <h1 className={chrome.title}>Films</h1>
-          <p className={chrome.description}>
-            {films.length} films · {indexedCount} searchable
-            {activeCount > 0
-              ? ` · ${activeCount} preparing or waiting`
-              : ""}
-          </p>
+        <h1 className={chrome.title}>Films</h1>
+        <div className={styles.headerActions}>
+          {!loading && <LibraryStorage refreshKey={storageRevision} />}
+          <button ref={addButtonRef} type="button" className="films-button films-button--primary" aria-expanded={adding !== null} aria-controls="films-add-panel"
+            disabled={Boolean(queue.busy) || importing} onClick={() => {
+              if (adding) closeAdd();
+              else { setAdding("online"); setNotice(null); queue.clearMutationError(); }
+            }}>Add films</button>
         </div>
-        {!loading && <LibraryStorage refreshKey={storageRevision} />}
       </header>
 
       <div className="films-messages" aria-live="polite">
@@ -546,81 +607,63 @@ export default function LibraryView() {
           </p>
         )}
         {notice && <p className="films-message films-message--success">{notice}</p>}
+        {queue.error && view === "library" && !adding && <p className="films-message films-message--error" role="alert">{queue.error}</p>}
       </div>
 
-      <AcquisitionPanel onLibraryChange={refreshAcquiredFilms} onRefresh={handleQueueRefresh} jobs={jobs} films={films} onItemsChange={setAcquisitions} />
+      {!adding && incoming.length > 0 && <button type="button" className={`films-button films-button--quiet ${styles.incomingShortcut}`}
+        disabled={Boolean(queue.busy)} onClick={() => { setAdding("downloaded"); setNotice(null); queue.clearMutationError(); }}>
+        {incoming.length} downloaded file{incoming.length === 1 ? "" : "s"} to review
+      </button>}
 
-      <section className="films-section" aria-labelledby="incoming-heading">
-        <div className={`films-section-header ${incomingEmpty ? styles.incomingEmpty : ""}`}>
-          <div>
-            <h2 id="incoming-heading">From incoming{incoming.length > 0 ? ` · ${incoming.length}` : ""}</h2>
-            <p>
-              {incomingEmpty
-                ? "No files to add. Place finished downloads in incoming, then rescan."
-                : "Downloaded a film yourself? Review it here once downloading and seeding finish."}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="films-button films-button--quiet"
-            onClick={() => void handleRescan()}
-            disabled={loading || rescanning}
-          >
-            {rescanning ? "Scanning…" : "Rescan"}
+      {adding && <section className={styles.addPanel} id="films-add-panel" aria-labelledby="films-add-heading">
+        <div className={styles.addHeading}>
+          <h2 id="films-add-heading">Add films</h2>
+          <button type="button" className="films-button films-button--quiet" disabled={Boolean(queue.busy) || importing} onClick={closeAdd}>Close</button>
+        </div>
+        <AddFilmForm key={adding} status={queue.status} busy={Boolean(queue.busy) || importing} requestError={queue.error}
+          downloadedFiles={downloadedFiles} initialSource={adding === "downloaded" ? "downloaded" : undefined}
+          onClearRequestError={queue.clearMutationError} onQueue={async (path, body) => {
+            const success = await queue.execute("add", path, body);
+            if (success) {
+              setAdding(null);
+              setNotice("Film added to the queue. You can leave this page while it prepares.");
+              showView("queue");
+            }
+            return success;
+          }} />
+      </section>}
+
+      <div className={styles.toolbar}>
+        <div className={styles.viewSwitch} role="group" aria-label="Films view">
+          <button ref={libraryButtonRef} type="button" id="films-library-view" aria-pressed={view === "library"} aria-controls="films-library-panel"
+            aria-label={`Library${libraryLoading ? "" : `, ${libraryFilms.length} films`}${libraryAttentionCount > 0 ? `, ${libraryAttentionCount} need attention` : ""}`} onClick={() => setView("library")}>
+            Library{!libraryLoading && <span className={styles.count}>{libraryFilms.length}</span>}
+            {libraryAttentionCount > 0 && <span className={styles.attention}>{libraryAttentionCount} {libraryAttentionCount === 1 ? "needs" : "need"} attention</span>}
+          </button>
+          <button ref={queueButtonRef} type="button" id="films-queue-view" aria-pressed={view === "queue"} aria-controls="films-queue-panel"
+            aria-label={`Queue${activeCount > 0 ? `, ${activeCount} active` : ""}${attentionCount > 0 ? `, ${attentionCount} need attention` : ""}`} onClick={() => setView("queue")}>
+            Queue{activeCount > 0 && <span className={styles.count}>{activeCount}</span>}
+            {attentionCount > 0 && <span className={styles.attention}>{attentionCount} {attentionCount === 1 ? "needs" : "need"} attention</span>}
           </button>
         </div>
+        {view === "library" && !libraryLoading && libraryFilms.length > 0 && <label className={styles.filter}>
+          <span className={styles.srOnly}>Find in library</span>
+          <input type="search" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Find in library" autoComplete="off" />
+        </label>}
+        {view === "queue" && <button type="button" className="films-button films-button--quiet" disabled={queue.loading || refreshing || Boolean(queue.busy)} onClick={() => void handleQueueRefresh()}>
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>}
+      </div>
 
-        {loading ? (
-          <p className="films-empty">Scanning incoming…</p>
-        ) : incoming.length > 0 ? (
-          <div className="films-list">
-            {incoming.map((candidate) => (
-              <article className="film-row film-row--incoming" key={candidate.relative_path}>
-                <div className="film-row-copy">
-                  <h3>{candidate.suggested_title || candidate.filename}</h3>
-                  <p className="film-filename" title={candidate.filename}>
-                    {candidate.filename}
-                  </p>
-                  <p className="film-meta">
-                    {candidate.size_gb} GB
-                    {candidate.extra_video_count > 0 && (
-                      <>
-                        <span aria-hidden="true"> · </span>
-                        Main movie selected · {candidate.extra_video_count} other video
-                        {candidate.extra_video_count === 1 ? "" : "s"} ignored
-                      </>
-                    )}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="films-button films-button--secondary"
-                  onClick={() => openReview(candidate)}
-                >
-                  Review &amp; add
-                </button>
-              </article>
-            ))}
-          </div>
-        ) : null}
-      </section>
+      <div id="films-queue-panel" hidden={view !== "queue"}>
+        <AcquisitionPanel queue={queue} jobs={jobs} films={films} showError={!adding} />
+      </div>
 
-      <section className="films-section" aria-labelledby="library-heading">
-        <div className={`films-section-header ${styles.libraryHeader}`}>
-          <div>
-            <h2 id="library-heading">Library{!loading ? ` · ${libraryFilms.length}` : ""}</h2>
-            <p>Ready films are available in Search. Films being prepared appear in the queue above.</p>
-          </div>
-          {!loading && libraryFilms.length > 0 && <label className={styles.filter}>
-            <span>Find in library</span>
-            <input type="search" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Film title" autoComplete="off" />
-          </label>}
-        </div>
-
-        {loading ? (
+      <section id="films-library-panel" aria-labelledby="films-library-view" hidden={view !== "library"}>
+        {libraryLoading ? (
           <p className="films-empty">Loading library…</p>
         ) : libraryFilms.length === 0 ? (
-          <p className="films-empty">{activeCount > 0 ? "Your films will appear here when they are ready." : "No films in the library yet. Add a film above to get started."}</p>
+          <p className="films-empty">{activeCount > 0 ? "Your films will appear here when they are ready." : "No films in the library yet. Use Add films to get started."}</p>
         ) : visibleFilms.length === 0 ? (
           <p className="films-empty">No films match “{libraryQuery}”.</p>
         ) : (

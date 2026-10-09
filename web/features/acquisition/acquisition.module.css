@@ -1,8 +1,9 @@
-.actions, .rowActions { display: flex; align-items: center; gap: 6px; }
+.rowActions { display: flex; align-items: center; gap: 6px; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .note, .notice, .connection { margin: 8px 0; color: var(--page-muted, #999); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .notice { color: #91bd96; }
 .connection { padding: 10px 12px; background: #17140e; border: 1px solid #332b1f; border-radius: 6px; color: #c3ac87; }
-.queue { margin-top: 12px; }
+.queue { margin-top: 0; }
 .queue article.row { align-items: flex-start; flex-wrap: nowrap; }
 .queue .row :global(.film-row-copy) { flex-basis: auto; }
 .row .itemDetails > summary:not(:has(svg)) { min-height: 36px; padding: 6px 0; gap: 16px; border-radius: 0; background: transparent; }
@@ -16,8 +17,6 @@
 .progress { display: block; width: min(360px, 100%); height: 4px; margin: 10px 0; border: 0; border-radius: 10px; overflow: hidden; background: #292929; accent-color: #b28a50; }
 .progress::-webkit-progress-bar { background: #292929; }
 .progress::-webkit-progress-value { background: #b28a50; }
-.waiting { margin-top: 16px; font-size: 13px; color: #aaa; }
-.waiting > div { margin-top: 8px; }
 .detailsBody { padding: 4px 0 8px; color: var(--page-muted, #888); font-size: 12px; line-height: 1.6; }
 .detailsBody p { margin: 6px 0; overflow-wrap: anywhere; }
 .setup { margin: 12px 0 0; color: var(--page-muted, #999); font-size: 12px; line-height: 1.6; }
@@ -26,7 +25,6 @@
 .setup details p { margin: 12px; }
 .setup code { color: #c5b08f; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
-  .actions { flex-wrap: wrap; justify-content: flex-end; }
   .row .itemDetails > summary:not(:has(svg)) { min-height: 44px; gap: 10px; }
   .row .itemDetails .rowHeading { flex-direction: column; gap: 2px; align-items: flex-start; }
   .rowTitle { max-width: 100%; white-space: normal; }

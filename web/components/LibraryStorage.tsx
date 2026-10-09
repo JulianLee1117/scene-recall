@@ -74,10 +74,13 @@ export default function LibraryStorage({ refreshKey = 0 }: { refreshKey?: number
   const supportingIncomplete = supporting.some((category) => category.incomplete);
   const supportingDetail = supporting.filter((category) => category.bytes > 0 || category.incomplete)
     .map((category) => `${category.label}: ${category.incomplete ? "at least " : ""}${formatBytes(category.bytes)}`).join("\n");
+  const measurementSummary = snapshot
+    ? `Measured ${new Date(snapshot.measured_at).toLocaleString()} · ${snapshot.file_count.toLocaleString()} files`
+    : "";
   const measurementDetail = snapshot ? [
     "Combined file sizes; shared files counted once",
-    `Measured ${new Date(snapshot.measured_at).toLocaleString()}`,
-    `${snapshot.file_count.toLocaleString()} files · decimal storage units`,
+    measurementSummary,
+    "Decimal storage units",
     ...snapshot.issues.map((issue) => `${issue.path}: ${issue.reason}`),
     ...(snapshot.excluded.length ? [`Excludes: ${snapshot.excluded.join(", ")}`] : []),
   ].join("\n") : "";
@@ -87,39 +90,58 @@ export default function LibraryStorage({ refreshKey = 0 }: { refreshKey?: number
     : snapshot?.incomplete ? "Some locations unavailable" : "";
 
   return (
-    <section className={styles.storage} aria-label="Library storage" aria-busy={busy}>
-      <div className={styles.summary}>
-        {snapshot ? (
-          <>
-            <strong title={measurementDetail} aria-label={`${snapshot.incomplete ? "At least " : ""}${formatBytes(snapshot.total_bytes)} storage. ${measurementDetail}`}>
-              {snapshot.incomplete ? "At least " : ""}{formatBytes(snapshot.total_bytes)} <span>storage</span>
-            </strong>
+    <details className={styles.storage} aria-label="Library storage" aria-busy={busy}>
+      <summary className={styles.summary}>
+        <span className={styles.summaryCopy}>
+          {snapshot ? <strong>
+            {snapshot.incomplete ? "At least " : ""}{formatBytes(snapshot.total_bytes)} <span>storage</span>
+          </strong> : <span className={styles.pending} role="status">{status}</span>}
+          {snapshot && status && <span className={styles.status} role="status">{status}</span>}
+        </span>
+        <svg className={styles.chevron} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </summary>
+      <div className={styles.panel}>
+        <div className={styles.panelHeading}>
+          <span>Library storage</span>
+          <button className={styles.refresh} type="button" disabled={busy} aria-label="Refresh storage measurement" onClick={() => setRefresh((current) => current + 1)}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17" />
+            </svg>
+            Refresh
+          </button>
+        </div>
+        {snapshot && <>
+          <div className={styles.volumes}>
             {snapshot.volumes.map((volume) => {
               const label = volume.label.replace(/[\\/]$/, "") || volume.label;
+              const capacity = [
+                volume.free_bytes === null ? "Free space unavailable" : `${formatBytes(volume.free_bytes)} free`,
+                ...(volume.total_capacity_bytes === null ? [] : [`${formatBytes(volume.total_capacity_bytes)} capacity`]),
+              ].join(" · ");
               const detail = [
                 `${label} ${volume.incomplete ? "at least " : ""}${formatBytes(volume.bytes)} in library files`,
                 volume.free_bytes === null ? "Free space unavailable" : `${formatBytes(volume.free_bytes)} free`,
                 ...(volume.total_capacity_bytes === null ? [] : [`${formatBytes(volume.total_capacity_bytes)} drive capacity`]),
               ].join(" · ");
-              return <span className={styles.volume} key={volume.id} title={detail} aria-label={detail}>
-                <span>{label}</span> {volume.incomplete ? "≥ " : ""}{formatBytes(volume.bytes)}
-              </span>;
+              return <div className={styles.volume} key={volume.id} title={detail}>
+                <span><span>{label}</span> {volume.incomplete ? "≥ " : ""}{formatBytes(volume.bytes)}</span>
+                <small>{capacity}</small>
+              </div>;
             })}
-          </>
-        ) : <span className={styles.pending} role="status" title={state.error ?? undefined}>{status}</span>}
-        <button className={styles.refresh} type="button" disabled={busy} aria-label="Refresh storage measurement" title="Refresh storage measurement" onClick={() => setRefresh((current) => current + 1)}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17" />
-          </svg>
-        </button>
+          </div>
+          <div className={styles.breakdown}>
+            {films && <span title="Original films and their subtitle files">Films {films.incomplete ? "≥ " : ""}{formatBytes(films.bytes)}</span>}
+            <span title={supportingDetail || "No supporting files measured"} aria-label={`Supporting files ${supportingIncomplete ? "at least " : ""}${formatBytes(supportingBytes)}. ${supportingDetail}`}>
+              Supporting {supportingIncomplete ? "≥ " : ""}{formatBytes(supportingBytes)}
+            </span>
+          </div>
+          <p className={styles.measurement} title={measurementDetail} aria-label={measurementDetail}>{measurementSummary}</p>
+        </>}
+        {state.error && <p className={styles.error} role="status">{state.error}</p>}
+        {!snapshot && !state.error && <p className={styles.pending} role="status">{status}</p>}
       </div>
-      {snapshot && <div className={styles.breakdown}>
-        {films && <span title="Original films and their subtitle files">Films {films.incomplete ? "≥ " : ""}{formatBytes(films.bytes)}</span>}
-        <span title={supportingDetail || "No supporting files measured"} aria-label={`Supporting files ${supportingIncomplete ? "at least " : ""}${formatBytes(supportingBytes)}. ${supportingDetail}`}>
-          Supporting {supportingIncomplete ? "≥ " : ""}{formatBytes(supportingBytes)}
-        </span>
-        {status && <span className={styles.status} role="status" title={state.error || measurementDetail}>{status}</span>}
-      </div>}
-    </section>
+    </details>
   );
 }
