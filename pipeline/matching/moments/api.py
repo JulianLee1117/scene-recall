@@ -15,7 +15,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from pipeline.matching.moments import find, frames, index as moment_index
+from pipeline.matching.moments import find, frames, vision
+from pipeline.matching.moments import index as moment_index
 from pipeline.matching.moments import score as scoring
 
 router = APIRouter(prefix="/matching/moments", tags=["matching"])
@@ -112,6 +113,17 @@ def search(body: SearchBody, request: Request):
                     + [(row["film_id"], row["time"], row["content_box"]) for row in result["results"][:16]])
     result["request"] = options
     return result
+
+
+@router.get("/vision")
+def vision_layers(request: Request, unit_id: str = Query(min_length=1, max_length=240), time: float = Query(ge=0)):
+    """What the index saw at the analysed instant of a shot nearest *time*: layers for the lab's overlay."""
+    if not math.isfinite(time):
+        raise HTTPException(422, "Choose a finite time")
+    try:
+        return vision.describe(_index(request), unit_id, time)
+    except KeyError as exc:
+        raise HTTPException(404, "This shot is not in the match index yet") from exc
 
 
 @router.get("/frame")

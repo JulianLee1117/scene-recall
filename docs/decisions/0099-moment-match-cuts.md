@@ -95,6 +95,10 @@ the library, so a library-wide, per-instant description became affordable.
    - **Add to chain & continue** makes the chosen shot the next reference and
      keeps chaining.
    - It remains a Lab session with no project (ADR-0051).
+   - Amended 2026-10-09: **Vision** overlays what the index stored at an
+     instant (objects, poses, the scorer's eye point, lines, light, colour,
+     motion) from a read-only endpoint. Its layers describe themselves by
+     kind and name the producer profile, so model upgrades need no UI change.
 7. **Editor.** With harness v2 and a built index, the assembly scores every cut
    on its actual frames (`pipeline.lab.harness.matchcuts`).
    - Scoring uses the identity-crop form of the same components, weights and

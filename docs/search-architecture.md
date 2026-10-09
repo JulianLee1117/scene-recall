@@ -2587,6 +2587,13 @@ compared in output coordinates.
   window, with frame nudges and an overlay view.
 - **Add to chain & continue** appends the shot and searches from its
   out-point. A chain lives in the session and plays back to back.
+- **Vision** draws what the index stored for the nearest analysed instant
+  (`GET /matching/moments/vision`): objects with silhouettes, poses, the
+  scorer's eye point, lines, light, colour and motion, over the Cut from
+  frame and both frames of the audition's overlay, with the reasons as bars.
+  Layers are described by kind in content fractions and name the film's
+  moments profile (and, for the current producer, its models), so a new
+  producer version changes the data, not the overlay.
 
 **Editor** (harness v2, `pipeline.lab.harness.matchcuts`):
 - With a built index, the assembly scores each transition from the previous

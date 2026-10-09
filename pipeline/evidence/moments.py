@@ -29,6 +29,7 @@ records the arrays' SHA-256 so a reader never pairs mismatched files.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import io
 import time
@@ -54,6 +55,12 @@ BATCH = 48
 POSE_THRESHOLD = 0.5
 MAX_POSES = 4
 KEYPOINTS = 17
+# COCO-17 keypoints, in the order the pose model returns them, and the bones that join them.
+KEYPOINT_NAMES = ("nose", "left eye", "right eye", "left ear", "right ear", "left shoulder", "right shoulder",
+                  "left elbow", "right elbow", "left wrist", "right wrist", "left hip", "right hip",
+                  "left knee", "right knee", "left ankle", "right ankle")
+SKELETON = ((0, 1), (0, 2), (1, 3), (2, 4), (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), (5, 11), (6, 12), (11, 12),
+            (11, 13), (13, 15), (12, 14), (14, 16))
 
 PRODUCER = store.Producer(
     kind="moments",
@@ -71,6 +78,18 @@ PRODUCER = store.Producer(
     },
 )
 
+
+
+def model_names() -> dict[str, str]:
+    """The models behind this producer version, by role."""
+    return {"objects": PRODUCER.settings["segment"]["model"], "pose": PRODUCER.settings["pose"]["model"]}
+
+
+@functools.cache
+def class_names() -> dict[int, str]:
+    """Stored class codes (1..80) to names: COCO categories in id order, as the producer encodes them."""
+    from rfdetr.assets.coco_classes import COCO_CLASSES
+    return {position + 1: COCO_CLASSES[coco_id] for position, coco_id in enumerate(sorted(COCO_CLASSES))}
 
 # ---------------------------------------------------------------------------
 # Pure helpers (numpy; unit tested without a GPU)

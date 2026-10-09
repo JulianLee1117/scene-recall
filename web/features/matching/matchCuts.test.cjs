@@ -10,6 +10,8 @@ const compile = (file) => ts.transpileModule(fs.readFileSync(path.join(__dirname
 }).outputText;
 const lib = {};
 vm.runInNewContext(compile("../../lib/matchCuts.ts"), { exports: lib, process: { env: {} }, URLSearchParams });
+const vision = {};
+vm.runInNewContext(compile("../../lib/matchVision.ts"), { exports: vision });
 const close = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-6, `${message}: ${actual} != ${expected}`);
 
 test("a whole picture of the output's shape fills the box", () => {
@@ -59,4 +61,41 @@ test("a search result opens at its matched frame, inside the shot", () => {
   assert.equal(lib.resultTime({ t_start: 5, t_end: 9, matched_frame_timestamp: 6.5 }), 6.5);
   assert.equal(lib.resultTime({ t_start: 5, t_end: 9 }), 8.7);
   assert.equal(lib.resultTime({ t_start: 5, t_end: 9, matched_frame_timestamp: 20 }), 8.95);
+});
+
+const moment = (layers) => ({ unit_id: "u", film_id: "f", time: 1, usable: true, aspect: 2, layers,
+  source: { index: "i", profile: "match-v1-abc", models: { objects: "seg-model", pose: "pose-model" } } });
+
+test("vision draws any described layer in the picture's own shape, and only the layers asked for", () => {
+  const layers = [
+    { key: "objects", label: "Objects", kind: "regions",
+      items: [{ label: "person", score: 0.95, box: [0.25, 0.1, 0.75, 0.9], mask: ["0110", "1111", "0000"] }] },
+    { key: "pose", label: "Pose", kind: "skeletons", joints: ["a", "b", "c"], edges: [[0, 1], [1, 2]],
+      items: [{ points: [[0.5, 0.2, 0.9], [0.5, 0.4, 0.9], [0.5, 0.6, 0.1]] }] },
+    { key: "eyes", label: "Eye point", kind: "points", items: [{ label: "eyes", at: [0.5, 0.2] }] },
+    { key: "lines", label: "Lines", kind: "field", columns: 2, rows: 1, cells: [[0, 0, Math.PI / 2, 1]] },
+    { key: "light", label: "Light", kind: "grid", columns: 2, rows: 1, values: [0, 1] },
+    { key: "motion", label: "Motion", kind: "vectors", seconds: 2, zoom: null, items: [{ label: "camera", from: [0.5, 0.5], to: [0.6, 0.5] }] },
+  ];
+  const all = vision.visionShapes(moment(layers), new Set(layers.map((layer) => layer.key)));
+  assert.equal(all.width, 200);
+  assert.equal(all.height, 100);
+  const by = (key) => all.shapes.filter((shape) => shape.layer === key);
+  // A silhouette is one cell per run of filled squares, inside its box.
+  const cells = by("objects").filter((shape) => shape.kind === "cell");
+  assert.equal(cells.length, 2);
+  close(cells[0].x, 0.25 * 200 + 25, "first run starts one column in");
+  close(cells[0].w, 50, "two columns wide");
+  assert.ok(by("objects").some((shape) => shape.kind === "label" && shape.text === "person 0.95"));
+  // A bone needs both its ends shown.
+  assert.equal(by("pose").filter((shape) => shape.kind === "line").length, 1);
+  assert.equal(by("eyes")[0].ring, true);
+  const [stroke] = by("lines");
+  close(stroke.x1, stroke.x2, "an edge at a right angle is upright");
+  assert.deepEqual(Array.from(by("light"), (shape) => shape.fill), ["rgb(0,0,0)", "rgb(255,255,255)"]);
+  assert.equal(by("motion")[0].arrow, true);
+
+  const some = vision.visionShapes(moment(layers), new Set(["eyes"]));
+  assert.deepEqual([...new Set(some.shapes.map((shape) => shape.layer))], ["eyes"]);
+  assert.equal(vision.visionSource(moment([])), "seg-model · pose-model · match-v1-abc");
 });

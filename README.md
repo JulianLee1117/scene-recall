@@ -1694,6 +1694,13 @@ shot, so you can build a match-cut sequence. **Play chain** plays it back to
 back. **Undo last** steps back. The chain lives in this browser session. Nothing
 here creates a project.
 
+Turn on **Vision** under the Cut from frame to see what the matcher stored for
+that instant: objects with their silhouettes and confidence, poses, the eye
+point, lines, light, colour and motion (chips choose the layers). The
+audition's **Overlay** then draws both frames' layers, the outgoing one dashed,
+with each reason's strength. The note under the chips names the models and
+version behind what you see.
+
 New films get the moments pass after ingestion, and the index rebuilds when
 one ran. For the existing library, or after a producer change:
 

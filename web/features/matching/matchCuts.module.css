@@ -117,3 +117,25 @@
   .chain { flex-direction: column; align-items: stretch; }
   .auditionActions { margin-left: 0; }
 }
+
+/* Vision: what the matcher sees, drawn over a frame at the frame's own placement. */
+.vision { position: absolute; overflow: visible; pointer-events: none; color: #f2ede6; }
+.visionBox { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.visionLabel { font: 600 3.4px system-ui, sans-serif; paint-order: stroke; stroke: #000000b3; stroke-width: .7px; }
+.visionLine { stroke: currentColor; stroke-width: 2; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.visionLine[data-layer="lines"] { stroke-width: 1.5; }
+.visionLine[data-layer="motion"] { stroke: #e8b060; stroke-width: 2.5; }
+.visionDot { fill: currentColor; }
+.visionRing { fill: none; stroke: #e8b060; stroke-width: 2; vector-effect: non-scaling-stroke; }
+/* The outgoing frame's layers over the incoming one: outlines only, dashed white. */
+.vision[data-tone="out"] { color: #ffffffd9; }
+.vision[data-tone="out"] rect[data-layer], .vision[data-tone="out"] .visionLabel { display: none; }
+.vision[data-tone="out"] .visionBox { stroke: #ffffffd9; stroke-dasharray: 4 3; }
+.vision[data-tone="out"] .visionLine, .vision[data-tone="out"] .visionRing { stroke: #ffffffd9; stroke-dasharray: 3 3; }
+.visionControls { display: grid; gap: 8px; }
+.visionSource { margin: 0; color: var(--faint); font-size: 10px; overflow-wrap: anywhere; }
+.reasonBars { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.reasonBars li { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) 2.5rem; gap: 10px; align-items: center; color: var(--soft); font-size: 11px; }
+.strength { position: relative; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.strength span { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: #aab6d0; }
+.reasonBars data { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; text-align: right; color: var(--text); }

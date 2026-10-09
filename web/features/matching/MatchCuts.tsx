@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { seconds } from "@/lib/lab";
+import { DEFAULT_VISION_LAYERS } from "@/lib/matchVision";
 import {
   cropFits, defaultOut, FOCUS_LABELS, FRAME_SECONDS, LEAD_IN, LEAD_OUT, matchHref, matchRequest, nearestMoment, percent, resultTime,
   settingsFrom, type ChainLink, type MatchFocus, type MatchSettings, type MomentMatch, type MomentSearchResponse,
@@ -13,9 +14,25 @@ import SourceBrowser from "../lab/SourceBrowser";
 import { FramedImage } from "./Framed";
 import MatchIcon from "./MatchIcon";
 import SequencePlayer, { type Segment } from "./SequencePlayer";
+import { useVision, VisionControls, VisionOverlay } from "./Vision";
 import styles from "./matchCuts.module.css";
 
 const CHAIN_KEY = "scene-recall:match-cuts-chain";
+const VISION_KEY = "scene-recall:match-cuts-vision";
+
+interface VisionView { on: boolean; visible: ReadonlySet<string> }
+
+/** Vision is remembered in this browser: whether it is on, and which layers show. */
+function readVision(): VisionView {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(VISION_KEY) ?? "null");
+    if (saved && typeof saved.on === "boolean" && Array.isArray(saved.visible)) return { on: saved.on, visible: new Set(saved.visible) };
+  } catch { /* unreadable: the defaults */ }
+  return { on: false, visible: new Set(DEFAULT_VISION_LAYERS) };
+}
+function writeVision(vision: VisionView) {
+  try { window.localStorage.setItem(VISION_KEY, JSON.stringify({ on: vision.on, visible: [...vision.visible] })); } catch { /* not remembered */ }
+}
 const FORMATS: { value: OutputFormat; label: string }[] = [
   { value: "landscape", label: "16:9" }, { value: "vertical", label: "9:16" }, { value: "square", label: "1:1" },
 ];
@@ -46,9 +63,12 @@ export default function MatchCuts() {
   const [chain, setChain] = useState<ChainLink[]>([]);
   const [playingChain, setPlayingChain] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [vision, setVision] = useState<VisionView>({ on: false, visible: new Set(DEFAULT_VISION_LAYERS) });
   const requestId = useRef(0);
+  const referenceVision = useVision(shot?.unit_id ?? null, time, vision.on);
+  const changeVision = (next: VisionView) => { setVision(next); writeVision(next); };
 
-  useEffect(() => { setChain(readChain()); }, []);
+  useEffect(() => { setChain(readChain()); setVision(readVision()); }, []);
   useEffect(() => {
     const controller = new AbortController();
     matchRequest<{ ready: boolean; moments?: number; films?: { film_id: string }[] }>("/status", { signal: controller.signal })
@@ -144,13 +164,17 @@ export default function MatchCuts() {
         <header className={styles.sideHeader}><h2>Cut from</h2><button className={styles.textButton} onClick={() => setChoosing(true)}>Change shot</button></header>
         {shot && time !== null ? <>
           <FramedImage src={frameUrl(shot.film_id, time, 1280)} crop={referenceCrop} aspect={shot.aspect} output={settings.output}
-            alt={`${shot.film_title} at ${seconds(time)}`} eager />
+            alt={`${shot.film_title} at ${seconds(time)}`} eager>
+            {(place) => referenceVision && <VisionOverlay vision={referenceVision} visible={vision.visible} place={place} />}
+          </FramedImage>
           <div className={styles.sourceLine}><strong>{shot.film_title}</strong><time>{seconds(time)}</time></div>
           <input className={styles.scrub} type="range" aria-label="Cut point" min={shot.t_start} max={shot.t_end} step={0.25}
             value={time} onChange={(event) => setTime(Number(event.target.value))}
             onPointerUp={(event) => commitTime(Number((event.target as HTMLInputElement).value))}
             onKeyUp={(event) => commitTime(Number((event.target as HTMLInputElement).value))} />
           <div className={styles.scrubLabels}><time>{seconds(shot.t_start)}</time><span>The last frame before the cut</span><time>{seconds(shot.t_end)}</time></div>
+          <VisionControls on={vision.on} onToggle={(on) => changeVision({ ...vision, on })} layers={referenceVision?.layers ?? []}
+            visible={vision.visible} onVisibleChange={(visible) => changeVision({ ...vision, visible })} vision={referenceVision} />
         </> : <div className={styles.placeholder} />}
         <section className={styles.settings} aria-label="Match settings">
           <div className={styles.setting}><span>Format</span><div className={styles.segmented}>{FORMATS.map((format) =>
@@ -201,7 +225,7 @@ export default function MatchCuts() {
     {choosing && <SourceBrowser context="match" filmIds={[]} replacing={!!unitId} onClose={() => setChoosing(false)}
       onSelect={(result) => { setChoosing(false); updateChain([]); navigate({ unit: result.unit_id, at: resultTime(result) }, false); }} />}
     {selected && shot && time !== null && reference && <Audition match={selected} shot={shot} time={time} referenceCrop={reference.crop}
-      output={settings.output} onClose={() => setSelected(null)} onChain={addToChain}
+      output={settings.output} vision={vision} onClose={() => setSelected(null)} onChain={addToChain}
       onOpen={(match, start) => { setSelected(null); updateChain([]); navigate({ unit: match.unit_id, at: start }, false); }} />}
     {playingChain && <Dialog title="Chain" onClose={() => setPlayingChain(false)}>
       <SequencePlayer output={settings.output} segments={chain.map((link, index): Segment => ({ key: `${link.unit_id}:${index}`, filmId: link.film_id,
@@ -210,12 +234,13 @@ export default function MatchCuts() {
   </main>;
 }
 
-function Audition({ match, shot, time, referenceCrop, output, onClose, onChain, onOpen }: {
+function Audition({ match, shot, time, referenceCrop, output, vision, onClose, onChain, onOpen }: {
   match: MomentMatch;
   shot: MomentShot;
   time: number;
   referenceCrop: [number, number, number, number] | null;
   output: OutputFormat;
+  vision: VisionView;
   onClose: () => void;
   onChain: (match: MomentMatch, start: number) => void;
   onOpen: (match: MomentMatch, start: number) => void;
@@ -224,6 +249,8 @@ function Audition({ match, shot, time, referenceCrop, output, onClose, onChain, 
   const [view, setView] = useState<"play" | "overlay">("play");
   const [opacity, setOpacity] = useState(0.5);
   useEffect(() => { setStart(match.time); }, [match]);
+  const incoming = useVision(match.unit_id, start, vision.on && view === "overlay");
+  const outgoing = useVision(shot.unit_id, time, vision.on && view === "overlay");
   const nudge = (delta: number) => setStart((value) => Math.max(match.t_start, Math.min(match.t_end - 0.1, value + delta)));
   const segments: Segment[] = [
     { key: `a:${shot.unit_id}`, filmId: shot.film_id, start: Math.max(shot.t_start, time - LEAD_IN), end: time, crop: referenceCrop,
@@ -238,8 +265,16 @@ function Audition({ match, shot, time, referenceCrop, output, onClose, onChain, 
     </div>
     {view === "play" ? <SequencePlayer segments={segments} output={output} /> : <div className={styles.overlayView}>
       <FramedImage src={frameUrl(match.film_id, start, 1280)} crop={match.crop} aspect={match.aspect} output={output} alt="Incoming frame"
-        overlay={{ src: frameUrl(shot.film_id, time, 1280), crop: referenceCrop, aspect: shot.aspect }} overlayOpacity={opacity} eager />
+        overlay={{ src: frameUrl(shot.film_id, time, 1280), crop: referenceCrop, aspect: shot.aspect }} overlayOpacity={opacity} eager>
+        {(place, over) => <>
+          {incoming && <VisionOverlay vision={incoming} visible={vision.visible} place={place} />}
+          {outgoing && over && <VisionOverlay vision={outgoing} visible={vision.visible} place={over} tone="out" />}
+        </>}
+      </FramedImage>
       <label className={styles.opacity}>Outgoing frame <input type="range" min={0} max={1} step={0.05} value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>
+      {vision.on && <ul className={styles.reasonBars} aria-label="Why this cut matched">{match.reasons.map((reason) =>
+        <li key={reason.code}><span>{reason.label}</span><span className={styles.strength}><span style={{ width: `${Math.round(reason.strength * 100)}%` }} /></span>
+          <data value={reason.strength}>{reason.strength.toFixed(2)}</data></li>)}</ul>}
     </div>}
     <div className={styles.auditionBar}>
       <div className={styles.nudge} aria-label="Incoming first frame">

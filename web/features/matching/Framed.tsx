@@ -1,10 +1,14 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { mediaUrl, OUTPUT_ASPECT, placement, type Crop, type OutputFormat } from "@/lib/matchCuts";
+import { mediaUrl, OUTPUT_ASPECT, placement, type Crop, type OutputFormat, type Placement } from "@/lib/matchCuts";
 import styles from "./matchCuts.module.css";
 
-/** A still of the content picture seen through a crop, in the output's shape (letterboxed when needed). */
+/**
+ * A still of the content picture seen through a crop, in the output's shape
+ * (letterboxed when needed). Children drawn over it can take the picture's
+ * placement (and the overlay's), so they line up with whatever is shown.
+ */
 export function FramedImage({ src, crop, aspect, output, alt, overlay, overlayOpacity = 0.5, children, eager }: {
   src: string;
   crop: Crop | null;
@@ -13,7 +17,7 @@ export function FramedImage({ src, crop, aspect, output, alt, overlay, overlayOp
   alt: string;
   overlay?: { src: string; crop: Crop | null; aspect: number } | null;
   overlayOpacity?: number;
-  children?: ReactNode;
+  children?: ReactNode | ((place: Placement, over: Placement | null) => ReactNode);
   eager?: boolean;
 }) {
   const outputAspect = OUTPUT_ASPECT[output];
@@ -24,6 +28,6 @@ export function FramedImage({ src, crop, aspect, output, alt, overlay, overlayOp
       style={{ left: `${place.left}%`, top: `${place.top}%`, width: `${place.width}%`, height: `${place.height}%` }} />
     {overlay && over && <img className={styles.onion} src={mediaUrl(overlay.src)} alt="" aria-hidden="true" draggable={false}
       style={{ left: `${over.left}%`, top: `${over.top}%`, width: `${over.width}%`, height: `${over.height}%`, opacity: overlayOpacity }} />}
-    {children}
+    {typeof children === "function" ? children(place, over) : children}
   </div>;
 }
