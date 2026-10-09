@@ -358,3 +358,29 @@ not compelling, "to get this good we'd need a tuned model", "these experiments a
 going anywhere". Exploration paused. What held: dots round 9 (vivid), shredded train and car,
 motion echo, the live layer as a control. The hand-built approach to a painter's look tops out
 at dots round 9; a learned model is the next step if the look is ever wanted.
+
+## Continuing from here
+
+What is in the Lab and works: painted dots (vivid and pastel; the round-9 look with the
+round-10/11 controls defaulted on, turn Colour variety, Dashes and Flat areas left open to 0
+for the pure round-9 look), time stripes with the blocks pattern (shredded trains), the motion
+echo (in `temporal.py`, not yet a Lab treatment), the quadtree, the mosaic with its tile bank,
+and the live layer on every per-shot treatment. Primitives any treatment or editor can use:
+regions (`pipeline/lab/regions.py`), the person matte (`matte.py`), monocular depth
+(`depth.py`), grafts (`grafts.py`), beats from the rhythm caches (`temporal.py`).
+
+To add a treatment: a model in `contracts.py` (bounded fields, a `live` region), a branch in
+`render.apply_mod`, controls in `catalog()`, params in `render_params()`, a test in
+`test_algmods.py`; bump `MODS_VERSION`. The board picks it up from the catalog. Batch study runs
+from `python -m pipeline.algmods render` and `python -m pipeline.algmods.experiments`.
+
+His methods never tried, from the reference folder's `methods.md`: frames as planes in 3D
+space (the "4D" and "vessel" reels: a point renderer plus perspective warps with alpha, time
+as a spatial axis); Delaunay triangulation with inscribed circles carrying a transition;
+time-parametric geometry (every shape a function of the frame's position in the clip);
+halftone with a part-whole relationship; strip decomposition of a figure. The first is the
+real gap and is purely geometric, the family that held up here.
+
+The process that held: stills before clips, judged at full size with the reference in the same
+sheet; publish only passes to the review page with one question per round; log every round
+in the reference folder's `dots-mastery.md`.
