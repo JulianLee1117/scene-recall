@@ -1425,11 +1425,12 @@ browse scenes in source order without a model query. This uses the normal bounde
 result prefix; a description searches across the whole selected film, including
 later moments. Shot types, subjects, styles and feelings can share one description.
 
-Use **Filter** to narrow a search by era, genre, director or movie. Choices
-within a section are alternatives (1990s or 2000s); sections combine (1990s
-and Crime). Each change reruns the search, active filters appear beside the
-button as chips you can remove, and options that would leave no movie are
-dimmed. The footer counts the movies being searched. Picking a movie in its
+Use **Filter**, beside Refine, to narrow a search by era, genre, director or
+movie, before your first search or after. Choices within a section are
+alternatives (1990s or 2000s); sections combine (1990s and Crime). Each change
+reruns the search, and options that would leave no movie are dimmed. Active
+filters show under the bar as one chip per section with the number of movies
+left; click a chip to edit it or its × to clear it. The footer counts the movies being searched. Picking a movie in its
 section appends that movie's mention, sharing the same scope as inline
 mentions; deselecting it removes the @ marker and leaves the title words as
 plain text. Going home clears the filters. Search uses bounded ranked

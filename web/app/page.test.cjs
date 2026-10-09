@@ -268,7 +268,7 @@ test("inline boundary deletion removes only that mention, while selections and I
   ]) {
     const app = harness();
     const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
-    const scope = () => nodes(app.find((node) => node.type === "MatchByRail").props.controls).find((node) => node.type === "SearchFilter").props;
+    const scope = () => nodes(app.find((node) => node.type === "MatchByRail").props.filter).find((node) => node.type === "SearchFilter").props;
     try {
       input().onChange({ target: { value: "red" } });
       await app.flush();
@@ -311,7 +311,7 @@ test("Backspace after a film-only mention clears scope and cancels its browse", 
 test("middle mentions preserve visible prose and the picker removes deselected titles without leaving hidden scope", async () => {
   const app = harness();
   const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
-  const scope = () => nodes(app.find((node) => node.type === "MatchByRail").props.controls).find((node) => node.type === "SearchFilter").props;
+  const scope = () => nodes(app.find((node) => node.type === "MatchByRail").props.filter).find((node) => node.type === "SearchFilter").props;
   try {
     input().onChange({ target: { value: "the scene in @Before where they listen", selectionStart: 20, selectionEnd: 20 } });
     await app.flush();
@@ -546,7 +546,7 @@ test("Related starts a fresh search from the chosen scene and marks the request 
 test("film filters narrow the search to matching movies and say when none match", async () => {
   const app = harness();
   const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
-  const filter = () => nodes(app.find((node) => node.type === "MatchByRail").props.controls).find((node) => node.type === "SearchFilter").props;
+  const filter = () => nodes(app.find((node) => node.type === "MatchByRail").props.filter).find((node) => node.type === "SearchFilter").props;
   const body = (index) => JSON.parse(app.requests[index].init.body);
   try {
     await app.setFilms([
@@ -559,6 +559,13 @@ test("film filters narrow the search to matching movies and say when none match"
     await app.runTimers();
     assert.deepEqual(body(0).film_ids, ["heat"]);
     assert.equal(body(0).clauses[0].text, "rain at night");
+    // Active filters show in the refinements row; a chip reopens the panel.
+    const summary = () => app.find((node) => node.type === "MatchByRail").props.activeExtra;
+    assert.equal(summary().props.movieCount, 1);
+    assert.equal(filter().open, false);
+    summary().props.onEdit();
+    await app.flush();
+    assert.equal(filter().open, true);
 
     // Crime and the 2000s share no movie: nothing is searched, and the page says why.
     filter().onFiltersChange({ genre: ["Crime"], era: ["2000s"] });

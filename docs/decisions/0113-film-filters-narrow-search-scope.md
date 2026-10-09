@@ -36,13 +36,18 @@ not change.
   runs and the page says so with a way to clear them. When every movie passes,
   no film list is sent.
 - On the search page one **Filter** control replaces the **All movies**
-  picker. Active filters sit beside it as removable chips (on phones the
-  trigger's count stands in for them). Its panel has Era, Genre, Director and
-  Movie sections; each option is counted against the other facets' filters,
-  and options with no movie are dimmed. Changes apply as they are made and are
-  scope changes: old scenes clear and the search reruns after the usual
-  debounce. Picking a movie still appends its @mention. Going home clears the
-  filters. The Lab keeps its own movie picker.
+  picker. It sits beside Refine, on the empty home screen too, so a first
+  search can be filtered, and like Refine it keeps one size and shows a
+  count. Active filters appear in Refine's active row, one chip per section
+  with every value ("Era 1990s, 2000s"), followed by the number of movies
+  left: a chip reopens the panel and its × clears that section. (Amended the
+  same day: chips beside the trigger widened the toolbar and hid the rest
+  behind "+N".) The panel has Era, Genre, Director and Movie sections; each
+  option is counted against the other facets' filters, and options with no
+  movie are dimmed. Changes apply as they are made and are scope changes: old
+  scenes clear and the search reruns after the usual debounce. Picking a
+  movie still appends its @mention. Going home clears the filters. The Lab
+  keeps its own movie picker.
 
 ## Consequences
 

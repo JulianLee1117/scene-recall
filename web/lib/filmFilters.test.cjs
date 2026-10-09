@@ -57,10 +57,13 @@ test("toggling adds and removes values, dropping empty facets", () => {
   const once = lib.toggleFilter({}, "genre", "Crime");
   assert.deepEqual(plain(once), { genre: ["Crime"] });
   assert.deepEqual(plain(lib.toggleFilter(once, "genre", "Crime")), {});
-  assert.deepEqual(plain(lib.activeFilters({ director: ["Wong Kar-wai"], era: ["1990s"] })), [
-    { key: "era", value: "1990s" },
-    { key: "director", value: "Wong Kar-wai" },
+  // One summary per section, in panel order; clearing drops a whole section.
+  const both = { director: ["Wong Kar-wai"], era: ["1990s", "2000s"] };
+  assert.deepEqual(plain(lib.activeFacets(both)).map(({ key, values }) => [key, values]), [
+    ["era", ["1990s", "2000s"]],
+    ["director", ["Wong Kar-wai"]],
   ]);
+  assert.deepEqual(plain(lib.clearFacet(both, "era")), { director: ["Wong Kar-wai"] });
 });
 
 test("the search scope is the named movies or the library, narrowed by the filters", () => {

@@ -1452,23 +1452,28 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 /* Filter: narrow a search by era, genre, director or movie. */
-.search-filter { position: relative; display: inline-flex; align-items: center; gap: 4px; }
-.search-filter-trigger { display: inline-flex; min-height: 27px; padding: 4px 7px; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: #777; font: inherit; font-size: .7rem; line-height: 1; cursor: pointer; white-space: nowrap; transition: border-color .15s ease, color .15s ease, background .15s ease; }
-.search-filter-trigger:hover, .search-filter-trigger[aria-expanded="true"] { border-color: #303030; background: #111; color: #b7b7b7; }
-.search-filter-trigger.is-active { color: #d6c2a3; }
+/* Beside Refine and styled like it: one size, a count, never the values. */
+.clues-filter { margin-left: -8px; }
+.search-filter { position: relative; display: inline-flex; align-items: center; }
+.search-filter-trigger { display: inline-flex; flex: 0 0 auto; min-height: 36px; padding: 7px 10px; align-items: center; gap: 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #a49e94; font: inherit; font-size: .78rem; cursor: pointer; white-space: nowrap; }
+.search-filter-trigger:hover { background: #ffffff06; color: #e8dece; }
+.search-filter-trigger[aria-expanded="true"] { border-color: #40382d; background: #b88a4710; color: #e2c49b; }
 .search-filter-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.search-filter-count { display: inline-grid; min-width: 15px; height: 15px; padding: 0 3px; place-items: center; border-radius: 999px; background: #c8a37323; color: #e2c49b; font-size: .6rem; font-variant-numeric: tabular-nums; }
-.search-filter-chevron { flex: 0 0 auto; transition: transform .15s ease; }
+.search-filter-count { display: inline-grid; min-width: 17px; height: 17px; place-items: center; border-radius: 50%; background: #c8a37323; color: #e2c49b; font-size: .64rem; }
+.search-filter-chevron { color: #857c6f; transition: transform .15s ease; }
 .search-filter-trigger[aria-expanded="true"] .search-filter-chevron { transform: rotate(180deg); }
-.search-filter-token { display: inline-flex; max-width: 150px; min-height: 23px; padding: 3px 7px 3px 9px; align-items: center; gap: 5px; border: 1px solid #403528; border-radius: 999px; background: #bb94590c; color: #d6c2a3; font: inherit; font-size: .68rem; line-height: 1; cursor: pointer; white-space: nowrap; transition: border-color .15s ease, background .15s ease; }
-.search-filter-token > span { overflow: hidden; text-overflow: ellipsis; }
-.search-filter-token > svg { flex: 0 0 auto; color: #9e8769; }
-.search-filter-token:hover { border-color: #7b6240; background: #bb945916; }
-.search-filter-token:hover > svg { color: #e2c49b; }
-.search-filter-token.is-more { padding-inline: 8px; color: #a99a84; }
-.search-filter-token:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Active filters: one chip per section in the refinements row, every value visible. */
+.filter-summary { display: inline-flex; min-width: 0; max-width: min(100%, 320px); align-items: stretch; border: 1px solid #403528; border-radius: 5px; background: #bb94590c; color: #d6c2a3; font-size: .72rem; transition: border-color .15s ease, background .15s ease; }
+.filter-summary:hover { border-color: #7b6240; background: #bb945916; }
+.filter-summary button { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.filter-summary-edit { display: inline-flex; min-width: 0; align-items: center; gap: 7px; padding: 5px 4px 5px 9px; }
+.filter-summary-edit .clue-summary-value { min-width: 0; }
+.filter-summary .filter-summary-remove { display: grid; flex: 0 0 auto; width: 24px; place-items: center; border-radius: 0 4px 4px 0; color: #9e8769; }
+.filter-summary .filter-summary-remove:hover { color: #f0dcc0; }
+.filter-summary button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+.filter-summary-count { align-self: center; color: #857d70; font-size: .68rem; font-variant-numeric: tabular-nums; }
 .search-filter-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 40; display: flex; width: min(430px, calc(100vw - 32px)); max-height: min(560px, calc(100dvh - 220px)); flex-direction: column; overflow: hidden; border: 1px solid #2c2822; border-radius: 12px; background: #111; box-shadow: 0 22px 56px rgba(0, 0, 0, .55); outline: none; animation: search-filter-in .14s ease-out; }
-.search-hero.is-home .search-filter-panel { max-height: max(260px, min(560px, calc(100dvh - var(--home-top) - 190px))); }
+.search-hero.is-home .search-filter-panel { max-height: max(260px, min(560px, calc(100dvh - var(--home-top) - 200px))); }
 @keyframes search-filter-in { from { opacity: 0; transform: translateY(-4px); } }
 .search-filter-sections { overflow-y: auto; padding: 6px 16px 4px; overscroll-behavior: contain; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
 .search-filter-section { padding: 12px 0 14px; }
@@ -1500,8 +1505,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 @media (max-width: 600px) {
   .search-filter { position: static; }
   .search-filter-panel { left: 50%; max-height: min(560px, calc(100dvh - 300px)); transform: translateX(-50%); animation: none; }
-  /* The trigger's count stands in for the chips; the panel lists them. */
-  .search-filter-token { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .search-filter-panel { animation: none; }

@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { LibraryFilm } from "@/types/api";
 import {
   FILM_FACETS,
-  activeFilters,
+  activeFacets,
   facetOptions,
   filterFilms,
   filterableFilms,
@@ -17,13 +17,14 @@ import { displayFilmTitle } from "@/lib/movieSuggestions";
 import { displayTitle } from "@/lib/format";
 import DirectionIcon from "./DirectionIcon";
 
-// Chips beside the trigger before the rest fold into "+N".
-const VISIBLE_CHIPS = 2;
 // A list section shows this many values until you search it.
 const LIST_IDLE = 6;
 const LIST_MATCHES = 8;
 
 interface SearchFilterProps {
+  /** The panel opens from the trigger or from an active filter's chip. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   films: LibraryFilm[];
   filters: FilmFilters;
   onFiltersChange: (filters: FilmFilters) => void;
@@ -33,24 +34,26 @@ interface SearchFilterProps {
 }
 
 /**
- * Narrows a search to movies by era, genre, director or title. Active
- * filters sit beside the trigger as removable chips; the panel applies each
- * change as it is made, with counts so a choice never empties the library.
+ * Narrows a search to movies by era, genre, director or title. The trigger
+ * keeps one size and counts the active sections (ActiveFilters shows them);
+ * the panel applies each change as it is made, with counts so a choice
+ * never empties the library.
  */
 export default function SearchFilter({
+  open,
+  onOpenChange: setOpen,
   films,
   filters,
   onFiltersChange,
   selectedFilmIds,
   onMoviesChange,
 }: SearchFilterProps) {
-  const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const catalog = useMemo(() => filterableFilms(films), [films]);
-  const active = activeFilters(filters);
+  const active = activeFacets(filters);
 
   useEffect(() => {
     if (!open) return;
@@ -69,7 +72,7 @@ export default function SearchFilter({
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   if (catalog.length === 0 && active.length === 0) return null;
 
@@ -110,7 +113,7 @@ export default function SearchFilter({
         aria-controls={panelId}
         aria-haspopup="dialog"
         title="Narrow the search by era, genre, director or movie"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(!open)}
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 5h16l-6.2 7.4V18l-3.6 1.8v-7.4z" />
@@ -120,31 +123,6 @@ export default function SearchFilter({
         <DirectionIcon name="chevron-down" className="search-filter-chevron" size={12} />
       </button>
 
-      {active.slice(0, VISIBLE_CHIPS).map(({ key, value }) => (
-        <button
-          key={`${key}:${value}`}
-          type="button"
-          className="search-filter-token"
-          aria-label={`Remove ${value}`}
-          title={`Remove ${value}`}
-          onClick={() => onFiltersChange(toggleFilter(filters, key, value))}
-        >
-          <span>{value}</span>
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true">
-            <path d="M6 6l12 12M18 6 6 18" />
-          </svg>
-        </button>
-      ))}
-      {active.length > VISIBLE_CHIPS && (
-        <button
-          type="button"
-          className="search-filter-token is-more"
-          aria-label={`${active.length - VISIBLE_CHIPS} more filters`}
-          onClick={() => setOpen(true)}
-        >
-          +{active.length - VISIBLE_CHIPS}
-        </button>
-      )}
 
       {open && (
         <div

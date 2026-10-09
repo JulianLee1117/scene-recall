@@ -260,10 +260,10 @@ Film filters (ADR-0113) narrow that scope by era, genre family and director.
 (`pipeline/search/film_facets.py`); the browser resolves the filters to
 `film_ids`, so retrieval and ranking are unchanged. Values within a facet are
 alternatives and facets combine; @mentioned movies are narrowed too. Filters
-that leave no movie run no search and say so. One **Filter** control on the
-search page holds the facets and the movie picker, shows active filters as
-removable chips, and counts each option against the other facets. Filter
-changes are scope changes. Shot-level filters are not film scope and need
+that leave no movie run no search and say so. One **Filter** control beside
+Refine, home screen included, holds the facets and the movie picker; active
+filters join Refine's active row as one chip per section, and each option is
+counted against the other facets. Filter changes are scope changes. Shot-level filters are not film scope and need
 their own decision.
 
 With only movie scope supplied, `GET /library/scenes` browses selected published

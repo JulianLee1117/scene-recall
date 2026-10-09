@@ -128,18 +128,23 @@ export function facetOptions(films: readonly FilterableFilm[], filters: FilmFilt
 export function toggleFilter(filters: FilmFilters, key: FilmFacetKey, value: string): FilmFilters {
   const current = filters[key] ?? [];
   const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
-  const rest = { ...filters };
-  delete rest[key];
+  const rest = clearFacet(filters, key);
   return next.length ? { ...rest, [key]: next } : rest;
 }
 
-/** Active filters in panel order, for the removable chips beside the trigger. */
-export function activeFilters(filters: FilmFilters): Array<{ key: FilmFacetKey; value: string }> {
-  return FILM_FACETS.flatMap(({ key }) => (filters[key] ?? []).map((value) => ({ key, value })));
+export function clearFacet(filters: FilmFilters, key: FilmFacetKey): FilmFilters {
+  const rest = { ...filters };
+  delete rest[key];
+  return rest;
+}
+
+/** Active filters grouped by facet in panel order: one summary chip each. */
+export function activeFacets(filters: FilmFilters): Array<FilmFacet & { values: readonly string[] }> {
+  return FILM_FACETS.flatMap((facet) => (filters[facet.key]?.length ? [{ ...facet, values: filters[facet.key]! }] : []));
 }
 
 export function hasFilters(filters: FilmFilters): boolean {
-  return activeFilters(filters).length > 0;
+  return activeFacets(filters).length > 0;
 }
 
 /**

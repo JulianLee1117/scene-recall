@@ -14,6 +14,7 @@ import VideoModal from "@/components/VideoModal";
 import SavedView from "@/components/SavedView";
 import MatchByRail from "@/components/MatchByRail";
 import SearchFilter from "@/components/SearchFilter";
+import ActiveFilters from "@/components/ActiveFilters";
 import MovieSearchInput from "@/components/MovieSearchInput";
 import SearchOptions from "@/components/SearchOptions";
 import RankingPresetControl from "@/components/RankingPresetControl";
@@ -168,6 +169,7 @@ export default function Home() {
   // like the preset, so a running search always uses the latest choice.
   const [filmFilters, setFilmFilters] = useState<FilmFilters>({});
   const filmFiltersRef = useRef<FilmFilters>({});
+  const [filterOpen, setFilterOpen] = useState(false);
   const filterable = useMemo(() => filterableFilms(films), [films]);
   const filterableRef = useRef(filterable);
   useEffect(() => {
@@ -644,6 +646,7 @@ export default function Home() {
     commitMovieDraft(EMPTY_MOVIE_DRAFT);
     filmFiltersRef.current = {};
     setFilmFilters({});
+    setFilterOpen(false);
     compositionScopePendingRef.current = false;
     revokeImageInput(mainImageRef.current);
     mainImageRef.current = null;
@@ -836,7 +839,6 @@ export default function Home() {
     isHome &&
     !query.trim() &&
     selectedFilmIds.length === 0 &&
-    !hasFilters(filmFilters) &&
     !hasFacetDrafts &&
     !mainImage &&
     !sourceReferenceFacet &&
@@ -872,9 +874,8 @@ export default function Home() {
   const activeLoading = loading;
   const activeError = error;
   const hasNoResults = results.length === 0 && hasCompletedSearch;
-  const filtersExcludeAll =
-    (clauseCount > 0 || selectedFilmIds.length > 0) &&
-    narrowScope(selectedFilmIds, filterable, filmFilters).excludesAll;
+  const filterScope = narrowScope(selectedFilmIds, filterable, filmFilters);
+  const filtersExcludeAll = (clauseCount > 0 || selectedFilmIds.length > 0) && filterScope.excludesAll;
   const hasFramingWithoutMainEvidence = Boolean(
     hasCompletedSearch &&
     query.trim() &&
@@ -1260,6 +1261,27 @@ export default function Home() {
                 targetFacet={sourceReferenceFacet ?? undefined}
                 referenceHasResults={facetSourceSearch.results.length > 0}
                 onCloseReference={handleSourceReferenceCancel}
+                filter={
+                  <SearchFilter
+                    open={filterOpen}
+                    onOpenChange={setFilterOpen}
+                    films={films}
+                    filters={filmFilters}
+                    onFiltersChange={handleFiltersChange}
+                    selectedFilmIds={selectedFilmIds}
+                    onMoviesChange={handleMoviePickerChange}
+                  />
+                }
+                activeExtra={
+                  hasFilters(filmFilters) && (
+                    <ActiveFilters
+                      filters={filmFilters}
+                      onFiltersChange={handleFiltersChange}
+                      onEdit={() => setFilterOpen(true)}
+                      movieCount={filterScope.excludesAll ? 0 : filterScope.filmIds.length || filterable.length}
+                    />
+                  )
+                }
                 controls={
                   // A fresh home shows examples beside Refine; once you start
                   // composing, the scope and ranking settings take their place.
@@ -1281,13 +1303,6 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="search-controls">
-                      <SearchFilter
-                        films={films}
-                        filters={filmFilters}
-                        onFiltersChange={handleFiltersChange}
-                        selectedFilmIds={selectedFilmIds}
-                        onMoviesChange={handleMoviePickerChange}
-                      />
                       <RankingPresetControl
                         value={preset}
                         onChange={handlePresetChange}
