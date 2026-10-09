@@ -19,6 +19,8 @@ const mentionHelpers = {};
 vm.runInNewContext(compile("../lib/movieMentions.ts"), { exports: mentionHelpers, require: () => movieHelpers });
 const formatHelpers = {};
 vm.runInNewContext(compile("../lib/format.ts"), { exports: formatHelpers });
+const shotFilters = {};
+vm.runInNewContext(compile("../lib/shotFilters.ts"), { exports: shotFilters });
 const filmFilters = {};
 vm.runInNewContext(compile("../lib/filmFilters.ts"), {
   exports: filmFilters,
@@ -125,6 +127,7 @@ function harness() {
   const hooks = [], requests = [];
   const timers = new Map();
   let nextTimerId = 0;
+  const shotFacets = [{ key: "dialogue", label: "Dialogue", values: [{ value: "none", label: "None", count: 3 }, { value: "spoken", label: "Spoken", count: 9 }] }];
   let films = [{ film_id: "before-sunrise", title: "Before Sunrise (1995)", filename: "Before Sunrise (1995).mkv", status: "indexed" }];
   let cursor = 0, output, scheduled = false, disposed = false, effects = [];
   const schedule = () => { if (!scheduled && !disposed) { scheduled = true; queueMicrotask(render); } };
@@ -183,10 +186,12 @@ function harness() {
       if (name === "@/lib/movieSuggestions") return movieHelpers;
       if (name === "@/lib/movieMentions") return mentionHelpers;
       if (name === "@/lib/filmFilters") return filmFilters;
+      if (name === "@/lib/shotFilters") return shotFilters;
       if (name === "@/lib/viewPrefs") return viewPrefs;
       if (name === "@/lib/appClient") return { APP_CLIENT_HEADERS: { "X-Scene-Recall-Client": "app" } };
       if (name === "@/components/MovieSearchInput") return movieInputExports;
       if (name === "@/hooks/useSearchFilms") return { useSearchFilms: () => films };
+      if (name === "@/hooks/useShotFacets") return { useShotFacets: () => shotFacets };
       if (name === "@/hooks/useGlide") return { useGlide() {} };
       if (name === "@/hooks/useBookmarks") return { useBookmarks: () => bookmarks };
       if (name === "@/hooks/useSpeechRecognition") return { useSpeechRecognition: () => speech };
@@ -557,7 +562,7 @@ test("film filters narrow the search to matching movies and say when none match"
     ]);
     input().onChange({ target: { value: "rain at night" } });
     await app.flush();
-    filter().onApply({ genre: ["Crime"] });
+    filter().onApply({ film: { genre: ["Crime"] }, shot: {} });
     await app.runTimers();
     assert.deepEqual(body(0).film_ids, ["heat"]);
     assert.equal(body(0).clauses[0].text, "rain at night");
@@ -565,14 +570,14 @@ test("film filters narrow the search to matching movies and say when none match"
     // Active filters show beside the result count; a chip reopens the menu at its section.
     await app.resolve(0, response([result("heat")]));
     const summary = () => nodes(app.grid().props.status).find((node) => node.type === "ActiveFilters");
-    assert.deepEqual(JSON.parse(JSON.stringify(summary().props.filters)), { genre: ["Crime"] });
+    assert.deepEqual(JSON.parse(JSON.stringify(summary().props.filters)), { film: { genre: ["Crime"] }, shot: {} });
     assert.equal(filter().view, null);
     summary().props.onEdit("genre");
     await app.flush();
     assert.equal(filter().view, "genre");
 
     // Crime and the 2000s share no movie: nothing is searched, and the page says why.
-    filter().onApply({ genre: ["Crime"], era: ["2000s"] });
+    filter().onApply({ film: { genre: ["Crime"], era: ["2000s"] }, shot: {} });
     await app.runTimers();
     assert.equal(app.requests.length, 1);
     const none = app.find((node) => node.props?.className === "search-filter-none");
@@ -639,12 +644,12 @@ test("quick changes run one search: order switching settles on the last choice, 
     assert.equal(app.requests.length, searches + 1, "one search for four quick order changes");
     assert.equal(body().preset, "gems");
 
-    filter().onApply({});
+    filter().onApply({ film: {}, shot: {} });
     await app.runTimers();
     assert.equal(app.requests.length, searches + 1, "applying no filters again runs no search");
 
-    filter().onApply({ era: ["1990s"] });
-    filter().onApply({ era: ["1990s"], genre: ["Crime"] });
+    filter().onApply({ film: { era: ["1990s"] }, shot: {} });
+    filter().onApply({ film: { era: ["1990s"], genre: ["Crime"] }, shot: {} });
     await app.runTimers();
     assert.equal(app.requests.length, searches + 2, "back-to-back applies settle into one search");
     assert.deepEqual(body().film_ids, ["heat"]);
@@ -663,17 +668,43 @@ test("movies picked in Filter are a filter: the search text is untouched and cle
     ]);
     input().onChange({ target: { value: "rain" } });
     await app.flush();
-    filter().onApply({ movie: ["Heat (1995)"] });
+    filter().onApply({ film: { movie: ["Heat (1995)"] }, shot: {} });
     await app.runTimers();
     assert.deepEqual(body().film_ids, ["heat"]);
     assert.equal(input().value, "rain", "no @mentions are written into the search");
     await app.resolve(0, response([result("heat")]));
     assert.deepEqual(JSON.parse(JSON.stringify(nodes(app.grid().props.status).find((node) => node.type === "ActiveFilters").props.filters)),
-      { movie: ["Heat (1995)"] });
+      { film: { movie: ["Heat (1995)"] }, shot: {} });
 
-    filter().onApply({});
+    filter().onApply({ film: {}, shot: {} });
     await app.runTimers();
     assert.equal(body().film_ids, undefined);
     assert.equal(input().value, "rain");
+  } finally { app.dispose(); }
+});
+
+test("shot filters travel with the search and with browsing a movie, and clear like film filters", async () => {
+  const app = harness();
+  const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
+  const filter = () => nodes(app.find((node) => node.type === "MatchByRail").props.filter).find((node) => node.type === "SearchFilter").props;
+  try {
+    input().onChange({ target: { value: "rain" } });
+    await app.flush();
+    filter().onApply({ film: {}, shot: { dialogue: ["none"] } });
+    await app.runTimers();
+    assert.deepEqual(JSON.parse(app.requests.at(-1).init.body).shot_filters, { dialogue: ["none"] });
+    assert.deepEqual(filter().shotFacets.map((facet) => facet.key), ["dialogue"]);
+
+    // Browsing a named movie with no description keeps the shot filters.
+    input().onFocus();
+    input().onChange({ target: { value: "@Before" } });
+    await app.flush();
+    app.find((node) => node.props?.className === "movie-autocomplete-option").props.onClick();
+    await app.runTimers();
+    assert.match(app.requests.at(-1).url, /\/library\/scenes\?film_id=before-sunrise&shot=dialogue%3Anone/);
+
+    filter().onApply({ film: {}, shot: {} });
+    await app.runTimers();
+    assert.doesNotMatch(app.requests.at(-1).url, /shot=/);
   } finally { app.dispose(); }
 });

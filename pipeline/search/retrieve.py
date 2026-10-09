@@ -34,7 +34,7 @@ from pipeline.search import rerank as _rerank
 from pipeline.search import signals as _signals
 from pipeline.search import resident as _resident
 from pipeline.search.quotes import STRONG_SCORE as _STRONG_QUOTE, find_lines as _find_lines, quote_strength
-from pipeline.search.request import search_execution, search_stage, reuse_vector
+from pipeline.search.request import search_execution, search_stage, reuse_vector, unit_scope as _unit_scope
 
 from pipeline.config import (
     DEFAULT_SEARCH_CANDIDATE_LIMIT,
@@ -615,7 +615,7 @@ def _native_lexical_ranking(
             table.search(fts_query, query_type="fts")
             .select(_FTS_COLUMNS)
             .where(representative_filter)
-            .limit(candidate_limit * 3)
+            .limit(_scoped_depth(candidate_limit * 3))
             .to_list()
         )
     except (RuntimeError, ValueError):
@@ -628,11 +628,11 @@ def _native_lexical_ranking(
         )
         return _lexical_ranking(
             query,
-            _rows_in_film_scope(rows, film_ids),
+            _rows_in_scope(rows, film_ids),
             candidate_limit=candidate_limit,
         )
 
-    rows = _rows_in_film_scope(rows, film_ids)
+    rows = _rows_in_scope(rows, film_ids)
     # Unit-test doubles and legacy indexless callers may not expose Lance's
     # synthetic score column. Preserve correct behavior without weakening the
     # production requirement that startup validates the real native index.
@@ -1000,7 +1000,7 @@ def _global_frame_candidate_rows(
             ]
 
     frame_rows = _stable_vector_ranking(
-        _rows_in_film_scope(
+        _rows_in_scope(
             frame_neighbors(db, vector, columns=_FRAME_CANDIDATE_COLUMNS,
                             limit=metadata_depth, where=_film_filter(film_ids)),
             film_ids,
@@ -1160,7 +1160,7 @@ def _frame_search_rows(
     if unit_filter is None:
         return []
     unit_rows = _hydrate_units(unit_table, unit_ids, film_ids, db)
-    unit_rows = _rows_in_film_scope(unit_rows, film_ids)
+    unit_rows = _rows_in_scope(unit_rows, film_ids)
     return _frame_image_ranking(
         frame_rows,
         unit_rows,
@@ -1246,7 +1246,7 @@ def _semantic_text_search_rows(
     texts = _feature_texts(db, profile, [best[unit_id][1]["feature_id"] for unit_id in ordered
                                          if best[unit_id][1].get("text") is None])
     unit_rows = _hydrate_units(unit_table, tuple(ordered), film_ids, db)
-    units_by_id = {_row_id(row): row for row in _rows_in_film_scope(unit_rows, film_ids) if _row_id(row)}
+    units_by_id = {_row_id(row): row for row in _rows_in_scope(unit_rows, film_ids) if _row_id(row)}
     ranked: list[dict[str, Any]] = []
     for unit_id in ordered:
         unit = units_by_id.get(unit_id)
@@ -1317,7 +1317,7 @@ def _semantic_view_rankings(
         .limit(candidate_limit * len(views))
         .to_list()
     )
-    rows = _rows_in_film_scope(rows, film_ids)
+    rows = _rows_in_scope(rows, film_ids)
     rows.sort(key=lambda row: (float(row.get("_distance", 1.0)), str(row.get("feature_id") or "")))
     per_view: dict[str, list[dict[str, Any]]] = {view: [] for view in views}
     for row in rows:
@@ -1510,20 +1510,28 @@ def _representative_filter(film_ids: tuple[str, ...]) -> Any:
     return expression if film_filter is None else expression & film_filter
 
 
-def _rows_in_film_scope(
+def _rows_in_scope(
     rows: Iterable[dict[str, Any]],
     film_ids: tuple[str, ...],
 ) -> list[dict[str, Any]]:
-    """Defensively enforce film scope after database prefiltering."""
+    """Enforce film scope and the search's shot filters after database prefiltering."""
     materialized = list(rows)
-    if not film_ids:
-        return materialized
     allowed = set(film_ids)
+    shots = _unit_scope()
+    if not allowed and shots is None:
+        return materialized
     return [
         row
         for row in materialized
-        if str(row.get("film_id") or "") in allowed
+        if (not allowed or str(row.get("film_id") or "") in allowed)
+        and (shots is None or shots.allows(_row_id(row)))
     ]
+
+
+def _scoped_depth(limit: int) -> int:
+    """Read deeper on paths that can only apply shot filters after ranking."""
+    shots = _unit_scope()
+    return limit if shots is None else shots.depth(limit)
 
 
 def _stable_vector_ranking(
@@ -1901,7 +1909,7 @@ def search(
                 pe_vector = embed_text([query], config)[0]
             assert pe_vector is not None
             text_rows = _stable_vector_ranking(
-                _rows_in_film_scope(
+                _rows_in_scope(
                     table.search(pe_vector, vector_column_name="txt_vec")
                     .metric("cosine")
                     .where(representative_filter)
@@ -1940,7 +1948,7 @@ def search(
         )
         if not image_rows:
             image_rows = _stable_vector_ranking(
-                _rows_in_film_scope(
+                _rows_in_scope(
                     table.search(pe_vector, vector_column_name="img_vec")
                     .metric("cosine")
                     .where(representative_filter)
@@ -1955,7 +1963,8 @@ def search(
     # counts most when the query reads as a line; otherwise it only adds weak
     # candidates, because word overlap with dialogue is usually incidental.
     with search_stage("quote_retrieval"):
-        line_hits = _find_lines(db, query, film_ids=scoped_film_ids, limit=min(channel_candidate_limit, _QUOTE_DEPTH))
+        line_hits = _find_lines(db, query, film_ids=scoped_film_ids,
+                                limit=_scoped_depth(min(channel_candidate_limit, _QUOTE_DEPTH)))
     strength = quote_strength(line_hits)
     weights["quote"] = 1.2 if strength >= _STRONG_QUOTE else 0.3 * strength
     # A quote-like query keeps half-strength priors: exact lines lead, and fame
@@ -1966,7 +1975,7 @@ def search(
         hit_by_unit = {hit.unit_id: hit for hit in line_hits}
         hydrated = {
             _row_id(row): row
-            for row in _rows_in_film_scope(_hydrate_units(table, tuple(hit_by_unit), scoped_film_ids, db), scoped_film_ids)
+            for row in _rows_in_scope(_hydrate_units(table, tuple(hit_by_unit), scoped_film_ids, db), scoped_film_ids)
         }
         for hit in line_hits:
             unit_row = hydrated.get(hit.unit_id)
@@ -2425,7 +2434,7 @@ def search_dialogue(
     """Words facet: remembered lines (quote channel) fused with semantic dialogue and on-screen text."""
     candidate_limit, resolved_result_limit = _validated_search_limits(config, result_limit)
     scoped_film_ids = _normalise_film_ids(film_ids)
-    hits = _find_lines(db, query, film_ids=scoped_film_ids, limit=candidate_limit)
+    hits = _find_lines(db, query, film_ids=scoped_film_ids, limit=_scoped_depth(candidate_limit))
     try:
         semantic = search_semantic_views(query, ("dialogue", "ocr"), db, config, film_ids=scoped_film_ids,
                                          result_limit=candidate_limit)
@@ -2436,7 +2445,7 @@ def search_dialogue(
     hit_by_unit = {hit.unit_id: hit for hit in hits}
     unit_rows = {
         _row_id(row): row
-        for row in _rows_in_film_scope(_hydrate_units(db.open_table("units"), tuple(hit_by_unit), scoped_film_ids, db),
+        for row in _rows_in_scope(_hydrate_units(db.open_table("units"), tuple(hit_by_unit), scoped_film_ids, db),
                                        scoped_film_ids)
     }
     quote_rows = []
@@ -2674,7 +2683,7 @@ def apply_recipe_result_preferences(
     )
     units_by_id = {
         _row_id(row): row
-        for row in _rows_in_film_scope(rows, scoped_film_ids)
+        for row in _rows_in_scope(rows, scoped_film_ids)
         if _row_id(row)
     }
     requested_junk = _requested_junk_categories(requested_text)
@@ -3205,7 +3214,7 @@ def _search_by_image_only(
     unit_rows = _hydrate_units(unit_table, unit_ids, scoped_film_ids)
     units_by_id = {
         str(row.get("unit_id") or row.get("shot_id") or ""): row
-        for row in _rows_in_film_scope(unit_rows, scoped_film_ids)
+        for row in _rows_in_scope(unit_rows, scoped_film_ids)
         if row.get("unit_id") or row.get("shot_id")
     }
 

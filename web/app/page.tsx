@@ -13,7 +13,7 @@ import ResultGrid from "@/components/ResultGrid";
 import VideoModal from "@/components/VideoModal";
 import SavedView from "@/components/SavedView";
 import MatchByRail from "@/components/MatchByRail";
-import SearchFilter, { type FilterView } from "@/components/SearchFilter";
+import SearchFilter, { type FilterView, type SearchFilters } from "@/components/SearchFilter";
 import ActiveFilters from "@/components/ActiveFilters";
 import MovieSearchInput from "@/components/MovieSearchInput";
 import ViewMenu from "@/components/ViewMenu";
@@ -22,11 +22,13 @@ import { useBookmarks } from "@/hooks/useBookmarks";
 import { useFacetSourceSearch } from "@/hooks/useFacetSourceSearch";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useSearchFilms } from "@/hooks/useSearchFilms";
+import { useShotFacets } from "@/hooks/useShotFacets";
 import { useGlide } from "@/hooks/useGlide";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
 import { filterableFilms, narrowScope, sameFilters, type FilmFilters } from "@/lib/filmFilters";
+import { sameShotFilters, shotFiltersPayload, type ShotFilters } from "@/lib/shotFilters";
 import { DEFAULT_VIEW, ORDER_OPTIONS, loadViewPrefs, saveViewPrefs, type ViewPrefs } from "@/lib/viewPrefs";
 import {
   FACET_LABELS,
@@ -179,6 +181,10 @@ export default function Home() {
   // like the preset, so a running search always uses the latest choice.
   const [filmFilters, setFilmFilters] = useState<FilmFilters>({});
   const filmFiltersRef = useRef<FilmFilters>({});
+  // Shot filters travel with each search and apply inside retrieval (ADR-0114).
+  const [shotFilters, setShotFilters] = useState<ShotFilters>({});
+  const shotFiltersRef = useRef<ShotFilters>({});
+  const shotFacets = useShotFacets();
   const [filterView, setFilterView] = useState<FilterView | null>(null);
   const filterable = useMemo(() => filterableFilms(films), [films]);
   const filterableRef = useRef(filterable);
@@ -271,6 +277,7 @@ export default function Home() {
       const request: SearchRecipeRequest = {
         clauses,
         ...(narrowed.filmIds.length ? { film_ids: [...narrowed.filmIds] } : {}),
+        ...(shotFiltersPayload(shotFiltersRef.current) ? { shot_filters: shotFiltersPayload(shotFiltersRef.current) } : {}),
         ...(limit !== undefined ? { limit } : {}),
         ...(presetRef.current !== "balanced" ? { preset: presetRef.current } : {}),
       };
@@ -281,7 +288,10 @@ export default function Home() {
           formData.append("recipe", JSON.stringify(request));
           formData.append("image", image.file, image.file.name);
         }
-        const browseParams = new URLSearchParams(narrowed.filmIds.map((id) => ["film_id", id]));
+        const browseParams = new URLSearchParams([
+          ...narrowed.filmIds.map((id) => ["film_id", id]),
+          ...Object.entries(shotFiltersRef.current).flatMap(([key, values]) => values.map((value) => ["shot", `${key}:${value}`])),
+        ]);
         if (limit !== undefined) browseParams.set("limit", String(limit));
         if (presetRef.current !== "balanced") browseParams.set("preset", presetRef.current);
         const browsingFilm = clauses.length === 0;
@@ -557,10 +567,14 @@ export default function Home() {
   );
 
   const handleFiltersChange = useCallback(
-    (next: FilmFilters) => {
-      if (sameFilters(next, filmFiltersRef.current)) return;
-      filmFiltersRef.current = next;
-      setFilmFilters(next);
+    (change: Partial<SearchFilters>) => {
+      const film = change.film ?? filmFiltersRef.current;
+      const shot = change.shot ?? shotFiltersRef.current;
+      if (sameFilters(film, filmFiltersRef.current) && sameShotFilters(shot, shotFiltersRef.current)) return;
+      filmFiltersRef.current = film;
+      setFilmFilters(film);
+      shotFiltersRef.current = shot;
+      setShotFilters(shot);
       scheduleSearch();
     },
     [scheduleSearch],
@@ -664,6 +678,8 @@ export default function Home() {
     commitMovieDraft(EMPTY_MOVIE_DRAFT);
     filmFiltersRef.current = {};
     setFilmFilters({});
+    shotFiltersRef.current = {};
+    setShotFilters({});
     setFilterView(null);
     compositionScopePendingRef.current = false;
     revokeImageInput(mainImageRef.current);
@@ -1287,7 +1303,8 @@ export default function Home() {
                     view={filterView}
                     onViewChange={setFilterView}
                     films={films}
-                    applied={filmFilters}
+                    shotFacets={shotFacets}
+                    applied={{ film: filmFilters, shot: shotFilters }}
                     onApply={handleFiltersChange}
                     mentionedFilmIds={selectedFilmIds}
                   />
@@ -1443,7 +1460,7 @@ export default function Home() {
                 {selectedFilmIds.length
                   ? "Your filters leave none of the movies you named."
                   : "No movies match these filters."}
-                <button type="button" onClick={() => handleFiltersChange({})}>
+                <button type="button" onClick={() => handleFiltersChange({ film: {}, shot: {} })}>
                   Clear filters
                 </button>
               </p>
@@ -1539,7 +1556,12 @@ export default function Home() {
                       onClear={() => handleViewChange({ order: DEFAULT_VIEW.order })}
                     />
                   )}
-                  <ActiveFilters filters={filmFilters} onFiltersChange={handleFiltersChange} onEdit={setFilterView} />
+                  <ActiveFilters
+                    filters={{ film: filmFilters, shot: shotFilters }}
+                    shotFacets={shotFacets}
+                    onFiltersChange={handleFiltersChange}
+                    onEdit={setFilterView}
+                  />
                 </>
               }
             />

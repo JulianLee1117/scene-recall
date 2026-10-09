@@ -16,11 +16,27 @@ import {
   type FilmFacetKey,
   type FilmFilters,
 } from "@/lib/filmFilters";
+import {
+  activeShotFacets,
+  hasShotFilters,
+  sameShotFilters,
+  toggleShotFilter,
+  type ShotFacet,
+  type ShotFilters,
+} from "@/lib/shotFilters";
 import { useDismiss } from "@/hooks/useDismiss";
 import DirectionIcon from "./DirectionIcon";
 
-/** What the Filter menu shows: its overview, or one section's values. */
+/** What the Filter menu shows: its overview, or one movie section's values. */
 export type FilterView = "menu" | FilmFacetKey;
+
+/** Everything the Filter menu applies at once. */
+export interface SearchFilters {
+  /** Which movies: resolved in the browser to the request's film scope. */
+  film: FilmFilters;
+  /** What is in the shot: sent with the request and applied inside retrieval. */
+  shot: ShotFilters;
+}
 
 interface Section {
   key: FilmFacetKey;
@@ -36,32 +52,42 @@ interface SearchFilterProps {
   view: FilterView | null;
   onViewChange: (view: FilterView | null) => void;
   films: LibraryFilm[];
+  /** The server's shot facets; the Shots group appears once they load. */
+  shotFacets: readonly ShotFacet[];
   /** What the search uses now. */
-  applied: FilmFilters;
+  applied: SearchFilters;
   /** Runs the search once with the menu's choices. */
-  onApply: (filters: FilmFilters) => void;
+  onApply: (filters: SearchFilters) => void;
   /** Movies @mentioned in the search text, which the filters narrow too. */
   mentionedFilmIds: readonly string[];
 }
 
 /**
- * Narrows a search to movies by era, genre, director or title. The menu
- * opens on one row per section with its current choice, and drills into a
- * section to pick values. Choices stay a draft, previewed by the counts,
- * and apply together when the menu closes (Apply, or a click away), so
- * quick toggling runs one search rather than many.
+ * Narrows a search by movie (era, genre, director, title) and by shot
+ * (dialogue, size, people, camera, color, time, place). Movie sections drill
+ * in; shot facets are a few values each, so they toggle in place. Choices
+ * stay a draft, previewed by the movie counts, and apply together when the
+ * menu closes (Apply, or a click away): one search however fast you pick.
  */
-export default function SearchFilter({ view, onViewChange, films, applied, onApply, mentionedFilmIds }: SearchFilterProps) {
+export default function SearchFilter({
+  view,
+  onViewChange,
+  films,
+  shotFacets,
+  applied,
+  onApply,
+  mentionedFilmIds,
+}: SearchFilterProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const catalog = useMemo(() => filterableFilms(films), [films]);
-  const [draft, setDraft] = useState<FilmFilters | null>(null);
-  const filters = draft ?? applied;
-  const changed = !sameFilters(filters, applied);
+  const [draft, setDraft] = useState<SearchFilters | null>(null);
+  const working = draft ?? applied;
+  const changed = !sameFilters(working.film, applied.film) || !sameShotFilters(working.shot, applied.shot);
   const finish = () => {
-    if (changed) onApply(filters);
+    if (changed) onApply(working);
     setDraft(null);
     onViewChange(null);
   };
@@ -73,9 +99,10 @@ export default function SearchFilter({ view, onViewChange, films, applied, onApp
     else if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus();
   }, [view]);
 
-  const active = activeFacets(applied);
-  if (catalog.length === 0 && active.length === 0) return null;
+  const activeCount = activeFacets(applied.film).length + activeShotFacets(applied.shot, shotFacets).length;
+  if (catalog.length === 0 && activeCount === 0) return null;
 
+  const { film: filters, shot } = working;
   const scope = narrowScope(mentionedFilmIds, catalog, filters);
   const searched = scope.excludesAll ? 0 : scope.filmIds.length || catalog.length;
   const summary = searched === catalog.length ? `All ${catalog.length} movies` : `${searched} of ${catalog.length} movies`;
@@ -87,6 +114,7 @@ export default function SearchFilter({ view, onViewChange, films, applied, onApp
     counted: !facet.perFilm,
   }));
   const open = sections.find((section) => section.key === view);
+  const editFilm = (film: FilmFilters) => setDraft({ ...working, film });
 
   return (
     <div className="toolbar-menu-root" ref={rootRef}>
@@ -97,29 +125,30 @@ export default function SearchFilter({ view, onViewChange, films, applied, onApp
         aria-expanded={view !== null}
         aria-controls={panelId}
         aria-haspopup="dialog"
-        title="Narrow the search by era, genre, director or movie"
+        title="Narrow the search by movie or by what is in the shot"
         onClick={() => (view ? finish() : onViewChange("menu"))}
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 5h16l-6.2 7.4V18l-3.6 1.8v-7.4z" />
         </svg>
         <span>Filter</span>
-        {active.length > 0 && <span className="toolbar-menu-count">{active.length}</span>}
+        {activeCount > 0 && <span className="toolbar-menu-count">{activeCount}</span>}
         <DirectionIcon name="chevron-down" className="toolbar-menu-chevron" size={12} />
       </button>
 
       {view && (
-        <div ref={panelRef} id={panelId} className="toolbar-menu" role="dialog" aria-label="Filter movies" tabIndex={-1}>
+        <div ref={panelRef} id={panelId} className="toolbar-menu" role="dialog" aria-label="Filter the search" tabIndex={-1}>
           {open ? (
             <SectionList
               key={open.key}
               section={open}
               onBack={() => onViewChange("menu")}
-              onToggle={(value) => setDraft(toggleFilter(filters, open.key, value))}
-              onClear={() => setDraft(clearFacet(filters, open.key))}
+              onToggle={(value) => editFilm(toggleFilter(filters, open.key, value))}
+              onClear={() => editFilm(clearFacet(filters, open.key))}
             />
           ) : (
-            <div className="toolbar-menu-list">
+            <div className="toolbar-menu-list is-scroll">
+              <p className="toolbar-menu-heading">Movies</p>
               {sections.map((section) => {
                 const picked = filters[section.key] ?? [];
                 return (
@@ -132,12 +161,30 @@ export default function SearchFilter({ view, onViewChange, films, applied, onApp
                   </button>
                 );
               })}
+              {shotFacets.length > 0 && <p className="toolbar-menu-heading">Shots</p>}
+              {shotFacets.map((facet) => (
+                <div key={facet.key} className="toolbar-menu-pills" role="group" aria-label={facet.label}>
+                  <span>{facet.label}</span>
+                  <div>
+                    {facet.values.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={(shot[facet.key] ?? []).includes(option.value)}
+                        onClick={() => setDraft({ ...working, shot: toggleShotFilter(shot, facet.key, option.value) })}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
           <footer className="toolbar-menu-foot">
             <span role="status">{summary}</span>
-            {!open && hasFilters(filters) && (
-              <button type="button" className="toolbar-menu-link" onClick={() => setDraft({})}>
+            {!open && (hasFilters(filters) || hasShotFilters(shot)) && (
+              <button type="button" className="toolbar-menu-link" onClick={() => setDraft({ film: {}, shot: {} })}>
                 Clear all
               </button>
             )}

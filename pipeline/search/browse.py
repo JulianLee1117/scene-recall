@@ -7,7 +7,7 @@ chunk and its verified frame choices are retained in memory.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import closing
 import heapq
 import json
@@ -132,6 +132,7 @@ def browse_scenes(
     *,
     film_ids: Iterable[str] | None,
     result_limit: int | None = None,
+    shot_filters: Mapping[str, Sequence[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return a bounded chronological prefix from explicitly selected films.
 
@@ -140,12 +141,14 @@ def browse_scenes(
     Missing/unpublished IDs return no scenes; an absent scope is an error.
     """
     from pipeline.search import priors
+    from pipeline.search.shot_facets import unit_scope
 
     scope = _scope(film_ids)
     limit = resolve_result_limit(config, result_limit)
     snapshot = db if getattr(db, "is_index_snapshot", False) is True else acquire_search_snapshot(config, db)
     if not {"films", "units", "frames"}.issubset(table_names(snapshot)):
         return []
+    shots = unit_scope(snapshot, shot_filters)
     published = {
         row["film_id"] for row in filtered_rows(
             snapshot.open_table("films"), where=_film_filter(scope),
@@ -168,7 +171,8 @@ def browse_scenes(
                 snapshot, priors.load_evidence(snapshot, (unit["unit_id"] for unit in units)), set())
             for unit in units:
                 unit_id = unit["unit_id"]
-                if unit_id not in seen and unit_id in frames and unit_id not in junk_units:
+                if (unit_id not in seen and unit_id in frames and unit_id not in junk_units
+                        and (shots is None or shots.allows(unit_id))):
                     selected.append({**unit, "_matched_frame": frames[unit_id]})
                     seen.add(unit_id)
                     if len(selected) == limit:
@@ -192,6 +196,7 @@ def browse_highlights(
     film_ids: Iterable[str] | None,
     preset: str,
     result_limit: int | None = None,
+    shot_filters: Mapping[str, Sequence[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """A film's best-known moments (``famous``) or its hidden gems (``gems``), one per dramatic scene.
 
@@ -200,19 +205,23 @@ def browse_highlights(
     """
     from pipeline.evidence.tables import SHOT_EVIDENCE
     from pipeline.search import priors
+    from pipeline.search.shot_facets import unit_scope
 
     scope = _scope(film_ids)
     limit = resolve_result_limit(config, result_limit)
     snapshot = db if getattr(db, "is_index_snapshot", False) is True else acquire_search_snapshot(config, db)
     if SHOT_EVIDENCE not in table_names(snapshot):
-        return browse_scenes(snapshot, config, film_ids=scope, result_limit=limit)
+        return browse_scenes(snapshot, config, film_ids=scope, result_limit=limit, shot_filters=shot_filters)
+    shots = unit_scope(snapshot, shot_filters)
     rows = filtered_rows(
         snapshot.open_table(SHOT_EVIDENCE), where=_film_filter(scope),
         columns=["unit_id", "film_id", "scene_id", "fame_library", "craft", "distinctiveness", "iconic", "gem"],
         limit=200_000,
     )
+    if shots is not None:
+        rows = [row for row in rows if shots.allows(row["unit_id"])]
     if not rows:
-        return browse_scenes(snapshot, config, film_ids=scope, result_limit=limit)
+        return browse_scenes(snapshot, config, film_ids=scope, result_limit=limit, shot_filters=shot_filters)
 
     def famous(row: dict[str, Any]) -> float:
         return (1.0 if row.get("iconic") else 0.0) + float(row.get("fame_library") or 0) + 0.3 * float(row.get("craft") or 0)

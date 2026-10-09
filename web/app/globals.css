@@ -1420,6 +1420,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-list { display: flex; min-height: 0; padding: 0 4px 4px; flex-direction: column; }
 .toolbar-menu-list.is-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
 .toolbar-menu-title { margin: 0 0 6px; color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+/* Filter overview groups: Movies drill in, Shots toggle in place. */
+.toolbar-menu-heading { margin: 8px 10px 3px; color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.toolbar-menu-heading:first-child { margin-top: 2px; }
+.toolbar-menu-pills { display: flex; min-height: 32px; padding: 3px 10px; align-items: center; justify-content: space-between; gap: 10px; color: #d8d0c4; font-size: .76rem; }
+.toolbar-menu-pills > div { display: flex; gap: 3px; }
+.toolbar-menu-pills button { min-height: 23px; padding: 2px 9px; border: 1px solid #2a2622; border-radius: 999px; background: transparent; color: #a49e94; font: inherit; font-size: .7rem; cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.toolbar-menu-pills button:hover { border-color: #4a4134; color: #e8dece; }
+.toolbar-menu-pills button[aria-pressed="true"] { border-color: #7b6240; background: #bb945922; color: #f0dcc0; }
+.toolbar-menu-pills button:focus-visible { outline: 1px solid var(--field-border-focus); outline-offset: 1px; }
 .toolbar-menu-row, .toolbar-menu-option { display: flex; width: 100%; min-height: 32px; padding: 6px 10px; align-items: center; gap: 10px; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .76rem; text-align: left; cursor: pointer; }
 .toolbar-menu-row:hover, .toolbar-menu-option:hover:not(:disabled) { background: #ffffff0a; }
 .toolbar-menu-row > span:first-child { flex: 0 0 auto; }

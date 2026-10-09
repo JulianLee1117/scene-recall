@@ -1441,6 +1441,13 @@ windows, not a minimum-similarity cutoff, so a globally uncompetitive movie may
 be absent; pick that movie under **Filter** when you want the ranking scoped
 entirely to that movie.
 
+Its **Shots** group narrows by what is in the shot: dialogue (none or
+spoken), size, people, camera (still or moving), color (or black and white),
+time of day and inside or outside. These apply inside the search itself, so
+even a narrow combination returns a full page of the best matches. A shot
+whose evidence is missing never passes a filter: time of day, for one, is
+known for about half the shots.
+
 **View** sets how results are shown, and this browser remembers it: the order
 (Balanced, Famous, Hidden gems), the row size (Small, Medium, Large) and
 **Details**. Active filters and a non-default order show as chips beside the

@@ -47,6 +47,8 @@ export interface SearchRecipeRequest {
   limit?: number;
   /** Balanced (default), famous moments first, or hidden gems first. */
   preset?: RankingPreset;
+  /** Shot filters applied inside retrieval, e.g. { dialogue: ["none"] } (ADR-0114). */
+  shot_filters?: Record<string, string[]>;
 }
 
 export type SourceInputEvidence =

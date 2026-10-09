@@ -119,6 +119,7 @@ from pipeline.search.retrieve import (
 )
 from pipeline.search.browse import browse_highlights as _browse_highlights, browse_scenes as _browse_scenes
 from pipeline.search.film_facets import film_facets as _film_facets
+from pipeline.search.shot_facets import shot_facet_vocabulary as _shot_facet_vocabulary, validate_shot_filters
 from pipeline.search.recipe import (
     RecipeSourceNotFound,
     RecipeSourceUnavailable,
@@ -167,6 +168,10 @@ def _warm_search_models(config: Config, app: FastAPI) -> None:
         from pipeline.search.retrieve import search
 
         search("warmup", app.state.db, config, result_limit=1)
+        # And the shot facet index, so the first filtered search does not build it.
+        from pipeline.search.shot_facets import shot_facet_index
+
+        shot_facet_index(app.state.db)
         print(f"[startup] search ready in {time.perf_counter() - started:.1f}s", flush=True)
     except Exception as exc:
         print(f"[startup] search warmup failed: {exc}", flush=True)
@@ -987,6 +992,13 @@ class SearchRecipeRequest(BaseModel):
     film_ids: list[str] = Field(default_factory=list, max_length=1_000)
     limit: int | None = Field(default=None, ge=1, strict=True)
     preset: Literal["balanced", "famous", "gems"] = "balanced"
+    # Shot filters (ADR-0114): facet -> chosen values, e.g. {"dialogue": ["none"]}.
+    shot_filters: dict[str, list[str]] = Field(default_factory=dict, max_length=16)
+
+    @field_validator("shot_filters")
+    @classmethod
+    def known_shot_filters(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        return {key: list(values) for key, values in validate_shot_filters(value).items()}
 
     @field_validator("film_ids")
     @classmethod
@@ -1019,6 +1031,13 @@ class SearchImageRecipeRequest(BaseModel):
     film_ids: list[str] = Field(default_factory=list, max_length=1_000)
     limit: int | None = Field(default=None, ge=1, strict=True)
     preset: Literal["balanced", "famous", "gems"] = "balanced"
+    # Shot filters (ADR-0114): facet -> chosen values, e.g. {"dialogue": ["none"]}.
+    shot_filters: dict[str, list[str]] = Field(default_factory=dict, max_length=16)
+
+    @field_validator("shot_filters")
+    @classmethod
+    def known_shot_filters(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        return {key: list(values) for key, values in validate_shot_filters(value).items()}
 
     @field_validator("film_ids")
     @classmethod
@@ -1126,6 +1145,7 @@ async def _run_recipe_execution(
     result_limit: int,
     *,
     preset: str = "balanced",
+    shot_filters: dict[str, list[str]] | None = None,
     image_slot_already_acquired: bool = False,
 ) -> Any:
     """Execute one validated recipe under the required GPU guard."""
@@ -1151,6 +1171,7 @@ async def _run_recipe_execution(
                 film_ids=film_ids,
                 result_limit=result_limit,
                 preset=preset,
+                shot_filters=shot_filters,
             )
             if uses_serialized_image_work
             else asyncio.to_thread(
@@ -1161,6 +1182,7 @@ async def _run_recipe_execution(
                 film_ids=film_ids,
                 result_limit=result_limit,
                 preset=preset,
+                shot_filters=shot_filters,
             )
         )
     except RecipeSourceNotFound as exc:
@@ -1226,6 +1248,7 @@ async def search_recipe_endpoint(
         payload.film_ids,
         probe_limit,
         preset=payload.preset,
+        shot_filters=payload.shot_filters,
     )
     _log_interaction(request, "search", query=" | ".join(str(getattr(c, "text", "") or "") for c in payload.clauses if getattr(c, "text", None)),
                      preset=payload.preset,
@@ -1270,6 +1293,7 @@ async def image_recipe_endpoint(
             payload.film_ids,
             probe_limit,
             preset=payload.preset,
+            shot_filters=payload.shot_filters,
             image_slot_already_acquired=True,
         )
     finally:
@@ -1759,24 +1783,36 @@ def library_scenes_endpoint(
     film_id: Annotated[list[str], Query(min_length=1, max_length=1_000)],
     limit: int | None = None,
     preset: Literal["balanced", "famous", "gems"] = Query(default="balanced"),
+    shot: Annotated[list[str], Query(max_length=32)] = [],
 ) -> dict[str, Any]:
     """Browse explicit movie scopes: source order, or the films' highlights / hidden gems."""
     config: Config = request.app.state.config
     result_limit = _resolve_api_result_limit(config, limit)
     try:
+        shot_filters: dict[str, list[str]] = {}
+        for pair in shot:
+            key, _, value = pair.partition(":")
+            shot_filters.setdefault(key, []).append(value)
+        shot_filters = {key: list(values) for key, values in validate_shot_filters(shot_filters).items()}
         if preset == "balanced":
             results = _browse_scenes(
                 request.app.state.db, config, film_ids=film_id,
-                result_limit=_result_probe_limit(config, result_limit),
+                result_limit=_result_probe_limit(config, result_limit), shot_filters=shot_filters,
             )
         else:
             results = _browse_highlights(
                 request.app.state.db, config, film_ids=film_id, preset=preset,
-                result_limit=_result_probe_limit(config, result_limit),
+                result_limit=_result_probe_limit(config, result_limit), shot_filters=shot_filters,
             )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _search_response(_with_film_titles(request, results), config, result_limit)
+
+
+@app.get("/search/shot-facets")
+def shot_facets_endpoint(request: Request) -> list[dict[str, Any]]:
+    """The shot filters the Filter menu offers, with library-wide shot counts."""
+    return _shot_facet_vocabulary(request.app.state.db)
 
 
 @app.get("/library")

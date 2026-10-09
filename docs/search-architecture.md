@@ -17,7 +17,7 @@ records.
 |---|---|---|---|
 | Evidence: per-film artifacts, compiled tables | Evidence v2 | `pipeline/evidence/` | 0001, 0093, 0095, 0098, 0099 |
 | Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080, 0102 |
-| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, 0112, 0113, with 0002-0021 and 0082-0087 where not superseded |
+| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, 0112, 0113, 0114, with 0002-0021 and 0082-0087 where not superseded |
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
@@ -270,8 +270,19 @@ beside the count. A grid that cannot fill the viewport from the loaded prefix
 requests the next one itself. Filter choices are a draft until the menu
 closes (Apply or a click away), then rerun the search once like an edited
 query, keeping the current scenes until the filtered ones arrive; ordering
-changes rerun after the same short pause. Shot-level filters are not film scope and need
-their own decision.
+changes rerun after the same short pause.
+
+Shot filters (ADR-0114) narrow by what is in the shot: dialogue, size,
+people, camera, color, time and place. `pipeline/search/shot_facets.py`
+derives one value per representative shot from `units` annotations and
+`shot_evidence` measurements (none when missing or unreliable), in memory per
+table version; `GET /search/shot-facets` lists them. A recipe's
+`shot_filters` bind a `UnitScope` to its search execution: resident channels
+mask rows before top-k, database paths drop out-of-scope rows in
+`_rows_in_scope`, and the keyword and quote channels read deeper in
+proportion to the scope's narrowness. Browsing takes the same filters. In the
+Filter menu shot facets form a Shots group that toggles in place and applies
+with the film filters.
 
 With only movie scope supplied, `GET /library/scenes` browses selected published
 films in request order and source chronology using the usual bounded result

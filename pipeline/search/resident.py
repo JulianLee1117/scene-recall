@@ -69,16 +69,23 @@ class VectorMatrix:
         return {key: block[position] for position, (key, _row) in enumerate(wanted)}
 
     def allowed_rows(self, film_ids: tuple[str, ...]) -> Any | None:
-        """Boolean row mask for a film scope (None when unscoped)."""
-        if not film_ids:
-            return None
+        """Boolean row mask for a film scope and the running search's shot filters (None when unscoped)."""
         import torch
-        wanted = [index for index, film in enumerate(self.films) if film in set(film_ids)]
-        if not wanted:
-            return torch.zeros(len(self.row_unit), dtype=torch.bool, device=self.device)
-        film_ok = torch.zeros(len(self.films), dtype=torch.bool, device=self.device)
-        film_ok[wanted] = True
-        return film_ok[self.unit_film[self.row_unit]]
+        from pipeline.search.request import unit_scope
+
+        allowed = None
+        if film_ids:
+            wanted = [index for index, film in enumerate(self.films) if film in set(film_ids)]
+            film_ok = torch.zeros(len(self.films), dtype=torch.bool, device=self.device)
+            film_ok[wanted] = True
+            allowed = film_ok[self.unit_film[self.row_unit]]
+        scope = unit_scope()
+        if scope is not None:
+            # Shot filters mask rows before top-k, so each channel's depth is all in scope.
+            unit_ok = torch.from_numpy(scope.mask_for(self.unit_ids, (self.name, self.version))).to(self.device)
+            shot_rows = unit_ok[self.row_unit]
+            allowed = shot_rows if allowed is None else allowed & shot_rows
+        return allowed
 
 
 def disable() -> None:

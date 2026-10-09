@@ -1457,6 +1457,7 @@ def test_recipe_api_forwards_typed_clauses_and_returns_matches(
         "film_ids": ["film-a", "film-b"],
         "result_limit": 13,
         "preset": "balanced",
+        "shot_filters": {},
     }
     assert available_slots == 2
 
@@ -1548,6 +1549,7 @@ def test_uploaded_image_recipe_api_decodes_and_forwards_native_clause(
         "film_ids": ["film-a", "film-b"],
         "result_limit": 25,
         "preset": "balanced",
+        "shot_filters": {},
     }
     assert available_slots == 2
 

@@ -7,7 +7,7 @@ from functools import wraps
 from inspect import signature
 import logging
 from time import perf_counter
-from typing import Callable
+from typing import Any, Callable
 from contextlib import contextmanager
 from copy import deepcopy
 import json
@@ -25,6 +25,9 @@ class SearchContext:
     hits: int = 0
     metadata: dict = field(default_factory=dict)
     stages: dict = field(default_factory=dict)
+    # Shots the search may return (pipeline.search.shot_facets.UnitScope), or
+    # None for all. Every resident channel and database path consults it.
+    units: Any = None
 
 
 _CURRENT: ContextVar[SearchContext | None] = ContextVar("scene_search_request", default=None)
@@ -39,6 +42,20 @@ def search_stage(name):
         context = _CURRENT.get()
         if context is not None:
             context.stages[name] = context.stages.get(name, 0.) + (perf_counter() - started) * 1000
+
+
+def bind_unit_scope(scope) -> None:
+    """Limit the running search to *scope*'s shots (call inside a search execution)."""
+    context = _CURRENT.get()
+    if context is None:
+        raise RuntimeError("shot filters need a search execution")
+    context.units = scope
+
+
+def unit_scope():
+    """The running search's shot scope, or None when it has no shot filters."""
+    context = _CURRENT.get()
+    return context.units if context is not None else None
 
 
 def reuse_rows(namespace, identities, fetch, *, identity_field="unit_id"):

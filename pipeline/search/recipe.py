@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 import lancedb
 from lancedb.expr import col, lit
@@ -18,7 +18,8 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from pipeline.config import Config
-from pipeline.search.request import search_execution
+from pipeline.search.request import bind_unit_scope, search_execution
+from pipeline.search.shot_facets import unit_scope, validate_shot_filters
 from pipeline.index.text_features import build_mood_view_text
 from pipeline.search.retrieve import (
     SemanticTextProfileUnavailable,
@@ -816,9 +817,14 @@ def execute_search_recipe(
     film_ids: Sequence[str] = (),
     result_limit: int | None = None,
     preset: str = "balanced",
+    shot_filters: Mapping[str, Sequence[str]] | None = None,
     _preserve_visual_alternatives: bool = False,
 ) -> SearchRecipeExecution:
-    """Run a recipe and return results with its resolved source snapshot."""
+    """Run a recipe and return results with its resolved source snapshot.
+
+    Shot filters (ADR-0114) bind to the whole execution, so every clause and
+    channel ranks only shots that pass them.
+    """
     resolved_result_limit = resolve_result_limit(config, result_limit)
     if not 1 <= len(clauses) <= 3:
         raise ValueError("a search recipe requires one to three clauses")
@@ -844,6 +850,7 @@ def execute_search_recipe(
             if str(film_id).strip()
         )
     )
+    bind_unit_scope(unit_scope(db, validate_shot_filters(shot_filters or {})))
     only_clause = clauses[0] if len(clauses) == 1 else None
     if (
         only_clause is not None
@@ -942,6 +949,7 @@ def search_recipe(
     film_ids: Sequence[str] = (),
     result_limit: int | None = None,
     preset: str = "balanced",
+    shot_filters: Mapping[str, Sequence[str]] | None = None,
     _preserve_visual_alternatives: bool = False,
 ) -> list[dict[str, Any]]:
     """Run one to three typed clauses and return one final ranked window."""
@@ -952,6 +960,7 @@ def search_recipe(
         film_ids=film_ids,
         result_limit=result_limit,
         preset=preset,
+        shot_filters=shot_filters,
         _preserve_visual_alternatives=_preserve_visual_alternatives,
     ).results
 
