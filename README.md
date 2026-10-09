@@ -46,9 +46,9 @@ the compiled tables migrate in place; `compile --rebuild` drops and recompiles
 them after an incompatible schema change.
 
 Search ranks by relevance first, then applies the order chosen under **View**:
-**Balanced** (default) lets iconic and well-made shots rise a little, **Famous
-first** favours iconic moments, **Hidden gems first** favours well-made shots
-people rarely see. Shots of
+**Balanced** (default) lets iconic and well-made shots rise a little, **Famous**
+favours iconic moments, **Hidden gems** favours well-made shots people rarely
+see. Shots of
 one dramatic scene fold into one card. `retrieval.rerank_shortlist` (default 40)
 sets the cross-encoder rerank of the fused shortlist; `0` disables it.
 
@@ -1431,22 +1431,26 @@ movie, before your first search or after. Its menu lists each section with its
 current choice and opens one section at a time; long sections have a search
 field. Choices within a section are alternatives (1990s or 2000s); sections
 combine (1990s and Crime). Each change reruns the search, and counts keep you
-from choosing a combination with no movie. Active filters show under the bar
-as one chip per section with the number of movies left; click a chip to edit
-it or its × to clear it.
+from choosing a combination with no movie. Picking a movie in its section
+appends that movie's mention, sharing the same scope as inline mentions;
+deselecting it removes the @ marker and leaves the title words as plain text.
+Going home clears the filters. Search uses bounded ranked candidate and result
+windows, not a minimum-similarity cutoff, so a globally uncompetitive movie may
+be absent; pick that movie under **Filter** when you want the ranking scoped
+entirely to that movie.
 
 **View** sets how results are shown, and this browser remembers it: the order
-(Balanced, Famous first, Hidden gems first), the row size (Small, Medium,
-Large) and **Show details**. A non-default order shows as a chip beside the
-filters. Picking a movie in its
-section appends that movie's mention, sharing the same scope as inline
-mentions; deselecting it removes the @ marker and leaves the title words as
-plain text. Going home clears the filters. Search uses bounded ranked
-candidate and result windows, not a minimum-similarity cutoff, so a globally
-uncompetitive movie may be absent; pick that movie under **Filter** when you
-want the ranking scoped entirely to that movie.
+(Balanced, Famous, Hidden gems), the row size (Small, Medium, Large) and
+**Details**. Active filters and a non-default order show as chips beside the
+result count, so they never move the grid; click a chip to edit it or its ×
+to clear it.
+
+In the player, the scene's other matching shots sit in a strip under the
+details. Picking one makes it the shot Save, Related and Match cuts act on;
+Save keeps the frame its thumbnail shows.
 The responsive grid shows at least three complete rows and expands its initial
-display to fill the available viewport. **Show more** first reveals the rest of
+display to fill the available viewport, loading more results by itself when
+the loaded ones cannot fill it (small rows, a tall window). **Show more** first reveals the rest of
 the current backend-ranked prefix, then asks the backend for a deeper prefix
 when more eligible scenes exist. The current progressive window is bounded by
 the configured 200-result ceiling; the control does not expose internal batch

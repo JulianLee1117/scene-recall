@@ -11,10 +11,10 @@ export interface ViewPrefs {
 export const DEFAULT_VIEW: ViewPrefs = { order: "balanced", size: "medium", details: false };
 
 /** The orderings, in menu order. They rerank results; none hides any. */
-export const ORDER_OPTIONS: ReadonlyArray<{ value: RankingPreset; label: string; hint: string }> = [
-  { value: "balanced", label: "Balanced", hint: "Relevance first" },
-  { value: "famous", label: "Famous first", hint: "Iconic moments rise" },
-  { value: "gems", label: "Hidden gems first", hint: "Well-made, rarely seen" },
+export const ORDER_OPTIONS: ReadonlyArray<{ value: RankingPreset; label: string }> = [
+  { value: "balanced", label: "Balanced" },
+  { value: "famous", label: "Famous" },
+  { value: "gems", label: "Hidden gems" },
 ];
 
 export const SIZE_OPTIONS: ReadonlyArray<{ value: RowSize; label: string }> = [

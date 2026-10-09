@@ -2315,12 +2315,22 @@ def _scene_alternative(candidate: dict[str, Any], shot_evidence: dict[str, Any] 
     """Compact card for another matching shot of the same scene."""
     row = candidate["row"]
     unit_id = str(row["unit_id"])
-    keyframe = f"/media/keyframe/{row.get('shot_id') or unit_id}/{_keyframe_index(row)}"
-    thumbnail = (_priors.hero_url(unit_id, shot_evidence) if shot_evidence and shot_evidence.get("hero_path")
-                 else keyframe)
-    return {"unit_id": unit_id, "t_start": row["t_start"], "t_end": row["t_end"], "keyframe_url": keyframe,
-            "keyframe_index": _keyframe_index(row), "thumbnail_url": thumbnail,
-            "preview_url": f"/media/preview/{row.get('shot_id') or unit_id}"}
+    return _show_alternative_hero({
+        "unit_id": unit_id, "t_start": row["t_start"], "t_end": row["t_end"],
+        "keyframe_url": f"/media/keyframe/{row.get('shot_id') or unit_id}/{_keyframe_index(row)}",
+        "keyframe_index": _keyframe_index(row), "preview_url": f"/media/preview/{row.get('shot_id') or unit_id}",
+    }, shot_evidence)
+
+
+def _show_alternative_hero(alternative: dict[str, Any], shot_evidence: dict[str, Any] | None) -> dict[str, Any]:
+    """Show an alternative by its best frame when it has one, with that frame's moment for saving."""
+    if shot_evidence and shot_evidence.get("hero_path"):
+        alternative["thumbnail_url"] = _priors.hero_url(alternative["unit_id"], shot_evidence)
+        if shot_evidence.get("hero_time") is not None:
+            alternative["hero_time"] = float(shot_evidence["hero_time"])
+    else:
+        alternative["thumbnail_url"] = alternative.get("keyframe_url")
+    return alternative
 
 
 def _clause_results_from_rows(
@@ -2744,9 +2754,7 @@ def _decorate_results(results: list[dict[str, Any]], db: lancedb.DBConnection,
         if shot_evidence:
             _priors.decorate(result, shot_evidence, scenes.get(shot_evidence.get("scene_id") or ""))
         for alternative in result.get("scene_alternatives") or []:
-            alternative_evidence = evidence.get(_result_unit_id(alternative)) or {}
-            alternative["thumbnail_url"] = (_priors.hero_url(alternative["unit_id"], alternative_evidence)
-                                            if alternative_evidence.get("hero_path") else alternative.get("keyframe_url"))
+            _show_alternative_hero(alternative, evidence.get(_result_unit_id(alternative)))
     return results
 
 

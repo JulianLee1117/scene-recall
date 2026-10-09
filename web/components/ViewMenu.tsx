@@ -54,54 +54,51 @@ export default function ViewMenu({
 
       {open && (
         <div ref={panelRef} id={panelId} className="toolbar-menu is-view" role="dialog" aria-label="View options" tabIndex={-1}>
-          <div className="toolbar-menu-list" role="radiogroup" aria-label="Order">
-            <p className="toolbar-menu-title">Order</p>
-            {ORDER_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className="toolbar-menu-option"
-                role="radio"
-                aria-checked={view.order === option.value}
-                onClick={() => onChange({ order: option.value })}
-              >
-                <span className="toolbar-menu-check" aria-hidden="true">{view.order === option.value ? "✓" : ""}</span>
-                <span className="toolbar-menu-label">{option.label}</span>
-                <span className="toolbar-menu-tally">{option.hint}</span>
-              </button>
-            ))}
-          </div>
-          <div className="toolbar-menu-group">
-            <p className="toolbar-menu-title">Size</p>
-            <div className="toolbar-menu-segmented" role="radiogroup" aria-label="Size">
-              {SIZE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={view.size === option.value}
-                  onClick={() => onChange({ size: option.value })}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="toolbar-menu-list is-last">
-            <button
-              type="button"
-              className="toolbar-menu-option"
-              role="switch"
-              aria-checked={view.details}
-              onClick={() => onChange({ details: !view.details })}
-            >
-              <span className="toolbar-menu-label">Show details</span>
-              <span className="toolbar-menu-tally">Why each scene matched</span>
-              <span className="toolbar-menu-switch" aria-hidden="true" />
-            </button>
-          </div>
+          <Segmented label="Order" options={ORDER_OPTIONS} value={view.order} onChange={(order) => onChange({ order })} />
+          <Segmented label="Size" options={SIZE_OPTIONS} value={view.size} onChange={(size) => onChange({ size })} />
+          <button
+            type="button"
+            className="toolbar-menu-toggle"
+            role="switch"
+            aria-checked={view.details}
+            onClick={() => onChange({ details: !view.details })}
+          >
+            <span>Details</span>
+            <span className="toolbar-menu-switch" aria-hidden="true" />
+          </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="toolbar-menu-group">
+      <p className="toolbar-menu-title">{label}</p>
+      <div className="toolbar-menu-segmented" role="radiogroup" aria-label={label}>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={value === option.value}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

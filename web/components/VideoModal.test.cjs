@@ -38,6 +38,10 @@ function harness({ shot = film(), apiUrl = "http://api.invalid" } = {}) {
       const i = cursor++; if (!hooks[i] || !same(deps, hooks[i].deps)) hooks[i] = { callback, deps };
       return hooks[i].callback;
     },
+    useMemo(factory, deps) {
+      const i = cursor++; if (!hooks[i] || !same(deps, hooks[i].deps)) hooks[i] = { value: factory(), deps };
+      return hooks[i].value;
+    },
     useEffect(effect, deps) {
       const i = cursor++;
       if (!hooks[i] || !same(deps, hooks[i].deps)) {
@@ -121,7 +125,7 @@ test("compatible playback URL loads only after metadata and retains evidence see
     video.props.onTimeUpdate({ currentTarget: { currentTime: 27 } }); await app.flush();
     app.button("Return to retrieved moment · 23s").props.onClick();
     assert.equal(video.props.ref.current.currentTime, 23);
-    app.find((node) => node.props?.["aria-label"] === "Save retrieved scene").props.onClick();
+    app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
     assert.equal(app.bookmarks[0].matched_frame_timestamp, 23, "saving retains the retrieved anchor after scrubbing");
   } finally { app.dispose(); }
 });
@@ -247,5 +251,31 @@ test("one action bar offers Save, Related, Match cuts at the playhead and Copy t
     assert.match(text(why), /Why it's here/);
     assert.equal(nodes(why).find((node) => node.type === "./MatchBreakdown").props.shot, shot, "the shared breakdown explains the ranking");
     assert.doesNotMatch(text(app.state), /Save and Find related use/);
+  } finally { app.dispose(); }
+});
+
+test("picking another shot of the scene makes Save and Match cuts act on it", async () => {
+  const shot = { ...film(), keyframe_index: 1, scene: { title: "Planetarium" },
+    scene_alternatives: [{ unit_id: "film-a_0004", t_start: 40, t_end: 44, keyframe_url: "/k/4", keyframe_index: 1, thumbnail_url: "/h/4", hero_time: 42.5 }] };
+  const app = harness({ shot });
+  try {
+    await app.resolve(0, { url: "/video/film-a" });
+    const strip = () => nodes(app.find((node) => node.props?.className === "modal-scene-alternatives")).filter((node) => node.type === "button");
+    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [true, false], "the retrieved shot leads the strip");
+
+    strip()[1].props.onClick();
+    await app.flush();
+    assert.equal(app.video().props.ref.current.currentTime, 40);
+    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [false, true]);
+    assert.match(text(app.find((node) => node.props?.className === "modal-time")), /40s – 44s/);
+    assert.equal(app.find((node) => node.type === "a" && text(node) === "Match cuts").props.href, "/match?unit_id=film-a_0004&time=42.500");
+    app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
+    assert.equal(app.bookmarks[0].unit_id, "film-a_0004");
+    assert.equal(app.bookmarks[0].evidence_timestamp, 42.5, "it saves the frame its thumbnail showed");
+    assert.equal(app.bookmarks[0].scene.title, "Planetarium");
+
+    app.button("Return to retrieved moment · 23s").props.onClick();
+    await app.flush();
+    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [true, false]);
   } finally { app.dispose(); }
 });

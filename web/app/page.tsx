@@ -26,7 +26,7 @@ import { useGlide } from "@/hooks/useGlide";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
-import { filterableFilms, hasFilters, narrowScope, type FilmFilters } from "@/lib/filmFilters";
+import { filterableFilms, narrowScope, type FilmFilters } from "@/lib/filmFilters";
 import { DEFAULT_VIEW, ORDER_OPTIONS, loadViewPrefs, saveViewPrefs, type ViewPrefs } from "@/lib/viewPrefs";
 import {
   FACET_LABELS,
@@ -891,9 +891,6 @@ export default function Home() {
     () => new Set(bookmarkByUnit.keys()),
     [bookmarkByUnit],
   );
-  const activeShotBookmark = activeShot
-    ? bookmarkByUnit.get(activeShot.unit_id)
-    : undefined;
   const voiceActive = speech.status !== "idle";
   const activeLoading = loading;
   const activeError = error;
@@ -1299,26 +1296,6 @@ export default function Home() {
                     onMoviesChange={handleMoviePickerChange}
                   />
                 }
-                activeExtra={
-                  (orderChip || hasFilters(filmFilters)) && (
-                    <>
-                      {orderChip && (
-                        <ActiveChip
-                          label="Order"
-                          value={orderChip}
-                          onEdit={() => setViewOpen(true)}
-                          onClear={() => handleViewChange({ order: DEFAULT_VIEW.order })}
-                        />
-                      )}
-                      <ActiveFilters
-                        filters={filmFilters}
-                        onFiltersChange={handleFiltersChange}
-                        onEdit={setFilterView}
-                        movieCount={filterScope.excludesAll ? 0 : filterScope.filmIds.length || filterable.length}
-                      />
-                    </>
-                  )
-                }
                 controls={
                   // Home shows examples beside Refine and Filter; the first
                   // search swaps in the View menu as the bar glides up.
@@ -1554,6 +1531,21 @@ export default function Home() {
               bookmarkDisabled={bookmarksLoading}
               showDetails={showDetails}
               size={view.size}
+              status={
+                // The settings shaping these results, beside their count:
+                // they never add a line or move the grid.
+                <>
+                  {orderChip && (
+                    <ActiveChip
+                      label="Order"
+                      value={orderChip}
+                      onEdit={() => setViewOpen(true)}
+                      onClear={() => handleViewChange({ order: DEFAULT_VIEW.order })}
+                    />
+                  )}
+                  <ActiveFilters filters={filmFilters} onFiltersChange={handleFiltersChange} onEdit={setFilterView} />
+                </>
+              }
             />
           </div>
         </>
@@ -1578,10 +1570,9 @@ export default function Home() {
           disabledUseFacets={disabledUseFacets}
           sourceReferenceFacet={sourceReferenceFacet ?? undefined}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
-          bookmarked={Boolean(activeShotBookmark)}
-          bookmarkDisabled={
-            bookmarksLoading || pendingBookmarkUnitIds.has(activeShot.unit_id)
-          }
+          bookmarkedUnitIds={bookmarkedUnitIds}
+          pendingBookmarkUnitIds={pendingBookmarkUnitIds}
+          bookmarkDisabled={bookmarksLoading}
         />
       )}
     </main>

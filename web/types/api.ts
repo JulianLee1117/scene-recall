@@ -211,9 +211,11 @@ export interface SceneAlternative {
   t_start: number;
   t_end: number;
   keyframe_url: string;
-  keyframe_index?: number;
+  keyframe_index: number;
   thumbnail_url?: string;
   preview_url?: string;
+  /** The moment its thumbnail shows, when the shot has a chosen best frame. */
+  hero_time?: number;
 }
 
 export interface MatchedLine {

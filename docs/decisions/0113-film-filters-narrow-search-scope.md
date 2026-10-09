@@ -38,9 +38,10 @@ not change.
 - On the search page one **Filter** control replaces the **All movies**
   picker. It sits beside Refine, on the empty home screen too, so a first
   search can be filtered, and like Refine it keeps one size and shows a
-  count. Active filters appear in Refine's active row, one chip per section
-  with every value ("Era 1990s, 2000s"), followed by the number of movies
-  left: a chip reopens the menu at its section and its × clears that section.
+  count. Active filters appear beside the result count, one chip per section
+  with every value ("Era 1990s, 2000s"), so they never move the grid: a chip
+  reopens the menu at its section and its × clears that section. (Amended
+  2026-10-09: in Refine's active row they pushed the results down.)
   (Amended the same day: chips beside the trigger widened the toolbar and hid
   the rest behind "+N".) The menu lists Era, Genre, Director and Movie with
   their current choices and opens one section at a time. (Amended 2026-10-09:

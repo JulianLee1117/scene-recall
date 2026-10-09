@@ -262,10 +262,12 @@ Film filters (ADR-0113) narrow that scope by era, genre family and director.
 alternatives and facets combine; @mentioned movies are narrowed too. Filters
 that leave no movie run no search and say so. One **Filter** control beside
 Refine, home screen included, opens a menu of the facets and the movie picker,
-one section at a time; active filters join Refine's active row as one chip
-per section, and each option is counted against the other facets. A **View**
-menu holds presentation only: the ranking preset, row size and Details,
-remembered in the browser, with a non-default preset shown as a chip. A filter change reruns the search like an
+one section at a time; active filters show as one chip per section beside
+the result count, and each option is counted against the other facets. A
+**View** menu holds presentation only: the ranking preset, row size and
+Details, remembered in the browser, with a non-default preset shown as a chip
+beside the count. A grid that cannot fill the viewport from the loaded prefix
+requests the next one itself. A filter change reruns the search like an
 edited query, keeping the current scenes until the filtered ones arrive. Shot-level filters are not film scope and need
 their own decision.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import ShotCard from "./ShotCard";
 import { ROW_GAP, rowStarts, useJustifiedRows } from "@/hooks/useJustifiedRows";
 import { visibleTileCount, type RowSize } from "@/lib/justifiedRows";
@@ -30,6 +30,8 @@ interface ResultGridProps {
   showDetails: boolean;
   /** Row height: the View menu's size, or "small" for the compact reference lookup. */
   size?: RowSize;
+  /** Settings shaping these results, shown beside the count (fixed height: nothing moves). */
+  status?: ReactNode;
 }
 
 
@@ -50,6 +52,7 @@ export default function ResultGrid({
   bookmarkDisabled = false,
   showDetails,
   size = "medium",
+  status,
 }: ResultGridProps) {
   const { ref: gridRef, frame, layout, tileStyle, learnAspect } = useJustifiedRows(results, size);
   // How many scenes the user has seen; a resize never hides them again.
@@ -74,6 +77,14 @@ export default function ResultGrid({
   useEffect(() => {
     setVisibleItemFloor((current) => Math.max(current, shown.count));
   }, [shown.count]);
+
+  // Small rows or a tall window can need more scenes than were loaded to fill
+  // the screen: ask for the next batch rather than wait for Show more.
+  const wholeRowsLoaded = layout ? layout.sizes.length - (hasMore ? 1 : 0) : 0;
+  const underfilled = Boolean(layout && hasMore && !revealDisabled && wholeRowsLoaded < minRows);
+  useEffect(() => {
+    if (underfilled) onRequestMore?.();
+  }, [underfilled, results.length, onRequestMore]);
 
   if (!hasResults) return null;
 
@@ -121,6 +132,7 @@ export default function ResultGrid({
           Showing {visibleResults.length} {sceneLabel}{" "}
           <span aria-hidden="true">&middot;</span> {movieCount} {movieLabel}
         </p>
+        {status}
       </header>
       {layout ? (
         <div

@@ -1751,6 +1751,17 @@ def test_search_folds_a_near_identical_shot_of_the_same_film_into_its_card(
     assert [alternative["unit_id"] for alternative in cards["first"]["scene_alternatives"]] == ["again"]
 
 
+def test_scene_alternative_carries_the_moment_its_thumbnail_shows() -> None:
+    from pipeline.search.retrieve import _scene_alternative
+
+    row = {"unit_id": "film_0007", "shot_id": "film_0007", "t_start": 10.0, "t_end": 14.0,
+           "keyframe_paths": '["a.jpg", "b.jpg", "c.jpg"]'}
+    plain = _scene_alternative({"row": row}, None)
+    assert "hero_time" not in plain and plain["keyframe_index"] == 1
+    hero = _scene_alternative({"row": row}, {"hero_path": "film/hero.jpg", "hero_time": 12.5})
+    assert hero["hero_time"] == 12.5
+
+
 def test_search_keeps_temporally_adjacent_visually_distinct_results(
     config: Config,
 ) -> None:

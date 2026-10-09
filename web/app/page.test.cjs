@@ -564,9 +564,10 @@ test("film filters narrow the search to matching movies and say when none match"
     assert.deepEqual(body(0).film_ids, ["heat"]);
     assert.equal(body(0).clauses[0].text, "rain at night");
     // Active filters show in the refinements row; a chip reopens the panel.
-    // Active filters show in the refinements row; a chip reopens the menu at its section.
-    const summary = () => nodes(app.find((node) => node.type === "MatchByRail").props.activeExtra).find((node) => node.type === "ActiveFilters");
-    assert.equal(summary().props.movieCount, 1);
+    // Active filters show beside the result count; a chip reopens the menu at its section.
+    await app.resolve(0, response([result("heat")]));
+    const summary = () => nodes(app.grid().props.status).find((node) => node.type === "ActiveFilters");
+    assert.deepEqual(JSON.parse(JSON.stringify(summary().props.filters)), { genre: ["Crime"] });
     assert.equal(filter().view, null);
     summary().props.onEdit("genre");
     await app.flush();
@@ -590,7 +591,7 @@ test("film filters narrow the search to matching movies and say when none match"
 test("the View menu reorders the current search, shows a non-default order as a chip, and sizes the grid", async () => {
   const app = harness();
   const rail = () => app.find((node) => node.type === "MatchByRail").props;
-  const chip = () => nodes(rail().activeExtra).find((node) => node.type === "ActiveChip");
+  const chip = () => nodes(app.grid().props.status).find((node) => node.type === "ActiveChip");
   try {
     app.find((node) => node.props?.["aria-label"] === "Describe a scene").props.onChange({ target: { value: "rain at night" } });
     await app.flush();
@@ -602,7 +603,7 @@ test("the View menu reorders the current search, shows a non-default order as a 
     rail().controls.props.onChange({ order: "famous" });
     await app.flush();
     assert.equal(JSON.parse(app.requests.at(-1).init.body).preset, "famous");
-    assert.equal(chip().props.value, "Famous first");
+    assert.equal(chip().props.value, "Famous");
 
     rail().controls.props.onChange({ size: "large" });
     await app.flush();

@@ -1409,14 +1409,12 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-chevron { flex: 0 0 auto; color: #857c6f; transition: transform .15s ease; }
 .toolbar-menu-trigger[aria-expanded="true"] .toolbar-menu-chevron { transform: rotate(180deg); }
 .toolbar-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; display: flex; width: 280px; max-width: calc(100vw - 32px); max-height: min(440px, calc(100dvh - 220px)); flex-direction: column; overflow: hidden; padding-top: 4px; border: 1px solid #2c2822; border-radius: 10px; background: #121110; box-shadow: 0 18px 44px rgba(0, 0, 0, .55); outline: none; animation: toolbar-menu-in .12s ease-out; }
-.toolbar-menu.is-view { width: 300px; }
-.clues-tools .toolbar-menu { right: 0; left: auto; }
+.toolbar-menu.is-view { width: 270px; padding: 6px 0 0; }
 .search-hero.is-home .toolbar-menu { max-height: max(240px, min(440px, calc(100dvh - var(--home-top) - 200px))); }
 @keyframes toolbar-menu-in { from { opacity: 0; transform: translateY(-3px); } }
 .toolbar-menu-list { display: flex; min-height: 0; padding: 0 4px 4px; flex-direction: column; }
 .toolbar-menu-list.is-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
-.toolbar-menu-list.is-last { padding-top: 4px; border-top: 1px solid #23201c; }
-.toolbar-menu-title { margin: 6px 8px 4px; color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.toolbar-menu-title { margin: 0 0 6px; color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .toolbar-menu-row, .toolbar-menu-option { display: flex; width: 100%; min-height: 32px; padding: 6px 8px; align-items: center; gap: 8px; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .76rem; text-align: left; cursor: pointer; }
 .toolbar-menu-row:hover, .toolbar-menu-option:hover:not(:disabled) { background: #ffffff0a; }
 .toolbar-menu-row > span:first-child { flex: 0 0 auto; }
@@ -1425,7 +1423,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-check { width: 12px; flex: 0 0 12px; color: var(--accent); font-size: .72rem; text-align: center; }
 .toolbar-menu-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar-menu-tally { flex: 0 0 auto; color: #6f6a62; font-size: .68rem; font-variant-numeric: tabular-nums; }
-.toolbar-menu-option[aria-pressed="true"], .toolbar-menu-option[aria-checked="true"] { color: #f0dcc0; }
+.toolbar-menu-option[aria-pressed="true"] { color: #f0dcc0; }
 .toolbar-menu-option:disabled { color: #4d4943; cursor: default; }
 .toolbar-menu-option:disabled .toolbar-menu-tally { color: #3d3a35; }
 .toolbar-menu-head { display: flex; padding: 0 8px 0 4px; align-items: center; justify-content: space-between; }
@@ -1442,16 +1440,18 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-empty { margin: 8px; color: #6f6a62; font-size: .72rem; }
 .toolbar-menu-foot { display: flex; padding: 8px 12px; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #23201c; }
 .toolbar-menu-foot > span { color: #857d70; font-size: .68rem; font-variant-numeric: tabular-nums; }
-.toolbar-menu-group { padding: 0 4px 8px; }
-.toolbar-menu-segmented { display: flex; margin: 0 4px; padding: 2px; gap: 2px; border: 1px solid #262320; border-radius: 7px; background: #0b0b0b; }
-.toolbar-menu-segmented button { min-height: 26px; flex: 1; border: 0; border-radius: 5px; background: transparent; color: #8f887d; font: inherit; font-size: .72rem; cursor: pointer; }
+.toolbar-menu-group { padding: 0 12px 12px; }
+.toolbar-menu-segmented { display: flex; padding: 2px; gap: 2px; border: 1px solid #262320; border-radius: 7px; background: #0b0b0b; }
+.toolbar-menu-segmented button { min-height: 26px; flex: 1; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: #8f887d; font: inherit; font-size: .72rem; white-space: nowrap; cursor: pointer; }
 .toolbar-menu-segmented button:hover { color: #e8dece; }
 .toolbar-menu-segmented button[aria-checked="true"] { background: #1f1b16; color: var(--accent); }
 .toolbar-menu-switch { position: relative; width: 26px; height: 15px; flex: 0 0 26px; border-radius: 999px; background: #2a2723; transition: background .15s ease; }
 .toolbar-menu-switch::after { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #8f887d; content: ""; transition: transform .15s ease, background .15s ease; }
-.toolbar-menu-option[aria-checked="true"] .toolbar-menu-switch { background: #b88a4766; }
-.toolbar-menu-option[aria-checked="true"] .toolbar-menu-switch::after { background: #f0dcc0; transform: translateX(11px); }
-.toolbar-menu-row:focus-visible, .toolbar-menu-option:focus-visible, .toolbar-menu-back:focus-visible, .toolbar-menu-link:focus-visible, .toolbar-menu-segmented button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.toolbar-menu-toggle { display: flex; width: 100%; min-height: 40px; padding: 0 12px; align-items: center; justify-content: space-between; border: 0; border-top: 1px solid #23201c; background: transparent; color: #d8d0c4; font: inherit; font-size: .76rem; cursor: pointer; }
+.toolbar-menu-toggle:hover { background: #ffffff06; }
+.toolbar-menu-toggle[aria-checked="true"] .toolbar-menu-switch { background: #b88a4766; }
+.toolbar-menu-toggle[aria-checked="true"] .toolbar-menu-switch::after { background: #f0dcc0; transform: translateX(11px); }
+.toolbar-menu-row:focus-visible, .toolbar-menu-option:focus-visible, .toolbar-menu-back:focus-visible, .toolbar-menu-link:focus-visible, .toolbar-menu-segmented button:focus-visible, .toolbar-menu-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Active settings join the refinements row: one chip each, every value visible. */
 .active-chip { display: inline-flex; min-width: 0; max-width: min(100%, 320px); align-items: stretch; border: 1px solid #403528; border-radius: 5px; background: #bb94590c; color: #d6c2a3; font-size: .72rem; transition: border-color .15s ease, background .15s ease; }
 .active-chip:hover { border-color: #7b6240; background: #bb945916; }
@@ -1461,10 +1461,13 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .active-chip .active-chip-clear { display: grid; width: 24px; flex: 0 0 auto; place-items: center; border-radius: 0 4px 4px 0; color: #9e8769; }
 .active-chip .active-chip-clear:hover { color: #f0dcc0; }
 .active-chip button:focus-visible { border-radius: 4px; outline: 2px solid var(--accent); outline-offset: -2px; }
-.active-chip-count { align-self: center; color: #857d70; font-size: .68rem; font-variant-numeric: tabular-nums; }
+/* Beside the result count the chips shrink to the line's height, so they never move the grid. */
+.result-toolbar .active-chip { height: 22px; font-size: .66rem; }
+.result-toolbar .active-chip-edit { padding: 0 2px 0 8px; gap: 6px; }
+.result-toolbar .active-chip .active-chip-clear { width: 20px; }
 @media (max-width: 600px) {
   .toolbar-menu-root { position: static; }
-  .toolbar-menu, .clues-tools .toolbar-menu { right: auto; left: 50%; max-height: min(440px, calc(100dvh - 300px)); transform: translateX(-50%); animation: none; }
+  .toolbar-menu { left: 50%; max-height: min(440px, calc(100dvh - 300px)); transform: translateX(-50%); animation: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .toolbar-menu { animation: none; }
@@ -1581,9 +1584,12 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   min-height: 24px;
   padding: 0 12px;
   align-items: center;
+  gap: 8px;
+  overflow: hidden;
 }
 
 .result-count {
+  flex: 0 0 auto;
   margin: 0;
   color: #5f5f5f;
   font-size: 0.66rem;
@@ -2727,8 +2733,14 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 .modal-scene-alternatives button:hover,
 .modal-scene-alternatives button:focus-visible {
-  border-color: var(--accent);
+  border-color: #5a4c38;
   color: #e0e0e0;
+}
+
+/* The shot the player's actions apply to. */
+.modal-scene-alternatives button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: #f0dcc0;
 }
 
 .modal-scene-alternatives img {

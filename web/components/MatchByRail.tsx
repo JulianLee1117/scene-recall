@@ -69,8 +69,6 @@ interface MatchByRailProps {
   referenceHasResults?: boolean;
   /** Beside Refine: what else narrows the search (the Filter control). */
   filter?: ReactNode;
-  /** After the active refinements, in the same row: active filters. */
-  activeExtra?: ReactNode;
   controls?: ReactNode;
   idleContent?: ReactNode;
   onCloseReference?: () => void;
@@ -181,7 +179,6 @@ export default function MatchByRail({
   referencePicker,
   referenceHasResults = false,
   filter,
-  activeExtra,
   controls,
   idleContent,
   onCloseReference,
@@ -544,8 +541,8 @@ export default function MatchByRail({
         )}
       </div>
 
-      {(activeFacets.length > 0 || activeExtra) && (
-        <div className="clues-active" aria-label="Active refinements and filters">
+      {activeFacets.length > 0 && (
+        <div className="clues-active" aria-label="Active refinements">
           {activeFacets.map((facet) => {
             const draft = drafts[facet];
             const hasImage = image?.facet === facet;
@@ -572,7 +569,6 @@ export default function MatchByRail({
               <span className="clue-summary-value">{title}</span>
             </ClueChip>;
           })}
-          {activeExtra}
         </div>
       )}
 
