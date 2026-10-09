@@ -123,14 +123,13 @@ export default function InfoView() {
     </header>
 
     <nav className={styles.topics} aria-label="Guide topics">
-      {TOPICS.map((item, index) => <button
+      {TOPICS.map((item) => <button
         key={item.id}
         type="button"
         aria-current={topicId === item.id ? "page" : undefined}
         aria-controls="info-topic"
         onClick={() => setTopicId(item.id)}
       >
-        <span className={styles.topicNumber} aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
         <span><strong>{item.title}</strong><span>{item.description}</span></span>
       </button>)}
     </nav>
