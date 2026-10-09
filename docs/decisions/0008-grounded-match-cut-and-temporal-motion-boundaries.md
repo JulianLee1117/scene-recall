@@ -4,6 +4,7 @@
 - Date: 2026-08-29
 - Supersedes: None
 - Superseded by: ADR-0027 for Lab experiment ordering only; production gates unchanged
+- Amended: 2026-10-08 (shadow layout profile code removed; see the end)
 
 ## Context
 
@@ -109,3 +110,13 @@ win by shared appearance alone does not count.
   evidence or fallback behavior.
 - Match Cut and Motion Match remain unavailable until their respective
   profiles, evaluations, and manifests pass the accepted gates.
+
+## Amendment (2026-10-08)
+
+The shadow grounded-layout profile (`match-layout-v1`, Mask R-CNN silhouettes
+and ViTPose keypoints in `pipeline/search/match_layout*.py`) was never
+promoted, and its code is removed. ADR-0099's moment index now describes
+objects, silhouettes and poses for every instant across the library, which
+covers this evidence. The promotion gate above still applies to any match-cut
+option in ordinary search, and `pipeline/eval/match_cut.py` remains its
+scorer.

@@ -2147,10 +2147,9 @@ cursor or server-side search-session state.
 Ordinary search offers Framing only. A match-cut option there still needs
 ADR-0008's gate: on an owner-reviewed reference set it must beat Framing, and
 it needs acceptable latency and complete coverage (now the moment index,
-ADR-0099). Two experiments are frozen, recorded in ADR-0008 and ADR-0026:
-- the shadow `match-layout-v1` profile (`pipeline/search/match_layout*.py`,
-  `pipeline/eval/match_cut.py`);
-- the offline dense-geometry adapter (`pipeline/experiments/dense_geometry.py`).
+ADR-0099). `pipeline/eval/match_cut.py` scores candidates against that gate.
+The offline dense-geometry adapter (`pipeline/experiments/dense_geometry.py`)
+is frozen, recorded in ADR-0026.
 
 ### Modular recipe retrieval
 
