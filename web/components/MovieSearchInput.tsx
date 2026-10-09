@@ -64,6 +64,12 @@ export default function MovieSearchInput(props: Props) {
   const active = open && activeIndex >= 0 ? suggestions[activeIndex] : undefined;
   const optionId = (filmId: string) => `${id}-${filmId}`;
 
+  // Autofocus can land before hydration, when no focus event reaches React.
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (input && input.ownerDocument?.activeElement === input) setFocused(true);
+  }, [inputRef]);
+
   useEffect(() => {
     if (!canHint) {
       if (hintStep >= 0) {

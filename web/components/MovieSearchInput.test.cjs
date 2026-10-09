@@ -420,3 +420,16 @@ test("typing stops the examples for good, and reduced motion keeps the placehold
     assert.deepEqual(showing(calm), []);
   } finally { calm.dispose(); }
 });
+
+test("a bar the browser focused before hydration still plays its examples", async () => {
+  const time = clock();
+  const native = { value: "", selectionStart: 0, selectionEnd: 0, scrollLeft: 0, clientWidth: 0, scrollWidth: 0, focus() {}, setSelectionRange() {} };
+  native.ownerDocument = { activeElement: native };
+  const app = setup("", { hints, inputRef: { current: native } }, null, { window: time.window });
+  try {
+    await app.flush();
+    assert.deepEqual(showing(app), ["Describe a scene, or @ a movie"], "no focus event needed");
+    await time.tick(app);
+    assert.deepEqual(showing(app), ["neon in the rain"]);
+  } finally { app.dispose(); }
+});
