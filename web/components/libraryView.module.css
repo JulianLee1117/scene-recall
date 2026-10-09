@@ -1,3 +1,4 @@
+.page { max-width: 1200px; }
 .page :global(.films-section) { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--page-line); }
 .page :global(.films-section-header) { margin-bottom: 12px; align-items: center; gap: 12px 24px; }
 .page :global(.films-section-header h2) { color: #e6e1d8; font-size: 16px; font-weight: 500; letter-spacing: -.01em; line-height: 1.4; }
