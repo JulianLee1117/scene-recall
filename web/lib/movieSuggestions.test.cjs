@@ -250,3 +250,42 @@ test("mention ranges handle empty, common and numeric tags without coloring foll
     assert.equal(getMovieMentionRange(email, email.length, library), null);
   }
 });
+
+test("@ finds titles from any word's start, in any order, by initials or with one typo, best match first", () => {
+  const budapest = film("The Grand Budapest Hotel", 2014);
+  const dispatch = film("The French Dispatch", 2021);
+  const frances = film("Frances Ha", 2012);
+  const rings = film("The Lord of the Rings - The Fellowship of the Ring", 2001);
+  const library = [budapest, dispatch, frances, rings, film("Free Solo", 2018), moonlight];
+  const first = (query) => ids(getMovieSuggestions(query, library, []))[0];
+  assert.equal(first("@buda"), budapest.film_id, "a later word's start");
+  assert.equal(first("@fren"), dispatch.film_id, "after a leading article");
+  assert.equal(first("@grand bud"), budapest.film_id);
+  assert.equal(first("@hotel grand"), budapest.film_id, "any order");
+  assert.equal(first("@grandbud"), budapest.film_id, "spaces optional");
+  assert.equal(first("@gbh"), budapest.film_id, "initials");
+  assert.equal(first("@lotr"), rings.film_id);
+  assert.equal(first("@budapset"), budapest.film_id, "one typo in a long word");
+  assert.equal(first("@budapest 2014"), budapest.film_id, "its own release year");
+  assert.deepEqual(ids(getMovieSuggestions("@budapest 1999", library, [])), [], "another year");
+  assert.deepEqual(ids(getMovieSuggestions("@fran", library, [])), [frances.film_id], "a title's own start before anything else");
+  assert.deepEqual(ids(getMovieSuggestions("@fre", library, [])), ["Free Solo-2018", dispatch.film_id], "a title's own start, then after its article");
+  assert.deepEqual(ids(getMovieSuggestions("@b", library, [])), [], "a lone letter only starts a title");
+  assert.deepEqual(ids(getMovieSuggestions("@udapest", library, [])), [], "never from inside a word");
+  assert.deepEqual(ids(getMovieSuggestions("@vudapest", library, [])), [], "never a typo in the first letter");
+  assert.deepEqual(ids(getMovieSuggestions("@grand rain", library, [])), [], "every typed word must belong to the title");
+});
+
+test("edition labels are not part of a title", () => {
+  const cure = film("Cure (1997) [Criterion]", null, { filename: "Cure (1997) [Criterion].mkv" });
+  const [suggestion] = getMovieSuggestions("@crit", [cure], []);
+  assert.equal(suggestion, undefined);
+  const [named] = getMovieSuggestions("@cur", [cure], []);
+  assert.equal(named.title, "Cure (1997)");
+});
+
+test("a typed word that is a whole title word outranks one that only begins a longer word", () => {
+  const lantern = film("Raise the Red Lantern", 1991);
+  const shawshank = film("The Shawshank Redemption", 1994);
+  assert.deepEqual(ids(getMovieSuggestions("@red", [shawshank, lantern], [])), [lantern.film_id, shawshank.film_id]);
+});

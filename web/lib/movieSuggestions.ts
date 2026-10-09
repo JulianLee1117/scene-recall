@@ -33,6 +33,11 @@ function tokens(text: string): Token[] {
 
 const COMMON_TITLES = new Set(["her", "us", "it", "up"]);
 const YEAR = /^(?:18|19|20)\d{2}$/;
+/** Edition labels ("[Criterion]", "[Director's Cut]") are not part of a film's name. */
+const EDITION = /(\s*\[[^\]]*\])+\s*$/;
+const ARTICLES = new Set(["the", "a", "an"]);
+/** A typed word may carry one typo from five letters, as in Meilisearch's defaults. */
+const TYPO_LENGTH = 5;
 const PUNCTUATION_ONLY = /^[\s\p{P}]*$/u;
 const QUOTE_PAIRS = new Map([["\"", "\""], ["'", "'"], ["“", "”"], ["‘", "’"]]);
 
@@ -43,6 +48,70 @@ function identity(film: LibraryFilm, title: string) {
   // catalog title or filename; never guess one from the user's query.
   const filenameYear = film.filename.match(/[([]((?:18|19|20)\d{2})[)\]](?:\.[^.]+)?$/);
   return { words: tokens(name), year: datedTitle?.[1] ?? filenameYear?.[1] };
+}
+
+/** Whether two words differ by at most one added, dropped, changed or swapped letter. */
+function withinOneEdit(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  if (a.length > b.length) return a.slice(i + 1) === b.slice(i);
+  if (a.length < b.length) return a.slice(i) === b.slice(i + 1);
+  return a.slice(i + 1) === b.slice(i + 1) || (a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2));
+}
+
+type Fits = (typed: string, word: string) => boolean;
+const isWord: Fits = (typed, word) => typed === word;
+const beginsWord: Fits = (typed, word) => word.startsWith(typed);
+/** A long typed word that begins a title word with one typo, never in the first letter. */
+const nearlyBeginsWord: Fits = (typed, word) => typed.length >= TYPO_LENGTH && typed[0] === word[0]
+  && [typed.length - 1, typed.length, typed.length + 1].some((length) => length <= word.length && withinOneEdit(typed, word.slice(0, length)));
+
+/** Whether each typed word fits a different title word: 0 in title order, 1 in any order. */
+function wordOrder(typed: readonly string[], words: readonly string[], fits: Fits): 0 | 1 | null {
+  let at = 0;
+  if (typed.every((token) => {
+    while (at < words.length && !fits(token, words[at])) at += 1;
+    return at++ < words.length;
+  })) return 0;
+  const used = new Set<number>();
+  const place = (i: number): boolean => i === typed.length || words.some((word, j) => {
+    if (used.has(j) || !fits(typed[i], word)) return false;
+    used.add(j);
+    if (place(i + 1)) return true;
+    used.delete(j);
+    return false;
+  });
+  return place(0) ? 1 : null;
+}
+
+/**
+ * How well the words typed after @ name a title (lower is better), or null
+ * when they do not. Every typed word must count: each fits a different title
+ * word, or is (the start of) the film's release year beside other words.
+ *   0    the title starts with them ("the gra"; spaces optional: "grandbud")
+ *   1    the same after a leading article ("fren": The French Dispatch)
+ *   2, 3 each is a whole title word, in title order or not ("red")
+ *   4, 5 each begins a title word, in title order or not ("buda", "hotel gra")
+ *   6    the initials ("gbh", "lotr")
+ *   7    a beginning with one typo in a word of five letters or more ("budapset")
+ * A lone letter only starts a title; anywhere else it would match too much.
+ */
+function completionRank(typed: readonly string[], words: readonly string[], year: string | undefined): number | null {
+  const isYear = (token: string) => Boolean(year && /^\d+$/.test(token) && year.startsWith(token));
+  const named = typed.some((token) => !isYear(token)) ? typed.filter((token) => !isYear(token)) : typed;
+  const body = ARTICLES.has(words[0]) && words.length > 1 ? words.slice(1) : words;
+  const phrase = named.join(" "), joined = named.join("");
+  if (words.join(" ").startsWith(phrase) || words.join("").startsWith(joined)) return 0;
+  if (body.join(" ").startsWith(phrase) || body.join("").startsWith(joined)) return 1;
+  if (joined.length < 2) return null;
+  const whole = wordOrder(named, words, isWord);
+  if (whole !== null) return 2 + whole;
+  const begun = wordOrder(named, words, beginsWord);
+  if (begun !== null) return 4 + begun;
+  const initials = (list: readonly string[]) => list.map((word) => word[0]).join("");
+  if (named.length === 1 && (initials(words).startsWith(joined) || initials(body).startsWith(joined))) return 6;
+  return wordOrder(named, words, nearlyBeginsWord) !== null ? 7 : null;
 }
 
 function styleReference(query: string, start: number, end: number): boolean {
@@ -102,12 +171,12 @@ export function getMovieSuggestions(
   const queryWords = tokens(query);
   if (!queryWords.length) return [];
   const selected = new Set(selectedFilmIds);
-  const matches: Array<MovieSuggestion & { words: number; exact: boolean; marker: number | null }> = [];
+  const matches: Array<MovieSuggestion & { words: number; exact: boolean; marker: number | null; rank: number }> = [];
   const recognizedTitles: Array<{ start: number; end: number; words: number }> = [];
   for (const film of films) {
     if (film.status !== "indexed" || !film.film_id) continue;
     const indexedFilm = film as LibraryFilm & { film_id: string };
-    const title = displayFilmTitle(film);
+    const title = displayFilmTitle(film).replace(EDITION, "").trim();
     const { words, year } = identity(film, title);
     if (!words.length) continue;
     for (let i = 0; i <= queryWords.length - words.length; i += 1) {
@@ -137,16 +206,17 @@ export function getMovieSuggestions(
       if (words.length === 1 && COMMON_TITLES.has(words[0].text)
         && marker === null && !wholeQuery && !quoted && !scoped && !explicitYear) continue;
       const start = marker ?? (explicitYear && quoted && closingQuote === query[last.end] ? first.start - 1 : first.start);
-      matches.push({ film: indexedFilm, title, ...acceptedSpan(query, start, end), words: words.length, exact: true, marker });
+      matches.push({ film: indexedFilm, title, ...acceptedSpan(query, start, end), words: words.length, exact: true, marker, rank: 0 });
     }
     // Completion belongs only to an explicit tag continuing to the caret.
     // Ordinary prose never offers partial titles or arbitrary defaults for @.
-    const name = words.map((word) => word.text).join(" ");
+    const name = words.map((word) => word.text);
     if (active !== null) {
-      const suffix = tokens(query.slice(active + 1, position));
-      const input = suffix.map((word) => word.text).join(" ");
-      if (!input || name === input || !name.startsWith(input)) continue;
-      matches.push({ film: indexedFilm, title, ...acceptedSpan(query, active, position), words: words.length, exact: false, marker: active });
+      const typed = tokens(query.slice(active + 1, position)).map((word) => word.text);
+      if (!typed.length || typed.join(" ") === name.join(" ")) continue;
+      const rank = completionRank(typed, name, year);
+      if (rank === null) continue;
+      matches.push({ film: indexedFilm, title, ...acceptedSpan(query, active, position), words: words.length, exact: false, marker: active, rank });
     }
   }
   // Editing inside an existing complete title replaces that entire mention,
@@ -162,7 +232,10 @@ export function getMovieSuggestions(
     && (match.end >= position || PUNCTUATION_ONLY.test(query.slice(match.end, position)));
   const closedMention = matches.some((match) => match.exact && match.marker === active && !isActive(match));
   const onlyActive = active !== null && (!closedMention || matches.some(isActive));
-  matches.sort((a, b) => Number(b.exact) - Number(a.exact) || b.words - a.words
+  // Complete titles first, longest first; then completions by how well they
+  // match, shorter titles first.
+  matches.sort((a, b) => Number(b.exact) - Number(a.exact)
+    || (a.exact ? b.words - a.words : a.rank - b.rank || a.words - b.words)
     || a.start - b.start || a.title.localeCompare(b.title) || a.film.film_id.localeCompare(b.film.film_id));
   const seen = new Set<string>();
   return matches.filter((match) => {
