@@ -252,7 +252,7 @@ def test_fractional_source_rates_and_short_windows_render_at_real_draft_resoluti
     request["recipe"].update(id="whip-pan", duration=.15, easing="snappy", direction="up")
     request["output"]["aspect"] = "portrait"
     monkeypatch.setattr(jobs, "dimensions", _OUTPUT_DIMENSIONS)
-    job = store.enqueue_transition_render(jobs.freeze(request, None))
+    store.enqueue_transition_render(jobs.freeze(request, None))
     result = jobs.run(store.claim(role="editor"), config, None, store, lambda _: None, lambda: False)
     assert (result["width"], result["height"]) == (480, 854)
     assert result["duration"] == pytest.approx((frame_count(end - start) + 36 - frame_count(.15)) / 30)

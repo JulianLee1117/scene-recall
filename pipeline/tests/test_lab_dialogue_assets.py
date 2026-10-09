@@ -4,7 +4,6 @@ from copy import deepcopy
 import hashlib
 import json
 import os
-from pathlib import Path
 import time
 from unittest.mock import patch
 
@@ -17,7 +16,7 @@ from pipeline.index.writer import create_tables, open_db
 from pipeline.ingest.probe import _content_hash
 from pipeline.lab.audio_mix import music_gain_at
 from pipeline.lab.cleanup import collect_garbage
-from pipeline.lab.dialogue_assets import PROFILE, audio_asset_path, cache_root, prepare_dialogue_audio
+from pipeline.lab.dialogue_assets import audio_asset_path, prepare_dialogue_audio
 from pipeline.lab.media import render_from_manifest, render_manifest, run_process
 from pipeline.lab.models import ProjectDocument
 from pipeline.lab.store import LabStore

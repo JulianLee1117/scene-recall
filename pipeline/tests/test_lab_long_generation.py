@@ -3,7 +3,7 @@ from copy import deepcopy
 
 import pytest
 
-from pipeline.lab import direction_planner, generation, music, music_planner, timing_planner
+from pipeline.lab import direction_planner, music, music_planner, timing_planner
 from pipeline.lab.long_audio import compose_analysis
 from pipeline.lab.long_form import partition_passage
 from pipeline.lab.models import ClipSelection, MusicDirection, ProjectDocument

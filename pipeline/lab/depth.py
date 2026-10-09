@@ -54,8 +54,3 @@ class DepthEstimator:
         sample = np.concatenate([m[::8, ::8].ravel() for m in maps])
         lo, hi = np.percentile(sample, [2, 98])
         return [np.clip((m - lo) / max(hi - lo, 1e-6), 0, 1).astype(np.float32) for m in maps]
-
-
-def depth_visual(near: np.ndarray) -> np.ndarray:
-    """A grey picture of a nearness map (near is bright)."""
-    return np.repeat((near * 255).astype(np.uint8)[..., None], 3, axis=2)

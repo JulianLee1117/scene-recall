@@ -1,4 +1,3 @@
-from copy import deepcopy
 import pytest
 from pipeline.eval.search_foundation import validate_promotion, validate_ann
 

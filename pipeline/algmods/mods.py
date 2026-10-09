@@ -782,10 +782,3 @@ def quadtree_reveal(frame: np.ndarray, progress: float, *, coarse: float = 64.0,
 
 
 # -- helpers --------------------------------------------------------------------
-
-def subject_centre(mask: np.ndarray | None, width: int, height: int) -> tuple[float, float]:
-    """Centre of the mask's bounding box in output fractions, else the frame centre."""
-    if mask is None or not mask.any():
-        return 0.5, 0.5
-    ys, xs = np.nonzero(mask)
-    return (float(xs.min() + xs.max()) / 2 / width, float(ys.min() + ys.max()) / 2 / height)

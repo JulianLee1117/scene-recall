@@ -411,44 +411,6 @@ def units_from_search(api: str, queries: list[str], *, limit: int = 200) -> list
     return list(found.values())
 
 
-def shot_times(assets_dir: Path, film_id: str, unit: int) -> tuple[float, float] | None:
-    path = Path(assets_dir) / film_id / "shots.json"
-    if not path.is_file():
-        return None
-    for shot in json.load(path.open(encoding="utf-8")).get("shots", []):
-        if shot["shot_id"] == f"{film_id}_{unit:04d}":
-            return float(shot["t_start"]), float(shot["t_end"])
-    return None
-
-
-def zoom_through(mosaic_frames: list[np.ndarray], cell: tuple[int, int], grid: tuple[int, int, int, int],
-                 target_frames: list[np.ndarray], *, blend: int = 4) -> list[np.ndarray]:
-    """Push into one cell until it fills the width, then hand over to the shot behind it.
-
-    ``mosaic_frames`` play while the push happens; the zoom factor runs 1 -> columns with an ease,
-    centred on the cell; the last ``blend`` frames cross to ``target_frames`` (same size)."""
-    import cv2
-    rows, cols, cw, ch = grid
-    r, c = cell
-    h, w = mosaic_frames[0].shape[:2]
-    cx, cy = (c + 0.5) * cw, (r + 0.5) * ch
-    n = len(mosaic_frames)
-    out = []
-    for i, frame in enumerate(mosaic_frames):
-        z = 1 + (cols - 1) * _ease(i / max(n - 1, 1))
-        vw, vh = w / z, h / z
-        x0 = min(max(cx - vw / 2, 0), w - vw); y0 = min(max(cy - vh / 2, 0), h - vh)
-        M = np.array([[z, 0, -x0 * z], [0, z, -y0 * z]], np.float32)
-        view = cv2.warpAffine(frame, M, (w, h), flags=cv2.INTER_LINEAR)
-        k = i - (n - blend)
-        if k >= 0 and target_frames:
-            a = _ease((k + 1) / blend)
-            target = target_frames[min(k, len(target_frames) - 1)]
-            view = (view.astype(np.float32) * (1 - a) + target.astype(np.float32) * a).astype(np.uint8)
-        out.append(view)
-    return out
-
-
 # ---------------------------------------------------------------------------------------------
 # Quad mosaic: cells follow the picture. Large tiles where the host is flat, small along its
 # edges, the cell layout fixed for the clip so the surface is calm. Tone transfer carries the

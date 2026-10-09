@@ -8,7 +8,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 import pytest
 
-from pipeline.lab import direction_planner, generation, music, music_planner, timing_planner
+from pipeline.lab import direction_planner, music, music_planner, timing_planner
 from pipeline.lab.limits import MAX_SAVED_CLIPS
 from pipeline.lab.models import ClipSelection, JobRequest, MusicDirection, ProjectDocument
 from pipeline.lab.worker import execute_job

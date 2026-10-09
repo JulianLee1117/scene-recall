@@ -6,7 +6,7 @@ import uuid
 import pytest
 
 from pipeline.lab.media import run_process
-from pipeline.transitions import bridges, generation, jobs, providers
+from pipeline.transitions import bridges, generation, providers
 from pipeline.tests.test_transition_bridges import bridge_pair as bridge_pair
 from pipeline.tests.test_transition_generation import job_for
 

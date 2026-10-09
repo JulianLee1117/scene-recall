@@ -40,7 +40,6 @@ from pipeline.ingest.subtitles import (
     external_srt_is_usable,
     parse_external_dialogue_srt,
     parse_srt,
-    parse_srt_timestamp as _parse_srt_timestamp,
     read_srt_text as _read_srt_text,
     validate_external_srt,
 )

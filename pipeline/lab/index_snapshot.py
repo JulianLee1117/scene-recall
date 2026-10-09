@@ -12,7 +12,8 @@ _SNAPSHOTS = {}
 READINESS_WAIT_SECONDS = 60
 
 
-from pipeline.index.snapshot import IndexSnapshot, publication_read, capture_snapshot
+from pipeline.index.snapshot import capture_snapshot
+from pipeline.index.snapshot import publication_read as publication_read  # re-exported for lab callers
 
 
 def _capture(config, db):

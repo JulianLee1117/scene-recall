@@ -1,5 +1,4 @@
 from dataclasses import replace
-import json
 
 import numpy as np
 import pytest

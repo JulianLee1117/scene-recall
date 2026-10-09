@@ -2,7 +2,6 @@
 
 from copy import deepcopy
 import hashlib
-from pathlib import Path
 
 import av
 import numpy as np

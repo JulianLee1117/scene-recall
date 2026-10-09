@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Callable, Mapping, Protocol, Sequence
+from typing import Mapping, Protocol, Sequence
 
 import numpy as np
 from PIL import Image

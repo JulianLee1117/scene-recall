@@ -23,7 +23,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-import yaml
 
 from pipeline.config import load_config, Config
 

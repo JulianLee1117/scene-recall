@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from pipeline.transitions.compositor import Compositor, motion_phase, whip_motion
+from pipeline.transitions.compositor import Compositor, whip_motion
 from pipeline.transitions.contracts import Recipe
 
 

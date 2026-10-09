@@ -23,7 +23,6 @@ from pipeline.config import Config, load_config
 from pipeline.intake import move_file_no_replace
 from pipeline.ingest.locks import film_operation_lock, require_no_pending_film_relink
 from pipeline.ingest.playback import (
-    PROFILE,
     PlaybackPreparationError,
     PlaybackSourceChanged,
     _MAX_MANIFEST_BYTES,

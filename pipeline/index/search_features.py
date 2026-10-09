@@ -45,16 +45,6 @@ def preparation_request(config, db, film_id, *, composition_profile=None):
             "profile": asdict(profile), "frame_count": len(rows), "composition_profile": composition_profile}
 
 
-def queue_published_film(config, db, film_id):
-    """One optional job after successful ingest; never part of film readiness."""
-    from pipeline.lab.store import LabStore
-    options = preparation_request(config, db, film_id,
-                                  composition_profile=config.retrieval.composition_profile)
-    store = LabStore(config.paths.state_dir, config.paths.assets_dir)
-    store.initialize()
-    return store.enqueue_search_features(options)
-
-
 def prepare_batch(config, db, options, cursor="", *, cancelled=lambda: False):
     """One work quantum; no inference or disk budget scan under publication lock."""
     from pipeline.lab.media import JobCancelled

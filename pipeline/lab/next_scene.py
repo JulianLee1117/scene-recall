@@ -19,7 +19,7 @@ from pipeline.index.reads import filtered_rows
 from pipeline.lab.direction_planner import GeneratedDirection, _source_context
 from pipeline.lab.limits import MAX_SAVED_CLIPS
 from pipeline.lab.media import JobCancelled, resolve_film
-from pipeline.lab.models import ClipSelection, LabModel, MusicDirection, NextSceneAdjust, ProjectDocument
+from pipeline.lab.models import ClipSelection, LabModel, NextSceneAdjust, ProjectDocument
 from pipeline.lab.music_evidence import PLANNING_GUIDANCE, music_evidence
 from pipeline.lab.music_planner import _candidate, _hydrate_metadata, _match_evidence, _slot_evidence
 from pipeline.lab.search_plan import bind_generated_direction, execute_search, offered_references, recipe_key, resolve_search

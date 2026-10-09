@@ -238,14 +238,6 @@ def test_quadtree_reveal_returns_the_frame_at_full_progress_and_gets_finer_towar
     assert np.abs(late.astype(int) - frame).mean() < np.abs(early.astype(int) - frame).mean()
 
 
-def test_subject_centre_defaults_to_the_frame_centre():
-    assert mods.subject_centre(None, 100, 50) == (0.5, 0.5)
-    mask = np.zeros((50, 100), bool)
-    mask[10:20, 60:80] = True
-    cx, cy = mods.subject_centre(mask, 100, 50)
-    assert cx == pytest.approx(0.695) and cy == pytest.approx(0.29)
-
-
 def test_live_region_rides_every_per_shot_treatment():
     from pipeline.algmods import contracts
     for kind in ("dots", "stripes", "quadtree"):

@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from pipeline.algmods import render
-from pipeline.algmods.mosaic import Mosaic, TileBank, shot_times, units_from_search, zoom_through
+from pipeline.algmods.mosaic import Mosaic, TileBank, units_from_search
 
 API = "http://127.0.0.1:8000"
 OUT = Path(".tmp/algmods")
@@ -71,7 +71,6 @@ def exp_face(assets_dir, still):
     film_id, frames, masks = load("Top Gun", 5332.3, 5334.2, segment=True, classes=["person"])
     bank = bank_for(assets_dir, film_id, source="query", queries=["close-up of a face", "a face in shadow", "extreme close-up of eyes", "portrait of a woman", "portrait of a man", "a face lit from one side"])
     m = Mosaic(bank, columns=18, moving=not still, tint=0.7, grout=1)
-    n = len(frames)
     out = []
     for i, (f, mask) in enumerate(zip(frames[:1] if still else frames, masks)):
         region = m.cell_region(mask, H, W, where="subject", cover=0.35)
@@ -100,7 +99,6 @@ def exp_reveal(assets_dir, still):
     film_id, frames, _ = load("Oppenheimer", 6988, 6994)
     bank = bank_for(assets_dir, film_id, source="all")
     m = Mosaic(bank, columns=12, moving=not still, tint=0.5, grout=1)
-    n = len(frames)
     beat = int(round(render.FPS * 0.5))                 # 120 bpm
     out = []
     for i, f in enumerate(frames[:1] if still else frames):
@@ -120,56 +118,10 @@ def exp_reveal(assets_dir, still):
     return "reveal-fireball", out, "The arrival: the real fireball shatters into tiles from the centre on a beat, plays as a mosaic for two bars, and re-forms."
 
 
-def exp_zoom(assets_dir, still):
-    """Zoom through one tile into the shot behind it, then that shot becomes a mosaic."""
-    film_id, frames, _ = load("Lawrence of Arabia", 4397, 4400)
-    bank = bank_for(assets_dir, film_id, source="query", queries=["silhouette against the sunset", "a lone figure against a bright sky", "sunset over the horizon"])
-    m = Mosaic(bank, columns=10, moving=False)
-    mosaic_frames = [m.step(f) for f in frames]
-    rows, cols, cw, ch = m.grid(H, W)
-    # the target: the cell nearest the figure (lower left third) that has a tile with a preview
-    r, c = int(rows * 0.68), int(cols * 0.12)
-    index = int(m.assigned[r, c])
-    film, unit, _k = bank.unit_of(index)
-    times = shot_times(assets_dir, film, unit)
-    target = []
-    if times:
-        import lancedb
-        from pipeline.config import load_config
-        films = lancedb.connect(str(load_config().paths.assets_dir / "db")).open_table("films").to_pandas()
-        path = films[films.film_id == film].iloc[0].path
-        t0 = times[0] + 0.2
-        tf = render.decode(str(path), t0, t0 + 3.0)
-        h, w = tf[0].shape[:2]; cw2 = int(round(h * 9 / 16 / 2)) * 2; x0 = (w - cw2) // 2
-        target = [render.resize(f[:, x0:x0 + cw2], W, H) for f in tf]
-    zoom = zoom_through(mosaic_frames, (r, c), (rows, cols, cw, ch), target, blend=6)
-    # then the shot we landed in becomes a mosaic of its own (same set), revealed from the centre
-    after = []
-    if target:
-        m2 = Mosaic(bank, columns=10)
-        for i, f in enumerate(target[6:]):
-            m2.assign(f)
-            after.append(m2.compose(f, progress=min(1.0, i / 30), origin=(0.5, 0.5)))
-    out = zoom + after
-    if still:
-        out = [zoom[len(zoom) // 2]]
-    return "zoom-through", out, "Zoom through: push into one tile until it fills the frame, land in that shot at full quality, and watch it turn into a mosaic of its own."
-
-
-def exp_city(assets_dir, still):
-    """A city made of cities: the skyline across the river, tiled from other films' skylines at night."""
-    film_id, frames, _ = load("No Country for Old Men", 15, 21)
-    bank = bank_for(assets_dir, film_id, source="query", queries=["city skyline at night", "skyscrapers lit at night", "aerial view of a city at night", "city lights across the water"])
-    m = Mosaic(bank, columns=14, moving=not still, tint=0.55, grout=1)
-    out = [m.step(f) for f in (frames[:1] if still else frames)]
-    return "city-of-cities", out, "A city made of cities: the skyline across the river rebuilt from other films' skylines, toned to the shot, tiles playing."
-
-
 def exp_composite(assets_dir, still, host=("Top Gun", 5332.3, 5334.2)):
     """A composite face: the host face rebuilt from other faces, feature on feature, following the head."""
     from pipeline.algmods.composite import CompositeFace, donor_faces, load_landmarks
     from pipeline.config import load_config
-    from pipeline.lab import regions
     title, a, b = host
     film_id, path = render._resolve_film(title)
     frames = render.decode(str(path), a, a + 0.1 if still else b, height=1080)
@@ -182,7 +134,6 @@ def exp_composite(assets_dir, still, host=("Top Gun", 5332.3, 5334.2)):
     comp = CompositeFace(donors)
     out = []
     last = None
-    n = len(frames)
     for i, f in enumerate(frames):
         pts = lm.pixels(film_id, unit_id, a + i / render.FPS, w, h) or last
         if pts is None:

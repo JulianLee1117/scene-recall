@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.context.schema import ContextArtifact, ContextSource, Evidence, TimeRange
-from pipeline.context.store import ContextStore, ContextStoreError
+from pipeline.context.schema import TimeRange
+from pipeline.context.store import ContextStore
 
 
 FILM = "a" * 64

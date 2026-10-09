@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 from pipeline.lab import music
 from pipeline.lab.direction_planner import DirectionPlan, run_direction_job
 from pipeline.lab.models import ClipSelection, JobRequest, ProjectDocument
-from pipeline.lab.store import LabStore
 from pipeline.lab.timeline import PROVISIONAL_TIMING_CONTRACT, ensure_timeline, plan_targets, timing_fingerprint
 from pipeline.lab.worker import execute_job
 from pipeline.tests.test_lab import db, store  # noqa: F401

@@ -150,15 +150,6 @@ def donor_faces(assets_dir: Path, landmarks: Landmarks, units: list[dict], *, ex
     return out
 
 
-def face_box(p: FacePoints) -> tuple[int, int, int, int]:
-    """(x0, y0, w, h) around a face from its eyes: ample forehead, chin and cheeks."""
-    d = p.interocular
-    cx = float(p.eyes[:, 0].mean()); cy = float(p.eyes[:, 1].mean())
-    x0, x1 = cx - 1.9 * d, cx + 1.9 * d
-    y0, y1 = cy - 1.7 * d, cy + 2.4 * d
-    return int(x0), int(y0), int(x1 - x0), int(y1 - y0)
-
-
 # Feature cells in face units: x in interoculars from the eye midpoint (left negative), y down from
 # the eye line. Each is (name, x0, x1, y0, y1). Eyes, nose, mouth and chin are single cells so the
 # feature a donor contributes is whole; cheeks and forehead are larger, calmer cells.

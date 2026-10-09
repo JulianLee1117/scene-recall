@@ -238,7 +238,6 @@ def test_subject_velocity_follows_the_same_subject_within_a_shot():
 
 def _index() -> moment_index.Index:
     """Four films; each unit holds eight grid instants with the same framed subject."""
-    unit_rows = []
     films, scenes = [], []
     for film in range(4):
         for unit in range(3):

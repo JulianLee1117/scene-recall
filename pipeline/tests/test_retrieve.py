@@ -3196,7 +3196,6 @@ def test_search_by_image_excludes_source_unit(
     paths = [tmp_path / "source.webp", tmp_path / "other.webp"]
     for path in paths:
         Image.new("RGB", (64, 36), "black").save(path)
-    source = _make_unit_row("source", "film_one")
     other = _make_unit_row("other", "film_one")
     frame_rows = [
         {

@@ -191,28 +191,28 @@ def test_dialogue_line_start_end_are_floats() -> None:
 
 def test_parse_srt_timestamp_zero() -> None:
     """00:00:00,000 → 0.0 seconds."""
-    from pipeline.ingest.dialogue import _parse_srt_timestamp
+    from pipeline.ingest.subtitles import parse_srt_timestamp as _parse_srt_timestamp
 
     assert _parse_srt_timestamp("00:00:00,000") == pytest.approx(0.0)
 
 
 def test_parse_srt_timestamp_one_second() -> None:
     """00:00:01,000 → 1.0 seconds."""
-    from pipeline.ingest.dialogue import _parse_srt_timestamp
+    from pipeline.ingest.subtitles import parse_srt_timestamp as _parse_srt_timestamp
 
     assert _parse_srt_timestamp("00:00:01,000") == pytest.approx(1.0)
 
 
 def test_parse_srt_timestamp_fractional() -> None:
     """00:00:01,500 → 1.5 seconds."""
-    from pipeline.ingest.dialogue import _parse_srt_timestamp
+    from pipeline.ingest.subtitles import parse_srt_timestamp as _parse_srt_timestamp
 
     assert _parse_srt_timestamp("00:00:01,500") == pytest.approx(1.5)
 
 
 def test_parse_srt_timestamp_full() -> None:
     """01:02:03,456 → 3723.456 seconds."""
-    from pipeline.ingest.dialogue import _parse_srt_timestamp
+    from pipeline.ingest.subtitles import parse_srt_timestamp as _parse_srt_timestamp
 
     assert _parse_srt_timestamp("01:02:03,456") == pytest.approx(3723.456)
 

@@ -1,8 +1,6 @@
 """Feature maintenance yields between batches, respects cancellation and budgets."""
-from dataclasses import asdict
 from unittest.mock import patch
 
-import numpy as np
 import pytest
 
 from pipeline.index.search_features import preparation_request, prepare_batch

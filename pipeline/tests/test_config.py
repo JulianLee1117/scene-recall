@@ -1,5 +1,4 @@
 """Tests for pipeline/config.py — written BEFORE implementation (TDD)."""
-import os
 import textwrap
 from pathlib import Path
 
@@ -242,7 +241,7 @@ def test_load_config_falls_back_to_cwd(tmp_path, monkeypatch):
     """Without CINEMA_CONFIG set, load_config looks for ./config.yaml."""
     from pipeline.config import load_config
 
-    cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
+    _write_config(tmp_path, MINIMAL_CONFIG)
     # We rename it to config.yaml inside tmp_path and cd there
     monkeypatch.delenv("CINEMA_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)
@@ -267,7 +266,7 @@ def test_load_config_missing_file_raises(tmp_path, monkeypatch):
 
 def test_config_not_a_dict(tmp_path):
     """Config should be a dataclass, not a plain dict."""
-    from pipeline.config import load_config, Config
+    from pipeline.config import load_config
 
     cfg_file = _write_config(tmp_path, MINIMAL_CONFIG)
     cfg = load_config(cfg_file)

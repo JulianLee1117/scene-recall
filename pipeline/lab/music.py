@@ -21,7 +21,7 @@ from typing import Literal
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pipeline.lab.models import EditorialDirection, MusicDirection, ProjectDocument
+from pipeline.lab.models import EditorialDirection, ProjectDocument
 from pipeline.lab.limits import MAX_AUDIO_PART_SECONDS
 from pipeline.lab.music_evidence import LISTENING_INPUT_CONTRACT, PLANNING_GUIDANCE, listening_evidence, music_evidence
 from pipeline.lab.editorial_context import editorial_context

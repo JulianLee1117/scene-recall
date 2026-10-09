@@ -1,5 +1,4 @@
 """Explicit generation authorization, durable identity, and worker routing."""
-import json
 import uuid
 
 from fastapi import FastAPI

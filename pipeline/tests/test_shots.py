@@ -10,7 +10,6 @@ Tests:
 """
 from __future__ import annotations
 
-import math
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch

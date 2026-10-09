@@ -67,7 +67,6 @@ def beat_time(frames: list[np.ndarray], masks: list[np.ndarray | None], beats: l
               feather: int = 4, sub_beats: int = 1) -> list[np.ndarray]:
     """Two clocks: one half of the picture only advances on beats."""
     import cv2
-    n = len(frames)
     steps = sorted(set(beats))
     if sub_beats > 1 and len(steps) > 1:
         extra = []
@@ -149,7 +148,6 @@ def time_slice(frames: list[np.ndarray], *, offset: int = 30, sweeps: list[tuple
 
     Between sweeps the picture is wholly 'later' (after a sweep completes) or wholly 'now' (before the
     next starts), so each sweep is a visible seam of time crossing the picture."""
-    import cv2
     n = len(frames)
     h, w = frames[0].shape[:2]
     sweeps = sweeps or [(0, n)]
