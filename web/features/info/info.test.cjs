@@ -8,8 +8,13 @@ const ts = require("typescript");
 const compile = (file) => ts.transpileModule(fs.readFileSync(path.join(__dirname, file), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
+const models = {};
+vm.runInNewContext(compile("models.ts"), { exports: models });
 const guide = {};
-vm.runInNewContext(compile("guide.ts"), { exports: guide });
+vm.runInNewContext(compile("guide.ts"), { exports: guide, require: (name) => {
+  if (name === "./models") return models;
+  throw new Error(`Unexpected module: ${name}`);
+} });
 const glossary = {};
 vm.runInNewContext(compile("glossary.ts"), { exports: glossary });
 const compiled = compile("InfoView.tsx");
@@ -57,6 +62,7 @@ function harness() {
     require(name) {
       if (name === "react") return react;
       if (name === "./guide") return guide;
+      if (name === "./models") return models;
       if (name === "./glossary") return glossary;
       if (name.endsWith(".css")) return { default: {} };
       if (name === "react/jsx-runtime") {
@@ -166,19 +172,22 @@ test("Info fetches one read-only configuration snapshot per mount and refresh, w
   } finally { app.dispose(); }
 });
 
-test("current model summary follows loaded settings and refresh, without presenting defaults as live values", async () => {
+test("current model summary follows loaded settings and refresh, with implementation defaults distinguished", async () => {
   const app = harness();
   const snapshot = () => app.find((node) => node.props?.["aria-labelledby"] === "info-models-heading");
   try {
     assert.match(text(snapshot()), /Reading API settings/);
-    assert.equal(nodes(snapshot()).filter((node) => node.type === "li").length, 0);
+    assert.equal(nodes(snapshot()).filter((node) => node.type === "strong" && text(node) === "Settings unavailable").length, 6);
+    assert.match(text(snapshot()), /Understanding, highlights & optional critiqueGemini 3.8 Flash · default/);
     const config = settings();
     config.models.visual_encoder = "pe_core_l14";
     config.models.text_encoder = "qwen3-embedding-0.6b";
     await app.resolve(0, config);
     const names = () => nodes(snapshot()).filter((node) => node.type === "strong").map(text);
-    assert.deepEqual(names(), ["PE-Core L/14", "Qwen3-Embedding-0.6B", "custom-vision", "Whisper custom-whisper", "custom-music", "custom-planner"]);
-    assert.match(text(snapshot()), /Loaded API configuration.*Film evidence keeps its own model versions/);
+    for (const name of ["PE-Core L/14", "Qwen3-Embedding-0.6B", "custom-vision", "Whisper custom-whisper", "custom-music", "custom-planner"]) {
+      assert.ok(names().includes(name), name);
+    }
+    assert.match(text(snapshot()), /API settings \+ implementation defaults.*Film evidence keeps its own versions/);
     app.find((node) => node.type === "button" && text(node) === "Refresh settings").props.onClick();
     await app.flush();
     const changed = settings();
@@ -191,9 +200,29 @@ test("current model summary follows loaded settings and refresh, without present
     await app.flush();
     await app.reject(2);
     assert.match(text(snapshot()), /API settings unavailable/);
-    assert.equal(names().length, 0, "failed settings must not retain purported current versions");
+    assert.ok(!names().includes("next-vision-version"), "failed settings must not retain purported current versions");
+    assert.equal(names().filter((name) => name === "Settings unavailable").length, 6);
+    assert.ok(names().includes("Gemini 3.8 Flash · default"), "implementation defaults remain readable offline");
     assert.equal(app.requests.length, 3);
   } finally { app.dispose(); }
+});
+
+test("model groups cover hosted and local stages, with optional models and checkpoint overrides explicit", () => {
+  const config = settings();
+  const groups = models.buildModelGroups(config);
+  assert.deepEqual(Array.from(groups, (group) => group.title), ["Search", "Film evidence", "Picture measurement", "Audio & editing"]);
+  const entries = groups.flatMap((group) => group.models);
+  const byRole = Object.fromEntries(entries.map((model) => [model.role, model.name]));
+  assert.equal(Object.keys(byRole).length, entries.length);
+  for (const name of Object.values(models.GUIDE_MODELS)) {
+    assert.ok(entries.some((model) => model.name.startsWith(name)), name);
+  }
+  assert.equal(byRole["Reranking · optional"], "Qwen3-Reranker-0.6B");
+  assert.equal(byRole["Understanding, highlights & optional critique"], "Gemini 3.8 Flash · default");
+  assert.equal(byRole["Beat timing · optional"], "Beat This! · final0 default");
+  config.lab.beat_checkpoint_configured = true;
+  assert.match(JSON.stringify(models.buildModelGroups(config)), /Beat This! · custom checkpoint/);
+  assert.doesNotMatch(JSON.stringify(models.buildModelGroups(config)), /final0 default/);
 });
 
 test("network, HTTP and unsupported-schema errors preserve a readable guide and explicit retry", async () => {

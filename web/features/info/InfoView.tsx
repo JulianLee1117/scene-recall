@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { buildGuide } from "./guide";
+import { buildModelGroups } from "./models";
 import { FOOTAGE_LADDER, GLOSSARY } from "./glossary";
 import type { GlossaryGroup, ProjectInfo } from "./types";
 import styles from "./info.module.css";
@@ -111,14 +112,7 @@ export default function InfoView() {
   const topic = TOPICS.find((item) => item.id === topicId)!;
   const isStorage = topicId === "storage";
   const DiagramList = isStorage ? "ul" : "ol";
-  const currentModels = settings ? [
-    { role: "Visual search", name: settings.models.visual_encoder === "pe_core_l14" ? "PE-Core L/14" : settings.models.visual_encoder },
-    { role: "Semantic search", name: settings.models.text_encoder === "qwen3-embedding-0.6b" ? "Qwen3-Embedding-0.6B" : settings.models.text_encoder },
-    { role: "Vision annotation", name: settings.models.annotator },
-    { role: "Speech transcription", name: `Whisper ${settings.models.whisper}` },
-    { role: "Music understanding", name: settings.lab.music_model },
-    { role: "Edit planning", name: settings.lab.planner_model },
-  ] : [];
+  const modelGroups = buildModelGroups(settings);
 
   return <section className={styles.page} aria-labelledby="info-heading">
     <header className={styles.header}>
@@ -130,12 +124,17 @@ export default function InfoView() {
     <section className={styles.modelSnapshot} aria-labelledby="info-models-heading" aria-busy={loading}>
       <div className={styles.modelSnapshotHeading}>
         <h2 id="info-models-heading">Current models</h2>
-        <span>{loading ? "Reading API settings…" : error ? "API settings unavailable" : "Loaded API configuration"}</span>
+        <span>{loading ? "Reading API settings…" : error ? "API settings unavailable · implementation defaults shown" : "API settings + implementation defaults"}</span>
       </div>
-      {currentModels.length > 0 && <ul className={styles.modelList}>
-        {currentModels.map((model) => <li key={model.role}><span>{model.role}</span><strong>{model.name}</strong></li>)}
-      </ul>}
-      <p>Other models are listed in the steps below. Film evidence keeps its own model versions.</p>
+      <div className={styles.modelGroups}>
+        {modelGroups.map((group) => <div key={group.title}>
+          <h3>{group.title}</h3>
+          <ul className={styles.modelList}>
+            {group.models.map((model) => <li key={model.role}><span>{model.role}</span><strong>{model.name}</strong></li>)}
+          </ul>
+        </div>)}
+      </div>
+      <p>Names reflect loaded API settings or implementation defaults, not model readiness. Film evidence keeps its own versions.</p>
     </section>
 
     <nav className={styles.topics} aria-label="Guide topics">

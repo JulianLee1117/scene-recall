@@ -1,4 +1,5 @@
 import type { GuideSection, ProjectInfo } from "./types";
+import { GUIDE_MODELS } from "./models";
 
 // Explanations live separately from presentation and runtime configuration.
 // Update alongside docs/search-architecture.md when a processing boundary changes.
@@ -38,7 +39,7 @@ export function buildGuide(config: ProjectInfo | null): GuideSection[] {
         {
           id: "shots", title: "Detect shots", summary: "Find the cuts and divide long takes into search units.",
           detail: ["TransNetV2 finds where the picture cuts. Tiny flash fragments are merged, and long takes are divided into equal pieces that remember their parent shot.", "This tells search where shots change. It does not know when an action finishes or a scene ends."],
-          model: "TransNetV2 · local shot-boundary detector",
+          model: `${GUIDE_MODELS.shots} · local shot-boundary detector`,
           method: `Flash threshold: ${value(config?.thresholds.flash_min_duration)} s. Long-shot subdivision threshold: ${value(config?.thresholds.subsegment_min_duration)} s.`,
           output: "Stable unit IDs with start and end times, parent shots and keyframe targets.",
           sources: ["pipeline/ingest/shots.py"],
@@ -69,7 +70,7 @@ export function buildGuide(config: ProjectInfo | null): GuideSection[] {
         {
           id: "evidence", title: "Add evidence", summary: "Layer story, measurement and presentation facts on top.",
           detail: ["Open data adds cast, plot and quotes. A hosted model watches low-resolution clips and returns scenes, per-shot action and characters, the peak moment, and fame and craft ratings. Hero frames, a 4 fps moment index and priors follow.", "Each pass saves its own versioned result and the inputs it used, so stale results are easy to spot. A failed pass never undoes publication."],
-          model: "Gemini 3.8 Flash for understanding and highlights · RAFT-small and RF-DETR for local measurement · Silero VAD for subtitle sync.",
+          model: `${GUIDE_MODELS.understanding} for understanding and highlights · ${GUIDE_MODELS.flow} and ${GUIDE_MODELS.detector} for local measurement · ${GUIDE_MODELS.speech} for subtitle sync.`,
           method: "Per-film passes with hashed profiles and resumable receipts. Facts that can be measured come from pixels; model estimates are only hints.",
           output: "Versioned evidence per film, compiled into rebuildable search tables.",
           sources: ["pipeline/evidence/pipeline.py", "pipeline/evidence/understanding.py", "pipeline/evidence/measure.py", "pipeline/evidence/hero.py", "pipeline/evidence/moments.py", "pipeline/evidence/synthesis.py", "pipeline/evidence/subsync.py"],
@@ -77,7 +78,7 @@ export function buildGuide(config: ProjectInfo | null): GuideSection[] {
         {
           id: "measure", title: "Measure camera & picture", summary: "Read real camera movement and subjects from the pixels.",
           detail: ["One GPU pass follows optical flow between frames and labels the camera as static, handheld, pushing in, pulling out, or panning and tilting. Slow creeping moves are caught by adding up drift. Shaky, watery or very dark shots stay unknown instead of guessed.", "The same pass finds hidden cuts, subjects and where they travel, plus brightness, colour and sharpness."],
-          model: "RAFT-small optical flow · RF-DETR detection · local GPU",
+          model: `${GUIDE_MODELS.flow} optical flow (c_t_v2 checkpoint) · ${GUIDE_MODELS.detector} detection · local GPU`,
           method: "Per-frame-pair flow, smoothing, shake detection and drift accumulation, each label with a reliability score.",
           output: "Camera segments, hidden cuts, subject tracks and look measurements for every shot.",
           sources: ["pipeline/evidence/measure.py", "pipeline/evidence/compile.py"],
@@ -120,7 +121,7 @@ export function buildGuide(config: ProjectInfo | null): GuideSection[] {
         {
           id: "judge", title: "Judge & score", summary: "Give every candidate one relevance score.",
           detail: ["A cross-encoder reads your query together with each shortlisted shot’s evidence and judges the match. Its verdict is blended with the retrieval evidence into one score. Named films and characters, shot scale, camera move, time of day and colour then nudge it up or down by small fixed amounts, and the Balanced, Famous and Hidden gems presets lean on fame and craft.", "These nudges settle near-ties and never overturn a clearly better match. The judge has a one-second budget and rests when the GPU is busy, so results simply keep their retrieval order."],
-          model: "Qwen3-Reranker-0.6B · local cross-encoder · optional",
+          model: `${GUIDE_MODELS.reranker} · local cross-encoder · optional`,
           method: "A weighted blend of rank evidence and the judge’s log-odds, then bounded multiplicative factors for signals and priors.",
           output: "One ordered pool with a relevance score and the evidence behind it.",
           sources: ["pipeline/search/rerank.py", "pipeline/search/signals.py", "pipeline/search/priors.py"],
@@ -172,7 +173,7 @@ export function buildGuide(config: ProjectInfo | null): GuideSection[] {
         {
           id: "moments", title: "Match cuts", summary: "Cut between two shots that share a shape, position or motion.",
           detail: ["Four times a second, every instant is described by its shapes, people, light, lines, colour and motion. Search compares one moment with the whole library and scores the best candidates on what the eye carries across the cut.", "The editor can use the same score, and the Match Cuts workspace lets you browse and chain cuts. Ordinary search does not offer it."],
-          model: "RF-DETR segmentation and keypoints · local",
+          model: `${GUIDE_MODELS.segmentation} segmentation · ${GUIDE_MODELS.pose} keypoints · local`,
           method: "Memory-mapped coarse retrieval, then calibrated exact scoring. Cut points are exact to the 4 fps grid; renders use true source times.",
           output: "Ranked matching moments with source times and a crop for the chosen format.",
           sources: ["pipeline/evidence/moments.py", "pipeline/matching/moments/index.py", "pipeline/matching/moments/score.py", "pipeline/matching/moments/find.py", "pipeline/lab/harness/matchcuts.py"],
