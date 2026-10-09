@@ -3,27 +3,35 @@
 .notice { color: #91bd96; }
 .connection { padding: 10px 12px; background: #17140e; border: 1px solid #332b1f; border-radius: 6px; color: #c3ac87; }
 .queue { margin-top: 12px; }
-.row { align-items: flex-start; }
-.rowHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; justify-content: space-between; }
-.rowHeading h3 { white-space: normal; }
+.queue article.row { align-items: flex-start; flex-wrap: nowrap; }
+.queue .row :global(.film-row-copy) { flex-basis: auto; }
+.row .itemDetails > summary:not(:has(svg)) { min-height: 36px; padding: 6px 0; gap: 16px; border-radius: 0; background: transparent; }
+.row .itemDetails > summary:hover { color: #efe3cc; }
+.row .itemDetails > summary::before { opacity: .65; }
+.row .itemDetails .rowHeading { display: flex; flex: 1; min-width: 0; align-items: baseline; justify-content: space-between; gap: 4px 20px; font-size: 14px; font-weight: 400; }
+.rowTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rowHeading .state { flex-shrink: 0; }
-.rowActions { flex-wrap: wrap; padding-top: 4px; }
-.state { margin: 4px 0; font-size: 12px; color: #c5aa82; }
+.rowActions { flex-wrap: wrap; padding-top: 1px; }
+.state { margin: 0; font-size: 12px; font-weight: 400; color: #b9a78b; }
 .progress { display: block; width: min(360px, 100%); height: 4px; margin: 10px 0; border: 0; border-radius: 10px; overflow: hidden; background: #292929; accent-color: #b28a50; }
 .progress::-webkit-progress-bar { background: #292929; }
 .progress::-webkit-progress-value { background: #b28a50; }
 .waiting { margin-top: 16px; font-size: 13px; color: #aaa; }
 .waiting > div { margin-top: 8px; }
-.details { margin-top: 8px; color: var(--page-muted, #888); font-size: 12px; line-height: 1.6; }
-.details p { margin: 12px 12px 4px; overflow-wrap: anywhere; }
-.setup { margin: 20px 0 0; border: 1px solid var(--page-line, #262520); border-radius: 8px; color: var(--page-muted, #999); font-size: 13px; line-height: 1.6; }
+.detailsBody { padding: 4px 0 8px; color: var(--page-muted, #888); font-size: 12px; line-height: 1.6; }
+.detailsBody p { margin: 6px 0; overflow-wrap: anywhere; }
+.setup { margin: 12px 0 0; color: var(--page-muted, #999); font-size: 12px; line-height: 1.6; }
 .setup p { margin: 16px; max-width: 680px; }
 .setup details { margin: 12px; border-top: 1px solid var(--page-line, #262520); padding-top: 8px; }
 .setup details p { margin: 12px; }
 .setup code { color: #c5b08f; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
   .actions { flex-wrap: wrap; justify-content: flex-end; }
-  .row { flex-wrap: wrap; }
-  .row > :first-child { flex-basis: 100%; }
+  .row .itemDetails > summary:not(:has(svg)) { min-height: 44px; gap: 10px; }
+  .row .itemDetails .rowHeading { flex-direction: column; gap: 2px; align-items: flex-start; }
+  .rowTitle { max-width: 100%; white-space: normal; }
+  .rowHeading .state { white-space: normal; }
   .rowActions { padding-top: 0; }
+  .queue article.row:has(.rowActions > button + button) { flex-wrap: wrap; }
+  .row:has(.rowActions > button + button) :global(.film-row-copy) { flex-basis: 100%; }
 }

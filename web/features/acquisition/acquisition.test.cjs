@@ -337,6 +337,38 @@ test("the film queue hides completed history while preserving active work, failu
   } finally { app.dispose(); }
 });
 
+test("collapsed queue rows keep stalled downloads, errors and recovery actions visible", () => {
+  // Native details only exposes its summary until opened.
+  function collapsedContent(node) {
+    if (node == null || typeof node !== "object") return node;
+    if (Array.isArray(node)) return node.map(collapsedContent);
+    const children = node.type === "details" && !node.props.open
+      ? nodes(node.props.children).find((child) => child.type === "summary") : node.props.children;
+    return { ...node, props: { ...node.props, children: collapsedContent(children) } };
+  }
+  const queue = {
+    status, busy: null, error: null, loading: false,
+    items: [
+      { id: "paused", title: "Paused film", year: 1980, status: "downloading", progress: 0.25, message: "Download stopped in qBittorrent" },
+      { id: "waiting", title: "Waiting film", year: 1981, status: "downloading", message: "Waiting for peers" },
+      { id: "failed", title: "Failed film", year: 1982, status: "failed", error: "Connection lost" },
+      { id: "review", title: "Review film", year: 1983, status: "needs_review", review: {} },
+    ],
+  };
+  const app = harness("AcquisitionPanel.tsx", (exports) => exports.default({ onLibraryChange: async () => {} }), {
+    "./useAcquisitionQueue": { useAcquisitionQueue: () => queue }, "./AddFilmForm": { default: "AddFilmForm" }, "./AcquisitionReview": { default: "AcquisitionReview" },
+  });
+  try {
+    const collapsed = collapsedContent(app.state);
+    assert.match(text(collapsed), /Downloading · 25%/);
+    assert.match(text(collapsed), /Download paused\. Resume it in qBittorrent/);
+    assert.match(text(collapsed), /Waiting for people sharing this download/);
+    assert.match(text(collapsed), /Connection lost/);
+    const buttons = nodes(collapsed).filter((node) => node.type === "button").map(text);
+    for (const label of ["Review", "Try again", "Dismiss", "Cancel"]) assert.ok(buttons.includes(label), label);
+  } finally { app.dispose(); }
+});
+
 test("Dismiss forgets a cancelled or failed row, freeing its release for a fresh download", async () => {
   const calls = [];
   const queue = {

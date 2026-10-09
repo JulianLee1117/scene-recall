@@ -525,7 +525,7 @@ export default function LibraryView() {
   const incomingEmpty = !loading && incoming.length === 0;
 
   return (
-    <div className={`${chrome.page} ${styles.page}`}>
+    <div className={`${chrome.page} ${chrome.workspace} ${styles.page}`}>
       <header className={`${chrome.header} ${chrome.headerRow}`}>
         <div>
           <h1 className={chrome.title}>Films</h1>
@@ -624,7 +624,7 @@ export default function LibraryView() {
         ) : visibleFilms.length === 0 ? (
           <p className="films-empty">No films match “{libraryQuery}”.</p>
         ) : (
-          <div className="films-list">
+          <div className={`films-list ${styles.libraryList}`}>
             {visibleFilms.map((film) => {
               const key = pathKey(film.path);
               const job = jobsByPath.get(key);

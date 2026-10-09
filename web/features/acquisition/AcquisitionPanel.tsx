@@ -52,9 +52,13 @@ export default function AcquisitionPanel({ onLibraryChange, jobs = [], films = [
     return (
       <article className={`film-row ${job.status === "running" ? "film-row--running" : "film-row--queued"} ${styles.row}`} key={job.job_id}>
         <div className="film-row-copy">
-          <div className={styles.rowHeading}><h3>{title}</h3><span className={styles.state}>{job.status === "running" ? "Preparing for search" : waitingLabel(job)}</span></div>
-          {job.status === "running" && <p className={styles.note}>{preparationProgress(job.progress, job.log)}</p>}
-          {job.progress && <details className={styles.details}><summary>Details</summary><p>{job.progress}</p></details>}
+          <details className={styles.itemDetails}>
+            <summary><h3 className={styles.rowHeading}><span className={styles.rowTitle}>{title}</span><span className={styles.state}>{job.status === "running" ? "Preparing for search" : waitingLabel(job)}</span></h3></summary>
+            <div className={styles.detailsBody}>
+              {job.status === "running" && <p className={styles.note}>{preparationProgress(job.progress, job.log)}</p>}
+              <p>{job.progress || job.filename}</p>
+            </div>
+          </details>
         </div>
       </article>
     );
@@ -65,25 +69,28 @@ export default function AcquisitionPanel({ onLibraryChange, jobs = [], films = [
     const progress = item.progress != null && Number.isFinite(item.progress) ? Math.max(0, Math.min(1, item.progress)) : null;
     const eta = formatEta(item.eta_seconds);
     const hint = acquisitionHint(item, job);
+    const showHintCollapsed = item.status === "downloading" && Boolean(hint);
     const label = isCancelling(item) ? stateLabel("cancelling") : item.status === "ingest_queued" ? waitingLabel(job) : stateLabel(item.status);
     return (
       <article className={`film-row ${styles.row} ${item.status === "failed" ? "film-row--failed" : isActive(item) ? "film-row--queued" : ""}`} key={item.id}>
         <div className="film-row-copy">
-          <div className={styles.rowHeading}><h3>{item.title} ({item.year}){item.edition ? ` · ${item.edition}` : ""}</h3>
-            <span className={styles.state}>{label}{item.status === "downloading" && progress !== null ? ` · ${Math.round(progress * 100)}%` : ""}</span></div>
-          {item.status === "downloading" && <>
-            <progress className={styles.progress} value={progress ?? undefined} max={1} aria-label={`${item.title} download progress`} />
-            <p className="film-meta">{item.bytes_done != null ? `${formatBytes(item.bytes_done)} / ` : ""}{formatBytes(item.bytes_total)}{eta ? ` · ${eta}` : ""}</p>
-          </>}
-          {hint && <p className={styles.note}>{hint}</p>}
+          <details className={styles.itemDetails}>
+            <summary><h3 className={styles.rowHeading}><span className={styles.rowTitle}>{item.title} ({item.year}){item.edition ? ` · ${item.edition}` : ""}</span>
+              <span className={styles.state}>{label}{item.status === "downloading" && progress !== null ? ` · ${Math.round(progress * 100)}%` : ""}</span></h3></summary>
+            <div className={styles.detailsBody}>
+              {item.status === "downloading" && <>
+                <progress className={styles.progress} value={progress ?? undefined} max={1} aria-label={`${item.title} download progress`} />
+                <p className="film-meta">{item.bytes_done != null ? `${formatBytes(item.bytes_done)} / ` : ""}{formatBytes(item.bytes_total)}{eta ? ` · ${eta}` : ""}</p>
+              </>}
+              {hint && !showHintCollapsed && <p className={styles.note}>{hint}</p>}
+              {item.film_path && <p>{item.film_path}</p>}
+              {item.message && <p>{item.message}</p>}
+              {job?.progress && <p>{job.progress}</p>}
+              {item.status === "downloading" && item.download_rate != null && <p>{formatBytes(item.download_rate)}/s</p>}
+            </div>
+          </details>
+          {showHintCollapsed && <p className={styles.note}>{hint}</p>}
           {item.error && <p className="film-row-error">{item.error}</p>}
-          {(item.message || job?.progress || item.film_path) && <details className={styles.details}>
-            <summary>Details</summary>
-            {item.film_path && <p>{item.film_path}</p>}
-            {item.message && <p>{item.message}</p>}
-            {job?.progress && <p>{job.progress}</p>}
-            {item.status === "downloading" && item.download_rate != null && <p>{formatBytes(item.download_rate)}/s</p>}
-          </details>}
         </div>
         <div className={styles.rowActions}>
           {item.status === "needs_review" && item.review && !isCancelling(item) && <button type="button" className="films-button films-button--secondary" disabled={Boolean(queue.busy)}

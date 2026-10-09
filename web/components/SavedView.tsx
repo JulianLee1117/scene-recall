@@ -81,12 +81,9 @@ export default function SavedView({
   const starts = layout ? rowStarts(layout.sizes) : [];
 
   return (
-    <section className={`${chrome.page} ${styles.page}`} aria-labelledby="saved-heading">
+    <section className={`${chrome.page} ${chrome.workspace} ${styles.page}`} aria-labelledby="saved-heading">
       <header className={`${chrome.header} ${chrome.headerRow}`}>
-        <div>
-          <h1 id="saved-heading" className={chrome.title}>Saved scenes</h1>
-          <p className={chrome.description}>Moments you’ve bookmarked, ready to revisit or use in Search.</p>
-        </div>
+        <h1 id="saved-heading" className={chrome.title}>Saved scenes</h1>
         {!loading && (
           <span className={chrome.count}>
             {bookmarks.length} {bookmarks.length === 1 ? "scene" : "scenes"}
