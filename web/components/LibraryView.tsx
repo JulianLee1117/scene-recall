@@ -21,6 +21,7 @@ import AcquisitionPanel from "@/features/acquisition/AcquisitionPanel";
 import type { Acquisition } from "@/features/acquisition/types";
 import { belongsInLibrary } from "@/features/acquisition/model";
 import styles from "./libraryView.module.css";
+import chrome from "./pageChrome.module.css";
 import LibraryStorage from "./LibraryStorage";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -524,11 +525,11 @@ export default function LibraryView() {
   const incomingEmpty = !loading && incoming.length === 0;
 
   return (
-    <div className={`films-page ${styles.page}`}>
-      <header className="films-header">
+    <div className={`${chrome.page} ${styles.page}`}>
+      <header className={`${chrome.header} ${chrome.headerRow}`}>
         <div>
-          <h1>Films</h1>
-          <p>
+          <h1 className={chrome.title}>Films</h1>
+          <p className={chrome.description}>
             {films.length} films · {indexedCount} searchable
             {activeCount > 0
               ? ` · ${activeCount} preparing or waiting`

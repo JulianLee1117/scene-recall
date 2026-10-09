@@ -10,6 +10,8 @@ import type {
   SearchResult,
 } from "@/types/api";
 import { displayTitle, filmLabel, formatTime } from "@/lib/format";
+import chrome from "./pageChrome.module.css";
+import styles from "./savedView.module.css";
 
 interface SavedViewProps {
   bookmarks: BookmarkRecord[];
@@ -79,33 +81,33 @@ export default function SavedView({
   const starts = layout ? rowStarts(layout.sizes) : [];
 
   return (
-    <section className="saved-view" aria-labelledby="saved-heading">
-      <header className="saved-heading">
+    <section className={`${chrome.page} ${styles.page}`} aria-labelledby="saved-heading">
+      <header className={`${chrome.header} ${chrome.headerRow}`}>
         <div>
-          <p>Collection</p>
-          <h1 id="saved-heading">Saved scenes</h1>
+          <h1 id="saved-heading" className={chrome.title}>Saved scenes</h1>
+          <p className={chrome.description}>Moments you’ve bookmarked, ready to revisit or use in Search.</p>
         </div>
         {!loading && (
-          <span>
+          <span className={chrome.count}>
             {bookmarks.length} {bookmarks.length === 1 ? "scene" : "scenes"}
           </span>
         )}
       </header>
 
       {error && (
-        <p className="saved-error" role="status">
+        <p className={chrome.error} role="status">
           {error}
         </p>
       )}
 
       {loading ? (
-        <p className="saved-empty" role="status">
+        <p className={chrome.empty} role="status">
           Loading saved scenes…
         </p>
       ) : bookmarks.length === 0 ? (
-        <div className="saved-empty">
+        <div className={chrome.empty}>
           <BookmarkIcon filled={false} size={25} />
-          <p>Scenes you bookmark will appear here.</p>
+          <p>Save a scene from Search using the bookmark button. It will appear here.</p>
         </div>
       ) : layout ? (
         <div

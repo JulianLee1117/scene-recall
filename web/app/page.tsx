@@ -134,7 +134,11 @@ export default function Home() {
   const searchScrollRef = useRef(0);
   const restoreScrollRef = useRef<number | null>(null);
   useLayoutEffect(() => {
-    if (activeTab !== "search" || restoreScrollRef.current === null) return;
+    if (activeTab !== "search") {
+      if (typeof window.scrollTo === "function") window.scrollTo({ top: 0 });
+      return;
+    }
+    if (restoreScrollRef.current === null) return;
     if (typeof window.scrollTo === "function") window.scrollTo({ top: restoreScrollRef.current });
     restoreScrollRef.current = null;
   }, [activeTab]);

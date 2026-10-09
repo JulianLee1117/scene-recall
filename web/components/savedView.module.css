@@ -1,0 +1,14 @@
+.page :global(.saved-grid) { padding: 0 0 16px; }
+.page :global(.saved-unavailable) { padding: 12px; border-color: var(--page-line); background: var(--page-surface); }
+.page :global(.saved-unavailable span) { overflow: hidden; color: var(--page-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.page :global(.saved-unavailable strong) { color: var(--page-text); font-size: 14px; }
+.page :global(.saved-unavailable button) { min-height: 40px; padding: 8px 12px; border-color: #443c2e; border-radius: 7px; color: var(--page-text); font-size: 12px; }
+.page :global(.saved-unavailable button:hover:not(:disabled)) { background: #1c1a15; border-color: #6b5a3d; }
+.page :global(.saved-unavailable button:focus-visible) { outline: 2px solid var(--page-accent); outline-offset: 3px; }
+.page :global(.saved-unavailable button:disabled) { opacity: .45; cursor: default; }
+@media (max-width: 600px) {
+  .page :global(.saved-unavailable) { padding: 10px; gap: 8px; }
+  .page :global(.saved-unavailable span) { font-size: 11px; }
+  .page :global(.saved-unavailable strong) { font-size: 13px; }
+  .page :global(.saved-unavailable button) { min-height: 44px; padding: 8px; }
+}

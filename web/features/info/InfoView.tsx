@@ -6,6 +6,7 @@ import { buildModelGroups } from "./models";
 import { FOOTAGE_LADDER, GLOSSARY } from "./glossary";
 import type { GlossaryGroup, ProjectInfo } from "./types";
 import styles from "./info.module.css";
+import chrome from "@/components/pageChrome.module.css";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -115,11 +116,11 @@ export default function InfoView() {
   const DiagramList = isStorage ? "ul" : "ol";
   const modelGroups = buildModelGroups(settings);
 
-  return <section className={styles.page} aria-labelledby="info-heading">
-    <header className={styles.header}>
-      <span className={styles.eyebrow}>INSIDE SCENE RECALL</span>
-      <h1 id="info-heading">How Scene Recall works</h1>
-      <p>From a film file to a finished edit. Explore the workflow, vocabulary and models behind the app.</p>
+  return <section className={`${chrome.page} ${styles.page}`} aria-labelledby="info-heading">
+    <header className={chrome.header}>
+      <span className={chrome.eyebrow}>INSIDE SCENE RECALL</span>
+      <h1 id="info-heading" className={chrome.title}>How Scene Recall works</h1>
+      <p className={chrome.description}>From a film file to a finished edit. Explore the workflow, vocabulary and models behind the app.</p>
     </header>
 
     <nav className={styles.topics} aria-label="Guide topics">

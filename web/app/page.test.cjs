@@ -169,6 +169,8 @@ function harness() {
     URL: { createObjectURL: () => "blob:reference", revokeObjectURL() {} },
     fetch(url, init) { return new Promise((resolve) => requests.push({ url, init, resolve })); },
     window: {
+      scrollY: 0,
+      scrollTo({ top }) { this.scrollY = top; },
       clearTimeout(id) { timers.delete(id); },
       setTimeout(callback) { const id = ++nextTimerId; timers.set(id, callback); return id; },
       requestAnimationFrame: (callback) => callback(),
@@ -216,6 +218,8 @@ function harness() {
     async setFilms(next) { films = [...next]; schedule(); await flush(); },
     async runTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach((callback) => callback()); await flush(); },
     requests, flush, find,
+    setScroll(top) { context.window.scrollY = top; },
+    get scrollY() { return context.window.scrollY; },
     get state() { return output; },
     grid: () => find((node) => node.type === "ResultGrid"),
     note: () => find((node) => node.props?.className === "search-no-overlap"),
@@ -734,9 +738,17 @@ test("another tab leaves the search as it was: Search returns to it, and Search 
     app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
     await app.flush();
     const searches = app.requests.length;
+    app.setScroll(1200);
     tab("Films").props.onClick(); await app.flush();
+    assert.equal(app.scrollY, 0, "Films opens at its heading");
     assert.equal(app.find((node) => node.props?.className === "search-view").props.hidden, true);
+    for (const label of ["Saved", "Info"]) {
+      app.setScroll(600);
+      tab(label).props.onClick(); await app.flush();
+      assert.equal(app.scrollY, 0, `${label} opens at its heading`);
+    }
     tab("Search").props.onClick(); await app.flush();
+    assert.equal(app.scrollY, 1200, "Search restores the original result position");
     assert.equal(input().value, "rain at night");
     assert.ok(app.grid(), "the results come back with it");
     assert.equal(app.requests.length, searches, "returning runs no search");

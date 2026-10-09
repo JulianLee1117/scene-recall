@@ -1,16 +1,41 @@
-.page :global(.films-header p), .page :global(.films-section-header p) { color: #929292; }
-.page :global(.film-meta), .page :global(.film-filename) { color: #909090; }
-.filter { display: grid; gap: 5px; flex: 0 1 220px; font-size: .72rem; color: #aaa; }
-.filter input { min-width: 0; width: 100%; border: 1px solid #343434; border-radius: 6px; background: #111; padding: 8px 10px; color: #eee; font-size: .78rem; outline: none; }
+.page :global(.films-section) { margin-top: 36px; padding-top: 32px; border-top: 1px solid var(--page-line); }
+.page :global(.films-section-header) { margin-bottom: 20px; align-items: flex-end; gap: 16px 24px; }
+.page :global(.films-section-header h2) { color: #f0ede6; font-size: 22px; font-weight: 500; letter-spacing: -.025em; line-height: 1.3; }
+.page :global(.films-section-header p) { margin-top: 8px; color: var(--page-muted); font-size: 14px; line-height: 1.6; }
+.page :global(.films-list) { gap: 4px; }
+.page :global(.film-row) { min-height: 80px; padding: 16px; border-bottom-color: var(--page-line); border-radius: 8px; background: var(--page-surface); gap: 16px; }
+.page :global(.film-row-copy h3) { color: #e6e1d8; font-size: 15px; line-height: 1.5; }
+.page :global(.film-meta), .page :global(.film-filename) { color: var(--page-muted); font-size: 12px; line-height: 1.5; }
+.page :global(.film-row-error) { font-size: 13px; line-height: 1.6; white-space: normal; }
+.page :global(.film-status) { padding: 6px 10px; font-size: 12px; }
+.page :global(.films-empty) { padding: 28px 20px; border-style: solid; border-color: var(--page-line); border-radius: 8px; color: var(--page-muted); font-size: 14px; line-height: 1.6; }
+.page :global(.films-button) { min-height: 40px; padding: 10px 14px; border-radius: 7px; font-size: 13px; line-height: 1.4; }
+.page :global(.films-button--quiet), .page :global(.films-button--secondary) { color: #b7b1a5; }
+.page :global(.films-button--secondary) { border-color: #443c2e; }
+.page :global(.films-button--quiet:hover:not(:disabled)), .page :global(.films-button--secondary:hover:not(:disabled)) { color: #efe3cc; background: #1c1a15; border-color: #6b5a3d; }
+.page :global(.films-button--primary) { background: var(--page-accent); border-color: var(--page-accent); font-weight: 500; }
+.page :global(.films-message) { padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+.page details > summary:not(:has(svg)) { min-height: 44px; width: 100%; padding: 10px 12px; border-radius: 7px; color: #b7b1a5; font-size: 13px; line-height: 1.5; cursor: pointer; }
+.page details > summary:not(:has(svg))::before { order: 1; margin: 0 2px 2px auto; }
+.page details > summary:hover { background: #ffffff05; color: #efe3cc; }
+.page details[open] > summary { background: #1b1812; color: #f4e9d6; }
+.page details > summary:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 2px; }
+.page :global(.film-review-field) { gap: 8px; }
+.page :global(.film-review-field > span) { color: var(--page-muted); font-size: 12px; }
+.page :global(.film-review-field input) { min-height: 44px; padding: 10px 14px; border-color: #36322a; border-radius: 8px; background: #0c0c0a; color: #e7e3da; font-size: 14px; }
+.page :global(.film-review-field input)::file-selector-button { margin-right: 12px; padding: 6px 10px; border: 1px solid #443c2e; border-radius: 5px; background: #1b1812; color: #e7e3da; cursor: pointer; }
+.filter { display: grid; gap: 8px; flex: 0 1 240px; font-size: 12px; color: var(--page-muted); }
+.filter input { min-width: 0; width: 100%; min-height: 44px; border: 1px solid #36322a; border-radius: 8px; background: var(--page-surface); padding: 10px 14px; color: #e7e3da; font-size: 14px; outline: none; }
+.filter input::placeholder { color: #77746c; }
 .filter input:focus-visible { border-color: var(--field-border-focus); box-shadow: var(--field-ring); }
 .page .incomingEmpty { margin-bottom: 0; }
-.incomingEmpty > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
-.incomingEmpty h2 { flex-shrink: 0; }
-.page .incomingEmpty p { margin: 0; }
-.page .libraryHeader { align-items: flex-end; }
+.incomingEmpty > div { max-width: 650px; }
 .libraryHeader > div { min-width: 0; }
 @media (max-width: 600px) {
-  .page :global(.films-header) { flex-wrap: wrap; gap: 10px; }
-  .page :global(.films-section-header) { flex-wrap: wrap; }
+  .page :global(.films-section) { margin-top: 28px; padding-top: 24px; }
+  .page :global(.films-section-header) { flex-wrap: wrap; align-items: flex-start; }
+  .page :global(.film-row) { flex-wrap: wrap; gap: 10px 14px; }
+  .page :global(.film-row-copy) { flex-basis: 100%; }
+  .page :global(.films-button) { min-height: 44px; }
   .filter { flex-basis: 100%; }
 }
