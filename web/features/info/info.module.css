@@ -4,6 +4,7 @@
   --guide-muted: #9a978f;
   --guide-line: #262520;
   --guide-surface: #11110e;
+  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   width: min(1080px, 100%);
   margin: 0 auto;
   padding: 64px 32px 72px;
@@ -13,7 +14,7 @@
 /* ── Header ─────────────────────────────────────────────── */
 .header { margin-bottom: 44px; }
 .eyebrow { color: var(--guide-accent); font-size: 11px; font-weight: 500; letter-spacing: .18em; }
-.header h1 { margin: 14px 0 12px; color: #f3f1ec; font-size: clamp(32px, 4vw, 46px); font-weight: 500; line-height: 1.1; letter-spacing: -.035em; }
+.header h1 { margin: 14px 0 14px; color: #f3f0e8; font-family: var(--serif); font-size: clamp(36px, 5vw, 54px); font-weight: 400; line-height: 1.08; letter-spacing: -.02em; }
 .header p { margin: 0; max-width: 520px; color: var(--guide-muted); font-size: 16px; line-height: 1.6; }
 
 /* ── Topic navigation ───────────────────────────────────── */
@@ -34,52 +35,48 @@
 @media (prefers-reduced-motion: reduce) { .article { animation: none; } }
 
 .topicHeader { display: grid; grid-template-columns: minmax(0, 1fr) 250px; align-items: end; gap: 48px; }
-.topicHeader h2 { margin: 0 0 12px; color: #f0ede6; font-size: 32px; font-weight: 500; letter-spacing: -.03em; line-height: 1.15; }
+.topicHeader h2 { margin: 0 0 12px; color: #f0ede6; font-family: var(--serif); font-size: 36px; font-weight: 400; letter-spacing: -.015em; line-height: 1.15; }
 .topicSummary { margin: 0; max-width: 520px; font-size: 16px; line-height: 1.6; color: #aeaaa1; }
 .outcome { margin: 0; padding: 2px 0 2px 20px; border-left: 1px solid #4a4233; color: #dccfb8; font-size: 14px; line-height: 1.55; }
 .outcome > span { display: block; margin-bottom: 6px; color: var(--guide-muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
 
 /* Overview diagram */
-.overview { margin: 36px 0 28px; padding: 24px 26px 26px; border: 1px solid #24231e; border-radius: 16px; background: var(--guide-surface); }
+.overview { margin: 40px 0 36px; padding: 26px 0 28px; border-top: 1px solid var(--guide-line); border-bottom: 1px solid var(--guide-line); }
 .overview figcaption { margin-bottom: 22px; color: #a8a295; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
 .flow { display: flex; list-style: none; padding: 0; margin: 0; }
 .flow li { position: relative; flex: 1; min-width: 0; padding-right: 14px; }
-.flow li::before { content: ""; position: absolute; height: 1px; top: 14px; left: 39px; right: 9px; background: #403929; }
-.flow li::after { content: ""; position: absolute; top: 12px; right: 10px; width: 5px; height: 5px; border-top: 1px solid #7d6b4e; border-right: 1px solid #7d6b4e; transform: rotate(45deg); }
+.flow li::before { content: ""; position: absolute; height: 1px; top: 14px; left: 41px; right: 8px; background: linear-gradient(90deg, #7a6847, #2a2620); }
 .flow li:last-child { padding-right: 0; }
-.flow li:last-child::before, .flow li:last-child::after { display: none; }
-.flowMarker { position: relative; display: grid; place-items: center; width: 29px; height: 29px; margin-bottom: 12px; border: 1px solid #574a34; border-radius: 50%; background: var(--guide-surface); color: var(--guide-accent); font-size: 10px; font-variant-numeric: tabular-nums; }
+.flow li:last-child::before { display: none; }
+.flowMarker { position: relative; display: grid; place-items: center; width: 29px; height: 29px; margin-bottom: 12px; border: 1px solid #5d4e36; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #1d1a13, #12110d); color: var(--guide-accent); font-size: 10px; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 4px var(--guide-surface); }
 .flow li > span:last-child { display: block; color: #d6cdbd; font-size: 12px; line-height: 1.5; }
 .layers { gap: 20px; }
 .layers li { display: flex; align-items: center; gap: 12px; padding-right: 0; }
-.layers li::before, .layers li::after { display: none; }
+.layers li::before { display: none; }
 .layers .flowMarker { margin: 0; flex-shrink: 0; border-radius: 8px; }
 
-.introduction { max-width: 660px; margin: 0 0 44px; font-size: 16px; line-height: 1.75; color: #aeaaa1; }
+.introduction { max-width: 660px; margin: 0 0 48px; font-family: var(--serif); font-size: 20px; line-height: 1.6; color: #cdc7ba; }
 .introduction strong { color: #ddd2bd; font-weight: 500; }
 
 /* ── Steps: a quiet timeline ────────────────────────────── */
-.steps { border-top: 1px solid var(--guide-line); }
-.step { position: relative; display: grid; grid-template-columns: 56px minmax(0, 1fr); padding: 44px 0 8px; }
-.step::after { content: ""; position: absolute; left: 17px; top: 88px; bottom: -4px; width: 1px; background: linear-gradient(#2c2a23, #1c1b17); }
-.step:last-child::after { display: none; }
-.stepMarker { position: relative; z-index: 1; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #453c2b; border-radius: 50%; background: #0d0d0b; color: var(--guide-accent); font-size: 11px; font-variant-numeric: tabular-nums; }
-.stepContent { min-width: 0; padding-bottom: 44px; }
+.step { display: grid; grid-template-columns: 96px minmax(0, 1fr); padding: 48px 0 52px; border-bottom: 1px solid var(--guide-line); }
+.stepMarker { padding-top: 9px; color: var(--guide-accent); font-family: var(--serif); font-size: 15px; font-variant-numeric: tabular-nums; }
+.stepContent { min-width: 0; }
 .stepHeader { margin-bottom: 18px; }
-.stepHeader h3 { margin: 4px 0 8px; color: #efebe3; font-size: 22px; font-weight: 500; line-height: 1.3; letter-spacing: -.02em; }
+.stepHeader h3 { margin: 0 0 8px; color: #f0ece3; font-family: var(--serif); font-size: 26px; font-weight: 400; line-height: 1.25; letter-spacing: -.01em; }
 .stepHeader p { margin: 0; color: #b3aea4; font-size: 15px; line-height: 1.6; }
 .explanation { max-width: 660px; }
 .explanation p { margin: 0 0 14px; font-size: 14px; line-height: 1.8; color: #aaa69e; }
 .explanation p:last-child { margin-bottom: 0; }
 
 /* Model · Method · Output */
-.technical { margin-top: 24px; padding: 20px 22px; border: 1px solid #22211c; border-radius: 12px; background: var(--guide-surface); }
+.technical { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--guide-line); }
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 20px 28px; margin: 0; }
 .facts dt { margin-bottom: 6px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #b79d76; }
 .facts dd { margin: 0; color: #a9a49a; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
 
 /* Search channels */
-.branchDiagram { margin: 0 0 24px; padding: 22px; border: 1px solid #24231e; border-radius: 14px; background: var(--guide-surface); text-align: center; }
+.branchDiagram { margin: 0 0 26px; padding: 22px 0; border-top: 1px solid var(--guide-line); border-bottom: 1px solid var(--guide-line); text-align: center; }
 .branchDiagram figcaption { margin-bottom: 18px; color: #a69d8d; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
 .branchDiagram ul { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; list-style: none; padding: 0; margin: 0; }
 .branchDiagram li { padding: 14px 12px; border: 1px solid #38322a; border-radius: 10px; }
@@ -91,7 +88,7 @@
 .mergeLabel::before { content: ""; display: block; width: 1px; height: 14px; margin: 0 auto 8px; background: #685437; }
 
 /* ── Note and code references ───────────────────────────── */
-.note { display: flex; gap: 16px; align-items: flex-start; margin: 20px 0 52px; padding: 22px 24px; border-radius: 14px; background: #15140f; }
+.note { display: flex; gap: 16px; align-items: flex-start; margin: 40px 0 56px; padding: 4px 0 4px 20px; border-left: 1px solid #5d4e36; }
 .noteIcon { display: grid; place-items: center; flex: 0 0 20px; height: 20px; margin-top: 1px; border: 1px solid #8d7855; border-radius: 50%; font-family: Georgia, serif; font-size: 12px; color: #c4ad87; }
 .note h3 { margin: 0 0 6px; color: #d6c8b0; font-size: 13px; font-weight: 500; }
 .note p { margin: 0; max-width: 640px; color: #aaa396; font-size: 13px; line-height: 1.75; }
@@ -128,7 +125,7 @@
 
 .termGroup { scroll-margin-top: 24px; padding: 44px 0 4px; }
 .termGroupHeader { display: flex; align-items: baseline; gap: 18px; margin-bottom: 10px; }
-.termGroupHeader h3 { margin: 0; color: #efebe3; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
+.termGroupHeader h3 { margin: 0; color: #f0ece3; font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: -.01em; }
 .termGroupHeader p { margin: 0; color: var(--guide-muted); font-size: 14px; line-height: 1.6; }
 .terms { margin: 0; }
 .termRow { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; padding: 18px 0; border-bottom: 1px solid #23221d; }
@@ -159,23 +156,21 @@
   .header { margin-bottom: 28px; }
   .header p { font-size: 15px; }
   .article { padding-top: 34px; }
-  .topicHeader h2 { font-size: 28px; }
-  .topicSummary, .introduction { font-size: 15px; }
+  .topicHeader h2 { font-size: 30px; }
+  .topicSummary { font-size: 15px; }
+  .introduction { font-size: 18px; }
   .introduction { margin-bottom: 30px; }
-  .overview { padding: 20px; margin: 28px 0 22px; }
+  .overview { padding: 22px 0; margin: 28px 0 26px; }
   .flow { flex-direction: column; }
   .flow li { display: flex; gap: 13px; align-items: center; padding: 0 0 21px; }
   .flow li:last-child { padding-bottom: 0; }
-  .flow li::before { width: 1px; height: auto; top: 34px; bottom: 5px; left: 14px; right: auto; }
-  .flow li::after { top: auto; bottom: 5px; left: 12px; right: auto; transform: rotate(135deg); }
+  .flow li::before { width: 1px; height: auto; top: 36px; bottom: 6px; left: 14px; right: auto; background: linear-gradient(180deg, #7a6847, #2a2620); }
   .flowMarker { margin-bottom: 0; flex-shrink: 0; }
   .layers { gap: 16px; }
   .layers li { padding: 0; }
-  .step { grid-template-columns: 32px minmax(0, 1fr); padding-top: 32px; }
-  .step::after { left: 12px; top: 72px; }
-  .stepMarker { height: 26px; width: 26px; font-size: 10px; }
-  .stepContent { padding-bottom: 32px; padding-left: 8px; }
-  .stepHeader h3 { font-size: 20px; margin-top: 0; }
+  .step { grid-template-columns: 1fr; padding: 34px 0 38px; }
+  .stepMarker { padding: 0 0 10px; }
+  .stepHeader h3 { font-size: 23px; }
   .technical { padding: 16px; }
   .facts { gap: 16px; }
   .branchDiagram { padding: 17px 13px; }
