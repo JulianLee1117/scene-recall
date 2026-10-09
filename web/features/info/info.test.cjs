@@ -10,8 +10,6 @@ const compile = (file) => ts.transpileModule(fs.readFileSync(path.join(__dirname
 }).outputText;
 const guide = {};
 vm.runInNewContext(compile("guide.ts"), { exports: guide });
-const glossary = {};
-vm.runInNewContext(compile("glossary.ts"), { exports: glossary });
 const compiled = compile("InfoView.tsx");
 const nodes = (node) => node == null || typeof node !== "object" ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
 const text = (node) => node == null || typeof node === "boolean" ? "" : typeof node !== "object" ? String(node) : Array.isArray(node) ? node.map(text).join("") : text(node.props?.children);
@@ -57,7 +55,6 @@ function harness() {
     require(name) {
       if (name === "react") return react;
       if (name === "./guide") return guide;
-      if (name === "./glossary") return glossary;
       if (name.endsWith(".css")) return { default: {} };
       if (name === "react/jsx-runtime") {
         const jsx = (type, props) => typeof type === "function" ? type(props) : { type, props };
@@ -212,7 +209,7 @@ test("topic navigation exposes one labelled article with every step visible and 
   try {
     const headingId = app.state.props["aria-labelledby"];
     assert.ok(app.find((node) => node.type === "h1" && node.props.id === headingId));
-    assert.equal(buttons().length, 5);
+    assert.equal(buttons().length, 4);
     assert.equal(text(app.find((node) => node.props?.id === "info-topic-heading")), "Ingestion");
     assert.ok(text(buttons().find((node) => node.props["aria-current"] === "page")).includes("Ingestion"));
 
@@ -272,62 +269,5 @@ test("the selected topic survives loading and refreshing live settings", async (
     assert.match(text(app.find((node) => node.type === "article")), /refreshed-visual/);
     assert.equal(app.requests.length, 2);
     assert.deepEqual(app.timers, []);
-  } finally { app.dispose(); }
-});
-
-test("glossary has unique, complete, plain-language entries", () => {
-  const groups = glossary.GLOSSARY;
-  assert.ok(groups.length >= 5);
-  assert.equal(new Set(groups.map((group) => group.id)).size, groups.length);
-  const terms = groups.flatMap((group) => group.terms.map((item) => item.term));
-  assert.equal(new Set(terms.map((term) => term.toLowerCase())).size, terms.length, "a term is defined once");
-  for (const group of groups) {
-    assert.ok(group.title && group.summary && group.terms.length, group.id);
-    for (const item of group.terms) {
-      assert.ok(item.term.trim() && item.definition.trim().length > 20, item.term);
-      assert.match(item.definition, /[.]$/, `${item.term} ends as a sentence`);
-    }
-  }
-  for (const word of ["Shot", "Unit", "Scene", "Keyframe", "Moment", "Cross-encoder", "Signal", "Lock", "Foreground work"]) {
-    assert.ok(terms.includes(word), word);
-  }
-  assert.deepEqual(Array.from(glossary.FOOTAGE_LADDER), ["Film", "Scene", "Shot", "Unit", "Keyframe"]);
-  assert.doesNotMatch(JSON.stringify(groups), /undefined|NaN/);
-});
-
-test("Glossary tab shows every term, filters locally and starts no work", async () => {
-  const app = harness();
-  const heading = () => text(app.find((node) => node.props?.id === "info-topic-heading"));
-  const open = async () => {
-    const navigation = app.find((node) => node.type === "nav" && node.props["aria-label"] === "Guide topics");
-    nodes(navigation).find((node) => node.type === "button" && text(node).includes("Glossary")).props.onClick();
-    await app.flush();
-  };
-  try {
-    await open();
-    assert.equal(heading(), "Glossary");
-    assert.equal(nodes(app.state).filter((node) => node.type === "article").length, 1);
-    const terms = () => nodes(app.state).filter((node) => node.type === "dt").map(text);
-    assert.equal(JSON.stringify(terms()), JSON.stringify(glossary.GLOSSARY.flatMap((group) => group.terms.map((item) => item.term))));
-    assert.ok(app.find((node) => node.type === "nav" && node.props["aria-label"] === "Glossary groups"));
-    assert.ok(app.find((node) => node.type === "ol" && node.props["aria-label"] === "Footage hierarchy diagram"));
-
-    const input = () => app.find((node) => node.type === "input");
-    assert.ok(text(app.find((node) => node.type === "label")).includes("Filter terms"));
-    input().props.onChange({ target: { value: "KEYFRAME" } }); await app.flush();
-    assert.ok(terms().includes("Keyframe"));
-    assert.ok(terms().length < 10, "filter narrows the list, case-insensitively");
-    assert.equal(app.find((node) => node.type === "nav" && node.props["aria-label"] === "Glossary groups"), undefined);
-
-    input().props.onChange({ target: { value: "zzzz-not-a-term" } }); await app.flush();
-    assert.equal(terms().length, 0);
-    assert.match(text(app.state), /No terms match/);
-
-    input().props.onChange({ target: { value: "" } }); await app.flush();
-    assert.equal(terms().length, glossary.GLOSSARY.flatMap((group) => group.terms).length);
-
-    assert.equal(app.requests.length, 1, "the glossary must not fetch or start work");
-    assert.deepEqual(app.timers, []);
-    assert.doesNotMatch(text(app.state), /undefined|NaN/);
   } finally { app.dispose(); }
 });

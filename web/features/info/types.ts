@@ -52,15 +52,3 @@ export interface GuideSection {
   steps: GuideStep[];
   note: string;
 }
-
-export interface GlossaryTerm {
-  term: string;
-  definition: string;
-}
-
-export interface GlossaryGroup {
-  id: string;
-  title: string;
-  summary: string;
-  terms: GlossaryTerm[];
-}

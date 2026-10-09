@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { buildGuide } from "./guide";
-import { FOOTAGE_LADDER, GLOSSARY } from "./glossary";
-import type { GlossaryGroup, ProjectInfo } from "./types";
+import type { ProjectInfo } from "./types";
 import styles from "./info.module.css";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -13,69 +12,7 @@ const TOPICS = [
   { id: "search", title: "Search", description: "Find a moment", outcome: "Ranked moments linked to original footage" },
   { id: "editing", title: "Editing", description: "Build an edit", outcome: "An editable timeline and playable export" },
   { id: "storage", title: "Storage & services", description: "Keep sources and work", outcome: "Preserved sources and recoverable projects" },
-  { id: "glossary", title: "Glossary", description: "Learn the vocabulary", outcome: "One shared set of words for the whole system" },
 ] as const;
-
-function filterGlossary(query: string): GlossaryGroup[] {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return GLOSSARY;
-  return GLOSSARY
-    .map((group) => ({ ...group, terms: group.terms.filter((item) => `${item.term} ${item.definition}`.toLowerCase().includes(needle)) }))
-    .filter((group) => group.terms.length > 0);
-}
-
-function GlossaryArticle({ query, onQuery }: { query: string; onQuery: (value: string) => void }) {
-  const groups = filterGlossary(query);
-  const count = groups.reduce((total, group) => total + group.terms.length, 0);
-  const filtering = query.trim().length > 0;
-  return <article id="info-topic" className={styles.article} aria-labelledby="info-topic-heading">
-    <header className={styles.topicHeader}>
-      <div>
-        <h2 id="info-topic-heading">Glossary</h2>
-        <p className={styles.topicSummary}>The words this project uses, and what each one means here.</p>
-      </div>
-      <p className={styles.outcome}><span>What you get</span>One shared set of words for the whole system</p>
-    </header>
-
-    <figure className={styles.overview}>
-      <figcaption>How footage is divided</figcaption>
-      <ol className={styles.flow} aria-label="Footage hierarchy diagram">
-        {FOOTAGE_LADDER.map((name, index) => <li key={name}>
-          <span className={styles.flowMarker} aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-          <span>{name}</span>
-        </li>)}
-      </ol>
-    </figure>
-
-    <p className={styles.introduction}>Search, ingestion and editing share one vocabulary. Several everyday film words carry a narrower meaning here, most of all <strong>scene</strong>, <strong>unit</strong> and <strong>moment</strong>, so it is worth reading those first.</p>
-
-    <div className={styles.glossaryTools}>
-      <label className={styles.filter}>
-        <span>Filter terms</span>
-        <input type="search" value={query} placeholder="Try keyframe, fusion or lock" onChange={(event) => onQuery(event.target.value)} />
-      </label>
-      {filtering
-        ? <p className={styles.filterCount} aria-live="polite">{count} {count === 1 ? "term" : "terms"}</p>
-        : <nav className={styles.chips} aria-label="Glossary groups">
-          {GLOSSARY.map((group) => <a key={group.id} href={`#info-glossary-${group.id}`}>{group.title}</a>)}
-        </nav>}
-    </div>
-
-    {groups.map((group) => <section id={`info-glossary-${group.id}`} className={styles.termGroup} key={group.id} aria-labelledby={`info-glossary-heading-${group.id}`}>
-      <header className={styles.termGroupHeader}>
-        <h3 id={`info-glossary-heading-${group.id}`}>{group.title}</h3>
-        <p>{group.summary}</p>
-      </header>
-      <dl className={styles.terms}>
-        {group.terms.map((item) => <div className={styles.termRow} key={item.term}>
-          <dt>{item.term}</dt>
-          <dd>{item.definition}</dd>
-        </div>)}
-      </dl>
-    </section>)}
-    {count === 0 && <p className={styles.noTerms} aria-live="polite">No terms match “{query.trim()}”. Try a shorter word.</p>}
-  </article>;
-}
 
 export default function InfoView() {
   const [settings, setSettings] = useState<ProjectInfo | null>(null);
@@ -83,7 +20,6 @@ export default function InfoView() {
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState(0);
   const [topicId, setTopicId] = useState<(typeof TOPICS)[number]["id"]>("ingestion");
-  const [glossaryQuery, setGlossaryQuery] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -106,8 +42,7 @@ export default function InfoView() {
   }, [revision]);
 
   const sections = buildGuide(settings);
-  const isGlossary = topicId === "glossary";
-  const section = sections.find((item) => item.id === topicId);
+  const section = sections.find((item) => item.id === topicId)!;
   const topic = TOPICS.find((item) => item.id === topicId)!;
   const isStorage = topicId === "storage";
   const DiagramList = isStorage ? "ul" : "ol";
@@ -132,7 +67,7 @@ export default function InfoView() {
       </button>)}
     </nav>
 
-    {isGlossary || !section ? <GlossaryArticle query={glossaryQuery} onQuery={setGlossaryQuery} /> : <article id="info-topic" className={styles.article} key={section.id} aria-labelledby="info-topic-heading">
+    <article id="info-topic" className={styles.article} key={section.id} aria-labelledby="info-topic-heading">
       <header className={styles.topicHeader}>
         <div>
           <h2 id="info-topic-heading">{topic.title}</h2>
@@ -194,7 +129,7 @@ export default function InfoView() {
           <dd>{step.sources.map((source) => <code key={source}>{source}</code>)}</dd>
         </div>)}</dl>
       </section>
-    </article>}
+    </article>
 
     <footer className={styles.footer}>
       <div className={styles.settingsStatus}>

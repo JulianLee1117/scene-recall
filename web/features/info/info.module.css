@@ -13,7 +13,7 @@
 .header h1 { margin: 12px 0 14px; color: #f0eee9; font-size: clamp(28px, 3.4vw, 38px); font-weight: 450; line-height: 1.2; letter-spacing: -.04em; }
 .header p { margin: 0; color: var(--guide-muted); font-size: 14px; line-height: 1.8; }
 
-.topics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid #30302c; }
+.topics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #30302c; }
 .topics button { display: flex; align-items: flex-start; gap: 12px; padding: 17px 12px 19px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--guide-muted); text-align: left; cursor: pointer; }
 .topicNumber { padding-top: 3px; font-size: 10px; font-variant-numeric: tabular-nums; color: #77756e; }
 .topics strong { display: block; color: #aaa79f; font-size: 14px; font-weight: 500; line-height: 1.5; }
@@ -75,32 +75,6 @@
 .mergeLabel { color: #d2c3aa; font-size: 12px; }
 .mergeLabel::before { content: ""; display: block; width: 1px; height: 14px; margin: 0 auto 8px; background: #685437; }
 
-.introduction strong { color: #d8cdb8; font-weight: 500; }
-
-.glossaryTools { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 8px; padding-bottom: 22px; border-bottom: 1px solid #2b2a26; }
-.filter { flex: 0 1 340px; min-width: 0; }
-.filter span { display: block; margin-bottom: 8px; color: #b79d76; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
-.filter input { width: 100%; padding: 10px 14px; border: 1px solid #38342b; border-radius: 6px; background: #12120f; color: #e3dfd6; font: inherit; font-size: 13px; }
-.filter input::placeholder { color: #77746c; }
-.filter input:hover { border-color: #4a4334; }
-.filter input:focus-visible { outline: 2px solid var(--guide-accent); outline-offset: 2px; border-color: transparent; }
-.chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.chips a { padding: 6px 12px; border: 1px solid #36322a; border-radius: 999px; color: #b7b1a5; font-size: 12px; text-decoration: none; }
-.chips a:hover { border-color: #6b5a3d; color: #eadfc9; }
-.chips a:focus-visible { outline: 2px solid var(--guide-accent); outline-offset: 3px; }
-.filterCount { margin: 0; color: var(--guide-muted); font-size: 12px; }
-
-.termGroup { scroll-margin-top: 24px; padding: 38px 0 6px; }
-.termGroupHeader { display: flex; align-items: baseline; gap: 18px; margin-bottom: 8px; }
-.termGroupHeader h3 { margin: 0; color: #e7e2d9; font-size: 20px; font-weight: 450; letter-spacing: -.02em; }
-.termGroupHeader p { margin: 0; color: var(--guide-muted); font-size: 13px; line-height: 1.7; }
-.terms { margin: 0; }
-.termRow { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; padding: 17px 0; border-bottom: 1px solid #272622; }
-.termRow:last-child { border-bottom: 0; }
-.terms dt { color: #e0cfae; font-size: 14px; font-weight: 500; line-height: 1.7; }
-.terms dd { margin: 0; max-width: 680px; color: #b9b6b0; font-size: 13px; line-height: 1.85; }
-.noTerms { margin: 38px 0 0; color: var(--guide-muted); font-size: 13px; }
-
 .note { display: flex; gap: 15px; align-items: flex-start; margin: 30px 0 44px; padding: 21px 23px; border-radius: 8px; background: #15140f; }
 .noteIcon { display: grid; place-items: center; flex: 0 0 18px; height: 18px; margin-top: 2px; border: 1px solid #8d7855; border-radius: 50%; font-family: Georgia, serif; font-size: 12px; color: #c4ad87; }
 .note h3 { margin: 0 0 7px; color: #cec0a9; font-size: 12px; font-weight: 500; }
@@ -127,10 +101,6 @@
   .topics strong { font-size: 13px; }
   .topicHeader { grid-template-columns: minmax(0, 1fr) 200px; gap: 26px; }
   .stepColumns { grid-template-columns: 1fr; gap: 22px; }
-  .glossaryTools { flex-direction: column; align-items: stretch; gap: 18px; }
-  .filter { flex-basis: auto; }
-  .chips { justify-content: flex-start; }
-  .termRow { grid-template-columns: 150px minmax(0, 1fr); gap: 22px; }
   .technical { padding: 18px 20px; border-left-color: #695435; background: #12120f; }
   .facts { display: flex; gap: 22px; }
   .facts > div { flex: 1; min-width: 0; }
@@ -167,9 +137,6 @@
   .facts { display: block; }
   .facts > div + div { margin-top: 16px; }
   .technical { padding: 16px; }
-  .termGroup { padding-top: 30px; }
-  .termGroupHeader { flex-direction: column; gap: 4px; }
-  .termRow { grid-template-columns: 1fr; gap: 4px; padding: 15px 0; }
   .branchDiagram { padding: 17px 13px; }
   .branchDiagram ul { grid-template-columns: 1fr; gap: 10px; }
   .branchDiagram li { position: relative; margin-right: 12px; padding: 11px; }
