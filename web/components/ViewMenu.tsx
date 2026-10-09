@@ -53,19 +53,21 @@ export default function ViewMenu({
       </button>
 
       {open && (
-        <div ref={panelRef} id={panelId} className="toolbar-menu is-view" role="dialog" aria-label="View options" tabIndex={-1}>
-          <Segmented label="Order" options={ORDER_OPTIONS} value={view.order} onChange={(order) => onChange({ order })} />
-          <Segmented label="Size" options={SIZE_OPTIONS} value={view.size} onChange={(size) => onChange({ size })} />
-          <button
-            type="button"
-            className="toolbar-menu-toggle"
-            role="switch"
-            aria-checked={view.details}
-            onClick={() => onChange({ details: !view.details })}
-          >
-            <span>Details</span>
-            <span className="toolbar-menu-switch" aria-hidden="true" />
-          </button>
+        <div ref={panelRef} id={panelId} className="toolbar-menu" role="dialog" aria-label="View options" tabIndex={-1}>
+          <div className="toolbar-menu-list">
+            <Segmented label="Order" options={ORDER_OPTIONS} value={view.order} onChange={(order) => onChange({ order })} />
+            <Segmented label="Size" options={SIZE_OPTIONS} value={view.size} onChange={(size) => onChange({ size })} />
+            <button
+              type="button"
+              className="toolbar-menu-toggle"
+              role="switch"
+              aria-checked={view.details}
+              onClick={() => onChange({ details: !view.details })}
+            >
+              <span>Details</span>
+              <span className="toolbar-menu-switch" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -84,8 +86,8 @@ function Segmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="toolbar-menu-group">
-      <p className="toolbar-menu-title">{label}</p>
+    <div className="toolbar-menu-setting">
+      <span>{label}</span>
       <div className="toolbar-menu-segmented" role="radiogroup" aria-label={label}>
         {options.map((option) => (
           <button

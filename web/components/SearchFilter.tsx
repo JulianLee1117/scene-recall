@@ -164,9 +164,9 @@ export default function SearchFilter({
               })}
               {shotFacets.length > 0 && <p className="toolbar-menu-heading">Shots</p>}
               {shotFacets.map((facet) => (
-                <div key={facet.key} className="toolbar-menu-pills" role="group" aria-label={facet.label}>
+                <div key={facet.key} className="toolbar-menu-setting">
                   <span>{facet.label}</span>
-                  <div>
+                  <div className="toolbar-menu-segmented" role="group" aria-label={facet.label}>
                     {facet.values.map((option) => (
                       <button
                         key={option.value}
