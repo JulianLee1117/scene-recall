@@ -303,7 +303,9 @@ are outside this cleanup.
 Search begins with a large, centered query bar and a row of category controls.
 Each category keeps the same footprint whether empty, filled with text or holding
 a reference. Selecting it opens a compact editor near that category without
-moving the search bar; example searches hide while any category is open. Empty
+moving the search bar. Before the first search, the empty bar plays a few
+example searches through its placeholder once while it has focus (not with
+reduced motion); typing stops them. Empty
 text categories open directly to a text field and **Apply**. Existing references
 open their preview and actions; **Use text instead** preserves the reference until
 nonempty text is applied. **Change scene** opens a clearly labeled reference

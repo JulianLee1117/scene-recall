@@ -775,6 +775,13 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .movie-keyword { background: transparent; color: #f0c383; text-shadow: 0 0 16px #e8ae5745; text-decoration: underline; text-decoration-color: #d6a05c60; text-underline-offset: 5px; text-decoration-thickness: 1px; }
 .movie-keyword-confirmed { border-radius: 3px; background: #bc884f24; box-shadow: 0 0 0 2px #bc884f10; text-decoration-color: #d6a05c; }
 .movie-caret-measure { position: absolute; left: 0; top: 0; width: max-content; white-space: pre; visibility: hidden; pointer-events: none; }
+/* Examples crossfade through the empty bar's placeholder, matching its text exactly. */
+.movie-search-input.is-hinting .search-main-input::placeholder { color: transparent; }
+.movie-input-hint { position: absolute; left: 0; top: 0; white-space: pre; color: #85817a; animation: movie-hint-in .55s ease both; }
+.movie-input-hint.is-still { animation: none; }
+.movie-input-hint.is-leaving { animation: movie-hint-out .4s ease both; }
+@keyframes movie-hint-in { from { opacity: 0; filter: blur(3px); } }
+@keyframes movie-hint-out { to { opacity: 0; filter: blur(3px); } }
 .search-main-input::selection { color: #fff; background: #725635; }
 .movie-autocomplete { position: absolute; z-index: 80; box-sizing: border-box; width: min(304px, calc(100vw - 32px)); padding: 5px; border: 1px solid #564532; border-radius: 11px; background: linear-gradient(155deg, #26221c, #191817 65%); box-shadow: 0 14px 40px #0009, 0 2px 8px #0006, inset 0 1px 0 #f7d7a80b; font-size: .8rem; line-height: 1.4; }
 .movie-autocomplete-heading { display: flex; align-items: center; gap: 7px; padding: 7px 8px 9px; color: #dbc6a8; font-size: .7rem; }
@@ -794,6 +801,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 @media (forced-colors: active) {
   .search-main-input { color: CanvasText; }
   .movie-input-paint { visibility: hidden; }
+  .movie-search-input.is-hinting .search-main-input::placeholder { color: GrayText; }
   .movie-autocomplete { border-color: ButtonText; background: Canvas; }
   .movie-autocomplete-option[aria-selected="true"] { outline: 1px solid Highlight; }
 }
@@ -1532,48 +1540,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   box-shadow: 0 0 0 3px rgba(223, 118, 107, 0.12);
 }
 
-.search-examples {
-  display: flex;
-  min-width: 0;
-  margin: 0;
-  align-items: center;
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  color: #6f6a62;
-  font-size: 0.72rem;
-  scrollbar-width: none;
-}
-
-.search-examples::-webkit-scrollbar {
-  display: none;
-}
-
-.search-examples > span {
-  flex: 0 0 auto;
-}
-
-.search-examples > button {
-  flex: 0 0 auto;
-  padding: 4px 0;
-  border: 0;
-  border-bottom: 1px solid #302c26;
-  background: transparent;
-  color: #918a7e;
-  cursor: pointer;
-  font: inherit;
-  white-space: nowrap;
-}
-
-.search-examples > button:hover {
-  border-color: #433a2d;
-  color: #c9b18c;
-}
-
-.search-examples > button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
 
 @keyframes voice-search-pulse {
   from {
@@ -1604,16 +1570,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
   .movie-scope-trigger {
     max-width: 124px;
-  }
-
-  .search-examples > button:nth-of-type(n + 2) {
-    display: none;
-  }
-}
-
-@media (min-width: 481px) and (max-width: 720px) {
-  .search-examples > button:nth-of-type(n + 3) {
-    display: none;
   }
 }
 

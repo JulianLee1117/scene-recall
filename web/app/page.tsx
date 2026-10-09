@@ -118,14 +118,15 @@ const TABS: Array<{ id: Tab; label: string }> = [
 ];
 
 // Each example shows a different way in: a spoken line, light and color, a
-// mood, a kind of shot, an action. All were checked against the library.
+// mood, a kind of shot, an action. All were checked against the library. The
+// empty bar plays them through its placeholder once.
 const SEARCH_EXAMPLES = [
-  { label: "“you talkin’ to me?”", query: "you talkin' to me?" },
-  { label: "neon in the rain", query: "neon in the rain" },
-  { label: "quietly unsettling", query: "quietly unsettling" },
-  { label: "symmetrical hallway", query: "symmetrical hallway" },
-  { label: "dancing alone", query: "dancing alone" },
-] as const;
+  "“you talkin’ to me?”",
+  "neon in the rain",
+  "quietly unsettling",
+  "symmetrical hallway",
+  "dancing alone",
+];
 
 function focusFacetBrowse(facet: RecipeMatchFacet) {
   window.requestAnimationFrame(() => {
@@ -872,8 +873,8 @@ export default function Home() {
   useGlide(heroRef, searchFormRef, isHome);
   const clauseCount = recipeClauseCount(query, matchDrafts, mainImage);
   const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
-  // Examples stay while you type, so home holds still until the first search.
-  const showSearchExamples = Boolean(
+  // Before the first search, with nothing else in play, the bar shows examples.
+  const offerExamples = Boolean(
     isHome &&
     selectedFilmIds.length === 0 &&
     !hasFacetDrafts &&
@@ -909,7 +910,7 @@ export default function Home() {
   const activeError = error;
   const hasNoResults = results.length === 0 && hasCompletedSearch;
   const filterScope = narrowScope(selectedFilmIds, filterable, filmFilters);
-  const orderChip = !showSearchExamples && preset !== DEFAULT_VIEW.order
+  const orderChip = !offerExamples && preset !== DEFAULT_VIEW.order
     ? ORDER_OPTIONS.find((option) => option.value === preset)?.label
     : undefined;
   const filtersExcludeAll = (clauseCount > 0 || selectedFilmIds.length > 0) && filterScope.excludesAll;
@@ -1127,6 +1128,7 @@ export default function Home() {
                   onChange={handleQueryChange}
                   onKeyDown={handleKeyDown}
                   onMovieSelect={handleMovieSuggestion}
+                  hints={offerExamples ? SEARCH_EXAMPLES : undefined}
                   placeholder={selectedFilmIds.length ? "Describe a scene, or @ another movie…" : "Describe a scene, or @ a movie…"}
                   describedBy={voiceStatus ? voiceStatusId : undefined}
                 />
@@ -1310,25 +1312,9 @@ export default function Home() {
                   />
                 }
                 controls={
-                  // Home shows examples beside Refine and Filter; the first
-                  // search swaps in the View menu as the bar glides up.
-                  showSearchExamples ? (
-                    <div className="search-examples" aria-label="Example searches">
-                      <span>Try</span>
-                      {SEARCH_EXAMPLES.map((example) => (
-                        <button
-                          key={example.query}
-                          type="button"
-                          onClick={() => {
-                            commitMovieDraft({ text: example.query, mentions: [] });
-                            void runRecipe(example.query, matchDrafts);
-                          }}
-                        >
-                          {example.label}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
+                  // Home keeps Refine and Filter alone; the first search adds
+                  // the View menu as the bar glides up.
+                  offerExamples ? null : (
                     <ViewMenu open={viewOpen} onOpenChange={setViewOpen} view={view} onChange={handleViewChange} />
                   )
                 }

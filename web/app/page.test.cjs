@@ -708,3 +708,23 @@ test("shot filters travel with the search and with browsing a movie, and clear l
     assert.doesNotMatch(app.requests.at(-1).url, /shot=/);
   } finally { app.dispose(); }
 });
+
+test("home keeps Refine and Filter alone and plays examples through the empty bar's placeholder", async () => {
+  const app = harness();
+  const rail = () => app.find((node) => node.type === "MatchByRail").props;
+  const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
+  const hint = () => app.find((node) => node.props?.className === "movie-input-hint")?.props.children;
+  try {
+    assert.equal(rail().controls, null);
+    input().onFocus();
+    await app.flush();
+    await app.runTimers();
+    assert.equal(hint(), "“you talkin’ to me?”");
+    input().onChange({ target: { value: "rain at night" } });
+    await app.flush();
+    app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
+    await app.flush();
+    assert.equal(hint(), undefined);
+    assert.equal(rail().controls.type, "ViewMenu");
+  } finally { app.dispose(); }
+});
