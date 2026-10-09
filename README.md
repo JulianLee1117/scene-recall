@@ -45,9 +45,10 @@ title substring). Hosted passes need `GEMINI_API_KEY` (understanding) and
 the compiled tables migrate in place; `compile --rebuild` drops and recompiles
 them after an incompatible schema change.
 
-Search ranks by relevance first, then applies a preset: **Balanced** (default)
-lets iconic and well-made shots rise a little, **Famous** favours iconic
-moments, **Hidden gems** favours well-made shots people rarely see. Shots of
+Search ranks by relevance first, then applies the order chosen under **View**:
+**Balanced** (default) lets iconic and well-made shots rise a little, **Famous
+first** favours iconic moments, **Hidden gems first** favours well-made shots
+people rarely see. Shots of
 one dramatic scene fold into one card. `retrieval.rerank_shortlist` (default 40)
 sets the cross-encoder rerank of the fused shortlist; `0` disables it.
 
@@ -314,8 +315,8 @@ stay). Saved cards keep playback, bookmarks and Related without dragging or a
 drag badge. The player distinguishes its retrieved frame from the current
 playback time; its action bar saves the scene, finds related scenes, opens
 **Match cuts** at the playhead in a new tab and copies the film and time.
-**Details** shows each result's description and how each retrieval channel ranked
-it. Every card in a search lists the same rows in a fixed order: Visual (image-text
+**Show details** (under **View**) shows each result's description and how each
+retrieval channel ranked it. Every card in a search lists the same rows in a fixed order: Visual (image-text
 embedding), Semantic (text embedding, with the view it matched such as Story or
 On-screen text), Lexical (BM25 keywords over the description and subtitles; it needs
 two of your words and shows the ones it shares and where), Quote (spoken lines), any
@@ -1426,11 +1427,18 @@ result prefix; a description searches across the whole selected film, including
 later moments. Shot types, subjects, styles and feelings can share one description.
 
 Use **Filter**, beside Refine, to narrow a search by era, genre, director or
-movie, before your first search or after. Choices within a section are
-alternatives (1990s or 2000s); sections combine (1990s and Crime). Each change
-reruns the search, and options that would leave no movie are dimmed. Active
-filters show under the bar as one chip per section with the number of movies
-left; click a chip to edit it or its × to clear it. The footer counts the movies being searched. Picking a movie in its
+movie, before your first search or after. Its menu lists each section with its
+current choice and opens one section at a time; long sections have a search
+field. Choices within a section are alternatives (1990s or 2000s); sections
+combine (1990s and Crime). Each change reruns the search, and counts keep you
+from choosing a combination with no movie. Active filters show under the bar
+as one chip per section with the number of movies left; click a chip to edit
+it or its × to clear it.
+
+**View** sets how results are shown, and this browser remembers it: the order
+(Balanced, Famous first, Hidden gems first), the row size (Small, Medium,
+Large) and **Show details**. A non-default order shows as a chip beside the
+filters. Picking a movie in its
 section appends that movie's mention, sharing the same scope as inline
 mentions; deselecting it removes the @ marker and leaves the title words as
 plain text. Going home clears the filters. Search uses bounded ranked

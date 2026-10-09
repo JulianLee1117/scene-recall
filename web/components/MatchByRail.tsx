@@ -507,7 +507,7 @@ export default function MatchByRail({
       className={`match-rail search-clues${dragActive ? " is-drag-active" : ""}${dragActive && dragFloating ? " is-drag-floating" : ""}`}
       aria-label="Search details"
       onKeyDown={(event) => {
-        if (railRef.current?.querySelector(".search-filter-panel")) return;
+        if (railRef.current?.querySelector(".toolbar-menu")) return;
         if (event.key === "Escape" && panelOpen) {
           event.preventDefault();
           event.stopPropagation();

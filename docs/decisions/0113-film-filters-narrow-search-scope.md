@@ -40,11 +40,13 @@ not change.
   search can be filtered, and like Refine it keeps one size and shows a
   count. Active filters appear in Refine's active row, one chip per section
   with every value ("Era 1990s, 2000s"), followed by the number of movies
-  left: a chip reopens the panel and its × clears that section. (Amended the
-  same day: chips beside the trigger widened the toolbar and hid the rest
-  behind "+N".) The panel has Era, Genre, Director and Movie sections; each
-  option is counted against the other facets' filters, and options with no
-  movie are dimmed. Changes apply as they are made and rerun the search like
+  left: a chip reopens the menu at its section and its × clears that section.
+  (Amended the same day: chips beside the trigger widened the toolbar and hid
+  the rest behind "+N".) The menu lists Era, Genre, Director and Movie with
+  their current choices and opens one section at a time. (Amended 2026-10-09:
+  a panel listing every value at once was too large.) Each value is counted
+  against the other facets' filters; long sections have a search field and
+  leave out values no movie can match, while short ones dim them. Changes apply as they are made and rerun the search like
   an edited query, after the usual debounce: the current scenes stay until
   the filtered ones arrive, so toggling several filters never blanks the
   page. Picking a movie still appends its @mention, which remains a scope

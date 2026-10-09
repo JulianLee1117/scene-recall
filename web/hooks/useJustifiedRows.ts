@@ -21,7 +21,7 @@ type Scene = Pick<SearchResult, "unit_id" | "film_id">;
  * Measures a grid and lays its scenes out in even justified rows. Returns no
  * layout until the grid has a width (hidden grids keep their last layout).
  */
-export function useJustifiedRows(scenes: Scene[], size: RowSize = "large") {
+export function useJustifiedRows(scenes: Scene[], size: RowSize = "medium") {
   const ref = useRef<HTMLElement>(null);
   const { tileStyle, learnAspect, aspectOf } = useFrameAspects();
   const [frame, setFrame] = useState<GridFrame | null>(null);

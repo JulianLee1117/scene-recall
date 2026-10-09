@@ -28,7 +28,7 @@ interface ResultGridProps {
   pendingBookmarkUnitIds?: ReadonlySet<string>;
   bookmarkDisabled?: boolean;
   showDetails: boolean;
-  /** "small" for the compact reference lookup. */
+  /** Row height: the View menu's size, or "small" for the compact reference lookup. */
   size?: RowSize;
 }
 
@@ -49,7 +49,7 @@ export default function ResultGrid({
   pendingBookmarkUnitIds = EMPTY_UNIT_IDS,
   bookmarkDisabled = false,
   showDetails,
-  size = "large",
+  size = "medium",
 }: ResultGridProps) {
   const { ref: gridRef, frame, layout, tileStyle, learnAspect } = useJustifiedRows(results, size);
   // How many scenes the user has seen; a resize never hides them again.

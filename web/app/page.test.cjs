@@ -19,6 +19,8 @@ const mentionHelpers = {};
 vm.runInNewContext(compile("../lib/movieMentions.ts"), { exports: mentionHelpers, require: () => movieHelpers });
 const filmFilters = {};
 vm.runInNewContext(compile("../lib/filmFilters.ts"), { exports: filmFilters });
+const viewPrefs = {};
+vm.runInNewContext(compile("../lib/viewPrefs.ts"), { exports: viewPrefs, window: {} });
 const compiled = compile("page.tsx");
 const compiledMovieInput = compile("../components/MovieSearchInput.tsx");
 const result = (id, main = false) => ({ unit_id: id, film_id: "film", caption: "A scene", matches: [{ clause_id: "composition", facet: "composition" }, ...(main ? [{ clause_id: "main", facet: "all" }] : [])] });
@@ -176,6 +178,7 @@ function harness() {
       if (name === "@/lib/movieSuggestions") return movieHelpers;
       if (name === "@/lib/movieMentions") return mentionHelpers;
       if (name === "@/lib/filmFilters") return filmFilters;
+      if (name === "@/lib/viewPrefs") return viewPrefs;
       if (name === "@/lib/appClient") return { APP_CLIENT_HEADERS: { "X-Scene-Recall-Client": "app" } };
       if (name === "@/components/MovieSearchInput") return movieInputExports;
       if (name === "@/hooks/useSearchFilms") return { useSearchFilms: () => films };
@@ -561,12 +564,13 @@ test("film filters narrow the search to matching movies and say when none match"
     assert.deepEqual(body(0).film_ids, ["heat"]);
     assert.equal(body(0).clauses[0].text, "rain at night");
     // Active filters show in the refinements row; a chip reopens the panel.
-    const summary = () => app.find((node) => node.type === "MatchByRail").props.activeExtra;
+    // Active filters show in the refinements row; a chip reopens the menu at its section.
+    const summary = () => nodes(app.find((node) => node.type === "MatchByRail").props.activeExtra).find((node) => node.type === "ActiveFilters");
     assert.equal(summary().props.movieCount, 1);
-    assert.equal(filter().open, false);
-    summary().props.onEdit();
+    assert.equal(filter().view, null);
+    summary().props.onEdit("genre");
     await app.flush();
-    assert.equal(filter().open, true);
+    assert.equal(filter().view, "genre");
 
     // Crime and the 2000s share no movie: nothing is searched, and the page says why.
     filter().onFiltersChange({ genre: ["Crime"], era: ["2000s"] });
@@ -580,5 +584,34 @@ test("film filters narrow the search to matching movies and say when none match"
     assert.equal(app.requests.length, 2);
     assert.equal(body(1).film_ids, undefined);
     assert.equal(app.find((node) => node.props?.className === "search-filter-none"), undefined);
+  } finally { app.dispose(); }
+});
+
+test("the View menu reorders the current search, shows a non-default order as a chip, and sizes the grid", async () => {
+  const app = harness();
+  const rail = () => app.find((node) => node.type === "MatchByRail").props;
+  const chip = () => nodes(rail().activeExtra).find((node) => node.type === "ActiveChip");
+  try {
+    app.find((node) => node.props?.["aria-label"] === "Describe a scene").props.onChange({ target: { value: "rain at night" } });
+    await app.flush();
+    app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
+    await app.flush();
+    assert.equal(rail().controls.type, "ViewMenu");
+    assert.equal(chip(), undefined);
+
+    rail().controls.props.onChange({ order: "famous" });
+    await app.flush();
+    assert.equal(JSON.parse(app.requests.at(-1).init.body).preset, "famous");
+    assert.equal(chip().props.value, "Famous first");
+
+    rail().controls.props.onChange({ size: "large" });
+    await app.flush();
+    assert.equal(app.grid().props.size, "large");
+    const searches = app.requests.length;
+    chip().props.onClear();
+    await app.flush();
+    assert.equal(app.requests.length, searches + 1, "returning to Balanced reranks once");
+    assert.equal(JSON.parse(app.requests.at(-1).init.body).preset, undefined);
+    assert.equal(chip(), undefined);
   } finally { app.dispose(); }
 });

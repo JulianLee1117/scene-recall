@@ -41,5 +41,6 @@ test("only whole rows show while more results can arrive", () => {
 test("row height follows the viewport, smaller for the reference lookup", () => {
   assert.deepEqual([lib.rowHeightFor(1360), lib.rowHeightFor(2400), lib.rowHeightFor(800), lib.rowHeightFor(390)], [190, 240, 140, 92]);
   assert.deepEqual([lib.rowHeightFor(1360, "small"), lib.rowHeightFor(390, "small")], [96, 76]);
+  assert.deepEqual([lib.rowHeightFor(1360, "large"), lib.rowHeightFor(2400, "large"), lib.rowHeightFor(390, "large")], [286, 340, 140]);
   assert.equal(lib.cssAspect(16 / 9), 1.7778);
 });

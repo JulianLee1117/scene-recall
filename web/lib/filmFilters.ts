@@ -13,15 +13,15 @@ export type FilmFilters = Partial<Record<FilmFacetKey, readonly string[]>>;
 export interface FilmFacet {
   key: FilmFacetKey;
   label: string;
-  /** Chips show every value; a list adds a search field and shows its top values. */
-  kind: "chips" | "list";
+  /** A long list gets a search field and leaves out values no movie can match. */
+  long?: boolean;
 }
 
-/** The filter panel's sections, in order. A new facet is one entry plus its values below. */
+/** The filter menu's sections, in order. A new facet is one entry plus its values below. */
 export const FILM_FACETS: readonly FilmFacet[] = [
-  { key: "era", label: "Era", kind: "chips" },
-  { key: "genre", label: "Genre", kind: "chips" },
-  { key: "director", label: "Director", kind: "list" },
+  { key: "era", label: "Era" },
+  { key: "genre", label: "Genre", long: true },
+  { key: "director", label: "Director", long: true },
 ];
 
 /** An indexed film with its filter values worked out once. */

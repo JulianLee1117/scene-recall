@@ -13,11 +13,11 @@ import ResultGrid from "@/components/ResultGrid";
 import VideoModal from "@/components/VideoModal";
 import SavedView from "@/components/SavedView";
 import MatchByRail from "@/components/MatchByRail";
-import SearchFilter from "@/components/SearchFilter";
+import SearchFilter, { type FilterView } from "@/components/SearchFilter";
 import ActiveFilters from "@/components/ActiveFilters";
 import MovieSearchInput from "@/components/MovieSearchInput";
-import SearchOptions from "@/components/SearchOptions";
-import RankingPresetControl from "@/components/RankingPresetControl";
+import ViewMenu from "@/components/ViewMenu";
+import ActiveChip from "@/components/ActiveChip";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { useFacetSourceSearch } from "@/hooks/useFacetSourceSearch";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
@@ -27,6 +27,7 @@ import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
 import { filterableFilms, hasFilters, narrowScope, type FilmFilters } from "@/lib/filmFilters";
+import { DEFAULT_VIEW, ORDER_OPTIONS, loadViewPrefs, saveViewPrefs, type ViewPrefs } from "@/lib/viewPrefs";
 import {
   FACET_LABELS,
   MATCH_FACETS,
@@ -157,9 +158,17 @@ export default function Home() {
     Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>
   >({});
   const [activeShot, setActiveShot] = useState<SearchResult | null>(null);
-  const [showDetails, setShowDetails] = useState(false);
-  const [preset, setPreset] = useState<RankingPreset>("balanced");
-  const presetRef = useRef<RankingPreset>("balanced");
+  // Order, size and details, remembered in this browser (lib/viewPrefs.ts).
+  const [view, setView] = useState<ViewPrefs>(DEFAULT_VIEW);
+  const [viewOpen, setViewOpen] = useState(false);
+  const presetRef = useRef<RankingPreset>(DEFAULT_VIEW.order);
+  const preset = view.order;
+  const showDetails = view.details;
+  useEffect(() => {
+    const saved = loadViewPrefs();
+    presetRef.current = saved.order;
+    setView(saved);
+  }, []);
   const [resultWindow, setResultWindow] = useState<{
     hasMore: boolean;
     nextLimit: number | null;
@@ -170,7 +179,7 @@ export default function Home() {
   // like the preset, so a running search always uses the latest choice.
   const [filmFilters, setFilmFilters] = useState<FilmFilters>({});
   const filmFiltersRef = useRef<FilmFilters>({});
-  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterView, setFilterView] = useState<FilterView | null>(null);
   const filterable = useMemo(() => filterableFilms(films), [films]);
   const filterableRef = useRef(filterable);
   useEffect(() => {
@@ -324,15 +333,19 @@ export default function Home() {
     [cancelPendingScopeSearch, selectedFilmIds],
   );
 
-  const handlePresetChange = useCallback(
-    (next: RankingPreset) => {
-      presetRef.current = next;
-      setPreset(next);
+  const handleViewChange = useCallback(
+    (change: Partial<ViewPrefs>) => {
+      const next = { ...view, ...change };
+      setView(next);
+      saveViewPrefs(next);
+      if (next.order === presetRef.current) return;
+      // A new order reranks the current search.
+      presetRef.current = next.order;
       if (recipeClauseCount(query, matchDrafts, mainImageRef.current) > 0 || selectedFilmIds.length > 0) {
         void runRecipe(query, matchDrafts);
       }
     },
-    [matchDrafts, query, runRecipe, selectedFilmIds.length],
+    [matchDrafts, query, runRecipe, selectedFilmIds.length, view],
   );
 
   // Plays feed the local taste log (pipeline/interactions.py); never blocks playback.
@@ -654,7 +667,7 @@ export default function Home() {
     commitMovieDraft(EMPTY_MOVIE_DRAFT);
     filmFiltersRef.current = {};
     setFilmFilters({});
-    setFilterOpen(false);
+    setFilterView(null);
     compositionScopePendingRef.current = false;
     revokeImageInput(mainImageRef.current);
     mainImageRef.current = null;
@@ -886,6 +899,9 @@ export default function Home() {
   const activeError = error;
   const hasNoResults = results.length === 0 && hasCompletedSearch;
   const filterScope = narrowScope(selectedFilmIds, filterable, filmFilters);
+  const orderChip = !showSearchExamples && preset !== DEFAULT_VIEW.order
+    ? ORDER_OPTIONS.find((option) => option.value === preset)?.label
+    : undefined;
   const filtersExcludeAll = (clauseCount > 0 || selectedFilmIds.length > 0) && filterScope.excludesAll;
   const hasFramingWithoutMainEvidence = Boolean(
     hasCompletedSearch &&
@@ -1274,8 +1290,8 @@ export default function Home() {
                 onCloseReference={handleSourceReferenceCancel}
                 filter={
                   <SearchFilter
-                    open={filterOpen}
-                    onOpenChange={setFilterOpen}
+                    view={filterView}
+                    onViewChange={setFilterView}
                     films={films}
                     filters={filmFilters}
                     onFiltersChange={handleFiltersChange}
@@ -1284,18 +1300,28 @@ export default function Home() {
                   />
                 }
                 activeExtra={
-                  hasFilters(filmFilters) && (
-                    <ActiveFilters
-                      filters={filmFilters}
-                      onFiltersChange={handleFiltersChange}
-                      onEdit={() => setFilterOpen(true)}
-                      movieCount={filterScope.excludesAll ? 0 : filterScope.filmIds.length || filterable.length}
-                    />
+                  (orderChip || hasFilters(filmFilters)) && (
+                    <>
+                      {orderChip && (
+                        <ActiveChip
+                          label="Order"
+                          value={orderChip}
+                          onEdit={() => setViewOpen(true)}
+                          onClear={() => handleViewChange({ order: DEFAULT_VIEW.order })}
+                        />
+                      )}
+                      <ActiveFilters
+                        filters={filmFilters}
+                        onFiltersChange={handleFiltersChange}
+                        onEdit={setFilterView}
+                        movieCount={filterScope.excludesAll ? 0 : filterScope.filmIds.length || filterable.length}
+                      />
+                    </>
                   )
                 }
                 controls={
                   // Home shows examples beside Refine and Filter; the first
-                  // search swaps in ordering and Details as the bar glides up.
+                  // search swaps in the View menu as the bar glides up.
                   showSearchExamples ? (
                     <div className="search-examples" aria-label="Example searches">
                       <span>Try</span>
@@ -1313,17 +1339,7 @@ export default function Home() {
                       ))}
                     </div>
                   ) : (
-                    <div className="search-controls">
-                      <RankingPresetControl
-                        value={preset}
-                        onChange={handlePresetChange}
-                      />
-                      {/* Always present, so the toolbar never shifts when results land. */}
-                      <SearchOptions
-                        showDetails={showDetails}
-                        onShowDetailsChange={setShowDetails}
-                      />
-                    </div>
+                    <ViewMenu open={viewOpen} onOpenChange={setViewOpen} view={view} onChange={handleViewChange} />
                   )
                 }
                 referencePicker={
@@ -1537,6 +1553,7 @@ export default function Home() {
               pendingBookmarkUnitIds={pendingBookmarkUnitIds}
               bookmarkDisabled={bookmarksLoading}
               showDetails={showDetails}
+              size={view.size}
             />
           </div>
         </>

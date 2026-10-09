@@ -6,13 +6,14 @@
  * left short.
  */
 
-export type RowSize = "large" | "small";
+export type RowSize = "small" | "medium" | "large";
 
 /** Target row height in px. */
-export function rowHeightFor(viewportWidth: number, size: RowSize = "large"): number {
-  if (size === "small") return viewportWidth <= 600 ? 76 : 96;
-  if (viewportWidth <= 600) return 92;
-  return Math.round(Math.min(240, Math.max(140, viewportWidth * 0.14)));
+export function rowHeightFor(viewportWidth: number, size: RowSize = "medium"): number {
+  const phone = viewportWidth <= 600;
+  if (size === "small") return phone ? 76 : 96;
+  if (size === "large") return phone ? 140 : Math.round(Math.min(340, Math.max(200, viewportWidth * 0.21)));
+  return phone ? 92 : Math.round(Math.min(240, Math.max(140, viewportWidth * 0.14)));
 }
 
 /** The aspect exactly as CSS receives it (four decimals). */
