@@ -1437,7 +1437,8 @@ together with **Apply** (or a click away): one search however fast you pick.
 Movies picked in its Movie section are a filter like the others, shown as a
 chip and cleared the same way; they never touch the search text. Movies you
 @mention in the text scope the search too, and the filters narrow them.
-Going home clears the filters. Search uses bounded ranked candidate and result
+Going home clears the filters. Other tabs leave the search as it is: **Search**
+brings it back where you were, and **Search** again (or the wordmark) goes home. Search uses bounded ranked candidate and result
 windows, not a minimum-similarity cutoff, so a globally uncompetitive movie may
 be absent; pick that movie under **Filter** when you want the ranking scoped
 entirely to that movie.

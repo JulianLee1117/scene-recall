@@ -513,8 +513,7 @@ test("Info navigation mounts its own view without search UI or a search request"
     assert.ok(app.find((node) => node.type === "InfoView"));
     assert.equal(tab("Info").props["aria-current"], "page");
     assert.equal(app.find((node) => node.type === "LibraryView"), undefined);
-    assert.equal(app.find((node) => node.props?.["aria-label"] === "Describe a scene"), undefined);
-    assert.equal(app.grid(), undefined);
+    assert.equal(app.find((node) => node.props?.className === "search-view").props.hidden, true, "search hides, keeping its state");
     assert.equal(app.requests.length, 0);
 
     const transfer = { types: ["Files"], files: { item: () => new Blob(["image"], { type: "image/png" }) } };
@@ -528,7 +527,7 @@ test("Info navigation mounts its own view without search UI or a search request"
     assert.ok(app.find((node) => node.type === "LibraryView"));
     assert.equal(app.find((node) => node.type === "InfoView"), undefined);
     tab("Search").props.onClick(); await app.flush();
-    assert.ok(app.find((node) => node.props?.["aria-label"] === "Describe a scene"));
+    assert.equal(app.find((node) => node.props?.className === "search-view").props.hidden, false);
     assert.equal(app.find((node) => node.type === "InfoView"), undefined);
     assert.equal(app.requests.length, 0);
   } finally { app.dispose(); }
@@ -722,5 +721,26 @@ test("home keeps Refine and Filter alone under a placeholder that names the ways
     app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
     await app.flush();
     assert.equal(rail().controls.type, "ViewMenu");
+  } finally { app.dispose(); }
+});
+
+test("another tab leaves the search as it was: Search returns to it, and Search again goes home", async () => {
+  const app = harness();
+  const tab = (label) => app.find((node) => node.type === "button" && text(node) === label);
+  const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene")?.props;
+  try {
+    input().onChange({ target: { value: "rain at night" } });
+    await app.flush();
+    app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
+    await app.flush();
+    const searches = app.requests.length;
+    tab("Films").props.onClick(); await app.flush();
+    assert.equal(app.find((node) => node.props?.className === "search-view").props.hidden, true);
+    tab("Search").props.onClick(); await app.flush();
+    assert.equal(input().value, "rain at night");
+    assert.ok(app.grid(), "the results come back with it");
+    assert.equal(app.requests.length, searches, "returning runs no search");
+    tab("Search").props.onClick(); await app.flush();
+    assert.equal(input().value, "", "Search on Search goes home");
   } finally { app.dispose(); }
 });

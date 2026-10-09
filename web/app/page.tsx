@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
 } from "react";
@@ -128,6 +129,15 @@ function focusFacetBrowse(facet: RecipeMatchFacet) {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("search");
+  // The search stays as you left it while another tab is open; these keep
+  // your place in its results for the way back.
+  const searchScrollRef = useRef(0);
+  const restoreScrollRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (activeTab !== "search" || restoreScrollRef.current === null) return;
+    if (typeof window.scrollTo === "function") window.scrollTo({ top: restoreScrollRef.current });
+    restoreScrollRef.current = null;
+  }, [activeTab]);
   const [movieDraft, setMovieDraft] = useState<MovieSearchDraft>(EMPTY_MOVIE_DRAFT);
   const movieDraftRef = useRef(movieDraft);
   const compositionScopePendingRef = useRef(false);
@@ -987,9 +997,17 @@ export default function Home() {
             aria-current={activeTab === tab.id ? "page" : undefined}
             onClick={() => {
               if (tab.id === "search") {
-                resetSearchHome();
+                // From another tab, Search returns to your search; on Search
+                // itself it goes home, like the wordmark.
+                if (activeTab === "search") {
+                  resetSearchHome();
+                  return;
+                }
+                restoreScrollRef.current = searchScrollRef.current;
+                setActiveTab("search");
                 return;
               }
+              if (activeTab === "search") searchScrollRef.current = window.scrollY ?? 0;
               speech.cancel();
               facetSourceSearch.close();
               setActiveTab(tab.id);
@@ -1045,9 +1063,9 @@ export default function Home() {
         />
       )}
 
-      {/* Search view */}
-      {activeTab === "search" && (
-        <>
+      {/* Search view: hidden, not unmounted, while another tab is open, so the
+          search and your place in its results are there when you come back. */}
+      <div className="search-view" hidden={activeTab !== "search"}>
           {/* Hero search area */}
           <div ref={heroRef} className={`search-hero${isHome ? " is-home" : ""}`}>
             {/* wordmark */}
@@ -1535,8 +1553,7 @@ export default function Home() {
               }
             />
           </div>
-        </>
-      )}
+      </div>
 
       {bookmarkError && activeTab !== "saved" && activeTab !== "info" && (
         <p className="bookmark-error" role="status">
