@@ -111,6 +111,14 @@ export default function InfoView() {
   const topic = TOPICS.find((item) => item.id === topicId)!;
   const isStorage = topicId === "storage";
   const DiagramList = isStorage ? "ul" : "ol";
+  const currentModels = settings ? [
+    { role: "Visual search", name: settings.models.visual_encoder === "pe_core_l14" ? "PE-Core L/14" : settings.models.visual_encoder },
+    { role: "Semantic search", name: settings.models.text_encoder === "qwen3-embedding-0.6b" ? "Qwen3-Embedding-0.6B" : settings.models.text_encoder },
+    { role: "Vision annotation", name: settings.models.annotator },
+    { role: "Speech transcription", name: `Whisper ${settings.models.whisper}` },
+    { role: "Music understanding", name: settings.lab.music_model },
+    { role: "Edit planning", name: settings.lab.planner_model },
+  ] : [];
 
   return <section className={styles.page} aria-labelledby="info-heading">
     <header className={styles.header}>
@@ -118,6 +126,17 @@ export default function InfoView() {
       <h1 id="info-heading">How Scene Recall works</h1>
       <p>From a film file to a finished edit, one part at a time, in plain language, with the models behind each.</p>
     </header>
+
+    <section className={styles.modelSnapshot} aria-labelledby="info-models-heading" aria-busy={loading}>
+      <div className={styles.modelSnapshotHeading}>
+        <h2 id="info-models-heading">Current models</h2>
+        <span>{loading ? "Reading API settings…" : error ? "API settings unavailable" : "Loaded API configuration"}</span>
+      </div>
+      {currentModels.length > 0 && <ul className={styles.modelList}>
+        {currentModels.map((model) => <li key={model.role}><span>{model.role}</span><strong>{model.name}</strong></li>)}
+      </ul>}
+      <p>Other models are listed in the steps below. Film evidence keeps its own model versions.</p>
+    </section>
 
     <nav className={styles.topics} aria-label="Guide topics">
       {TOPICS.map((item, index) => <button
@@ -170,7 +189,7 @@ export default function InfoView() {
             <div className={styles.explanation}>{step.detail.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}</div>
             <aside className={styles.technical} aria-label={`${step.title} technical details`}>
               <dl className={styles.facts}>
-                {step.model && <div><dt>Model</dt><dd>{step.model}</dd></div>}
+                {step.model && <div className={styles.modelFact}><dt>Model</dt><dd>{step.model}</dd></div>}
                 <div><dt>Method</dt><dd>{step.method}</dd></div>
                 <div><dt>Output</dt><dd>{step.output}</dd></div>
               </dl>

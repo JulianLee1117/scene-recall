@@ -166,6 +166,36 @@ test("Info fetches one read-only configuration snapshot per mount and refresh, w
   } finally { app.dispose(); }
 });
 
+test("current model summary follows loaded settings and refresh, without presenting defaults as live values", async () => {
+  const app = harness();
+  const snapshot = () => app.find((node) => node.props?.["aria-labelledby"] === "info-models-heading");
+  try {
+    assert.match(text(snapshot()), /Reading API settings/);
+    assert.equal(nodes(snapshot()).filter((node) => node.type === "li").length, 0);
+    const config = settings();
+    config.models.visual_encoder = "pe_core_l14";
+    config.models.text_encoder = "qwen3-embedding-0.6b";
+    await app.resolve(0, config);
+    const names = () => nodes(snapshot()).filter((node) => node.type === "strong").map(text);
+    assert.deepEqual(names(), ["PE-Core L/14", "Qwen3-Embedding-0.6B", "custom-vision", "Whisper custom-whisper", "custom-music", "custom-planner"]);
+    assert.match(text(snapshot()), /Loaded API configuration.*Film evidence keeps its own model versions/);
+    app.find((node) => node.type === "button" && text(node) === "Refresh settings").props.onClick();
+    await app.flush();
+    const changed = settings();
+    changed.models.annotator = "next-vision-version";
+    await app.resolve(1, changed);
+    assert.ok(names().includes("custom-visual"));
+    assert.ok(names().includes("next-vision-version"));
+    assert.ok(!names().includes("custom-vision"));
+    app.find((node) => node.type === "button" && text(node) === "Refresh settings").props.onClick();
+    await app.flush();
+    await app.reject(2);
+    assert.match(text(snapshot()), /API settings unavailable/);
+    assert.equal(names().length, 0, "failed settings must not retain purported current versions");
+    assert.equal(app.requests.length, 3);
+  } finally { app.dispose(); }
+});
+
 test("network, HTTP and unsupported-schema errors preserve a readable guide and explicit retry", async () => {
   for (const failure of ["network", "http", "schema"]) {
     const app = harness();

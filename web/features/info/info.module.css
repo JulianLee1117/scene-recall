@@ -16,6 +16,22 @@
 .header h1 { margin: 14px 0 14px; color: #f3f0e8; font-size: clamp(34px, 4.6vw, 50px); font-weight: 500; line-height: 1.1; letter-spacing: -.035em; }
 .header p { margin: 0; max-width: 520px; color: var(--guide-muted); font-size: 16px; line-height: 1.6; }
 
+.modelSnapshot { margin: -12px 0 28px; padding: 18px 0; border-top: 1px solid var(--guide-line); border-bottom: 1px solid var(--guide-line); }
+.modelSnapshotHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+.modelSnapshotHeading h2 { margin: 0; color: var(--guide-accent); font-size: 11px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; }
+.modelSnapshotHeading > span { color: var(--guide-muted); font-size: 11px; }
+.modelList { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 28px; margin: 0; padding: 0; list-style: none; }
+.modelList li { min-width: 0; }
+.modelList span { display: block; margin-bottom: 4px; color: var(--guide-muted); font-size: 11px; }
+.modelList strong { color: #e6d6b6; font-size: 13px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.modelSnapshot > p { margin: 14px 0 0; color: var(--guide-muted); font-size: 11px; line-height: 1.6; }
+.facts .modelFact dd { color: #d6c8b0; }
+
+@media (max-width: 600px) {
+  .modelSnapshot { margin-top: 0; }
+  .modelList { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; }
+}
+
 /* ── Topic navigation ───────────────────────────────────── */
 .topics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid var(--guide-line); }
 .topics button { display: flex; align-items: flex-start; gap: 12px; padding: 16px 14px 18px 0; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--guide-muted); text-align: left; cursor: pointer; transition: border-color .2s ease, color .2s ease; }
