@@ -1425,14 +1425,17 @@ browse scenes in source order without a model query. This uses the normal bounde
 result prefix; a description searches across the whole selected film, including
 later moments. Shot types, subjects, styles and feelings can share one description.
 
-Use the compact **All movies** control to search one movie, several movies, or
-the whole library. It shares the same scope as the inline mentions. Choosing a
-movie appends its mention; deselecting it removes the @ marker and leaves the
-title words as plain text. The picker gains title
-search automatically as the library grows. Search uses bounded ranked
+Use **Filter** to narrow a search by era, genre, director or movie. Choices
+within a section are alternatives (1990s or 2000s); sections combine (1990s
+and Crime). Each change reruns the search, active filters appear beside the
+button as chips you can remove, and options that would leave no movie are
+dimmed. The footer counts the movies being searched. Picking a movie in its
+section appends that movie's mention, sharing the same scope as inline
+mentions; deselecting it removes the @ marker and leaves the title words as
+plain text. Going home clears the filters. Search uses bounded ranked
 candidate and result windows, not a minimum-similarity cutoff, so a globally
-uncompetitive movie may be absent; select that movie in **All movies** when
-you want the ranking scoped entirely to that movie.
+uncompetitive movie may be absent; pick that movie under **Filter** when you
+want the ranking scoped entirely to that movie.
 The responsive grid shows at least three complete rows and expands its initial
 display to fill the available viewport. **Show more** first reveals the rest of
 the current backend-ranked prefix, then asks the backend for a deeper prefix

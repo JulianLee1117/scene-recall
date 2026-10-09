@@ -17,7 +17,7 @@ records.
 |---|---|---|---|
 | Evidence: per-film artifacts, compiled tables | Evidence v2 | `pipeline/evidence/` | 0001, 0093, 0095, 0098, 0099 |
 | Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080, 0102 |
-| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, 0112, with 0002-0021 and 0082-0087 where not superseded |
+| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, 0112, 0113, with 0002-0021 and 0082-0087 where not superseded |
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
@@ -254,6 +254,17 @@ stale requests and clear previously displayed scenes from the old scope.
 No result recovery silently broadens these filters. Ambiguous versions display
 their catalog years; common-word and style-reference guards avoid obvious
 misreadings without claiming general natural-language intent recognition.
+
+Film filters (ADR-0113) narrow that scope by era, genre family and director.
+`/library` reports each indexed film's year, directors and genre families
+(`pipeline/search/film_facets.py`); the browser resolves the filters to
+`film_ids`, so retrieval and ranking are unchanged. Values within a facet are
+alternatives and facets combine; @mentioned movies are narrowed too. Filters
+that leave no movie run no search and say so. One **Filter** control on the
+search page holds the facets and the movie picker, shows active filters as
+removable chips, and counts each option against the other facets. Filter
+changes are scope changes. Shot-level filters are not film scope and need
+their own decision.
 
 With only movie scope supplied, `GET /library/scenes` browses selected published
 films in request order and source chronology using the usual bounded result

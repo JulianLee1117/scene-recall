@@ -1451,6 +1451,62 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   text-align: center;
 }
 
+/* Filter: narrow a search by era, genre, director or movie. */
+.search-filter { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.search-filter-trigger { display: inline-flex; min-height: 27px; padding: 4px 7px; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: #777; font: inherit; font-size: .7rem; line-height: 1; cursor: pointer; white-space: nowrap; transition: border-color .15s ease, color .15s ease, background .15s ease; }
+.search-filter-trigger:hover, .search-filter-trigger[aria-expanded="true"] { border-color: #303030; background: #111; color: #b7b7b7; }
+.search-filter-trigger.is-active { color: #d6c2a3; }
+.search-filter-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.search-filter-count { display: inline-grid; min-width: 15px; height: 15px; padding: 0 3px; place-items: center; border-radius: 999px; background: #c8a37323; color: #e2c49b; font-size: .6rem; font-variant-numeric: tabular-nums; }
+.search-filter-chevron { flex: 0 0 auto; transition: transform .15s ease; }
+.search-filter-trigger[aria-expanded="true"] .search-filter-chevron { transform: rotate(180deg); }
+.search-filter-token { display: inline-flex; max-width: 150px; min-height: 23px; padding: 3px 7px 3px 9px; align-items: center; gap: 5px; border: 1px solid #403528; border-radius: 999px; background: #bb94590c; color: #d6c2a3; font: inherit; font-size: .68rem; line-height: 1; cursor: pointer; white-space: nowrap; transition: border-color .15s ease, background .15s ease; }
+.search-filter-token > span { overflow: hidden; text-overflow: ellipsis; }
+.search-filter-token > svg { flex: 0 0 auto; color: #9e8769; }
+.search-filter-token:hover { border-color: #7b6240; background: #bb945916; }
+.search-filter-token:hover > svg { color: #e2c49b; }
+.search-filter-token.is-more { padding-inline: 8px; color: #a99a84; }
+.search-filter-token:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.search-filter-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 40; display: flex; width: min(430px, calc(100vw - 32px)); max-height: min(560px, calc(100dvh - 220px)); flex-direction: column; overflow: hidden; border: 1px solid #2c2822; border-radius: 12px; background: #111; box-shadow: 0 22px 56px rgba(0, 0, 0, .55); outline: none; animation: search-filter-in .14s ease-out; }
+.search-hero.is-home .search-filter-panel { max-height: max(260px, min(560px, calc(100dvh - var(--home-top) - 190px))); }
+@keyframes search-filter-in { from { opacity: 0; transform: translateY(-4px); } }
+.search-filter-sections { overflow-y: auto; padding: 6px 16px 4px; overscroll-behavior: contain; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
+.search-filter-section { padding: 12px 0 14px; }
+.search-filter-section + .search-filter-section { border-top: 1px solid #1e1c19; }
+.search-filter-section h3 { margin: 0 0 9px; color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.search-filter-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.search-filter-option { min-height: 26px; padding: 4px 10px; border: 1px solid #2a2722; border-radius: 999px; background: transparent; color: #b5ab9c; font: inherit; font-size: .72rem; line-height: 1.2; cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.search-filter-option:hover:not(:disabled) { border-color: #4a4134; color: #e8dece; }
+.search-filter-option[aria-pressed="true"] { border-color: #7b6240; background: #bb945922; color: #f0dcc0; }
+.search-filter-option:disabled { border-color: #1d1b18; color: #4d4943; cursor: default; }
+.search-filter-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.search-filter-find { display: flex; height: 30px; margin-bottom: 9px; padding: 0 10px; align-items: center; gap: 7px; border: 1px solid #242120; border-radius: 7px; background: #0b0b0b; color: #6f6a62; transition: border-color .15s ease; }
+.search-filter-find:focus-within { border-color: #4a4134; }
+.search-filter-find input { min-width: 0; flex: 1; border: 0; background: transparent; color: #e6e1d8; font: inherit; font-size: .74rem; outline: none; }
+.search-filter-find input::placeholder { color: #5f5a52; }
+.search-filter-find input::-webkit-search-cancel-button { display: none; }
+.search-filter-empty { margin: 2px 0 0; color: #6f6a62; font-size: .7rem; }
+.search-filter-foot { display: flex; padding: 10px 12px 10px 16px; align-items: center; gap: 8px; border-top: 1px solid #23201c; background: #0e0e0e; }
+.search-filter-foot > span { margin-right: auto; color: #857d70; font-size: .68rem; font-variant-numeric: tabular-nums; }
+.search-filter-clear, .search-filter-done { min-height: 26px; padding: 4px 11px; border-radius: 999px; font: inherit; font-size: .7rem; cursor: pointer; }
+.search-filter-clear { border: 0; background: transparent; color: #a99a84; }
+.search-filter-clear:hover { color: #e8dece; }
+.search-filter-done { border: 1px solid #4a4134; background: #bb945914; color: var(--accent); }
+.search-filter-done:hover { border-color: var(--accent); }
+.search-filter-clear:focus-visible, .search-filter-done:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.search-filter-none { display: flex; margin: 28px 0 0; align-items: center; justify-content: center; gap: 12px; color: #857d70; font-size: .85rem; }
+.search-filter-none button { padding: 4px 11px; border: 1px solid #4a4134; border-radius: 999px; background: transparent; color: var(--accent); font: inherit; font-size: .74rem; cursor: pointer; }
+.search-filter-none button:hover { border-color: var(--accent); }
+@media (max-width: 600px) {
+  .search-filter { position: static; }
+  .search-filter-panel { left: 50%; max-height: min(560px, calc(100dvh - 300px)); transform: translateX(-50%); animation: none; }
+  /* The trigger's count stands in for the chips; the panel lists them. */
+  .search-filter-token { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-filter-panel { animation: none; }
+}
+
 .voice-search-status-error {
   color: #c9786e;
 }

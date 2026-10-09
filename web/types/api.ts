@@ -272,6 +272,11 @@ export interface LibraryFilm {
   title: string;
   /** Runtime in seconds. */
   duration: number | null;
+  /** Filter facets from open metadata; absent until a film's metadata pass runs. */
+  year?: number | null;
+  directors?: string[];
+  /** Genre families, e.g. "Crime", "Sci-fi" (pipeline/search/film_facets.py). */
+  genres?: string[];
 }
 
 export interface IncomingFilm {

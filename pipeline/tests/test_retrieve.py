@@ -4304,6 +4304,42 @@ def test_api_library_includes_searchable_film_metadata(
     assert by_filename["unindexed.mp4"]["film_id"] is None
 
 
+def test_api_library_adds_film_filter_facets(config: Config) -> None:
+    """Indexed films carry year, directors and genre families for filters."""
+    from fastapi.testclient import TestClient
+
+    config.paths.films_dir.mkdir(parents=True)
+    source = config.paths.films_dir / "fallen-angels.mkv"
+    source.write_bytes(b"film")
+    mock_db = _make_film_mock_db([{"film_id": "film_one", "title": "Fallen Angels", "path": str(source), "duration": 5940.0}])
+    facets = {"film_one": {"year": 1995, "directors": ["Wong Kar-wai"], "genres": ["Crime", "Drama"]}}
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=mock_db),
+        patch("pipeline.api.main._film_facets", return_value=facets),
+    ):
+        import pipeline.api.main as api_mod  # noqa: PLC0415
+        with TestClient(api_mod.app) as client:
+            response = client.get("/library")
+
+    film = next(row for row in response.json() if row["film_id"] == "film_one")
+    assert (film["year"], film["directors"], film["genres"]) == (1995, ["Wong Kar-wai"], ["Crime", "Drama"])
+
+
+def test_genre_families_fold_wikidata_labels() -> None:
+    from pipeline.search.film_facets import genre_families
+
+    # Real labels from the library's open metadata.
+    assert genre_families(["crime thriller film", "neo-noir", "drama film"]) == ["Crime", "Drama", "Noir", "Thriller"]
+    assert genre_families(["comedy drama", "coming-of-age film", "LGBTQ-related film"]) == [
+        "Comedy", "Coming of age", "Drama", "LGBTQ+",
+    ]
+    assert genre_families(["science fiction film", "cyberpunk", "tech noir"]) == ["Noir", "Sci-fi"]
+    # Form, not genre: no family, and "warrior" is not war.
+    assert genre_families(["independent film", "flashback film", "warrior film"]) == []
+
+
 def test_api_library_does_not_mark_metadata_only_film_indexed(
     config: Config,
 ) -> None:
@@ -4480,6 +4516,9 @@ def test_api_library_unions_external_indexed_and_source_directory_films(
         "film_id": "external_film",
         "title": "External Film",
         "duration": 7200.0,
+        "year": None,
+        "directors": [],
+        "genres": [],
     }
     assert by_filename["waiting-to-ingest.mp4"]["status"] == "not_indexed"
     assert by_filename["waiting-to-ingest.mp4"]["film_id"] is None

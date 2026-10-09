@@ -17,6 +17,8 @@ const movieHelpers = {};
 vm.runInNewContext(compile("../lib/movieSuggestions.ts"), { exports: movieHelpers });
 const mentionHelpers = {};
 vm.runInNewContext(compile("../lib/movieMentions.ts"), { exports: mentionHelpers, require: () => movieHelpers });
+const filmFilters = {};
+vm.runInNewContext(compile("../lib/filmFilters.ts"), { exports: filmFilters });
 const compiled = compile("page.tsx");
 const compiledMovieInput = compile("../components/MovieSearchInput.tsx");
 const result = (id, main = false) => ({ unit_id: id, film_id: "film", caption: "A scene", matches: [{ clause_id: "composition", facet: "composition" }, ...(main ? [{ clause_id: "main", facet: "all" }] : [])] });
@@ -116,7 +118,7 @@ function harness() {
   const hooks = [], requests = [];
   const timers = new Map();
   let nextTimerId = 0;
-  const films = [{ film_id: "before-sunrise", title: "Before Sunrise (1995)", filename: "Before Sunrise (1995).mkv", status: "indexed" }];
+  let films = [{ film_id: "before-sunrise", title: "Before Sunrise (1995)", filename: "Before Sunrise (1995).mkv", status: "indexed" }];
   let cursor = 0, output, scheduled = false, disposed = false, effects = [];
   const schedule = () => { if (!scheduled && !disposed) { scheduled = true; queueMicrotask(render); } };
   const react = {
@@ -173,6 +175,7 @@ function harness() {
       if (name === "@/lib/searchRecipe") return recipe;
       if (name === "@/lib/movieSuggestions") return movieHelpers;
       if (name === "@/lib/movieMentions") return mentionHelpers;
+      if (name === "@/lib/filmFilters") return filmFilters;
       if (name === "@/lib/appClient") return { APP_CLIENT_HEADERS: { "X-Scene-Recall-Client": "app" } };
       if (name === "@/components/MovieSearchInput") return movieInputExports;
       if (name === "@/hooks/useSearchFilms") return { useSearchFilms: () => films };
@@ -194,7 +197,8 @@ function harness() {
   const flush = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); };
   render();
   return {
-    async setFilms(next) { films.splice(0, films.length, ...next); schedule(); await flush(); },
+    // Like the real catalog hook, each refresh is a new array.
+    async setFilms(next) { films = [...next]; schedule(); await flush(); },
     async runTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach((callback) => callback()); await flush(); },
     requests, flush, find,
     get state() { return output; },
@@ -264,11 +268,11 @@ test("inline boundary deletion removes only that mention, while selections and I
   ]) {
     const app = harness();
     const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
-    const scope = () => nodes(app.find((node) => node.type === "MatchByRail").props.controls).find((node) => node.type === "MovieScopeFilter").props;
+    const scope = () => nodes(app.find((node) => node.type === "MatchByRail").props.controls).find((node) => node.type === "SearchFilter").props;
     try {
       input().onChange({ target: { value: "red" } });
       await app.flush();
-      scope().onChange(["before-sunrise"]);
+      scope().onMoviesChange(["before-sunrise"]);
       await app.flush();
       assert.equal(input().value, "red @Before Sunrise (1995) ");
       const event = {
@@ -307,7 +311,7 @@ test("Backspace after a film-only mention clears scope and cancels its browse", 
 test("middle mentions preserve visible prose and the picker removes deselected titles without leaving hidden scope", async () => {
   const app = harness();
   const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
-  const scope = () => nodes(app.find((node) => node.type === "MatchByRail").props.controls).find((node) => node.type === "MovieScopeFilter").props;
+  const scope = () => nodes(app.find((node) => node.type === "MatchByRail").props.controls).find((node) => node.type === "SearchFilter").props;
   try {
     input().onChange({ target: { value: "the scene in @Before where they listen", selectionStart: 20, selectionEnd: 20 } });
     await app.flush();
@@ -316,7 +320,7 @@ test("middle mentions preserve visible prose and the picker removes deselected t
     assert.equal(input().value, "the scene in @Before Sunrise (1995) where they listen");
     assert.equal(JSON.parse(app.requests[0].init.body).clauses[0].text, "the scene where they listen");
     assert.deepEqual(Array.from(scope().selectedFilmIds), ["before-sunrise"]);
-    scope().onChange([]);
+    scope().onMoviesChange([]);
     await app.runTimers();
     assert.equal(input().value, "the scene where they listen");
     assert.equal(app.requests[0].init.signal.aborted, true);
@@ -536,5 +540,37 @@ test("Related starts a fresh search from the chosen scene and marks the request 
     assert.deepEqual(body.clauses.map((clause) => clause.facet), ["look"], "earlier references clear; only the chosen scene remains");
     assert.equal(body.clauses[0].source.unit_id, "chosen");
     assert.equal(app.requests[1].init.headers["X-Scene-Recall-Client"], "app");
+  } finally { app.dispose(); }
+});
+
+test("film filters narrow the search to matching movies and say when none match", async () => {
+  const app = harness();
+  const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
+  const filter = () => nodes(app.find((node) => node.type === "MatchByRail").props.controls).find((node) => node.type === "SearchFilter").props;
+  const body = (index) => JSON.parse(app.requests[index].init.body);
+  try {
+    await app.setFilms([
+      { film_id: "heat", title: "Heat (1995)", filename: "Heat (1995).mkv", status: "indexed", year: 1995, genres: ["Crime", "Drama"], directors: ["Michael Mann"] },
+      { film_id: "elf", title: "Elf (2003)", filename: "Elf (2003).mkv", status: "indexed", year: 2003, genres: ["Comedy"], directors: ["Jon Favreau"] },
+    ]);
+    input().onChange({ target: { value: "rain at night" } });
+    await app.flush();
+    filter().onFiltersChange({ genre: ["Crime"] });
+    await app.runTimers();
+    assert.deepEqual(body(0).film_ids, ["heat"]);
+    assert.equal(body(0).clauses[0].text, "rain at night");
+
+    // Crime and the 2000s share no movie: nothing is searched, and the page says why.
+    filter().onFiltersChange({ genre: ["Crime"], era: ["2000s"] });
+    await app.runTimers();
+    assert.equal(app.requests.length, 1);
+    const none = app.find((node) => node.props?.className === "search-filter-none");
+    assert.match(text(none), /No movies match these filters/);
+
+    nodes(none).find((node) => node.type === "button").props.onClick();
+    await app.runTimers();
+    assert.equal(app.requests.length, 2);
+    assert.equal(body(1).film_ids, undefined);
+    assert.equal(app.find((node) => node.props?.className === "search-filter-none"), undefined);
   } finally { app.dispose(); }
 });

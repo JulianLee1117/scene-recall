@@ -13,7 +13,7 @@ import ResultGrid from "@/components/ResultGrid";
 import VideoModal from "@/components/VideoModal";
 import SavedView from "@/components/SavedView";
 import MatchByRail from "@/components/MatchByRail";
-import MovieScopeFilter from "@/components/MovieScopeFilter";
+import SearchFilter from "@/components/SearchFilter";
 import MovieSearchInput from "@/components/MovieSearchInput";
 import SearchOptions from "@/components/SearchOptions";
 import RankingPresetControl from "@/components/RankingPresetControl";
@@ -24,6 +24,7 @@ import { useSearchFilms } from "@/hooks/useSearchFilms";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
+import { filterableFilms, hasFilters, narrowScope, type FilmFilters } from "@/lib/filmFilters";
 import {
   FACET_LABELS,
   MATCH_FACETS,
@@ -163,6 +164,15 @@ export default function Home() {
     maxLimit?: number;
   }>(EMPTY_RESULT_WINDOW);
   const films = useSearchFilms();
+  // Era, genre and director filters narrow every search; read through refs
+  // like the preset, so a running search always uses the latest choice.
+  const [filmFilters, setFilmFilters] = useState<FilmFilters>({});
+  const filmFiltersRef = useRef<FilmFilters>({});
+  const filterable = useMemo(() => filterableFilms(films), [films]);
+  const filterableRef = useRef(filterable);
+  useEffect(() => {
+    filterableRef.current = filterable;
+  }, [filterable]);
   const facetSourceSearch = useFacetSourceSearch(selectedFilmIds);
   const sourceReferenceFacet = facetSourceSearch.facet;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -215,6 +225,21 @@ export default function Home() {
         setRecipeNotice("Use up to three matches at once.");
         return;
       }
+      const narrowed = narrowScope(scope, filterableRef.current, filmFiltersRef.current);
+      if (narrowed.excludesAll) {
+        // The filters leave no movie to search; the page says so.
+        cancelPendingScopeSearch();
+        searchAbortRef.current?.abort();
+        searchAbortRef.current = null;
+        setSearchWorkspaceActive(true);
+        setLoading(false);
+        setError(null);
+        setResults([]);
+        setSourceEvidenceByFacet({});
+        setHasCompletedSearch(false);
+        setResultWindow(EMPTY_RESULT_WINDOW);
+        return;
+      }
 
       cancelPendingScopeSearch();
       searchAbortRef.current?.abort();
@@ -233,7 +258,7 @@ export default function Home() {
 
       const request: SearchRecipeRequest = {
         clauses,
-        ...(scope.length ? { film_ids: [...scope] } : {}),
+        ...(narrowed.filmIds.length ? { film_ids: [...narrowed.filmIds] } : {}),
         ...(limit !== undefined ? { limit } : {}),
         ...(presetRef.current !== "balanced" ? { preset: presetRef.current } : {}),
       };
@@ -244,7 +269,7 @@ export default function Home() {
           formData.append("recipe", JSON.stringify(request));
           formData.append("image", image.file, image.file.name);
         }
-        const browseParams = new URLSearchParams(scope.map((id) => ["film_id", id]));
+        const browseParams = new URLSearchParams(narrowed.filmIds.map((id) => ["film_id", id]));
         if (limit !== undefined) browseParams.set("limit", String(limit));
         if (presetRef.current !== "balanced") browseParams.set("preset", presetRef.current);
         const browsingFilm = clauses.length === 0;
@@ -503,6 +528,16 @@ export default function Home() {
     ],
   );
 
+  const handleFiltersChange = useCallback(
+    (next: FilmFilters) => {
+      filmFiltersRef.current = next;
+      setFilmFilters(next);
+      // A filter is a scope change: same clearing and debounce as @mentions.
+      handleMovieScopeChange(selectedFilmIds, query);
+    },
+    [handleMovieScopeChange, query, selectedFilmIds],
+  );
+
   const handleMovieSuggestion = useCallback((suggestion: MovieSuggestion) => {
     compositionScopePendingRef.current = false;
     const { draft } = acceptMovieMention(movieDraftRef.current, suggestion);
@@ -607,6 +642,8 @@ export default function Home() {
     facetSourceSearch.close();
     setActiveTab("search");
     commitMovieDraft(EMPTY_MOVIE_DRAFT);
+    filmFiltersRef.current = {};
+    setFilmFilters({});
     compositionScopePendingRef.current = false;
     revokeImageInput(mainImageRef.current);
     mainImageRef.current = null;
@@ -799,6 +836,7 @@ export default function Home() {
     isHome &&
     !query.trim() &&
     selectedFilmIds.length === 0 &&
+    !hasFilters(filmFilters) &&
     !hasFacetDrafts &&
     !mainImage &&
     !sourceReferenceFacet &&
@@ -834,6 +872,9 @@ export default function Home() {
   const activeLoading = loading;
   const activeError = error;
   const hasNoResults = results.length === 0 && hasCompletedSearch;
+  const filtersExcludeAll =
+    (clauseCount > 0 || selectedFilmIds.length > 0) &&
+    narrowScope(selectedFilmIds, filterable, filmFilters).excludesAll;
   const hasFramingWithoutMainEvidence = Boolean(
     hasCompletedSearch &&
     query.trim() &&
@@ -1240,10 +1281,12 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="search-controls">
-                      <MovieScopeFilter
-                        selectedFilmIds={selectedFilmIds}
-                        onChange={handleMoviePickerChange}
+                      <SearchFilter
                         films={films}
+                        filters={filmFilters}
+                        onFiltersChange={handleFiltersChange}
+                        selectedFilmIds={selectedFilmIds}
+                        onMoviesChange={handleMoviePickerChange}
                       />
                       <RankingPresetControl
                         value={preset}
@@ -1378,6 +1421,17 @@ export default function Home() {
                 }}
               >
                 {activeError}
+              </p>
+            )}
+
+            {filtersExcludeAll && (
+              <p className="search-filter-none" role="status">
+                {selectedFilmIds.length
+                  ? "Your filters leave none of the movies you named."
+                  : "No movies match these filters."}
+                <button type="button" onClick={() => handleFiltersChange({})}>
+                  Clear filters
+                </button>
               </p>
             )}
 

@@ -119,6 +119,7 @@ from pipeline.search.retrieve import (
     search_by_image as _search_by_image,
 )
 from pipeline.search.browse import browse_highlights as _browse_highlights, browse_scenes as _browse_scenes
+from pipeline.search.film_facets import film_facets as _film_facets
 from pipeline.search.recipe import (
     RecipeSourceNotFound,
     RecipeSourceUnavailable,
@@ -1809,6 +1810,13 @@ def library_endpoint(request: Request) -> list[dict]:
             detail="Indexed film metadata is temporarily unavailable",
         ) from exc
 
+    # Filter facets are optional: a catalog without them still searches.
+    try:
+        facets = _film_facets(db)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[library] film facets unavailable: {exc}", flush=True)
+        facets = {}
+
     def path_key(path: Path) -> str:
         return str(path.resolve()).casefold()
 
@@ -1838,6 +1846,10 @@ def library_endpoint(request: Request) -> list[dict]:
                 "film_id": film_id,
                 "title": film.get("title") or source_path.stem,
                 "duration": film.get("duration"),
+                "year": None,
+                "directors": [],
+                "genres": [],
+                **facets.get(film_id, {}),
             }
     except (OSError, TypeError, ValueError) as exc:
         raise HTTPException(
