@@ -846,9 +846,9 @@ export default function Home() {
   useGlide(heroRef, searchFormRef, isHome);
   const clauseCount = recipeClauseCount(query, matchDrafts, mainImage);
   const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
+  // Examples stay while you type, so home holds still until the first search.
   const showSearchExamples = Boolean(
     isHome &&
-    !query.trim() &&
     selectedFilmIds.length === 0 &&
     !hasFacetDrafts &&
     !mainImage &&
@@ -1294,8 +1294,8 @@ export default function Home() {
                   )
                 }
                 controls={
-                  // A fresh home shows examples beside Refine; once you start
-                  // composing, the scope and ranking settings take their place.
+                  // Home shows examples beside Refine and Filter; the first
+                  // search swaps in ordering and Details as the bar glides up.
                   showSearchExamples ? (
                     <div className="search-examples" aria-label="Example searches">
                       <span>Try</span>

@@ -893,9 +893,10 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .app-lab-link { display: flex; margin-left: auto; padding: 13px 14px; align-items: center; gap: 7px; color: #b8a68d; font-size: .82rem; text-decoration: none; }
 .app-lab-link span { color: #73706b; font-size: .65rem; }
 .app-lab-link:hover { color: #ead5b5; }
-/* Lined up with the search bar on home and results alike: Refine and Filter
-   hold the left edge, so swapping what sits on the right never moves them. */
-.clues-toolbar { display: flex; max-width: 720px; min-height: 36px; margin-inline: auto; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+/* One compact row centered under the bar. Its contents change only when the
+   first search starts (examples give way to ordering and Details), together
+   with the bar's glide, so the row never shifts while you work. */
+.clues-toolbar { display: flex; max-width: 720px; min-height: 36px; margin-inline: auto; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 10px; }
 .clues-refine-toggle { display: inline-flex; flex: 0 0 auto; min-height: 36px; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #a49e94; font: inherit; font-size: .78rem; cursor: pointer; white-space: nowrap; }
 .clues-refine-toggle:hover { background: #ffffff06; color: #e8dece; }
 .clues-refine-toggle[aria-expanded="true"] { border-color: #40382d; background: #b88a4710; color: #e2c49b; }
@@ -931,10 +932,10 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-summary img { width: 24px; height: 18px; flex: 0 0 24px; border-radius: 2px; object-fit: cover; }
 .clue-summary-label { color: #9e8769; flex: 0 0 auto; }
 .clue-summary-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.clues-tools { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; }
-.clues-tools > * { animation: clues-tools-in .2s ease-out; }
+.clues-tools { display: flex; min-width: 0; align-items: center; padding-left: 10px; border-left: 1px solid #302b24; }
+.clues-tools > * { animation: clues-tools-in .24s ease-out; }
 @keyframes clues-tools-in { from { opacity: 0; } }
-.clues-tools .search-controls { margin-left: auto; justify-content: flex-end; }
+.clues-tools .search-controls { margin-left: 0; justify-content: center; }
 .clues-tools .movie-scope-trigger { max-width: min(180px, 26vw); border-color: transparent; background: transparent; }
 .clues-tools .movie-scope-popover { z-index: 40; }
 .clues-tools .movie-scope-options { max-height: min(300px, 45dvh); }
@@ -1001,6 +1002,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   .clue-chip { padding-inline: 2px; font-size: .75rem; }
   .clue-visual { display: none; }
   .clues-toolbar { column-gap: 8px; }
+  /* The right group may wrap to its own line here; a divider would dangle. */
+  .clues-tools { padding-left: 0; border-left: 0; }
   .clues-tools .movie-scope { position: static; }
   .clues-tools .movie-scope-popover { left: 50%; right: auto; transform: translateX(-50%); }
   .clue-editor { padding: 12px 3px; }
@@ -1455,7 +1458,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 /* Filter: narrow a search by era, genre, director or movie. */
 /* Beside Refine and styled like it: one size, a count, never the values. */
-.clues-filter { margin-left: -8px; }
+.clues-filter { margin-left: -6px; }
 .search-filter { position: relative; display: inline-flex; align-items: center; }
 .search-filter-trigger { display: inline-flex; flex: 0 0 auto; min-height: 36px; padding: 7px 10px; align-items: center; gap: 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #a49e94; font: inherit; font-size: .78rem; cursor: pointer; white-space: nowrap; }
 .search-filter-trigger:hover { background: #ffffff06; color: #e8dece; }
