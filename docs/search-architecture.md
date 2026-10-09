@@ -263,7 +263,8 @@ alternatives and facets combine; @mentioned movies are narrowed too. Filters
 that leave no movie run no search and say so. One **Filter** control beside
 Refine, home screen included, holds the facets and the movie picker; active
 filters join Refine's active row as one chip per section, and each option is
-counted against the other facets. Filter changes are scope changes. Shot-level filters are not film scope and need
+counted against the other facets. A filter change reruns the search like an
+edited query, keeping the current scenes until the filtered ones arrive. Shot-level filters are not film scope and need
 their own decision.
 
 With only movie scope supplied, `GET /library/scenes` browses selected published

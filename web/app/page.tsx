@@ -22,6 +22,7 @@ import { useBookmarks } from "@/hooks/useBookmarks";
 import { useFacetSourceSearch } from "@/hooks/useFacetSourceSearch";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useSearchFilms } from "@/hooks/useSearchFilms";
+import { useGlide } from "@/hooks/useGlide";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
@@ -534,10 +535,17 @@ export default function Home() {
     (next: FilmFilters) => {
       filmFiltersRef.current = next;
       setFilmFilters(next);
-      // A filter is a scope change: same clearing and debounce as @mentions.
-      handleMovieScopeChange(selectedFilmIds, query);
+      // Like an edited query: the current scenes stay until the filtered
+      // ones arrive, so toggling several filters never blanks the page.
+      cancelPendingScopeSearch();
+      if (recipeClauseCount(query, matchDrafts, mainImageRef.current) > 0 || selectedFilmIds.length > 0) {
+        scopeSearchTimerRef.current = window.setTimeout(() => {
+          scopeSearchTimerRef.current = null;
+          void runRecipe(query, matchDrafts);
+        }, MOVIE_SCOPE_SEARCH_DEBOUNCE_MS);
+      }
     },
-    [handleMovieScopeChange, query, selectedFilmIds],
+    [cancelPendingScopeSearch, matchDrafts, query, runRecipe, selectedFilmIds.length],
   );
 
   const handleMovieSuggestion = useCallback((suggestion: MovieSuggestion) => {
@@ -833,6 +841,9 @@ export default function Home() {
   };
 
   const isHome = !searchWorkspaceActive;
+  const heroRef = useRef<HTMLDivElement>(null);
+  const searchFormRef = useRef<HTMLFormElement>(null);
+  useGlide(heroRef, searchFormRef, isHome);
   const clauseCount = recipeClauseCount(query, matchDrafts, mainImage);
   const hasFacetDrafts = Object.keys(matchDrafts).length > 0;
   const showSearchExamples = Boolean(
@@ -1030,7 +1041,7 @@ export default function Home() {
       {activeTab === "search" && (
         <>
           {/* Hero search area */}
-          <div className={`search-hero${isHome ? " is-home" : ""}`}>
+          <div ref={heroRef} className={`search-hero${isHome ? " is-home" : ""}`}>
             {/* wordmark */}
             <button
               type="button"
@@ -1043,7 +1054,7 @@ export default function Home() {
             </button>
 
             {/* One stable workspace for both recipes and scene references. */}
-            <form className="search-workspace-form" onSubmit={handleSubmit}>
+            <form ref={searchFormRef} className="search-workspace-form" onSubmit={handleSubmit}>
               <div
                 className={[
                   "search-bar-shell",
@@ -1307,12 +1318,11 @@ export default function Home() {
                         value={preset}
                         onChange={handlePresetChange}
                       />
-                      {(hasCompletedSearch || results.length > 0) && (
-                        <SearchOptions
-                          showDetails={showDetails}
-                          onShowDetailsChange={setShowDetails}
-                        />
-                      )}
+                      {/* Always present, so the toolbar never shifts when results land. */}
+                      <SearchOptions
+                        showDetails={showDetails}
+                        onShowDetailsChange={setShowDetails}
+                      />
                     </div>
                   )
                 }

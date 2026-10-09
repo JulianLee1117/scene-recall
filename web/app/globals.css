@@ -715,8 +715,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .search-hero.is-home { --home-top: max(32px, calc(50dvh - 141px)); padding-top: var(--home-top); }
 .search-hero.is-home .search-bar-shell { max-width: 720px; }
 .search-hero.is-home .match-rail { max-width: 720px; margin-top: 12px; }
-.search-hero.is-home .clues-toolbar { gap: 10px; }
-.search-hero.is-home .clues-tools { padding-left: 10px; }
 
 
 .search-workspace-form {
@@ -895,7 +893,9 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .app-lab-link { display: flex; margin-left: auto; padding: 13px 14px; align-items: center; gap: 7px; color: #b8a68d; font-size: .82rem; text-decoration: none; }
 .app-lab-link span { color: #73706b; font-size: .65rem; }
 .app-lab-link:hover { color: #ead5b5; }
-.clues-toolbar { display: flex; min-height: 36px; align-items: center; justify-content: center; gap: 12px; }
+/* Lined up with the search bar on home and results alike: Refine and Filter
+   hold the left edge, so swapping what sits on the right never moves them. */
+.clues-toolbar { display: flex; max-width: 720px; min-height: 36px; margin-inline: auto; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
 .clues-refine-toggle { display: inline-flex; flex: 0 0 auto; min-height: 36px; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #a49e94; font: inherit; font-size: .78rem; cursor: pointer; white-space: nowrap; }
 .clues-refine-toggle:hover { background: #ffffff06; color: #e8dece; }
 .clues-refine-toggle[aria-expanded="true"] { border-color: #40382d; background: #b88a4710; color: #e2c49b; }
@@ -931,8 +931,10 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-summary img { width: 24px; height: 18px; flex: 0 0 24px; border-radius: 2px; object-fit: cover; }
 .clue-summary-label { color: #9e8769; flex: 0 0 auto; }
 .clue-summary-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.clues-tools { padding-left: 12px; border-left: 1px solid #302b24; }
-.clues-tools .search-controls { margin-left: 0; justify-content: center; }
+.clues-tools { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; }
+.clues-tools > * { animation: clues-tools-in .2s ease-out; }
+@keyframes clues-tools-in { from { opacity: 0; } }
+.clues-tools .search-controls { margin-left: auto; justify-content: flex-end; }
 .clues-tools .movie-scope-trigger { max-width: min(180px, 26vw); border-color: transparent; background: transparent; }
 .clues-tools .movie-scope-popover { z-index: 40; }
 .clues-tools .movie-scope-options { max-height: min(300px, 45dvh); }
@@ -998,8 +1000,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   .clues-panel { padding-inline: 8px; }
   .clue-chip { padding-inline: 2px; font-size: .75rem; }
   .clue-visual { display: none; }
-  .clues-toolbar { gap: 8px; }
-  .clues-tools { padding-left: 8px; }
+  .clues-toolbar { column-gap: 8px; }
   .clues-tools .movie-scope { position: static; }
   .clues-tools .movie-scope-popover { left: 50%; right: auto; transform: translateX(-50%); }
   .clue-editor { padding: 12px 3px; }
@@ -1016,6 +1017,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 @media (prefers-reduced-motion: reduce) {
   .clues-refine-chevron { transition: none; }
+  .clues-tools > * { animation: none; }
 }
 
 .scene-drag-preview {

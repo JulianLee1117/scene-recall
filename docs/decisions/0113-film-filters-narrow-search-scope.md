@@ -44,9 +44,11 @@ not change.
   same day: chips beside the trigger widened the toolbar and hid the rest
   behind "+N".) The panel has Era, Genre, Director and Movie sections; each
   option is counted against the other facets' filters, and options with no
-  movie are dimmed. Changes apply as they are made and are scope changes: old
-  scenes clear and the search reruns after the usual debounce. Picking a
-  movie still appends its @mention. Going home clears the filters. The Lab
+  movie are dimmed. Changes apply as they are made and rerun the search like
+  an edited query, after the usual debounce: the current scenes stay until
+  the filtered ones arrive, so toggling several filters never blanks the
+  page. Picking a movie still appends its @mention, which remains a scope
+  change. Going home clears the filters. The Lab
   keeps its own movie picker.
 
 ## Consequences

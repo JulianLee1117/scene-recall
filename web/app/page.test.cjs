@@ -179,6 +179,7 @@ function harness() {
       if (name === "@/lib/appClient") return { APP_CLIENT_HEADERS: { "X-Scene-Recall-Client": "app" } };
       if (name === "@/components/MovieSearchInput") return movieInputExports;
       if (name === "@/hooks/useSearchFilms") return { useSearchFilms: () => films };
+      if (name === "@/hooks/useGlide") return { useGlide() {} };
       if (name === "@/hooks/useBookmarks") return { useBookmarks: () => bookmarks };
       if (name === "@/hooks/useSpeechRecognition") return { useSpeechRecognition: () => speech };
       if (name === "@/hooks/useFacetSourceSearch") return { useFacetSourceSearch: () => referenceSearch };
