@@ -17,23 +17,27 @@
 .header p { margin: 0; max-width: 520px; color: var(--guide-muted); font-size: 16px; line-height: 1.6; }
 
 .modelSnapshot { margin: -12px 0 28px; padding: 18px 0; border-top: 1px solid var(--guide-line); border-bottom: 1px solid var(--guide-line); }
-.modelSnapshotHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+.modelSnapshotHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 8px; }
 .modelSnapshotHeading h2 { margin: 0; color: var(--guide-accent); font-size: 11px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; }
 .modelSnapshotHeading > span { color: var(--guide-muted); font-size: 11px; }
-.modelGroups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
-.modelGroups h3 { margin: 0 0 14px; color: #c3b69f; font-size: 12px; font-weight: 500; }
-.modelList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.modelList li { min-width: 0; line-height: 1.4; }
-.modelList span { display: block; margin-bottom: 2px; color: var(--guide-muted); font-size: 11px; }
-.modelList strong { color: #e6d6b6; font-size: 13px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.modelGroups > div { display: grid; grid-template-columns: 165px minmax(0, 1fr); gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--guide-line); }
+.modelGroups > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.modelGroups h3 { margin: 0; color: #f0ede6; font-size: 15px; font-weight: 500; line-height: 1.4; }
+.modelList { display: flex; flex-wrap: wrap; gap: 12px 28px; margin: 0; padding: 0; list-style: none; }
+.modelList li { min-width: 0; max-width: 240px; line-height: 1.4; }
+.modelList span { display: block; margin-bottom: 3px; color: var(--guide-muted); font-size: 10px; }
+.modelList strong { color: var(--guide-accent); font-size: 12px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 .modelSnapshot > p { margin: 14px 0 0; color: var(--guide-muted); font-size: 11px; line-height: 1.6; }
 .facts .modelFact dd { color: #d6c8b0; }
 
 @media (max-width: 850px) {
-  .modelGroups { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 20px; }
+  .modelGroups > div { grid-template-columns: 130px minmax(0, 1fr); gap: 20px; }
 }
 @media (max-width: 600px) {
   .modelSnapshot { margin-top: 0; }
+  .modelGroups > div { grid-template-columns: 1fr; gap: 12px; }
+  .modelList { gap: 12px 20px; }
+  .modelList li { flex: 0 1 calc(50% - 10px); max-width: none; }
 }
 
 /* ── Topic navigation ───────────────────────────────────── */
