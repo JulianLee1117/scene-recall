@@ -31,9 +31,9 @@ not change.
   without metadata is left out whenever a filter is active.
 - Eras are decades. The oldest decades share one "Before 1960"-style bucket,
   merged until it holds ten films.
-- Values within a facet are alternatives; facets combine. Each section can
-  instead exclude its values (an Include/Exclude switch; "Genre not
-  Animation"), still resolved to film IDs in the browser. @mentioned movies
+- Values within a facet are alternatives; facets combine. Any value can be
+  excluded instead (a ⊘ beside its count; "Drama, not Animation"), still
+  resolved to film IDs in the browser. @mentioned movies
   are narrowed by the filters too. When the filters leave no movie, no search
   runs and the page says so with a way to clear them. When every movie passes,
   no film list is sent.

@@ -7,13 +7,12 @@ import {
   activeFacets,
   clearFacet,
   describeFacet,
-  excludeFacet,
   facetOptions,
   filterableFilms,
   hasFilters,
-  isExcluded,
   narrowScope,
   sameFilters,
+  toggleExclude,
   toggleFilter,
   type FacetOption,
   type FilmFacetKey,
@@ -34,8 +33,6 @@ import DirectionIcon from "./DirectionIcon";
 
 /** Every shot facet starts here: no narrowing. */
 const ANY = { value: "", label: "Any" };
-/** A Movies section keeps its values, or leaves them out. */
-const MODES = [{ value: "include", label: "Include" }, { value: "exclude", label: "Exclude" }] as const;
 
 /** What the Filter menu shows: its overview, or one movie section's values. */
 export type FilterView = "menu" | FilmFacetKey;
@@ -164,23 +161,23 @@ export default function SearchFilter({
                 <SectionList
                   key={open.key}
                   section={open}
-                  exclude={isExcluded(filters, open.key)}
                   onBack={() => onViewChange("menu")}
                   onToggle={(value) => edit((current) => ({ ...current, film: toggleFilter(current.film, open.key, value) }))}
-                  onExclude={(exclude) => edit((current) => ({ ...current, film: excludeFacet(current.film, open.key, exclude) }))}
-                  onClear={() => edit((current) => ({ ...current, film: clearFacet(current.film, open.key, true) }))}
+                  onExclude={(value) => edit((current) => ({ ...current, film: toggleExclude(current.film, open.key, value) }))}
+                  onClear={() => edit((current) => ({ ...current, film: clearFacet(current.film, open.key) }))}
                 />
               ) : (
                 <div className="toolbar-menu-list is-scroll">
                   <p className="toolbar-menu-heading">Movies</p>
                   {sections.map((section) => {
-                    const picked = filters[section.key] ?? [];
+                    const picked = { values: filters[section.key] ?? [], excluded: filters.exclude?.[section.key] ?? [] };
+                    const set = picked.values.length + picked.excluded.length > 0;
                     return (
                       <button key={section.key} type="button" className="toolbar-menu-row" onClick={() => onViewChange(section.key)}>
                         <span className="toolbar-menu-row-text">
                           <span>{section.label}</span>
-                          <span className={`toolbar-menu-value${picked.length ? " is-set" : ""}`}>
-                            {picked.length ? describeFacet({ values: picked, exclude: isExcluded(filters, section.key) }) : "Any"}
+                          <span className={`toolbar-menu-value${set ? " is-set" : ""}`}>
+                            {set ? describeFacet(picked) : "Any"}
                           </span>
                         </span>
                         <DirectionIcon name="chevron-right" className="toolbar-menu-chevron" size={12} />
@@ -225,22 +222,31 @@ export default function SearchFilter({
   );
 }
 
+/** The no-entry mark: a value left out. */
+const ExcludeMark = () => (
+  <>
+    <circle cx="12" cy="12" r="7.5" />
+    <path d="m6.8 17.2 10.4-10.4" />
+  </>
+);
+
 const fold = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
 
-/** One section's values as a checklist; long lists get a search field. */
+/**
+ * One section's values as a checklist: a click chooses a value; the ⊘ that
+ * appears beside its count excludes it instead. Long lists get a search field.
+ */
 function SectionList({
   section,
-  exclude,
   onBack,
   onToggle,
   onExclude,
   onClear,
 }: {
   section: Section;
-  exclude: boolean;
   onBack: () => void;
   onToggle: (value: string) => void;
-  onExclude: (exclude: boolean) => void;
+  onExclude: (value: string) => void;
   onClear: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -248,7 +254,7 @@ function SectionList({
   const noun = section.label.toLowerCase();
   // Long lists leave out values no movie can match; short ones dim them.
   const shown = section.options.filter((option) =>
-    (option.selected || !section.long || option.count > 0) &&
+    (option.selected || option.excluded || !section.long || option.count > 0) &&
     (!needle || fold(option.value).includes(needle)));
 
   return (
@@ -258,18 +264,10 @@ function SectionList({
           <DirectionIcon name="chevron-left" size={13} />
           <span>{section.label}</span>
         </button>
-        {section.options.some((option) => option.selected) && (
+        {section.options.some((option) => option.selected || option.excluded) && (
           <button type="button" className="toolbar-menu-link" onClick={onClear}>Clear</button>
         )}
       </header>
-      <ChoiceRow
-        bare
-        label={`${section.label}: include or exclude`}
-        options={MODES}
-        value={exclude ? "exclude" : "include"}
-        defaultValue="include"
-        onChange={(mode) => onExclude(mode === "exclude")}
-      />
       {section.long && (
         <label className="toolbar-menu-find">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -289,24 +287,41 @@ function SectionList({
       <div className="toolbar-menu-list is-scroll" role="group" aria-label={section.label}>
         {shown.map((option) => {
           const name = option.value;
+          const empty = option.count === 0 && !option.selected && !option.excluded;
           return (
-            <button
-              key={option.value}
-              type="button"
-              className="toolbar-menu-option"
-              aria-pressed={option.selected}
-              disabled={!option.selected && option.count === 0}
-              title={option.selected || option.count ? name : `${name}: no movies with your other filters`}
-              onClick={() => onToggle(option.value)}
-            >
-              <span className="toolbar-menu-label">{name}</span>
-              {/* Selected shows a check (or, excluded, a no-entry mark) where the count was. */}
-              {option.selected ? (
-                <svg className="toolbar-menu-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  {exclude ? <><circle cx="12" cy="12" r="7.5" /><path d="m6.8 17.2 10.4-10.4" /></> : <path d="m5 12.5 4.5 4.5L19 7.5" />}
-                </svg>
-              ) : section.counted && <span className="toolbar-menu-tally">{option.count}</span>}
-            </button>
+            <div key={option.value} className={`toolbar-menu-choice${option.excluded ? " is-excluded" : ""}`}>
+              <button
+                type="button"
+                className="toolbar-menu-option"
+                aria-pressed={option.selected}
+                aria-label={option.excluded ? `${name}, excluded` : undefined}
+                disabled={empty}
+                title={option.excluded ? `${name}: excluded; click to clear` : empty ? `${name}: no movies with your other filters` : name}
+                onClick={() => onToggle(option.value)}
+              >
+                <span className="toolbar-menu-label">{name}</span>
+                {/* A chosen value shows a check and an excluded one a no-entry mark, where the count was. */}
+                {option.selected || option.excluded ? (
+                  <svg className="toolbar-menu-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    {option.excluded ? <ExcludeMark /> : <path d="m5 12.5 4.5 4.5L19 7.5" />}
+                  </svg>
+                ) : section.counted && <span className="toolbar-menu-tally">{option.count}</span>}
+              </button>
+              {!option.excluded && (
+                <button
+                  type="button"
+                  className="toolbar-menu-exclude"
+                  aria-label={`Exclude ${name}`}
+                  title={`Exclude ${name}`}
+                  disabled={empty}
+                  onClick={() => onExclude(option.value)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                    <ExcludeMark />
+                  </svg>
+                </button>
+              )}
+            </div>
           );
         })}
         {shown.length === 0 && (

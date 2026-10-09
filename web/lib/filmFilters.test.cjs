@@ -48,12 +48,12 @@ test("values within a facet are alternatives; facets combine", () => {
 test("each facet counts films passing the other facets, keeps every value, and orders sensibly", () => {
   const filters = { era: ["2000s"] };
   assert.deepEqual(plain(lib.facetOptions(films, filters, "era")), [
-    { value: "1990s", count: 2, selected: false },
-    { value: "2000s", count: 2, selected: true },
+    { value: "1990s", count: 2, selected: false, excluded: false },
+    { value: "2000s", count: 2, selected: true, excluded: false },
   ]);
   const genres = plain(lib.facetOptions(films, filters, "genre"));
   assert.deepEqual(genres.map((option) => option.value), ["Comedy", "Crime", "Drama", "Family", "Romance", "Thriller"]);
-  assert.deepEqual(genres.find((option) => option.value === "Romance"), { value: "Romance", count: 0, selected: false });
+  assert.deepEqual(genres.find((option) => option.value === "Romance"), { value: "Romance", count: 0, selected: false, excluded: false });
   // Directors with more films come first.
   assert.deepEqual(plain(lib.facetOptions(films, {}, "director")).map((option) => option.value), ["Michael Mann", "Jon Favreau", "Wong Kar-wai"]);
 });
@@ -93,21 +93,25 @@ test("a movie is a facet of its own title, without counts", () => {
   assert.equal(lib.FILM_FACETS.find((facet) => facet.key === "movie").perFilm, true);
 });
 
-test("a facet set to exclude keeps the movies with none of its values", () => {
+test("excluded values leave movies out, alone or beside chosen ones", () => {
   const library = lib.filterableFilms([
-    { film_id: "akira", title: "Akira", filename: "a.mkv", status: "indexed", year: 1988, genres: ["Animation", "Science fiction"], directors: [] },
+    { film_id: "akira", title: "Akira", filename: "a.mkv", status: "indexed", year: 1988, genres: ["Animation", "Drama"], directors: [] },
     { film_id: "alien", title: "Alien", filename: "b.mkv", status: "indexed", year: 1979, genres: ["Horror", "Science fiction"], directors: [] },
-    { film_id: "heat", title: "Heat", filename: "c.mkv", status: "indexed", year: 1995, genres: ["Crime"], directors: [] },
+    { film_id: "heat", title: "Heat", filename: "c.mkv", status: "indexed", year: 1995, genres: ["Crime", "Drama"], directors: [] },
   ]);
-  const picked = lib.toggleFilter({}, "genre", "Animation");
-  const excluded = lib.excludeFacet(picked, "genre", true);
-  assert.deepEqual(plain(lib.narrowScope([], library, excluded).filmIds), ["alien", "heat"]);
-  assert.equal(lib.describeFacet(lib.activeFacets(excluded)[0]), "not Animation");
-  const withHorror = lib.toggleFilter(excluded, "genre", "Horror");
-  assert.deepEqual(plain(lib.narrowScope([], library, withHorror).filmIds), ["heat"], "toggling keeps the mode");
-  assert.equal(lib.facetOptions(library, excluded, "genre").find((option) => option.value === "Animation").count, 1);
-  assert.equal(lib.sameFilters(picked, excluded), false);
-  assert.equal(lib.sameFilters(lib.excludeFacet({}, "genre", true), {}), true, "a mode without values changes nothing");
-  assert.equal(lib.isExcluded(lib.clearFacet(excluded, "genre", true), "genre"), true, "clearing in the section keeps the mode");
-  assert.deepEqual(plain(lib.clearFacet(excluded, "genre")), {}, "clearing the chip resets it");
+  const noAnimation = lib.toggleExclude({}, "genre", "Animation");
+  assert.deepEqual(plain(lib.narrowScope([], library, noAnimation).filmIds), ["alien", "heat"]);
+  const drama = lib.toggleFilter(noAnimation, "genre", "Drama");
+  assert.deepEqual(plain(lib.narrowScope([], library, drama).filmIds), ["heat"], "Drama, not Animation");
+  assert.equal(lib.describeFacet(lib.activeFacets(drama)[0]), "Drama, not Animation");
+  const option = (filters, value) => lib.facetOptions(library, filters, "genre").find((item) => item.value === value);
+  assert.equal(option(drama, "Animation").excluded, true);
+  assert.equal(option(drama, "Drama").selected, true);
+
+  // A value is never chosen and excluded at once; a click on an excluded value clears it.
+  assert.deepEqual(plain(lib.toggleExclude(lib.toggleFilter({}, "genre", "Drama"), "genre", "Drama")), { exclude: { genre: ["Drama"] } });
+  assert.deepEqual(plain(lib.toggleFilter(noAnimation, "genre", "Animation")), {});
+  assert.deepEqual(plain(lib.toggleExclude(noAnimation, "genre", "Animation")), {});
+  assert.equal(lib.sameFilters(noAnimation, lib.toggleFilter({}, "genre", "Animation")), false);
+  assert.deepEqual(plain(lib.clearFacet(drama, "genre")), {});
 });

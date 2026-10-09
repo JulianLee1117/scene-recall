@@ -1443,6 +1443,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar-menu-tally { flex: 0 0 auto; color: #6f6a62; font-size: .68rem; font-variant-numeric: tabular-nums; }
 .toolbar-menu-option[aria-pressed="true"] { color: #f0dcc0; }
+/* A value row: a click chooses it; its ⊘ (shown on hover) excludes it instead. */
+.toolbar-menu-choice { position: relative; }
+.toolbar-menu-choice .toolbar-menu-label { margin-right: 22px; }
+.toolbar-menu-exclude { position: absolute; top: 50%; right: 34px; display: grid; width: 22px; height: 22px; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #857c6f; cursor: pointer; opacity: 0; transform: translateY(-50%); transition: opacity .12s ease, color .12s ease, background .12s ease; }
+.toolbar-menu-choice:hover .toolbar-menu-exclude:not(:disabled), .toolbar-menu-exclude:focus-visible { opacity: 1; }
+.toolbar-menu-exclude:hover { background: #ffffff0d; color: #e2c49b; }
+.toolbar-menu-exclude:disabled { cursor: default; }
+.toolbar-menu-choice.is-excluded .toolbar-menu-label { color: #a49e94; text-decoration: line-through; text-decoration-color: #a49e9480; }
+@media (hover: none) { .toolbar-menu-exclude:not(:disabled) { opacity: .5; } }
 .toolbar-menu-option:disabled { color: #4d4943; cursor: default; }
 .toolbar-menu-option:disabled .toolbar-menu-tally { color: #3d3a35; }
 .toolbar-menu-head { display: flex; padding: 0 8px 0 4px; align-items: center; justify-content: space-between; }
@@ -1468,7 +1477,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 /* A setting: its label in a fixed column, then its choices from one shared
    left edge, so every setting in both menus lines up. */
 .toolbar-menu-setting { display: grid; min-height: 32px; padding: 2px 10px; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 8px; color: #d8d0c4; font-size: .78rem; }
-.toolbar-menu-setting.is-bare { padding: 2px 8px 6px; grid-template-columns: minmax(0, 1fr); }
 /* Choices sit on a faint track that spans the row. The choice shows on a
    quiet thumb; one that differs from the default turns gold, like a set
    movie filter. */
