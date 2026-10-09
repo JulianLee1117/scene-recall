@@ -15,6 +15,7 @@ const TOPICS = [
   { id: "editing", title: "Editing", description: "Build an edit", outcome: "An editable timeline and playable export" },
   { id: "storage", title: "Storage & services", description: "Keep sources and work", outcome: "Preserved sources and recoverable projects" },
   { id: "glossary", title: "Glossary", description: "Learn the vocabulary", outcome: "One shared set of words for the whole system" },
+  { id: "models", title: "Models", description: "Current versions", outcome: "The model stack behind the app" },
 ] as const;
 
 function filterGlossary(query: string): GlossaryGroup[] {
@@ -121,22 +122,6 @@ export default function InfoView() {
       <p>From a film file to a finished edit, one part at a time, in plain language, with the models behind each.</p>
     </header>
 
-    <section className={styles.modelSnapshot} aria-labelledby="info-models-heading" aria-busy={loading}>
-      <div className={styles.modelSnapshotHeading}>
-        <h2 id="info-models-heading">Current models</h2>
-        <span>{loading ? "Reading API settings…" : error ? "API settings unavailable · implementation defaults shown" : "API settings + implementation defaults"}</span>
-      </div>
-      <div className={styles.modelGroups}>
-        {modelGroups.map((group) => <div key={group.title}>
-          <h3>{group.title}</h3>
-          <ul className={styles.modelList}>
-            {group.models.map((model) => <li key={model.role}><span>{model.role}</span><strong>{model.name}</strong></li>)}
-          </ul>
-        </div>)}
-      </div>
-      <p>Names reflect loaded API settings or implementation defaults, not model readiness. Film evidence keeps its own versions.</p>
-    </section>
-
     <nav className={styles.topics} aria-label="Guide topics">
       {TOPICS.map((item, index) => <button
         key={item.id}
@@ -150,7 +135,28 @@ export default function InfoView() {
       </button>)}
     </nav>
 
-    {isGlossary || !section ? <GlossaryArticle key="glossary" query={glossaryQuery} onQuery={setGlossaryQuery} /> : <article id="info-topic" className={styles.article} key={section.id} aria-labelledby="info-topic-heading">
+    {topicId === "models" ? <article id="info-topic" className={styles.article} key="models" aria-labelledby="info-topic-heading">
+      <header className={styles.topicHeader}>
+        <div>
+          <h2 id="info-topic-heading">Current models</h2>
+          <p className={styles.topicSummary}>The model stack behind search, film evidence and editing.</p>
+        </div>
+      </header>
+      <section className={styles.modelSnapshot} aria-label="Model versions" aria-busy={loading}>
+        <div className={styles.modelSnapshotHeading}>
+          <span>{loading ? "Reading API settings…" : error ? "API settings unavailable · implementation defaults shown" : "API settings + implementation defaults"}</span>
+        </div>
+        <div className={styles.modelGroups}>
+          {modelGroups.map((group) => <div key={group.title}>
+            <h3>{group.title}</h3>
+            <ul className={styles.modelList}>
+              {group.models.map((model) => <li key={model.role}><span>{model.role}</span><strong>{model.name}</strong></li>)}
+            </ul>
+          </div>)}
+        </div>
+        <p>Names reflect loaded API settings or implementation defaults, not model readiness. Film evidence keeps its own versions.</p>
+      </section>
+    </article> : isGlossary || !section ? <GlossaryArticle key="glossary" query={glossaryQuery} onQuery={setGlossaryQuery} /> : <article id="info-topic" className={styles.article} key={section.id} aria-labelledby="info-topic-heading">
       <header className={styles.topicHeader}>
         <div>
           <h2 id="info-topic-heading">{topic.title}</h2>

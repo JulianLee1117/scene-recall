@@ -174,8 +174,13 @@ test("Info fetches one read-only configuration snapshot per mount and refresh, w
 
 test("current model summary follows loaded settings and refresh, with implementation defaults distinguished", async () => {
   const app = harness();
-  const snapshot = () => app.find((node) => node.props?.["aria-labelledby"] === "info-models-heading");
+  const snapshot = () => app.find((node) => node.props?.["aria-label"] === "Model versions");
   try {
+    assert.equal(snapshot(), undefined, "the guide opens directly into the selected topic");
+    const navigation = app.find((node) => node.type === "nav" && node.props["aria-label"] === "Guide topics");
+    nodes(navigation).find((node) => node.type === "button" && text(node).includes("Models")).props.onClick();
+    await app.flush();
+    assert.equal(text(app.find((node) => node.props?.id === "info-topic-heading")), "Current models");
     assert.match(text(snapshot()), /Reading API settings/);
     assert.equal(nodes(snapshot()).filter((node) => node.type === "strong" && text(node) === "Settings unavailable").length, 6);
     assert.match(text(snapshot()), /Understanding, highlights & optional critiqueGemini 3.8 Flash · default/);
@@ -271,7 +276,7 @@ test("topic navigation exposes one labelled article with every step visible and 
   try {
     const headingId = app.state.props["aria-labelledby"];
     assert.ok(app.find((node) => node.type === "h1" && node.props.id === headingId));
-    assert.equal(buttons().length, 5);
+    assert.equal(buttons().length, 6);
     assert.equal(text(app.find((node) => node.props?.id === "info-topic-heading")), "Ingestion");
     assert.ok(text(buttons().find((node) => node.props["aria-current"] === "page")).includes("Ingestion"));
 
@@ -309,6 +314,24 @@ test("topic navigation exposes one labelled article with every step visible and 
       assert.equal(nodes(app.state).filter((node) => node.type === "details" || node.type === "summary").length, 0);
       assert.equal(app.requests.length, 1, "topic navigation must not fetch settings or start work");
     }
+  } finally { app.dispose(); }
+});
+
+test("Models is a guide destination and returning to a process keeps the model overview out of its way", async () => {
+  const app = harness();
+  try {
+    const navigation = () => app.find((node) => node.type === "nav" && node.props["aria-label"] === "Guide topics");
+    const button = (name) => nodes(navigation()).find((node) => node.type === "button" && text(node).includes(name));
+    assert.equal(app.find((node) => node.props?.["aria-label"] === "Model versions"), undefined);
+    button("Models").props.onClick(); await app.flush();
+    assert.equal(button("Models").props["aria-current"], "page");
+    assert.equal(nodes(app.state).filter((node) => node.type === "article").length, 1);
+    assert.match(text(app.find((node) => node.type === "article")), /Gemini 3.8 Flash.*RF-DETR Seg Small.*Silero VAD/);
+    button("Search").props.onClick(); await app.flush();
+    assert.equal(button("Search").props["aria-current"], "page");
+    assert.equal(text(app.find((node) => node.props?.id === "info-topic-heading")), "Search");
+    assert.equal(app.find((node) => node.props?.["aria-label"] === "Model versions"), undefined);
+    assert.equal(app.requests.length, 1, "switching to models uses the existing snapshot");
   } finally { app.dispose(); }
 });
 
