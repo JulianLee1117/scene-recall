@@ -10,12 +10,12 @@ import styles from "./info.module.css";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 const TOPICS = [
-  { id: "ingestion", title: "Ingestion", description: "Prepare the library", outcome: "Searchable shots, frames and dialogue" },
-  { id: "search", title: "Search", description: "Find a moment", outcome: "Ranked moments linked to original footage" },
-  { id: "editing", title: "Editing", description: "Build an edit", outcome: "An editable timeline and playable export" },
-  { id: "storage", title: "Storage & services", description: "Keep sources and work", outcome: "Preserved sources and recoverable projects" },
-  { id: "glossary", title: "Glossary", description: "Learn the vocabulary", outcome: "One shared set of words for the whole system" },
-  { id: "models", title: "Models", description: "Current versions", outcome: "The model stack behind the app" },
+  { id: "ingestion", title: "Ingestion", label: "Ingestion", outcome: "Searchable shots, frames and dialogue" },
+  { id: "search", title: "Search", label: "Search", outcome: "Ranked moments linked to original footage" },
+  { id: "editing", title: "Editing", label: "Editing", outcome: "An editable timeline and playable export" },
+  { id: "storage", title: "Storage & services", label: "Storage", outcome: "Preserved sources and recoverable projects" },
+  { id: "glossary", title: "Glossary", label: "Glossary", outcome: "One shared set of words for the whole system" },
+  { id: "models", title: "Models", label: "Models", outcome: "The model stack behind the app" },
 ] as const;
 
 function filterGlossary(query: string): GlossaryGroup[] {
@@ -119,7 +119,7 @@ export default function InfoView() {
     <header className={styles.header}>
       <span className={styles.eyebrow}>INSIDE SCENE RECALL</span>
       <h1 id="info-heading">How Scene Recall works</h1>
-      <p>From a film file to a finished edit, one part at a time, in plain language, with the models behind each.</p>
+      <p>From a film file to a finished edit. Explore the workflow, vocabulary and models behind the app.</p>
     </header>
 
     <nav className={styles.topics} aria-label="Guide topics">
@@ -130,7 +130,7 @@ export default function InfoView() {
         aria-controls="info-topic"
         onClick={() => setTopicId(item.id)}
       >
-        <span><strong>{item.title}</strong><span>{item.description}</span></span>
+        <span>{item.label}</span>
       </button>)}
     </nav>
 

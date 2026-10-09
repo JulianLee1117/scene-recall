@@ -282,7 +282,8 @@ test("topic navigation exposes one labelled article with every step visible and 
 
     for (const topic of sections) {
       const displayTitle = topic.id === "editing" ? "Editing" : topic.title;
-      const button = buttons().find((node) => text(node).includes(displayTitle));
+      const navigationLabel = topic.id === "storage" ? "Storage" : displayTitle;
+      const button = buttons().find((node) => text(node) === navigationLabel);
       assert.ok(button, topic.title);
       assert.equal(button.props.type, "button");
       assert.notEqual(button.props.role, "tab", "topic navigation uses ordinary buttons, not a partial tab widget");
@@ -291,7 +292,7 @@ test("topic navigation exposes one labelled article with every step visible and 
 
       const selected = buttons().filter((node) => node.props["aria-current"] === "page");
       assert.equal(selected.length, 1);
-      assert.ok(text(selected[0]).includes(displayTitle));
+      assert.equal(text(selected[0]), navigationLabel);
       for (const other of buttons().filter((node) => node !== selected[0])) assert.notEqual(other.props["aria-current"], "page");
       const articles = nodes(app.state).filter((node) => node.type === "article");
       assert.equal(articles.length, 1);
