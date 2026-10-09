@@ -267,8 +267,10 @@ the result count, and each option is counted against the other facets. A
 **View** menu holds presentation only: the ranking preset, row size and
 Details, remembered in the browser, with a non-default preset shown as a chip
 beside the count. A grid that cannot fill the viewport from the loaded prefix
-requests the next one itself. A filter change reruns the search like an
-edited query, keeping the current scenes until the filtered ones arrive. Shot-level filters are not film scope and need
+requests the next one itself. Filter choices are a draft until the menu
+closes (Apply or a click away), then rerun the search once like an edited
+query, keeping the current scenes until the filtered ones arrive; ordering
+changes rerun after the same short pause. Shot-level filters are not film scope and need
 their own decision.
 
 With only movie scope supplied, `GET /library/scenes` browses selected published

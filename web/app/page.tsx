@@ -26,7 +26,7 @@ import { useGlide } from "@/hooks/useGlide";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
-import { filterableFilms, narrowScope, type FilmFilters } from "@/lib/filmFilters";
+import { filterableFilms, narrowScope, sameFilmIds, sameFilters, type FilmFilters, type FilterSelection } from "@/lib/filmFilters";
 import { DEFAULT_VIEW, ORDER_OPTIONS, loadViewPrefs, saveViewPrefs, type ViewPrefs } from "@/lib/viewPrefs";
 import {
   FACET_LABELS,
@@ -333,6 +333,20 @@ export default function Home() {
     [cancelPendingScopeSearch, selectedFilmIds],
   );
 
+  /**
+   * Reruns the current search after a short pause; a later call replaces an
+   * earlier one, so quick changes run one search. Scenes stay until the new
+   * ones arrive, like an edited query.
+   */
+  const scheduleSearch = useCallback(() => {
+    cancelPendingScopeSearch();
+    if (recipeClauseCount(query, matchDrafts, mainImageRef.current) === 0 && selectedFilmIds.length === 0) return;
+    scopeSearchTimerRef.current = window.setTimeout(() => {
+      scopeSearchTimerRef.current = null;
+      void runRecipe(query, matchDrafts);
+    }, MOVIE_SCOPE_SEARCH_DEBOUNCE_MS);
+  }, [cancelPendingScopeSearch, matchDrafts, query, runRecipe, selectedFilmIds.length]);
+
   const handleViewChange = useCallback(
     (change: Partial<ViewPrefs>) => {
       const next = { ...view, ...change };
@@ -341,11 +355,9 @@ export default function Home() {
       if (next.order === presetRef.current) return;
       // A new order reranks the current search.
       presetRef.current = next.order;
-      if (recipeClauseCount(query, matchDrafts, mainImageRef.current) > 0 || selectedFilmIds.length > 0) {
-        void runRecipe(query, matchDrafts);
-      }
+      scheduleSearch();
     },
-    [matchDrafts, query, runRecipe, selectedFilmIds.length, view],
+    [scheduleSearch, view],
   );
 
   // Plays feed the local taste log (pipeline/interactions.py); never blocks playback.
@@ -548,17 +560,9 @@ export default function Home() {
     (next: FilmFilters) => {
       filmFiltersRef.current = next;
       setFilmFilters(next);
-      // Like an edited query: the current scenes stay until the filtered
-      // ones arrive, so toggling several filters never blanks the page.
-      cancelPendingScopeSearch();
-      if (recipeClauseCount(query, matchDrafts, mainImageRef.current) > 0 || selectedFilmIds.length > 0) {
-        scopeSearchTimerRef.current = window.setTimeout(() => {
-          scopeSearchTimerRef.current = null;
-          void runRecipe(query, matchDrafts);
-        }, MOVIE_SCOPE_SEARCH_DEBOUNCE_MS);
-      }
+      scheduleSearch();
     },
-    [cancelPendingScopeSearch, matchDrafts, query, runRecipe, selectedFilmIds.length],
+    [scheduleSearch],
   );
 
   const handleMovieSuggestion = useCallback((suggestion: MovieSuggestion) => {
@@ -577,6 +581,15 @@ export default function Home() {
     commitMovieDraft(draft);
     handleMovieScopeChange(next.filmIds, next.query);
   }, [commitMovieDraft, films, handleMovieScopeChange]);
+
+  // The Filter menu applies its choices together: one search, whatever changed.
+  const handleFilterApply = useCallback((selection: FilterSelection) => {
+    if (!sameFilters(selection.filters, filmFiltersRef.current)) handleFiltersChange(selection.filters);
+    // A movie change is a scope change; it replaces the search just scheduled.
+    if (!sameFilmIds(selection.filmIds, compileMovieDraft(movieDraftRef.current).filmIds)) {
+      handleMoviePickerChange([...selection.filmIds]);
+    }
+  }, [handleFiltersChange, handleMoviePickerChange]);
 
   const handleVoiceTranscript = useCallback(
     (transcript: string) => {
@@ -1290,10 +1303,8 @@ export default function Home() {
                     view={filterView}
                     onViewChange={setFilterView}
                     films={films}
-                    filters={filmFilters}
-                    onFiltersChange={handleFiltersChange}
-                    selectedFilmIds={selectedFilmIds}
-                    onMoviesChange={handleMoviePickerChange}
+                    applied={{ filters: filmFilters, filmIds: selectedFilmIds }}
+                    onApply={handleFilterApply}
                   />
                 }
                 controls={

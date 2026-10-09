@@ -1430,8 +1430,9 @@ Use **Filter**, beside Refine, to narrow a search by era, genre, director or
 movie, before your first search or after. Its menu lists each section with its
 current choice and opens one section at a time; long sections have a search
 field. Choices within a section are alternatives (1990s or 2000s); sections
-combine (1990s and Crime). Each change reruns the search, and counts keep you
-from choosing a combination with no movie. Picking a movie in its section
+combine (1990s and Crime). Choices stay in the menu, where the counts preview
+the result and keep you from choosing a combination with no movie, then apply
+together with **Apply** (or a click away): one search however fast you pick. Picking a movie in its section
 appends that movie's mention, sharing the same scope as inline mentions;
 deselecting it removes the @ marker and leaves the title words as plain text.
 Going home clears the filters. Search uses bounded ranked candidate and result

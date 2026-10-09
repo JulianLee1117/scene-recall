@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { LibraryFilm } from "@/types/api";
 import {
   FILM_FACETS,
@@ -9,11 +9,13 @@ import {
   facetOptions,
   filterFilms,
   filterableFilms,
+  hasFilters,
   narrowScope,
+  sameSelection,
   toggleFilter,
   type FacetOption,
   type FilmFacetKey,
-  type FilmFilters,
+  type FilterSelection,
 } from "@/lib/filmFilters";
 import { displayFilmTitle } from "@/lib/movieSuggestions";
 import { displayTitle } from "@/lib/format";
@@ -37,50 +39,54 @@ interface SearchFilterProps {
   view: FilterView | null;
   onViewChange: (view: FilterView | null) => void;
   films: LibraryFilm[];
-  filters: FilmFilters;
-  onFiltersChange: (filters: FilmFilters) => void;
-  /** Movies chosen by name: the search text's @mentions. */
-  selectedFilmIds: readonly string[];
-  onMoviesChange: (filmIds: string[]) => void;
+  /** What the search uses now. */
+  applied: FilterSelection;
+  /** Runs the search once with the menu's choices. */
+  onApply: (selection: FilterSelection) => void;
 }
+
+const NO_SELECTION: FilterSelection = { filters: {}, filmIds: [] };
 
 /**
  * Narrows a search to movies by era, genre, director or title. The menu
  * opens on one row per section with its current choice, and drills into a
- * section to pick values. Each change applies at once; counts keep a choice
- * from emptying the library.
+ * section to pick values. Choices stay a draft, previewed by the counts,
+ * and apply together when the menu closes (Apply, or a click away), so
+ * quick toggling runs one search rather than many.
  */
-export default function SearchFilter({
-  view,
-  onViewChange,
-  films,
-  filters,
-  onFiltersChange,
-  selectedFilmIds,
-  onMoviesChange,
-}: SearchFilterProps) {
+export default function SearchFilter({ view, onViewChange, films, applied, onApply }: SearchFilterProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const catalog = useMemo(() => filterableFilms(films), [films]);
-  const close = useCallback(() => onViewChange(null), [onViewChange]);
-  useDismiss(view !== null, rootRef, close, triggerRef);
-  // Opening or changing sections moves focus into the menu, unless a search field took it.
+  const [draft, setDraft] = useState<FilterSelection | null>(null);
+  const working = draft ?? applied;
+  const changed = !sameSelection(working, applied);
+  const finish = () => {
+    if (changed) onApply(working);
+    setDraft(null);
+    onViewChange(null);
+  };
+  useDismiss(view !== null, rootRef, finish, triggerRef);
+  // Closed from outside (going home) drops the draft; opening or changing
+  // sections moves focus into the menu, unless a search field took it.
   useEffect(() => {
-    if (view && !panelRef.current?.contains(document.activeElement)) panelRef.current?.focus();
+    if (view === null) setDraft(null);
+    else if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus();
   }, [view]);
 
-  const active = activeFacets(filters);
+  const active = activeFacets(applied.filters);
   if (catalog.length === 0 && active.length === 0) return null;
 
-  const scope = narrowScope(selectedFilmIds, catalog, filters);
+  const { filters, filmIds } = working;
+  const scope = narrowScope(filmIds, catalog, filters);
   const searched = scope.excludesAll ? 0 : scope.filmIds.length || catalog.length;
   const summary = searched === catalog.length ? `All ${catalog.length} movies` : `${searched} of ${catalog.length} movies`;
 
   // Movies are a section too: those passing the filters can be picked.
   const passing = new Set(filterFilms(catalog, filters).map((film) => film.id));
-  const chosen = new Set(selectedFilmIds);
+  const chosen = new Set(filmIds);
   const movieOptions: FacetOption[] = catalog
     .map((film) => ({
       value: film.id,
@@ -101,16 +107,13 @@ export default function SearchFilter({
   ];
   const open = sections.find((section) => section.key === view);
 
-  const toggle = (section: Section, value: string) => {
-    if (section.key !== "movie") return onFiltersChange(toggleFilter(filters, section.key, value));
-    onMoviesChange(chosen.has(value) ? selectedFilmIds.filter((id) => id !== value) : [...selectedFilmIds, value]);
-  };
+  const edit = (next: Partial<FilterSelection>) => setDraft({ ...working, ...next });
+  const toggle = (section: Section, value: string) =>
+    section.key === "movie"
+      ? edit({ filmIds: chosen.has(value) ? filmIds.filter((id) => id !== value) : [...filmIds, value] })
+      : edit({ filters: toggleFilter(filters, section.key, value) });
   const clear = (section: Section) =>
-    section.key === "movie" ? onMoviesChange([]) : onFiltersChange(clearFacet(filters, section.key));
-  const clearAll = () => {
-    onFiltersChange({});
-    if (selectedFilmIds.length) onMoviesChange([]);
-  };
+    section.key === "movie" ? edit({ filmIds: [] }) : edit({ filters: clearFacet(filters, section.key) });
 
   return (
     <div className="toolbar-menu-root" ref={rootRef}>
@@ -122,7 +125,7 @@ export default function SearchFilter({
         aria-controls={panelId}
         aria-haspopup="dialog"
         title="Narrow the search by era, genre, director or movie"
-        onClick={() => onViewChange(view ? null : "menu")}
+        onClick={() => (view ? finish() : onViewChange("menu"))}
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 5h16l-6.2 7.4V18l-3.6 1.8v-7.4z" />
@@ -143,31 +146,32 @@ export default function SearchFilter({
               onClear={() => clear(open)}
             />
           ) : (
-            <>
-              <div className="toolbar-menu-list">
-                {sections.map((section) => {
-                  const picked = section.options.filter((option) => option.selected);
-                  return (
-                    <button key={section.key} type="button" className="toolbar-menu-row" onClick={() => onViewChange(section.key)}>
-                      <span>{section.label}</span>
-                      <span className={`toolbar-menu-value${picked.length ? " is-set" : ""}`}>
-                        {picked.length ? picked.map((option) => option.label ?? option.value).join(", ") : "Any"}
-                      </span>
-                      <DirectionIcon name="chevron-right" className="toolbar-menu-chevron" size={12} />
-                    </button>
-                  );
-                })}
-              </div>
-              <footer className="toolbar-menu-foot">
-                <span role="status">{summary}</span>
-                {(active.length > 0 || selectedFilmIds.length > 0) && (
-                  <button type="button" className="toolbar-menu-link" onClick={clearAll}>
-                    Clear all
+            <div className="toolbar-menu-list">
+              {sections.map((section) => {
+                const picked = section.options.filter((option) => option.selected);
+                return (
+                  <button key={section.key} type="button" className="toolbar-menu-row" onClick={() => onViewChange(section.key)}>
+                    <span>{section.label}</span>
+                    <span className={`toolbar-menu-value${picked.length ? " is-set" : ""}`}>
+                      {picked.length ? picked.map((option) => option.label ?? option.value).join(", ") : "Any"}
+                    </span>
+                    <DirectionIcon name="chevron-right" className="toolbar-menu-chevron" size={12} />
                   </button>
-                )}
-              </footer>
-            </>
+                );
+              })}
+            </div>
           )}
+          <footer className="toolbar-menu-foot">
+            <span role="status">{summary}</span>
+            {!open && (hasFilters(filters) || filmIds.length > 0) && (
+              <button type="button" className="toolbar-menu-link" onClick={() => setDraft(NO_SELECTION)}>
+                Clear all
+              </button>
+            )}
+            <button type="button" className={`toolbar-menu-apply${changed ? " is-primary" : ""}`} onClick={finish}>
+              {changed ? "Apply" : "Done"}
+            </button>
+          </footer>
         </div>
       )}
     </div>

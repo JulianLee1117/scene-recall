@@ -74,3 +74,11 @@ test("the search scope is the named movies or the library, narrowed by the filte
   // A filter every movie passes needs no film list.
   assert.deepEqual(plain(lib.narrowScope([], films, { era: ["1990s", "2000s"] })), { filmIds: [], excludesAll: false });
 });
+
+test("selections compare by value, whatever the order of their choices", () => {
+  assert.equal(lib.sameFilters({ genre: ["Crime", "Drama"] }, { genre: ["Drama", "Crime"] }), true);
+  assert.equal(lib.sameFilters({ genre: ["Crime"] }, { genre: ["Crime"], era: [] }), true);
+  assert.equal(lib.sameFilters({ genre: ["Crime"] }, { era: ["1990s"] }), false);
+  assert.equal(lib.sameSelection({ filters: {}, filmIds: ["a", "b"] }, { filters: {}, filmIds: ["b", "a"] }), true);
+  assert.equal(lib.sameSelection({ filters: {}, filmIds: ["a"] }, { filters: {}, filmIds: [] }), false);
+});

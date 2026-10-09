@@ -147,6 +147,29 @@ export function hasFilters(filters: FilmFilters): boolean {
   return activeFacets(filters).length > 0;
 }
 
+/** Everything the Filter menu applies at once: facet filters and movies chosen by name. */
+export interface FilterSelection {
+  filters: FilmFilters;
+  /** The search text's @mentions. */
+  filmIds: readonly string[];
+}
+
+const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((item) => b.includes(item));
+
+/** Whether two filter sets choose the same values, whatever the order. */
+export function sameFilters(a: FilmFilters, b: FilmFilters): boolean {
+  return FILM_FACETS.every(({ key }) => sameSet(a[key] ?? [], b[key] ?? []));
+}
+
+/** Whether two lists name the same movies, whatever the order. */
+export function sameFilmIds(a: readonly string[], b: readonly string[]): boolean {
+  return sameSet(a, b);
+}
+
+export function sameSelection(a: FilterSelection, b: FilterSelection): boolean {
+  return sameFilters(a.filters, b.filters) && sameFilmIds(a.filmIds, b.filmIds);
+}
+
 /**
  * The movies a search covers: the @mentioned ones, or the whole library,
  * narrowed by the filters. Empty `filmIds` without `excludesAll` means the

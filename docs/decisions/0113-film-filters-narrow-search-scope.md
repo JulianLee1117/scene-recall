@@ -47,10 +47,11 @@ not change.
   their current choices and opens one section at a time. (Amended 2026-10-09:
   a panel listing every value at once was too large.) Each value is counted
   against the other facets' filters; long sections have a search field and
-  leave out values no movie can match, while short ones dim them. Changes apply as they are made and rerun the search like
-  an edited query, after the usual debounce: the current scenes stay until
-  the filtered ones arrive, so toggling several filters never blanks the
-  page. Picking a movie still appends its @mention, which remains a scope
+  leave out values no movie can match, while short ones dim them. Choices
+  stay a draft, previewed by the counts, and apply together when the menu
+  closes (Apply, or a click away), rerunning the search once like an edited
+  query: the current scenes stay until the filtered ones arrive. (Amended
+  2026-10-09: applying each change at once ran a search per click.) Picking a movie still appends its @mention, which remains a scope
   change. Going home clears the filters. The Lab
   keeps its own movie picker.
 
