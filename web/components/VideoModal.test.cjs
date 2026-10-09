@@ -256,17 +256,22 @@ test("one action bar offers Save, Related, Match cuts at the playhead and Copy t
 
 test("picking another shot of the scene makes Save and Match cuts act on it", async () => {
   const shot = { ...film(), keyframe_index: 1, scene: { title: "Planetarium" },
-    scene_alternatives: [{ unit_id: "film-a_0004", t_start: 40, t_end: 44, keyframe_url: "/k/4", keyframe_index: 1, thumbnail_url: "/h/4", hero_time: 42.5 }] };
+    scene_alternatives: [
+      { unit_id: "film-a_0004", t_start: 40, t_end: 44, keyframe_url: "/k/4", keyframe_index: 1, thumbnail_url: "/h/4", hero_time: 42.5 },
+      { unit_id: "film-a_0006", t_start: 50, t_end: 70, keyframe_url: "/k/6", keyframe_index: 1 },
+    ] };
   const app = harness({ shot });
   try {
     await app.resolve(0, { url: "/video/film-a" });
     const strip = () => nodes(app.find((node) => node.props?.className === "modal-scene-alternatives")).filter((node) => node.type === "button");
-    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [true, false], "the retrieved shot leads the strip");
+    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [true, false, false], "the retrieved shot leads the strip");
+    const caption = () => text(app.find((node) => node.props?.className === "modal-caption"));
 
     strip()[1].props.onClick();
     await app.flush();
-    assert.equal(app.video().props.ref.current.currentTime, 40);
-    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [false, true]);
+    assert.equal(app.video().props.ref.current.currentTime, 42.5, "it opens on the frame its thumbnail shows");
+    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [false, true, false]);
+    assert.equal(caption(), "A scene", "the result's details stay put");
     assert.match(text(app.find((node) => node.props?.className === "modal-time")), /40s – 44s/);
     assert.equal(app.find((node) => node.type === "a" && text(node) === "Match cuts").props.href, "/match?unit_id=film-a_0004&time=42.500");
     app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
@@ -274,8 +279,16 @@ test("picking another shot of the scene makes Save and Match cuts act on it", as
     assert.equal(app.bookmarks[0].evidence_timestamp, 42.5, "it saves the frame its thumbnail showed");
     assert.equal(app.bookmarks[0].scene.title, "Planetarium");
 
+    // Without a chosen best frame a shot's moment is its middle: label, seek and save agree.
+    strip()[2].props.onClick();
+    await app.flush();
+    assert.match(text(strip()[2]), /60s/);
+    assert.equal(app.video().props.ref.current.currentTime, 60);
+    app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
+    assert.equal(app.bookmarks[1].evidence_timestamp, 60);
+
     app.button("Return to retrieved moment · 23s").props.onClick();
     await app.flush();
-    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [true, false]);
+    assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [true, false, false]);
   } finally { app.dispose(); }
 });

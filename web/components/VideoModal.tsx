@@ -39,8 +39,9 @@ function sceneShot(shot: SearchResult, alternative: SceneAlternative): SearchRes
     keyframe_index: alternative.keyframe_index,
     preview_url: alternative.preview_url ?? "",
     thumbnail_url: alternative.thumbnail_url,
-    // Its thumbnail's moment, so saving keeps the frame that was picked.
-    evidence_timestamp: alternative.hero_time,
+    // The moment its thumbnail shows: the best frame when known, else the
+    // middle, where its middle keyframe sits. Label, seek and save all use it.
+    evidence_timestamp: alternative.hero_time ?? (alternative.t_start + alternative.t_end) / 2,
     scene: shot.scene,
   };
 }
@@ -92,7 +93,7 @@ export default function VideoModal({
   const matchCutsHref = `/match?unit_id=${encodeURIComponent(current.unit_id)}&time=${matchTime.toFixed(3)}`;
   const pickShot = (item: SearchResult) => {
     setPickedUnitId(item.unit_id);
-    if (videoRef.current) videoRef.current.currentTime = item === shot ? evidenceTime : item.t_start;
+    if (videoRef.current) videoRef.current.currentTime = momentOf(item);
   };
 
   useEffect(() => {
@@ -307,25 +308,25 @@ export default function VideoModal({
         </div>
 
         <div className="modal-evidence">
-          {/* The current shot's own details; a picked shot shares only the scene's. */}
-          {(current.scene?.title || (current.badges?.length ?? 0) > 0) && (
+          {/* The result's details stay put while another shot of the scene is picked. */}
+          {(shot.scene?.title || (shot.badges?.length ?? 0) > 0) && (
             <div className="modal-story-header">
-              {current.scene?.title && <strong>{current.scene.title}</strong>}
-              {current.badges?.map((badge) => (
+              {shot.scene?.title && <strong>{shot.scene.title}</strong>}
+              {shot.badges?.map((badge) => (
                 <span key={badge} className={`result-badge result-badge-${badge}`}>{BADGE_LABELS[badge]}</span>
               ))}
             </div>
           )}
-          {current.scene?.summary && <p className="modal-scene-summary">{current.scene.summary}</p>}
-          {current.action && (
+          {shot.scene?.summary && <p className="modal-scene-summary">{shot.scene.summary}</p>}
+          {shot.action && (
             <p className="modal-story-action">
-              {current.action}
-              {(current.characters?.length ?? 0) > 0 && <span> — {current.characters?.join(", ")}</span>}
+              {shot.action}
+              {(shot.characters?.length ?? 0) > 0 && <span> — {shot.characters?.join(", ")}</span>}
             </p>
           )}
-          {current.famous_line && <p className="modal-famous-line">“{current.famous_line}”</p>}
-          {current.caption && <p className="modal-caption">{current.caption}</p>}
-          {isRetrieved && hasBreakdown && (
+          {shot.famous_line && <p className="modal-famous-line">“{shot.famous_line}”</p>}
+          {shot.caption && <p className="modal-caption">{shot.caption}</p>}
+          {hasBreakdown && (
             <section className="modal-reasons" aria-label="Why this scene ranked here">
               <h3>Why it&apos;s here</h3>
               <MatchBreakdown shot={shot} />
