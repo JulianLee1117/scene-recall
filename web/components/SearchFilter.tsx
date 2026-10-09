@@ -114,7 +114,8 @@ export default function SearchFilter({
     counted: !facet.perFilm,
   }));
   const open = sections.find((section) => section.key === view);
-  const editFilm = (film: FilmFilters) => setDraft({ ...working, film });
+  // Edits read the latest draft, so quick successive clicks all count.
+  const edit = (change: (current: SearchFilters) => SearchFilters) => setDraft((current) => change(current ?? applied));
 
   return (
     <div className="toolbar-menu-root" ref={rootRef}>
@@ -143,8 +144,8 @@ export default function SearchFilter({
               key={open.key}
               section={open}
               onBack={() => onViewChange("menu")}
-              onToggle={(value) => editFilm(toggleFilter(filters, open.key, value))}
-              onClear={() => editFilm(clearFacet(filters, open.key))}
+              onToggle={(value) => edit((current) => ({ ...current, film: toggleFilter(current.film, open.key, value) }))}
+              onClear={() => edit((current) => ({ ...current, film: clearFacet(current.film, open.key) }))}
             />
           ) : (
             <div className="toolbar-menu-list is-scroll">
@@ -171,7 +172,7 @@ export default function SearchFilter({
                         key={option.value}
                         type="button"
                         aria-pressed={(shot[facet.key] ?? []).includes(option.value)}
-                        onClick={() => setDraft({ ...working, shot: toggleShotFilter(shot, facet.key, option.value) })}
+                        onClick={() => edit((current) => ({ ...current, shot: toggleShotFilter(current.shot, facet.key, option.value) }))}
                       >
                         {option.label}
                       </button>
