@@ -4,7 +4,6 @@
   --guide-muted: #9a978f;
   --guide-line: #262520;
   --guide-surface: #11110e;
-  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   width: min(1080px, 100%);
   margin: 0 auto;
   padding: 64px 32px 72px;
@@ -14,7 +13,7 @@
 /* ── Header ─────────────────────────────────────────────── */
 .header { margin-bottom: 44px; }
 .eyebrow { color: var(--guide-accent); font-size: 11px; font-weight: 500; letter-spacing: .18em; }
-.header h1 { margin: 14px 0 14px; color: #f3f0e8; font-family: var(--serif); font-size: clamp(36px, 5vw, 54px); font-weight: 400; line-height: 1.08; letter-spacing: -.02em; }
+.header h1 { margin: 14px 0 14px; color: #f3f0e8; font-size: clamp(34px, 4.6vw, 50px); font-weight: 500; line-height: 1.1; letter-spacing: -.035em; }
 .header p { margin: 0; max-width: 520px; color: var(--guide-muted); font-size: 16px; line-height: 1.6; }
 
 /* ── Topic navigation ───────────────────────────────────── */
@@ -35,7 +34,7 @@
 @media (prefers-reduced-motion: reduce) { .article { animation: none; } }
 
 .topicHeader { display: grid; grid-template-columns: minmax(0, 1fr) 250px; align-items: end; gap: 48px; }
-.topicHeader h2 { margin: 0 0 12px; color: #f0ede6; font-family: var(--serif); font-size: 36px; font-weight: 400; letter-spacing: -.015em; line-height: 1.15; }
+.topicHeader h2 { margin: 0 0 12px; color: #f0ede6; font-size: 34px; font-weight: 500; letter-spacing: -.03em; line-height: 1.15; }
 .topicSummary { margin: 0; max-width: 520px; font-size: 16px; line-height: 1.6; color: #aeaaa1; }
 .outcome { margin: 0; padding: 2px 0 2px 20px; border-left: 1px solid #4a4233; color: #dccfb8; font-size: 14px; line-height: 1.55; }
 .outcome > span { display: block; margin-bottom: 6px; color: var(--guide-muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
@@ -55,15 +54,15 @@
 .layers li::before { display: none; }
 .layers .flowMarker { margin: 0; flex-shrink: 0; border-radius: 8px; }
 
-.introduction { max-width: 660px; margin: 0 0 48px; font-family: var(--serif); font-size: 20px; line-height: 1.6; color: #cdc7ba; }
+.introduction { max-width: 660px; margin: 0 0 48px; font-size: 19px; line-height: 1.65; color: #cdc7ba; letter-spacing: -.01em; }
 .introduction strong { color: #ddd2bd; font-weight: 500; }
 
 /* ── Steps: a quiet timeline ────────────────────────────── */
 .step { display: grid; grid-template-columns: 96px minmax(0, 1fr); padding: 48px 0 52px; border-bottom: 1px solid var(--guide-line); }
-.stepMarker { padding-top: 9px; color: var(--guide-accent); font-family: var(--serif); font-size: 15px; font-variant-numeric: tabular-nums; }
+.stepMarker { padding-top: 7px; color: var(--guide-accent); font-size: 12px; font-variant-numeric: tabular-nums; }
 .stepContent { min-width: 0; }
 .stepHeader { margin-bottom: 18px; }
-.stepHeader h3 { margin: 0 0 8px; color: #f0ece3; font-family: var(--serif); font-size: 26px; font-weight: 400; line-height: 1.25; letter-spacing: -.01em; }
+.stepHeader h3 { margin: 0 0 8px; color: #f0ece3; font-size: 24px; font-weight: 500; line-height: 1.25; letter-spacing: -.025em; }
 .stepHeader p { margin: 0; color: #b3aea4; font-size: 15px; line-height: 1.6; }
 .explanation { max-width: 660px; }
 .explanation p { margin: 0 0 14px; font-size: 14px; line-height: 1.8; color: #aaa69e; }
@@ -125,7 +124,7 @@
 
 .termGroup { scroll-margin-top: 24px; padding: 44px 0 4px; }
 .termGroupHeader { display: flex; align-items: baseline; gap: 18px; margin-bottom: 10px; }
-.termGroupHeader h3 { margin: 0; color: #f0ece3; font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: -.01em; }
+.termGroupHeader h3 { margin: 0; color: #f0ece3; font-size: 22px; font-weight: 500; letter-spacing: -.02em; }
 .termGroupHeader p { margin: 0; color: var(--guide-muted); font-size: 14px; line-height: 1.6; }
 .terms { margin: 0; }
 .termRow { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; padding: 18px 0; border-bottom: 1px solid #23221d; }
