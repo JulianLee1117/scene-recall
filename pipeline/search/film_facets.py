@@ -24,6 +24,7 @@ GENRE_FAMILIES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("Action", r"\baction\b|martial arts|superhero|wuxia|samurai|girls with guns|\bchase\b|sword-and-sandal"),
         ("Adventure", r"adventure|treasure hunt|survival|sword and sorcery"),
         ("Animation", r"anim(?:ated|ation)|\banime\b"),
+        ("Anime", r"\banime\b"),
         ("Arthouse", r"\bart film|arthouse|experimental|surreal|psychedelic|absurdist"),
         ("Biography", r"biograph|biopic"),
         ("Comedy", r"comedy|comedic|satir|parody|tragicomedy"),
@@ -50,9 +51,15 @@ GENRE_FAMILIES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 )
 
 
-def genre_families(genres: Iterable[str]) -> list[str]:
-    """The families a film's raw genre labels belong to, in table order."""
-    labels = [str(genre).casefold() for genre in genres if genre]
+# A live-action film with animated passages (Avatar, Who Framed Roger Rabbit) is not an animation.
+_HYBRID = re.compile(r"live[- ]action")
+
+
+def genre_families(genres: Iterable[str], forms: Iterable[str] = ()) -> list[str]:
+    """The families a film's raw genre labels and its Wikidata form (anime film, animated film)
+    belong to, in table order."""
+    labels = [str(label).casefold() for label in (*genres, *forms) if label]
+    labels = [label for label in labels if not _HYBRID.search(label)]      # a form, not a genre
     return [family for family, pattern in GENRE_FAMILIES if any(pattern.search(label) for label in labels)]
 
 
@@ -84,12 +91,13 @@ def film_facets(db: Any) -> dict[str, dict[str, Any]]:
         cached = _CACHE.get(key)
         if cached is not None and cached[0] == version:
             return cached[1]
-    rows = table.search().select(["film_id", "year", "directors", "genres"]).limit(None).to_list()
+    columns = ["film_id", "year", "directors", "genres"] + (["forms"] if "forms" in table.schema.names else [])
+    rows = table.search().select(columns).limit(None).to_list()
     facets = {
         str(row["film_id"]): {
             "year": int(row["year"]) if row.get("year") else None,
             "directors": _json_list(row.get("directors")),
-            "genres": genre_families(_json_list(row.get("genres"))),
+            "genres": genre_families(_json_list(row.get("genres")), _json_list(row.get("forms"))),
         }
         for row in rows
         if row.get("film_id")

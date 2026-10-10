@@ -4350,6 +4350,19 @@ def test_genre_families_fold_wikidata_labels() -> None:
     assert genre_families(["independent film", "flashback film", "warrior film"]) == []
 
 
+def test_genre_families_read_the_film_form_and_skip_live_action_hybrids() -> None:
+    from pipeline.search.film_facets import genre_families
+
+    # Spider-Verse and Fantastic Mr Fox carry no animation genre label; their Wikidata form says it
+    assert genre_families(["action film", "superhero film"], ["animated film"]) == ["Action", "Animation"]
+    # anime is both Animation and Anime; the form alone is enough
+    assert genre_families(["fantasy film"], ["anime film"]) == ["Animation", "Anime", "Fantasy"]
+    assert genre_families(["science fiction anime"]) == ["Animation", "Anime", "Sci-fi"]
+    # Avatar's "live-action/animated film" label is not an animation
+    assert genre_families(["science fiction film", "live-action/animated film"]) == ["Sci-fi"]
+    assert genre_families(["drama film"], ["film"]) == ["Drama"]
+
+
 def test_api_library_does_not_mark_metadata_only_film_indexed(
     config: Config,
 ) -> None:

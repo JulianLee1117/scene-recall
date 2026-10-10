@@ -28,7 +28,7 @@ records.
 | Regions (masking spec shared by treatments; subject by video matte, box, near/far by depth) | Alg Mods Lab | `pipeline/lab/regions.py`, `pipeline/lab/matte.py`, `pipeline/lab/depth.py` | 0110 |
 | Grafts (landmark-aligned pieces of other shots, as plans) | Alg Mods Lab | `pipeline/lab/grafts.py`, `pipeline/algmods/composite.py` | 0110 (landmarks from 0099) |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
-| Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067, 0115 |
+| Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067, 0115, 0117 |
 
 Frozen: kept runnable, with no new investment. Their decision records hold the
 detail.
@@ -257,7 +257,10 @@ misreadings without claiming general natural-language intent recognition.
 Film filters (ADR-0113) narrow that scope by era, genre family, director and
 title.
 `/library` reports each indexed film's year, directors and genre families
-(`pipeline/search/film_facets.py`); the browser resolves the filters to
+(`pipeline/search/film_facets.py`, from its Wikidata genre labels and its film
+form, so an animated or anime film joins the Animation and Anime families with
+no genre label of its own; a live-action film with animated passages does
+not); the browser resolves the filters to
 `film_ids`, so retrieval and ranking are unchanged. Values within a facet are
 alternatives, and excluded values leave movies out ("Drama, not Animation");
 facets combine; @mentioned movies are narrowed too. Filters
@@ -276,7 +279,9 @@ changes rerun after the same short pause.
 Shot filters (ADR-0114) narrow by what is in the shot: dialogue, size,
 people, camera, color, time and place. `pipeline/search/shot_facets.py`
 derives one value per representative shot from `units` annotations and
-`shot_evidence` measurements (none when missing or unreliable), in memory per
+`shot_evidence` measurements (none when missing or unreliable; people fall back
+to the understanding pass's named characters when the COCO detector saw nobody,
+which is most shots of drawn or stop-motion characters), in memory per
 table version; `GET /search/shot-facets` lists them. A recipe's
 `shot_filters` bind a `UnitScope` to its search execution: resident channels
 mask rows before top-k, database paths drop out-of-scope rows in
@@ -330,6 +335,29 @@ This presentation does not change backend ranking, facet
 semantics, mandatory visual gates, movie scope or progressive result windows.
 The source player distinguishes a retrieved keyframe from its live playhead;
 moving playback does not silently change the indexed bookmark or search anchor.
+
+Result hover (ADR-0117) shows gold film title and timestamp, then one snippet.
+The explicit Words clause's own dialogue/OCR evidence takes priority, followed
+by the main query's strong quote (ordered overlap >= 0.8) or selected semantic
+dialogue/OCR evidence. These excerpts are labelled Spoken or On screen; otherwise
+the shot's `action`, falling back to `caption`, appears without a label. Channel
+ranks and unrelated clauses do not choose the snippet. Recipe text evidence
+preserves its own source, quote score and source timing before fusion; the
+browser never borrows another clause's top-level text or timestamp. The selected
+timed passage controls the hover time and initial playback, while source/save
+actions retain the indexed frame anchor. Retrieval and ranking are unchanged.
+
+Shot details load `GET /library/shot/{unit_id}/dialogue` on demand. It reads the
+canonical published shot and compiled `dialogue_lines` from one pinned snapshot,
+selecting by film and half-open time overlap so cues crossing cuts remain visible.
+The response retains source times and provenance and returns at most 200 lines
+chronologically, with an explicit truncation flag. Missing film-level dialogue
+coverage is unavailable, not proof of silence. There is no inference or backfill
+on this path. The Dialogue row shows a few lines around the matched passage,
+expands longer content and plays source timestamps. On-screen match text stays
+separate. These facts remain attached to the retrieved result while playback
+advances; empty/unavailable dialogue is omitted and failed reads can be retried.
+The detailed retrieval breakdown remains available separately.
 
 ADR-0062 adds an optional source-preserving browser audio representation for
 full-scene playback. `GET /video/{film_id}/playback` performs a read-only cache

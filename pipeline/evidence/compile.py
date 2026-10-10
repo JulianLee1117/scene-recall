@@ -65,6 +65,7 @@ def compile_film_meta(config: Any, db: Any, films: list[FilmRef], progress: Call
             "wikipedia_title": doc.get("wikipedia", {}).get("title"),
             "directors": json.dumps(wiki.get("directors", []), ensure_ascii=False),
             "genres": json.dumps(wiki.get("genres", []), ensure_ascii=False),
+            "forms": json.dumps(wiki.get("forms", []), ensure_ascii=False),
             "countries": json.dumps(wiki.get("countries", []), ensure_ascii=False),
             "languages": json.dumps(wiki.get("languages", []), ensure_ascii=False),
             "cast": json.dumps([{"actor": row["actor"], "characters": row["characters"]} for row in wiki.get("cast", [])], ensure_ascii=False),

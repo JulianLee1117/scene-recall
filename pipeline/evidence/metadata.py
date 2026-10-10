@@ -33,7 +33,7 @@ PRODUCER = store.Producer(
     name="open-data",
     version=1,
     settings={
-        "sources": ["wikidata", "wikipedia-plot", "wikiquote", "wikimedia-pageviews", "imdb-ratings"],
+        "sources": ["wikidata", "wikidata-forms", "wikipedia-plot", "wikiquote", "wikimedia-pageviews", "imdb-ratings"],
         "plot_max_chars": 12000,
         "quotes_max_chars": 40000,
         "pageview_months": 12,
@@ -60,6 +60,9 @@ FILM_CLASSES = {
     "Q229390",     # 3D film
 }
 _PLOT_HEADINGS = ("plot", "plot summary", "synopsis", "premise", "story", "summary")
+# Forms that say nothing beyond "a film": every other P31 class (anime film, animated film, silent
+# film, documentary film, short film) is kept as the film's form beside its genres.
+_PLAIN_FORMS = {"Q11424", "Q24869"}
 
 
 def normalize_title(value: str) -> str:
@@ -350,7 +353,8 @@ def build_metadata(api: OpenData, film: FilmRef, *, override: str | None = None,
     qid, entity, match = found
     result["match"] = {"status": "matched", "wikidata_id": qid, **match}
     cast = _cast(entity)
-    referenced = (_claim_ids(entity, "P57") + _claim_ids(entity, "P136") + _claim_ids(entity, "P495")
+    forms = [item for item in _claim_ids(entity, "P31") if item not in _PLAIN_FORMS]
+    referenced = (_claim_ids(entity, "P57") + _claim_ids(entity, "P136") + forms + _claim_ids(entity, "P495")
                   + _claim_ids(entity, "P364") + [row["actor_id"] for row in cast]
                   + [c["id"] for row in cast for c in row["characters"] if "id" in c])
     labels = {key: _label(value) for key, value in api.entities(referenced, props="labels").items()} if referenced else {}
@@ -366,6 +370,7 @@ def build_metadata(api: OpenData, film: FilmRef, *, override: str | None = None,
         "imdb_id": imdb_ids[0] if imdb_ids else None,
         "directors": [labels.get(item, item) for item in _claim_ids(entity, "P57")],
         "genres": [labels.get(item, item) for item in _claim_ids(entity, "P136")],
+        "forms": [labels.get(item, item) for item in forms],
         "countries": [labels.get(item, item) for item in _claim_ids(entity, "P495")],
         "languages": [labels.get(item, item) for item in _claim_ids(entity, "P364")],
         "duration_minutes": duration,

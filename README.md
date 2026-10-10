@@ -316,14 +316,19 @@ drag badge. The player's action bar saves, finds related scenes, opens **Match
 cuts** at the playhead in a new tab and copies the film and time, acting on the
 shot on screen: play or scrub elsewhere in the film and the line above the
 actions names the scene you are in, with **Back to result** to return. Its details describe
-the result, labelled **Scene** (the story), **Shot** (what happens, and who) and
-**Picture** (what the frame shows).
-Hovering a result shows one line named by the same words. When your words
-found the shot well (within a finder's top 30), it is the spoken line
-(**Dialogue**) or the text that matched in meaning (**Picture**, **Shot**,
-**Scene**, **On-screen text**, **Mood** or **Shot details**), whichever ranked
-it higher; otherwise it is what happens in the shot. **Show details** lists
-every finder.
+the result, labelled **Scene** (the story), **Shot** (what happens, and who),
+**Dialogue** (available subtitle/transcript lines) and **Picture** (what the
+frame shows). Dialogue loads on opening the player, shows a few lines around
+the match, and expands when longer. Its timestamps play the corresponding
+line. Matched on-screen words have their own **On screen** row.
+Hovering a result shows the film title in gold and its timestamp, followed by
+what happens in the shot (or the Picture description when no Shot description
+exists), without a category label. Useful matched words instead appear as one
+excerpt labelled **Spoken** or **On screen**: an explicit **Words** match takes
+priority, followed by the main search's strong quote or selected dialogue/OCR
+evidence. Weak quote overlap alone does not replace the description. A timed
+excerpt opens playback on that passage; the indexed frame remains the source
+for saving and visual references. The full retrieval breakdown stays in details.
 **Show details** (under **View**) shows each result's Picture text and how each
 retrieval channel ranked it. Every card in a search lists the same rows in a fixed order: Visual (image-text
 embedding), Semantic (text embedding, with the view it matched such as Shot or
@@ -1431,7 +1436,8 @@ browse scenes in source order without a model query. This uses the normal bounde
 result prefix; a description searches across the whole selected film, including
 later moments. Shot types, subjects, styles and feelings can share one description.
 
-Use **Filter**, beside Refine, to narrow a search by era, genre, director or
+Use **Filter**, beside Refine, to narrow a search by era, genre (Animation and
+Anime included, from the film's Wikidata form), director or
 movie, before your first search or after. Its menu lists each section with its
 current choice and opens one section at a time; long sections have a search
 field. Choices within a section are alternatives (1990s or 2000s); sections

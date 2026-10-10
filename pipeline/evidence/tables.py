@@ -30,6 +30,7 @@ def film_meta_schema() -> pa.Schema:
         pa.field("wikipedia_title", pa.string()),
         pa.field("directors", pa.string()),      # JSON list[str]
         pa.field("genres", pa.string()),         # JSON list[str]
+        pa.field("forms", pa.string()),          # JSON list[str]: Wikidata film form (anime film, animated film, ...)
         pa.field("countries", pa.string()),      # JSON list[str]
         pa.field("languages", pa.string()),      # JSON list[str]
         pa.field("cast", pa.string()),           # JSON list[{actor, characters}]

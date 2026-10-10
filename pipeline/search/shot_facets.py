@@ -73,7 +73,17 @@ def _place(unit: Row, _evidence: Row, _spoken: bool) -> str | None:
 
 
 def _people(_unit: Row, evidence: Row, _spoken: bool) -> str | None:
+    """People in the shot: the detector's count, or, when it saw nobody, the characters the
+    understanding pass named. The detector is COCO-trained and blind to drawn, stop-motion or
+    non-human characters (Spirited Away: nobody in 86% of shots with named characters)."""
     value = evidence.get("people")
+    if value is None or value < 0.5:
+        try:
+            named = json.loads(evidence.get("characters") or "[]")
+        except (TypeError, ValueError):
+            named = []
+        if isinstance(named, list) and named:
+            value = float(len(named))
     if value is None:
         return None
     return "none" if value < 0.5 else "one" if value < 1.5 else "two" if value < 2.5 else "group"
@@ -99,7 +109,7 @@ SHOT_FACETS: tuple[ShotFacet, ...] = (
 _BY_KEY = {facet.key: facet for facet in SHOT_FACETS}
 
 _UNIT_COLUMNS = ["unit_id", "film_id", "framing", "setting", "time_of_day", "dialogue"]
-_EVIDENCE_COLUMNS = ["unit_id", "colorfulness", "camera", "camera_reliability", "people"]
+_EVIDENCE_COLUMNS = ["unit_id", "colorfulness", "camera", "camera_reliability", "people", "characters"]
 
 
 def validate_shot_filters(filters: Mapping[str, Sequence[str]]) -> dict[str, tuple[str, ...]]:

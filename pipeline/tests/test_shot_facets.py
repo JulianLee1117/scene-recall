@@ -148,3 +148,16 @@ def test_api_rejects_unknown_shot_filters() -> None:
     assert request.shot_filters == {"color": ["bw"]}
     with pytest.raises(ValidationError):
         SearchRecipeRequest(clauses=[clause], shot_filters={"lens": ["wide"]})
+
+
+def test_people_fall_back_to_named_characters_when_the_detector_saw_nobody() -> None:
+    # Drawn and stop-motion characters are invisible to the COCO detector; the understanding
+    # pass still names them. A live-action shot with a detected person keeps the detector's count.
+    units = [_unit("anime", framing="medium"), _unit("empty", framing="wide"), _unit("live", framing="medium")]
+    evidence = {
+        "anime": {"people": 0.0, "characters": json.dumps(["Chihiro Ogino", "Haku"])},
+        "empty": {"people": 0.0, "characters": json.dumps([])},
+        "live": {"people": 1.0, "characters": json.dumps(["Mia", "Sebastian", "Keith"])},
+    }
+    index = _build_index(units, evidence)
+    assert _values(index, "people") == ["two", "none", "one"]
