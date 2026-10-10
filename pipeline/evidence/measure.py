@@ -8,7 +8,8 @@ shots to the GPU:
   series (static / pan / tilt / push / pull / roll / handheld / unknown);
 * hidden cuts — frame pairs the flow cannot explain and whose colour
   distribution jumps, away from the shot's own boundaries;
-* subjects — RF-DETR detections at ``DETECT_FPS`` with a tracked main subject
+* subjects — detections at ``DETECT_FPS`` with a tracked main subject, from the film's subject
+  backend (``pipeline.evidence.subjects``: RF-DETR for live action, a grounder for drawn films)
   (position, size, screen direction);
 * look — brightness, contrast, saturation, colourfulness, warmth, palette;
 * per-sample series — camera vectors and residual subject motion at
@@ -34,7 +35,7 @@ from typing import Any, Callable, Iterator
 
 import numpy as np
 
-from pipeline.evidence import store
+from pipeline.evidence import store, subjects
 from pipeline.evidence.library import FilmRef, film_units
 
 
@@ -152,6 +153,14 @@ class Models:
         self._raft = None
         self._detector = None
         self._classes: dict[int, str] | None = None
+        self.subjects = subjects.COCO          # the current film's subject backend
+        self._grounded = None
+
+    @property
+    def grounded(self):
+        if self._grounded is None:
+            self._grounded = subjects.GroundedSubjects(self.device)
+        return self._grounded
 
     @property
     def raft(self):
@@ -204,6 +213,9 @@ class Models:
         """Detections for uploaded N×H×W×3 uint8 frames (boxes as frame fractions)."""
         if len(frames) == 0:
             return []
+        if self.subjects == subjects.GROUNDED:
+            found = self.grounded.detect(list(frames.cpu().numpy()))
+            return [[(det.name, det.score, tuple(float(v) for v in det.box)) for det in per] for per in found]
         images = [frame.permute(2, 0, 1).float().div_(255) for frame in frames]
         results = self.detector.predict(images, threshold=DETECT_THRESHOLD, include_source_image=False)
         if not isinstance(results, list):
@@ -748,10 +760,12 @@ def run(config: Any, db: Any, films: list[FilmRef], *, force: bool = False, lock
     counts = {"cached": 0, "done": 0, "failed": 0}
     for number, film in enumerate(films, start=1):
         units = film_units(db, film.film_id)
-        inputs = {"shots": shots_digest(units)}
+        backend = subjects.backend_for_film(db, film.film_id, subjects.configured_families(config))
+        inputs = subjects.cache_inputs(shots_digest(units), backend)
         if not force and store.read_artifact(config.paths.assets_dir, film.film_id, PRODUCER, inputs=inputs):
             counts["cached"] += 1
             continue
+        models.subjects = backend
         try:
             if lock_films:
                 with film_operation_lock(Path(config.paths.assets_dir) / film.film_id):
@@ -762,6 +776,7 @@ def run(config: Any, db: Any, films: list[FilmRef], *, force: bool = False, lock
             counts["failed"] += 1
             progress(f"[measure] {film.title}: failed ({str(exc)[:300]})")
             continue
+        data["subjects"] = subjects.record(backend)
         store.write_artifact(config.paths.assets_dir, film.film_id, PRODUCER, data, inputs=inputs, compress=True)
         counts["done"] += 1
         progress(f"[measure] {number}/{len(films)} {film.title}: {data['measured']}/{data['units']} shots, "

@@ -7,8 +7,10 @@ a mean subject box) cannot say *when* inside a shot that happens, so this pass
 describes the picture on the film's time grid (``t = k / FPS``) inside every
 shot, at a size small enough to index the whole library:
 
-* ``instances`` — RF-DETR segmentation (COCO): class, score, box and a 16x16
-  silhouette inside the box, for the largest few objects;
+* ``instances`` — class, score, box and a 16x16 silhouette inside the box, for the
+  largest few objects, from the film's subject backend (``pipeline.evidence.subjects``):
+  RF-DETR segmentation (COCO) for live action; for drawn films a grounder's boxes with
+  the silhouette of RF-DETR's best-overlapping query and ViTPose keypoints;
 * ``poses`` — RF-DETR keypoints (COCO 17) for the largest few people, on
   instants where segmentation found a person: where heads and eyes are (the
   eye trace), which body parts the frame shows (close-up or full figure) and
@@ -38,7 +40,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from pipeline.evidence import store
+from pipeline.evidence import store, subjects
 from pipeline.evidence.library import FilmRef, film_units
 
 FPS = 4.0
@@ -89,7 +91,8 @@ def model_names() -> dict[str, str]:
 def class_names() -> dict[int, str]:
     """Stored class codes (1..80) to names: COCO categories in id order, as the producer encodes them."""
     from rfdetr.assets.coco_classes import COCO_CLASSES
-    return {position + 1: COCO_CLASSES[coco_id] for position, coco_id in enumerate(sorted(COCO_CLASSES))}
+    names = {position + 1: COCO_CLASSES[coco_id] for position, coco_id in enumerate(sorted(COCO_CLASSES))}
+    return {**names, **subjects.EXTRA_CLASS_NAMES}
 
 # ---------------------------------------------------------------------------
 # Pure helpers (numpy; unit tested without a GPU)
@@ -180,6 +183,25 @@ class Models:
         self._rf = None
         self._pose = None
         self._classes: dict[int, int] = {}
+        self.subjects = subjects.COCO          # the current film's subject backend
+        self._grounded = None
+
+    @property
+    def grounded(self):
+        if self._grounded is None:
+            self._grounded = subjects.GroundedSubjects(self.device)
+        return self._grounded
+
+    def _images(self, rgb: Any) -> list[np.ndarray]:
+        """The content-cropped frames back as H x W x 3 uint8 arrays for the grounder."""
+        return list((rgb * 255).round().clamp(0, 255).to(self.torch.uint8).permute(0, 2, 3, 1).cpu().numpy())
+
+    def _grounded_poses(self, rgb: Any, instances: list[list[tuple[int, float, np.ndarray, np.ndarray]]]) -> dict[int, list]:
+        boxes = [[box for code, score, box, _ in rows if code == 1 and score >= 0.4] for rows in instances]
+        if not any(boxes):
+            return {}
+        found = self.grounded.poses(self._images(rgb), boxes)
+        return {index: people for index, people in enumerate(found) if people}
 
     @property
     def rf(self):
@@ -276,9 +298,12 @@ class Models:
             sharpness = lap.flatten(1).var(dim=1)
             brightness = luma.mean(dim=(1, 2, 3))
             instances = self._segment(rgb)
-            people = [index for index, rows in enumerate(instances) if any(code == 1 and score >= 0.4
-                                                                            for code, score, _, _ in rows)]
-            poses = self._poses(rgb, people)
+            if self.subjects == subjects.GROUNDED:
+                poses = self._grounded_poses(rgb, instances)
+            else:
+                people = [index for index, rows in enumerate(instances) if any(code == 1 and score >= 0.4
+                                                                                for code, score, _, _ in rows)]
+                poses = self._poses(rgb, people)
         # The orientation field is scaled per frame (its direction and relative strength
         # matter); edge energy keeps an absolute log scale (busy versus clean pictures).
         field_np = field.cpu().numpy()
@@ -316,11 +341,42 @@ class Models:
         cx, cy, w, h = boxes.float().unbind(-1)
         xyxy = torch.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], dim=-1).clamp(0, 1)
         score_np, label_np, box_np = score.cpu().numpy(), label.cpu().numpy(), xyxy.cpu().numpy()
-        kept = [(frame, int(query)) for frame in range(len(score_np))
-                for query in select_instances(score_np[frame], label_np[frame], box_np[frame])]
         results: list[list[tuple[int, float, np.ndarray, np.ndarray]]] = [[] for _ in range(len(score_np))]
+        # (frame, query or -1, code, score, box): which query lends its mask and what the subject is
+        kept: list[tuple[int, int, int, float, np.ndarray]] = []
+        if self.subjects == subjects.GROUNDED:
+            for frame, found in enumerate(self.grounded.detect(self._images(rgb))):
+                area = np.array([(d.box[2] - d.box[0]) * (d.box[3] - d.box[1]) for d in found], np.float32)
+                order = [i for i in np.argsort(-(area * np.array([d.score for d in found], np.float32)), kind="stable")
+                         if area[i] >= MIN_INSTANCE_AREA][:MAX_INSTANCES]
+                chosen = [found[i] for i in order]
+                for det, query in zip(chosen, subjects.match_masks(chosen, box_np[frame])):
+                    kept.append((frame, query, det.code, det.score, det.box.astype(np.float32)))
+        else:
+            for frame in range(len(score_np)):
+                for query in select_instances(score_np[frame], label_np[frame], box_np[frame]):
+                    kept.append((frame, int(query), self._classes.get(int(label_np[frame, query]), 0),
+                                 float(score_np[frame, query]), box_np[frame, query].astype(np.float32)))
         if not kept:
             return results
+        from torchvision.ops import roi_align
+        mh, mw = masks.shape[-2:]
+        with_mask = [k for k, (_f, query, *_rest) in enumerate(kept) if query >= 0]
+        silhouettes = {}
+        if with_mask:
+            frames_index = torch.tensor([kept[k][0] for k in with_mask], device=self.device)
+            queries_index = torch.tensor([kept[k][1] for k in with_mask], device=self.device)
+            selected = masks[frames_index, queries_index].float().unsqueeze(1)                # K x 1 x h x w
+            boxes_px = torch.from_numpy(np.stack([kept[k][4] for k in with_mask])).to(self.device) \
+                * torch.tensor([mw, mh, mw, mh], dtype=torch.float32, device=self.device)
+            rois = torch.cat([torch.arange(len(with_mask), device=self.device, dtype=torch.float32).unsqueeze(1), boxes_px], dim=1)
+            cut = (roi_align(selected, rois, output_size=(SILHOUETTE, SILHOUETTE), spatial_scale=1.0,
+                             sampling_ratio=2, aligned=True)[:, 0] > 0).cpu().numpy()
+            silhouettes = {k: cut[row] for row, k in enumerate(with_mask)}
+        empty = np.zeros((SILHOUETTE, SILHOUETTE), bool)
+        for k, (frame, _query, code, score, box) in enumerate(kept):
+            results[frame].append((code, score, box, pack_silhouette(silhouettes.get(k, empty))))
+        return results
         from torchvision.ops import roi_align
         mh, mw = masks.shape[-2:]
         frames_index = torch.tensor([frame for frame, _ in kept], device=self.device)
@@ -479,7 +535,7 @@ def arrays_path(assets_dir: Path, film_id: str) -> Path:
 
 
 def write(assets_dir: Path, film: FilmRef, units: list[dict[str, Any]], arrays: dict[str, np.ndarray],
-          inputs: dict[str, str], content: list[float] | None, elapsed: float) -> None:
+          inputs: dict[str, str], content: list[float] | None, elapsed: float, *, backend: str = subjects.COCO) -> None:
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **arrays)
     payload = buffer.getvalue()
@@ -489,7 +545,7 @@ def write(assets_dir: Path, film: FilmRef, units: list[dict[str, Any]], arrays: 
             "described": int(arrays["described"].sum()), "instances": int(len(arrays["inst_moment"])),
             "poses": int(len(arrays["pose_moment"])),
             "content_box": content, "arrays": path.name, "arrays_sha256": hashlib.sha256(payload).hexdigest(),
-            "elapsed_s": round(elapsed, 1)}
+            "elapsed_s": round(elapsed, 1), "subjects": subjects.record(backend)}
     store.write_artifact(assets_dir, film.film_id, PRODUCER, data, inputs=inputs)
 
 
@@ -524,12 +580,14 @@ def run(config: Any, db: Any, films: list[FilmRef], *, force: bool = False, lock
     counts = {"cached": 0, "done": 0, "failed": 0}
     for number, film in enumerate(films, start=1):
         units = film_units(db, film.film_id)
-        inputs = {"shots": shots_digest(units)}
+        backend = subjects.backend_for_film(db, film.film_id, subjects.configured_families(config))
+        inputs = subjects.cache_inputs(shots_digest(units), backend)
         if not force and store.read_artifact(assets, film.film_id, PRODUCER, inputs=inputs) is not None \
                 and arrays_path(assets, film.film_id).is_file():
             counts["cached"] += 1
             continue
         models = models or Models()
+        models.subjects = backend
         started = time.perf_counter()
         try:
             content = _film_content_box(assets, film.film_id)
@@ -538,7 +596,7 @@ def run(config: Any, db: Any, films: list[FilmRef], *, force: bool = False, lock
                     arrays = describe_film(film, units, models, content, progress)
             else:
                 arrays = describe_film(film, units, models, content, progress)
-            write(assets, film, units, arrays, inputs, content, time.perf_counter() - started)
+            write(assets, film, units, arrays, inputs, content, time.perf_counter() - started, backend=backend)
         except Exception as exc:  # noqa: BLE001 - one film must not stop a library run
             counts["failed"] += 1
             progress(f"[moments] {film.title}: failed ({str(exc)[:300]})")

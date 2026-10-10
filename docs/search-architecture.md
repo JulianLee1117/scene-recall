@@ -27,7 +27,7 @@ records.
 | Alg Mods (treatments on one film window; tile bank) | Alg Mods Lab | `pipeline/algmods/`, `web/features/lab/algmods/` | 0110 (0070 pattern) |
 | Regions (masking spec shared by treatments; subject by video matte, box, near/far by depth) | Alg Mods Lab | `pipeline/lab/regions.py`, `pipeline/lab/matte.py`, `pipeline/lab/depth.py` | 0110 |
 | Grafts (landmark-aligned pieces of other shots, as plans) | Alg Mods Lab | `pipeline/lab/grafts.py`, `pipeline/algmods/composite.py` | 0110 (landmarks from 0099) |
-| Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/lab/matching/` | 0099 (0008 gates ordinary search) |
+| Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/lab/matching/` | 0099 (0008 gates ordinary search), 0119 (subject backends) |
 | Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067, 0115, 0117, 0118 |
 
 Frozen: kept runnable, with no new investment. Their decision records hold the
@@ -151,7 +151,7 @@ settings); recorded input digests make stale artifacts detectable. Producers:
 | `audio`, `subtitles` | Silero VAD, OpenSubtitles | English subtitles for Whisper-only films, synced to speech (FFT alignment, frame-rate scales, windowed shifts) and accepted by lift/prominence/text agreement; raw downloads archived |
 | `understanding` | Gemini 3.8 Flash | per chunk of ≤160 shots: 240p shot-numbered proxy + shot table + dialogue + cast/plot context → scenes, per-shot characters, action, peak time, emotion, line, sound, fame 0-3, craft 0-3, cut hint, iconic moments; resumable chunk receipts; standard or half-price batch transport; a synopsis that trips a content filter is retried without it; a clip refused even without it is closed with no records and listed in the artifact; shots an answer skipped are re-requested once per consecutive run and spliced into their chunk |
 | `highlights` | Gemini 3.8 Flash (text) | one call per film: merges the understanding pass's iconic flags into the film's best-known moments, ranked by recognizability (with Wikiquote quotes), plus visual motifs |
-| `measure` | RAFT-small, RF-DETR | one GPU decode per film: camera flow series (labels derived at compile time, including slow drift), hidden cuts, subject boxes and main-subject track, letterbox-aware look and palette, sharpness |
+| `measure` | RAFT-small, a subject backend (RF-DETR; Grounding DINO for drawn films, ADR-0119) | one GPU decode per film: camera flow series (labels derived at compile time, including slow drift), hidden cuts, subject boxes and main-subject track, letterbox-aware look and palette, sharpness |
 | `hero` | frame pick, keyframe embeddings | how a shot is shown (ADR-0098): its pictures (split at hidden cuts and wherever neighbouring keyframes stop looking alike, black removed), the focus span (the picture holding the peak), the best still inside it at 1280 px, and a 4 s H.264 hover preview around the peak where the ingest one strays outside a focus span of at least 1 s |
 | `synthesis` | priors | within-film and library fame, craft, distinctiveness; rare iconic and hidden-gem flags; per-film highlights and gems |
 
@@ -2568,6 +2568,12 @@ skipping non-reference frames on NVDEC. It describes every instant on the
 film's 4 fps grid inside every shot, at least 0.04 s from its cuts, in content
 coordinates (the film's letterbox bars, from `measure`, are cropped away):
 
+- Subjects from the film's backend (ADR-0119, `pipeline/evidence/subjects.py`): live
+  action uses RF-DETR segmentation (COCO); films in the `ingest.grounded_subjects`
+  families (Animation) use Grounding DINO boxes under generic subject words, codes 1
+  (person), 81 (animal), 82 (creature), 83 (vehicle), the silhouette of RF-DETR's
+  best-overlapping query and ViTPose keypoints; the backend is keyed into grounded
+  artifacts' inputs and recorded in the index's film rows.
 - RF-DETR segmentation (COCO): at most six objects above 0.35, by area x
   score, each with a box and a 16x16 silhouette inside it;
 - RF-DETR keypoints (COCO 17) for the four largest people (by keypoint extent,

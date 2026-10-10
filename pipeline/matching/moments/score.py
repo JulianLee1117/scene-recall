@@ -78,12 +78,16 @@ ANIMALS = set(range(15, 25))          # bird .. giraffe
 VEHICLES = set(range(2, 10))          # bicycle .. boat
 
 
+GROUNDED_ANIMALS = {81, 82}           # grounded "animal" and "creature" (pipeline.evidence.subjects)
+GROUNDED_VEHICLE = 83
+
+
 def family(code: int) -> int:
     if code == PERSON:
         return 0
-    if code in ANIMALS:
+    if code in ANIMALS or code in GROUNDED_ANIMALS:
         return 1
-    if code in VEHICLES:
+    if code in VEHICLES or code == GROUNDED_VEHICLE:
         return 2
     return 3
 

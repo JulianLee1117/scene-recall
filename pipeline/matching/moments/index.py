@@ -281,6 +281,7 @@ def _load_film(assets: Path, db: Any, film: Any, progress: Callable[[str], None]
                 "moments_profile": document["profile_id"], "measure_profile": (measured or {}).get("profile_id"),
                 "count": int(len(times)), "instances": int(len(arrays["inst_moment"])),
                 "poses": int(len(arrays.get("pose_moment", ()))),
+                "subjects": (document["data"].get("subjects") or {}).get("backend", "coco"),
                 "units": [unit["unit_id"] for unit in units],
                 "unit_bounds": [[float(unit["t_start"]), float(unit["t_end"])] for unit in units]}
     return film_row, arrays

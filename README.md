@@ -28,9 +28,9 @@ uv run python -m pipeline.evidence refresh-dialogue            # adopt accepted 
 uv run python -m pipeline.evidence understand --batch run --max-usd 110 [--wave-chunks 300]   # half-price Gemini batch, unattended
 uv run python -m pipeline.evidence understand --retry-refused  # recover filter-refused clips in smaller pieces
 uv run python -m pipeline.evidence understand --retry-missing  # re-request shots an answer skipped (automatic for new films)
-uv run python -m pipeline.evidence measure                     # local GPU pass (~3-4 min per film)
+uv run python -m pipeline.evidence measure                     # local GPU pass (~3-4 min per film; tens of minutes for a drawn film)
 uv run python -m pipeline.evidence hero
-uv run python -m pipeline.evidence moments                     # match-cut GPU pass, every instant at 4 fps (~4 min per film)
+uv run python -m pipeline.evidence moments                     # match-cut GPU pass, every instant at 4 fps (~4 min per film; tens of minutes for a drawn film)
 uv run python -m pipeline.matching.moments index               # rebuild the library match-cut index afterwards
 uv run python -m pipeline.evidence synthesize
 uv run python -m pipeline.evidence compile                     # search tables + semantic text views
@@ -39,7 +39,12 @@ uv run python -m pipeline.evidence prune [--apply]             # remove supersed
 ```
 
 Every command accepts `--film` (repeatable: film ID, 8+ character ID prefix or
-title substring). Hosted passes need `GEMINI_API_KEY` (understanding) and
+title substring). Subjects (boxes, silhouettes, keypoints) come from RF-DETR for
+live action and, for films whose genre families include those in
+`ingest.grounded_subjects` (default `["Animation"]`), from a grounder that sees
+drawn and non-human characters, with RF-DETR silhouettes and ViTPose keypoints
+(ADR-0119); those two models download on first use. A film re-measures when its
+backend changes. Hosted passes need `GEMINI_API_KEY` (understanding) and
 `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD`
 (subtitles) in `.env`. `understand --batch status` lists submitted batch jobs;
 `--batch collect` writes their results once finished. New nullable columns in

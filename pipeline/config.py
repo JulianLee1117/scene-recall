@@ -104,6 +104,7 @@ class IngestConfig:
     annotation_concurrency: int = 8
     evidence: bool = True              # run the evidence passes after publication
     evidence_hosted: bool = True       # include hosted passes (metadata, subtitles, understanding)
+    grounded_subjects: tuple[str, ...] = ("Animation",)   # genre families whose films use the grounded subject backend
 
 
 @dataclass
@@ -346,8 +347,11 @@ def load_config(path: Optional[Path | str] = None) -> Config:
     evidence_hosted = ingest_raw.get("evidence_hosted", True)
     if not isinstance(evidence, bool) or not isinstance(evidence_hosted, bool):
         raise ValueError("ingest.evidence and ingest.evidence_hosted must be booleans")
+    grounded = ingest_raw.get("grounded_subjects", ["Animation"])
+    if not isinstance(grounded, list) or not all(isinstance(item, str) for item in grounded):
+        raise ValueError("ingest.grounded_subjects must be a list of genre family names")
     ingest = IngestConfig(annotation_concurrency=annotation_concurrency, evidence=evidence,
-                          evidence_hosted=evidence_hosted)
+                          evidence_hosted=evidence_hosted, grounded_subjects=tuple(grounded))
 
     lab_raw = raw.get("lab") or {}
     footage_inspection = lab_raw.get("footage_inspection", False)
