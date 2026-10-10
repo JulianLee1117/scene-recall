@@ -385,3 +385,20 @@ def test_text_subtitle_stream_rejects_invalid_absolute_indices(index) -> None:
     from pipeline.ingest.probe import _text_subtitle_stream_index
 
     assert _text_subtitle_stream_index({"streams": [_subtitle_stream(index)]}) is None
+
+
+def test_hdr_sources_are_recognised_from_the_video_transfer(test_clip: Path, config: Config) -> None:
+    from pipeline.ingest import probe as probe_module
+    from pipeline.ingest.probe import hdr_transfer, probe_film
+
+    assert hdr_transfer({"streams": [{"codec_type": "video", "pix_fmt": "yuv420p10le"}]}) is None
+    assert hdr_transfer({"streams": [{"codec_type": "video", "color_transfer": "bt709"}]}) is None
+    assert hdr_transfer({"streams": [{"codec_type": "audio"}, {"codec_type": "video", "color_transfer": "smpte2084"}]}) == "PQ (HDR10)"
+    assert hdr_transfer({"streams": [{"codec_type": "video", "color_transfer": "arib-std-b67"}]}) == "HLG"
+
+    real = probe_module._ffprobe(test_clip)
+    assert probe_film(test_clip, config).hdr_transfer is None
+    tagged = {**real, "streams": [{**s, "color_transfer": "smpte2084"} if s.get("codec_type") == "video" else s
+                                   for s in real["streams"]]}
+    with patch("pipeline.ingest.probe._ffprobe", return_value=tagged):
+        assert probe_film(test_clip, config).hdr_transfer == "PQ (HDR10)"

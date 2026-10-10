@@ -16,8 +16,12 @@ from typing import Any
 from pipeline.config import Config
 
 
-def refresh_dialogue(config: Config, film_path: Path) -> dict[str, Any]:
-    """Re-derive dialogue for one film and publish changed units; returns counts."""
+def refresh_dialogue(config: Config, film_path: Path, *, holding_ingest_lock: bool = False) -> dict[str, Any]:
+    """Re-derive dialogue for one film and publish changed units; returns counts.
+
+    ``holding_ingest_lock`` when the caller is the ingest of this film and holds the global
+    ingest lock and the film's operation lock already (the post-ingest evidence refresh)."""
+    from contextlib import nullcontext
     from pipeline.index.backfill_text import backfill_text_features_during_ingest
     from pipeline.index.writer import _film_condition, open_db, publish_dialogue_updates
     from pipeline.ingest.dialogue import extract_dialogue
@@ -26,10 +30,9 @@ def refresh_dialogue(config: Config, film_path: Path) -> dict[str, Any]:
     from pipeline.ingest.probe import probe_film
 
     film = probe_film(film_path, config)
-    lock = global_ingest_lock(config.paths.assets_dir)
-    lock.acquire()
-    try:
-        with film_operation_lock(film.asset_dir):
+    lock = nullcontext() if holding_ingest_lock else global_ingest_lock(config.paths.assets_dir)
+    with lock:
+        with (nullcontext() if holding_ingest_lock else film_operation_lock(film.asset_dir)):
             lines = extract_dialogue(film, config)
             db = open_db(config)
             units = (db.open_table("units").search().where(_film_condition(film.film_id))
@@ -49,5 +52,3 @@ def refresh_dialogue(config: Config, film_path: Path) -> dict[str, Any]:
             text = backfill_text_features_during_ingest(config, film_id=film.film_id)
             return {"film_id": film.film_id, "lines": len(lines), "units_updated": len(updates),
                     "text_views_embedded": text.embedded, "text_profile_active": text.activated}
-    finally:
-        lock.release()

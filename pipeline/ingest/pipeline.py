@@ -109,6 +109,13 @@ def _run_pipeline_with_film_lock(film_path: Path, config: Config) -> FilmRecord:
     # ------------------------------------------------------------------
     t = time.perf_counter()
     candidate = probe_film(film_path, config)
+    hdr = getattr(candidate, "hdr_transfer", None)
+    if isinstance(hdr, str) and hdr:
+        raise RuntimeError(
+            f"{film_path.name} is an HDR source ({hdr}); the ingest decodes frames "
+            "without tone mapping and would index washed-out pictures. Use a 1080p SDR release, or "
+            "transcode to SDR (BT.709) first."
+        )
     with film_operation_lock(candidate.asset_dir):
         # The source can change while this process waits behind another ingest
         # or relink. Re-probe under the lock and never mutate the candidate

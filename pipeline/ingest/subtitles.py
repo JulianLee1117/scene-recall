@@ -31,6 +31,23 @@ _PROMOTIONAL_SUBTITLE_RE = re.compile(
 )
 
 
+# Hearing-impaired tracks carry sound and speaker cues that are not dialogue: "[ALARM BEEPS]",
+# "(sighs)", "[MILES] Hey, dad.", "♪ ♪". Brackets and parentheses are removed from a cue's text and
+# a cue with nothing spoken left is dropped. Up to a quarter of the lines of a popular SDH track
+# are such cues (Spider-Verse 18%, The Green Knight 32%).
+_SOUND_CUE_RE = re.compile(r"\[[^\]]*\]|\([^)]*\)|♪+")
+_LEADING_DASHES_RE = re.compile(r"^(?:[-–—]\s*){2,}")      # "- [GASPS] - What?" -> "- What?"
+_TRAILING_DASH_RE = re.compile(r"\s*[-–—]$")
+_NOTHING_SPOKEN_RE = re.compile(r"[-–—\s.,!?]*")
+
+
+def strip_sound_cues(text: str) -> str:
+    """``text`` without hearing-impaired sound or speaker cues; empty when nothing is spoken."""
+    cleaned = re.sub(r"\s+", " ", _SOUND_CUE_RE.sub(" ", text)).strip()
+    cleaned = _TRAILING_DASH_RE.sub("", _LEADING_DASHES_RE.sub("- ", cleaned)).strip()
+    return "" if _NOTHING_SPOKEN_RE.fullmatch(cleaned) else cleaned
+
+
 @dataclass(frozen=True, slots=True)
 class SrtCue:
     start: float
@@ -92,16 +109,20 @@ def parse_srt(text: str) -> list[SrtCue]:
 
 
 def parse_external_dialogue_srt(text: str) -> list[SrtCue]:
-    """Parse derived sidecar dialogue, excluding known promotional cues.
+    """Parse derived dialogue: known promotional cues excluded, hearing-impaired sound cues
+    stripped, cues with nothing spoken dropped.
 
     Filtering happens only in the returned derivation. The caller's raw SRT
     text and the source file it came from remain untouched.
     """
-    return [
-        cue
-        for cue in parse_srt(text)
-        if not _PROMOTIONAL_SUBTITLE_RE.search(cue.text)
-    ]
+    cues = []
+    for cue in parse_srt(text):
+        if _PROMOTIONAL_SUBTITLE_RE.search(cue.text):
+            continue
+        spoken = strip_sound_cues(cue.text)
+        if spoken:
+            cues.append(SrtCue(start=cue.start, end=cue.end, text=spoken))
+    return cues
 
 
 def parse_srt_timestamp(timestamp: str) -> float:

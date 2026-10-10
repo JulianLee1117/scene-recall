@@ -1,7 +1,11 @@
 """Bring one film's evidence up to date: every pass in order, each skipped when current.
 
-    metadata -> subtitles -> understanding -> measure -> moments -> hero -> synthesis -> compile
-      -> text views -> match-cut index (when a moments pass ran)
+    metadata -> subtitles -> adopt subtitles -> understanding -> measure -> moments -> hero
+      -> synthesis -> compile -> text views -> match-cut index (when a moments pass ran)
+
+The adopt step re-derives a film's published dialogue from an accepted synced download
+(a Japanese film's English lines) so the understanding pass and search see it; it is
+what ``python -m pipeline.evidence refresh-dialogue`` does by hand.
 
 Used after ingest for new films and by ``python -m pipeline.evidence refresh``.
 Each step is independently cached by its producer profile and inputs, so a
@@ -18,6 +22,32 @@ from typing import Any, Callable
 from pipeline.evidence.library import FilmRef
 
 FILM_UNDERSTANDING_MAX_USD = 3.0
+
+
+def adopt_subtitles(config: Any, films: list[FilmRef], *, holding_ingest_lock: bool = False,
+                    progress: Callable[[str], None] = print) -> dict[str, Any]:
+    """Publish an accepted synced subtitle download as a film's dialogue when it is not adopted yet."""
+    import json
+
+    from pipeline.evidence.subtitles import accepted_download
+    from pipeline.ingest.refresh_dialogue import refresh_dialogue
+
+    adopted, skipped = [], 0
+    for film in films:
+        if accepted_download(config, film.film_id) is None:
+            continue
+        manifest_path = config.paths.assets_dir / film.film_id / "dialogue.manifest.json"
+        try:
+            kind = json.loads(manifest_path.read_text(encoding="utf-8")).get("kind")
+        except (OSError, ValueError):
+            kind = None
+        if kind == "downloaded_srt":
+            skipped += 1
+            continue
+        result = refresh_dialogue(config, film.path, holding_ingest_lock=holding_ingest_lock)
+        progress(f"[adopt-subtitles] {film.title}: {result['units_updated']} shots updated")
+        adopted.append(film.film_id)
+    return {"adopted": adopted, "already": skipped}
 
 
 def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = True, measure_pass: bool = True,
@@ -39,6 +69,8 @@ def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = 
     if hosted:
         step("metadata", lambda: metadata.run(config, films))
         step("subtitles", lambda: subtitles.run(config, films, max_downloads=len(films)))
+        step("adopt_subtitles", lambda: adopt_subtitles(config, films, holding_ingest_lock=holding_ingest_lock,
+                                                        progress=progress))
         step("understanding", lambda: understanding.run(
             config, db, films, max_usd=FILM_UNDERSTANDING_MAX_USD * len(films), concurrency=4, progress=progress))
         step("highlights", lambda: highlights.run(config, db, films, progress=progress))

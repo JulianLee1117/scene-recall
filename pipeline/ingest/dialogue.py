@@ -47,7 +47,13 @@ from pipeline.ingest.subtitles import (
 
 _DIALOGUE_CONTRACT_VERSION = 2
 _DIALOGUE_MANIFEST_NAME = "dialogue.manifest.json"
-_SIDECAR_PROFILE_VERSION = 1
+_SIDECAR_PROFILE_VERSION = 2
+# Shared by sidecar, embedded and downloaded subtitle derivations.
+_TEXT_DERIVATION_PROFILE = {
+    "profile_version": _SIDECAR_PROFILE_VERSION,
+    "exclude_promotional_cues": True,
+    "exclude_sound_cues": True,
+}
 _EMBEDDED_VALIDATION_PROFILE_VERSION = 1
 _EMBEDDED_VALIDATION_RECEIPT_NAME = "subs.validation.json"
 _MAX_EMBEDDED_VALIDATION_RECEIPT_BYTES = 64 * 1024
@@ -138,7 +144,7 @@ def extract_dialogue(film: FilmRecord, config: Config) -> list[DialogueLine]:
             _save_manifest(receipt, film.asset_dir / _EMBEDDED_VALIDATION_RECEIPT_NAME)
             source = _source_with_embedded_validation(film, config, receipt)
         if source["kind"] == "embedded_text":
-            lines = _parse_srt(_read_srt_text(film.asset_dir / "subs.srt"))
+            lines = _parse_external_srt(_read_srt_text(film.asset_dir / "subs.srt"))
         elif source["kind"] == "downloaded_srt":
             download = _downloaded_subtitle(film, config)
             if download is None or download["synced_sha256"] != source["sha256"]:
@@ -186,10 +192,7 @@ def _dialogue_source(film: FilmRecord, config: Config) -> dict[str, object]:
             "kind": "sidecar_srt",
             "filename": sidecar.name,
             "sha256": _file_sha256(sidecar),
-            "derivation_profile": {
-                "profile_version": _SIDECAR_PROFILE_VERSION,
-                "exclude_promotional_cues": True,
-            },
+            "derivation_profile": dict(_TEXT_DERIVATION_PROFILE),
         }
     if film.text_subtitle_stream_index is not None:
         receipt = _load_embedded_validation_receipt(film)
@@ -225,10 +228,7 @@ def _fallback_source(film: FilmRecord, config: Config) -> dict[str, object]:
         "profile_id": download["profile_id"],
         "file_id": download["file_id"],
         "sha256": download["synced_sha256"],
-        "derivation_profile": {
-            "profile_version": _SIDECAR_PROFILE_VERSION,
-            "exclude_promotional_cues": True,
-        },
+        "derivation_profile": dict(_TEXT_DERIVATION_PROFILE),
     }
 
 
@@ -302,6 +302,7 @@ def _source_with_embedded_validation(
             "film_id": film.film_id,
             "stream_index": film.text_subtitle_stream_index,
             "subtitle_validation": receipt,
+            "derivation_profile": dict(_TEXT_DERIVATION_PROFILE),
         }
     return {
         **_fallback_source(film, config),

@@ -64,6 +64,7 @@ class FilmRecord:
     title: str          # From the authoritative filename stem
     text_subtitle_stream_index: int | None = None
     primary_audio_language_tag: str | None = None
+    hdr_transfer: str | None = None   # PQ or HLG transfer of the video stream; None for SDR
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,7 @@ def probe_film(path: Path, config: Config) -> FilmRecord:
     text_subtitle_stream_index = _text_subtitle_stream_index(meta)
     primary_audio_language_tag = _primary_audio_language_tag(meta)
     title = _parse_title(meta, path)
+    hdr = hdr_transfer(meta)
 
     asset_dir = config.paths.assets_dir / film_id
     asset_dir.mkdir(parents=True, exist_ok=True)
@@ -111,7 +113,22 @@ def probe_film(path: Path, config: Config) -> FilmRecord:
         title=title,
         text_subtitle_stream_index=text_subtitle_stream_index,
         primary_audio_language_tag=primary_audio_language_tag,
+        hdr_transfer=hdr,
     )
+
+
+# Transfer characteristics that mark a high-dynamic-range master. Every stage decodes to 8-bit
+# RGB through ffmpeg's default conversion, which has no tone mapping: an HDR source would index
+# dim, desaturated keyframes, captions and embeddings. Such a file is refused at ingest.
+_HDR_TRANSFERS = {"smpte2084": "PQ (HDR10)", "arib-std-b67": "HLG"}
+
+
+def hdr_transfer(meta: dict) -> str | None:
+    """The HDR transfer name of the first video stream, or None for an SDR source."""
+    for stream in meta.get("streams", []) or []:
+        if stream.get("codec_type") == "video":
+            return _HDR_TRANSFERS.get(str(stream.get("color_transfer") or "").lower())
+    return None
 
 
 # ---------------------------------------------------------------------------

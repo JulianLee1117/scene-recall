@@ -24,7 +24,7 @@ hosted passes gated by `ingest.evidence_hosted`). For the library:
 uv run python -m pipeline.evidence status                      # coverage per pass
 uv run python -m pipeline.evidence metadata                    # Wikidata, Wikipedia, Wikiquote, IMDb votes, pageviews
 uv run python -m pipeline.evidence subtitles --max-downloads 20  # OpenSubtitles daily quota; synced and validated
-uv run python -m pipeline.evidence refresh-dialogue            # re-ingest films whose accepted subtitles are not adopted yet
+uv run python -m pipeline.evidence refresh-dialogue            # adopt accepted subtitles not adopted yet (automatic for new films)
 uv run python -m pipeline.evidence understand --batch run --max-usd 110 [--wave-chunks 300]   # half-price Gemini batch, unattended
 uv run python -m pipeline.evidence understand --retry-refused  # recover filter-refused clips in smaller pieces
 uv run python -m pipeline.evidence measure                     # local GPU pass (~3-4 min per film)
@@ -1083,7 +1083,10 @@ magnet/torrent from your chosen source.
 Ingestion is FIFO and runs one film at a time in an isolated, low-priority
 child process. The Films screen polls only while work is active; completed
 jobs survive API and worker restarts. A separate CLI ingest fails with a
-clear message while another ingest owns the shared resource lock.
+clear message while another ingest owns the shared resource lock. An HDR
+source (PQ or HLG transfer, typical of 2160p releases) is refused at probe
+time with the reason: the stages decode without tone mapping and would index
+washed-out pictures. Use a 1080p SDR release; 10-bit SDR is fine.
 
 Do not rename or move a source after ingestion. If relocation is necessary,
 use `relink-film` below. `films` is scanned for unindexed source discovery;

@@ -409,8 +409,9 @@ def test_external_sidecar_filters_promos_from_derived_dialogue_only(
     manifest_path = film.asset_dir / "dialogue.manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["derivation_profile"] == {
-        "profile_version": 1,
+        "profile_version": 2,
         "exclude_promotional_cues": True,
+        "exclude_sound_cues": True,
     }
     manifest.pop("derivation_profile")
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -1056,7 +1057,9 @@ def test_embedded_cache_tracks_selected_stream_without_global_contract_bump(
     assert validation["stream_index"] == 3
     assert validation["validation"]["automatic_eligible"] is True
     assert manifest == {"contract_version": 2, "kind": "embedded_text",
-                        "film_id": film.film_id, "stream_index": 3}
+                        "film_id": film.film_id, "stream_index": 3,
+                        "derivation_profile": {"profile_version": 2, "exclude_promotional_cues": True,
+                                               "exclude_sound_cues": True}}
     # Reordering unchanged eligible evidence preserves the cache; abstaining
     # from a now-ineligible track invalidates the former embedded source.
     film.text_subtitle_stream_index = _text_subtitle_stream_index({"streams": [full, forced]})
@@ -1087,3 +1090,51 @@ def test_canonical_sidecar_precedence_and_cache_ignore_embedded_selection_change
     film.text_subtitle_stream_index = None
     assert dialogue_cache_is_current(film, config)
     assert sidecar.read_bytes() == raw
+
+
+def test_sound_cues_leave_derived_dialogue_but_spoken_words_stay() -> None:
+    from pipeline.ingest.subtitles import parse_external_dialogue_srt, strip_sound_cues
+
+    assert strip_sound_cues("[ALARM BEEPS]") == ""
+    assert strip_sound_cues("(sighs)") == ""
+    assert strip_sound_cues("♪ ♪") == ""
+    assert strip_sound_cues("[MILES] Hey, dad.") == "Hey, dad."
+    assert strip_sound_cues("- [GASPS] - What was that?") == "- What was that?"
+    assert strip_sound_cues("I thought I was the only one.") == "I thought I was the only one."
+    srt = (
+        "1\n00:00:01,000 --> 00:00:02,000\n[MAN WHISTLING]\n\n"
+        "2\n00:00:03,000 --> 00:00:04,000\n[MILES] I'm gonna get in so much trouble.\n\n"
+        "3\n00:00:05,000 --> 00:00:06,000\n(engine roars)\n- Hold on!\n\n"
+    )
+    cues = parse_external_dialogue_srt(srt)
+    assert [cue.text for cue in cues] == ["I'm gonna get in so much trouble.", "- Hold on!"]
+    assert [cue.start for cue in cues] == [3.0, 5.0]
+
+
+def test_post_ingest_refresh_adopts_an_accepted_download_once(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from pipeline.evidence import pipeline as evidence_pipeline
+
+    assets = tmp_path / "assets"
+    films = [SimpleNamespace(film_id="aaa", title="Akira", path=tmp_path / "akira.mkv"),
+             SimpleNamespace(film_id="bbb", title="Fox", path=tmp_path / "fox.mkv"),
+             SimpleNamespace(film_id="ccc", title="Done", path=tmp_path / "done.mkv")]
+    for film, kind in (("aaa", "whisper"), ("ccc", "downloaded_srt")):
+        (assets / film).mkdir(parents=True)
+        (assets / film / "dialogue.manifest.json").write_text(json.dumps({"kind": kind}), encoding="utf-8")
+    config = SimpleNamespace(paths=SimpleNamespace(assets_dir=assets))
+    monkeypatch.setattr("pipeline.evidence.subtitles.accepted_download",
+                        lambda _config, film_id: {"path": "x"} if film_id in ("aaa", "ccc") else None)
+    calls = []
+
+    def fake_refresh(_config, path, *, holding_ingest_lock=False):
+        calls.append((path.name, holding_ingest_lock))
+        return {"units_updated": 3}
+
+    monkeypatch.setattr("pipeline.ingest.refresh_dialogue.refresh_dialogue", fake_refresh)
+    summary = evidence_pipeline.adopt_subtitles(config, films, holding_ingest_lock=True, progress=lambda _m: None)
+    # the Whisper film with an accepted download is adopted inside the ingest's locks; the film
+    # without a download is left alone; the one already on downloaded_srt is not redone
+    assert calls == [("akira.mkv", True)]
+    assert summary == {"adopted": ["aaa"], "already": 1}

@@ -1696,7 +1696,9 @@ notes are in ADR-0070 to ADR-0076, `pipeline/transitions/` and
 
 The current pipeline performs:
 
-1. Content-addressed film probing.
+1. Content-addressed film probing. An HDR source (PQ or HLG transfer) is
+   refused with the reason: every stage decodes to 8-bit RGB without tone
+   mapping.
 2. Dialogue extraction from a usable canonical English SRT sidecar, a
    metadata-eligible English embedded text subtitle stream, an accepted synced
    English download (evidence v2), or local speech transcription, in that order.
@@ -1708,8 +1710,9 @@ The current pipeline performs:
 8. Publication of film, frame, and unit records.
 9. A non-blocking local semantic-text derivation.
 10. A non-blocking evidence-v2 refresh (`ingest.evidence`): metadata,
-    subtitles, understanding, measurement, hero frames, priors, compiled tables
-    and text views, each skipped when current.
+    subtitles (an accepted synced download is adopted into the published
+    dialogue at once, before understanding), understanding, measurement, hero
+    frames, priors, compiled tables and text views, each skipped when current.
 
 Hosted annotation caches are scoped by provider, requested model, prompt,
 schema, settings, ordered frame hashes and, when present, the sampling profile.
@@ -2003,9 +2006,12 @@ no automatic library backfill is introduced.
 
 Dialogue derivation records a contract-versioned
 manifest containing the selected sidecar content hash, embedded stream
-identity, or Whisper model and transcription profile. The sidecar derivation
-profile removes known promotional cues from parsed dialogue without changing
-the raw file. The Whisper fallback uses VAD and
+identity, or Whisper model and transcription profile. The subtitle derivation
+profile (sidecar, embedded and downloaded alike) removes known promotional cues
+and hearing-impaired sound cues (`[ALARM BEEPS]`, `(sighs)`, speaker tags) from
+parsed dialogue without changing the raw file. An accepted synced download is
+adopted into a new film's published dialogue by the post-ingest refresh, before
+the understanding pass. The Whisper fallback uses VAD and
 source-language transcription. A canonical `en` or `eng` tag on the primary
 audio stream supplies an English language hint; missing, `und`, and all other
 tags retain automatic majority voting over up to five voiced 30-second
