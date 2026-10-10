@@ -48,13 +48,9 @@ export function arrangeBoard(bookmarks: BookmarkRecord[], arrangement: Arrangeme
   return [{ key: "board", title: null, items: bookmarks }];
 }
 
-/** Whether anything has been placed by hand, so a reset means something. */
+/** Whether a scene has been placed by hand yet. */
 export const hasUserOrder = (bookmarks: BookmarkRecord[]) =>
   bookmarks.some((bookmark) => bookmark.position != null);
-
-/** The ids as the groups show them, first to last: what "Keep this order" stores. */
-export const boardIds = (groups: BoardGroup[]) =>
-  groups.flatMap((group) => group.items.map((bookmark) => bookmark.bookmark_id));
 
 /**
  * `list` with the item at `from` moved so that it sits at insertion index

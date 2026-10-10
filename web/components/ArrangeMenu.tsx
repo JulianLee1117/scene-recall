@@ -10,19 +10,13 @@ import styles from "./arrangeMenu.module.css";
 
 /**
  * How the Saved board is laid out. Your order is the board's own and the only
- * one stored; Newest and By film are views over it, so they never move a
- * scene. A view becomes your order only by keeping it, and your order can be
- * reset to newest.
+ * one stored; Newest and By film are views over it and never move a scene.
  */
-export default function ArrangeMenu({ value, hasOrder, onChange, onKeep, onReset }: {
+export default function ArrangeMenu({ value, placed, onChange }: {
   value: Arrangement;
-  /** Whether anything has been placed by hand, so a reset means something. */
-  hasOrder: boolean;
+  /** Whether a scene has been placed by hand yet. */
+  placed: boolean;
   onChange: (arrangement: Arrangement) => void;
-  /** Make the current view the board's order. */
-  onKeep: () => void;
-  /** Forget the board's order: newest first again. */
-  onReset: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -36,6 +30,7 @@ export default function ArrangeMenu({ value, hasOrder, onChange, onKeep, onReset
     if (open) panelRef.current?.focus({ preventScroll: true });
   }, [open]);
   const current = ARRANGEMENTS.find((option) => option.value === value) ?? ARRANGEMENTS[0];
+  const hint = value !== "yours" ? "Drag scenes in Your order." : placed ? null : "Drag a scene to place it.";
 
   return (
     <div className="toolbar-menu-root" ref={rootRef}>
@@ -46,7 +41,7 @@ export default function ArrangeMenu({ value, hasOrder, onChange, onKeep, onReset
         aria-expanded={open}
         aria-controls={panelId}
         aria-haspopup="dialog"
-        title="How the board is arranged"
+        title="Arrange the board"
         onClick={() => setOpen((state) => !state)}
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
@@ -60,23 +55,7 @@ export default function ArrangeMenu({ value, hasOrder, onChange, onKeep, onReset
         <div ref={panelRef} id={panelId} className={`toolbar-menu ${styles.panel}`} role="dialog" aria-label="Arrange the board" tabIndex={-1}>
           <div className={`toolbar-menu-list ${styles.content}`}>
             <ChoiceRow label="Arrange" options={ARRANGEMENTS} value={value} defaultValue="yours" onChange={onChange} />
-            {value !== "yours" ? (
-              <p className={styles.note}>
-                A view over your order; nothing moves. Drag scenes in Your order, or keep this one.
-                <button type="button" className="toolbar-menu-link" onClick={() => { onKeep(); close(); }}>
-                  Keep this as your order
-                </button>
-              </p>
-            ) : hasOrder ? (
-              <p className={styles.note}>
-                Drag a scene to place it. New saves land at the top.
-                <button type="button" className="toolbar-menu-link" onClick={() => { onReset(); close(); }}>
-                  Reset to newest
-                </button>
-              </p>
-            ) : (
-              <p className={styles.note}>Newest first until you drag a scene somewhere.</p>
-            )}
+            {hint && <p className={styles.hint}>{hint}</p>}
           </div>
         </div>
       )}

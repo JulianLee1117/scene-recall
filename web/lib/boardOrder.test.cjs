@@ -51,7 +51,6 @@ test("Your order shows the board as it is; Newest and By film are views that reo
     [format.displayTitle("Moonlight"), ["mid", "late"]],
   ], "films by name, each film's scenes in story order");
   assert.deepEqual(ids(bookmarks), ["late", "early", "mid"], "views never change the board");
-  assert.deepEqual(plain(board.boardIds(byFilm)), ["early", "mid", "late"], "what Keep this order would store");
 });
 
 test("hasUserOrder reads whether anything has been placed", () => {

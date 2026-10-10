@@ -270,9 +270,9 @@ in `web/features/info/guide.ts`, separate from its UI and the processing code.
 
 One bar tops every page: **Search**, **Saved**, **Films**, **Info** and **Lab**.
 **Saved** is a board: drag scenes to place them (press and hold on a phone),
-the **Size** slider resizes the rows, and **Arrange** shows the board in your
-order, newest first, or by film; the views move nothing until you keep one as
-your order, and your order can be reset to newest. New saves land at the top.
+the slider resizes the rows, and **Arrange** shows the board in your order,
+newest first, or by film. The views move nothing; scenes move in your order,
+and new saves land at its top.
 **Lab** opens [/lab](http://localhost:3000/lab), a directory of experiments and
 saved edits; each experiment keeps the bar, with **Labs** beside its title to
 return to the directory. Opening a new editor starts an unsaved draft; leaving

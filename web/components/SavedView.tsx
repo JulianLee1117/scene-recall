@@ -6,7 +6,7 @@ import BookmarkIcon from "./BookmarkIcon";
 import ArrangeMenu from "./ArrangeMenu";
 import { rowStarts, useJustifiedRows } from "@/hooks/useJustifiedRows";
 import { useBoardReorder } from "@/hooks/useBoardReorder";
-import { arrangeBoard, boardIds, hasUserOrder, moveItem } from "@/lib/boardOrder";
+import { arrangeBoard, hasUserOrder, moveItem } from "@/lib/boardOrder";
 import { BOARD_SCALE, DEFAULT_BOARD, loadBoardPrefs, saveBoardPrefs, type BoardPrefs } from "@/lib/boardPrefs";
 import type {
   BookmarkRecord,
@@ -27,13 +27,12 @@ interface SavedViewProps {
   disabledUseFacets?: ReadonlySet<RecipeMatchFacet>;
   onToggleBookmark: (shot: SearchResult) => void;
   onRemoveBookmark: (bookmark: BookmarkRecord) => void;
-  /** Store the board's order, first to last; an empty list clears it. Resolves to whether it held. */
+  /** Store the board's order, first to last. Resolves to whether it held. */
   onReorder: (bookmarkIds: string[]) => Promise<boolean>;
 }
 
 type LearnAspect = (scene: SearchResult, width: number, height: number) => void;
 
-const NOTICE_MS = 8000;
 /** A move starts on the scene's picture, never on the controls over it. */
 const isCardHandle = (target: Element) => Boolean(target.closest(".result-card-primary"));
 
@@ -53,7 +52,6 @@ function Board({ items, scale, canReorder, onMove, renderTile }: {
   const tileClass = (index: number) => [
     "result-grid-item",
     styles.tile,
-    canReorder ? styles.movable : "",
     gesture?.from === index ? styles.lifted : "",
     gesture?.over === index ? (gesture.before ? styles.dropBefore : styles.dropAfter) : "",
   ].filter(Boolean).join(" ");
@@ -97,6 +95,16 @@ function Board({ items, scale, canReorder, onMove, renderTile }: {
   );
 }
 
+/** The slider's ends: a small frame and a larger one. */
+function SizeGlyph({ large }: { large: boolean }) {
+  const size = large ? 14 : 9;
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x={(16 - size) / 2} y={(16 - size) / 2} width={size} height={size} rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
 export default function SavedView({
   bookmarks,
   loading,
@@ -120,39 +128,24 @@ export default function SavedView({
       return next;
     });
 
-  // What just happened to the order, with the way back, for a few seconds.
-  const [notice, setNotice] = useState<{ text: string; undo?: string[] } | null>(null);
-  const noticeTimer = useRef<number | null>(null);
-  const announce = (text: string, undo?: string[]) => {
-    setNotice({ text, undo });
-    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
-    noticeTimer.current = window.setTimeout(() => setNotice(null), NOTICE_MS);
-  };
+  // Heard, not seen: the move is visible on the board.
+  const [spoken, setSpoken] = useState("");
+  const spokenTimer = useRef<number | null>(null);
   useEffect(() => () => {
-    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    if (spokenTimer.current !== null) window.clearTimeout(spokenTimer.current);
   }, []);
 
   const groups = arrangeBoard(bookmarks, prefs.arrangement);
-  const ordered = prefs.arrangement === "yours";
-  const idsNow = () => bookmarks.map((bookmark) => bookmark.bookmark_id);
-  const place = async (ids: string[], text: string, previous: string[]) => {
-    if (await onReorder(ids)) announce(text, previous);
-  };
   const move = (from: number, to: number) => {
     const next = moveItem(bookmarks, from, to);
     if (next === bookmarks) return;
     const moved = bookmarks[from].bookmark_id;
-    const at = next.findIndex((bookmark) => bookmark.bookmark_id === moved) + 1;
-    void place(next.map((bookmark) => bookmark.bookmark_id), `Moved to ${at} of ${next.length}.`, idsNow());
-  };
-  const keep = () => {
-    void place(boardIds(groups), "Kept as your order.", idsNow());
-    changePrefs({ arrangement: "yours" });
-  };
-  const reset = () => void place([], "Order reset to newest.", idsNow());
-  const undo = (previous: string[]) => {
-    setNotice(null);
-    void onReorder(previous);
+    void onReorder(next.map((bookmark) => bookmark.bookmark_id)).then((held) => {
+      if (!held) return;
+      setSpoken(`Moved to ${next.findIndex((bookmark) => bookmark.bookmark_id === moved) + 1} of ${next.length}`);
+      if (spokenTimer.current !== null) window.clearTimeout(spokenTimer.current);
+      spokenTimer.current = window.setTimeout(() => setSpoken(""), 3000);
+    });
   };
 
   const tile = (bookmark: BookmarkRecord, index: number, learnAspect: LearnAspect) =>
@@ -208,13 +201,11 @@ export default function SavedView({
           <div className={styles.tools}>
             <ArrangeMenu
               value={prefs.arrangement}
-              hasOrder={hasUserOrder(bookmarks)}
+              placed={hasUserOrder(bookmarks)}
               onChange={(arrangement) => changePrefs({ arrangement })}
-              onKeep={keep}
-              onReset={reset}
             />
-            <label className={styles.size}>
-              <span>Size</span>
+            <div className={styles.size}>
+              <SizeGlyph large={false} />
               <input
                 type="range"
                 min={BOARD_SCALE.min}
@@ -224,7 +215,8 @@ export default function SavedView({
                 aria-label="Scene size"
                 onChange={(event) => changePrefs({ scale: Number(event.target.value) })}
               />
-            </label>
+              <SizeGlyph large />
+            </div>
           </div>
         )}
       </header>
@@ -234,16 +226,7 @@ export default function SavedView({
           {error}
         </p>
       )}
-      <p className={styles.notice} role="status" aria-live="polite">
-        {notice && (
-          <>
-            {notice.text}
-            {notice.undo && (
-              <button type="button" onClick={() => undo(notice.undo as string[])}>Undo</button>
-            )}
-          </>
-        )}
-      </p>
+      <p className={styles.spoken} role="status" aria-live="polite">{spoken}</p>
 
       {loading ? (
         <p className={chrome.empty} role="status">
@@ -266,7 +249,7 @@ export default function SavedView({
             <Board
               items={group.items}
               scale={prefs.scale}
-              canReorder={ordered && group.items.length > 1}
+              canReorder={prefs.arrangement === "yours" && group.items.length > 1}
               onMove={move}
               renderTile={tile}
             />

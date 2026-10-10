@@ -20,18 +20,10 @@
   font-size: 12px;
 }
 
-/* What the chosen arrangement means, and the one action it allows. */
-.note {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+/* One line, only while it helps. */
+.hint {
   margin: 0;
   color: #8f887d;
   font-size: 12px;
   line-height: 1.5;
-}
-
-.note :global(.toolbar-menu-link) {
-  margin-left: -6px;
 }
