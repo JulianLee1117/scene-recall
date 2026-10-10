@@ -9,7 +9,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from collections import OrderedDict
 from threading import Lock
-import json
 
 _RECENT_SEARCH = OrderedDict()
 _SEARCH_LOCK = Lock()
@@ -94,7 +93,7 @@ def publication_read(db, *, timeout=600):
 
 
 def capture_snapshot(config, db, *, require_semantic_ready=False, lock_timeout=.1):
-    from pipeline.index import framing_features, text_features
+    from pipeline.index import text_features
     from pipeline.index.writer import table_names
 
     with publication_read(db, timeout=lock_timeout):
@@ -105,23 +104,6 @@ def capture_snapshot(config, db, *, require_semantic_ready=False, lock_timeout=.
             tables[name] = _ReadTable(table)
         text_path = text_features.manifest_path(config, text_features.configured_text_profile(config))
         manifests = {str(text_path.resolve()): text_features._read_manifest(text_path)}
-        try:
-            framing = framing_features.configured_framing_spatial_profile(config)
-        except (OSError, RuntimeError, ValueError):
-            framing = None
-        if framing is not None:
-            path = framing_features.manifest_path(config, framing)
-            manifests[str(path.resolve())] = framing_features._read_manifest(path)
-        # Capture profile activation and coverage with the same table versions.
-        # Include shadow profiles so an evaluator can select one after capture.
-        profiles = Path(config.paths.assets_dir) / "search-profiles"
-        for path in profiles.glob("composition_*/*.json"):
-            if path.name not in {"coverage.json", "promotion.json"}:
-                continue
-            try:
-                manifests[str(path.resolve())] = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                manifests[str(path.resolve())] = None
         snapshot = IndexSnapshot(db.uri, tables, manifests)
         # Never replace a complete semantic library with a half-published one.
         # Libraries that have never built this optional index keep their normal

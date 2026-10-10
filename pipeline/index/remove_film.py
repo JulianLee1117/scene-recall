@@ -30,10 +30,6 @@ from pipeline.ingest.locks import (
     global_ingest_lock,
     require_no_pending_film_relink,
 )
-from pipeline.index.framing_features import (
-    publish_framing_manifest,
-    resolve_ready_framing_profile,
-)
 from pipeline.index.text_features import (
     publish_text_index_manifest,
     resolve_ready_text_profile,
@@ -130,12 +126,11 @@ def _delete_folders(config: Config, report: dict[str, Any]) -> None:
 def _plan(db: Any, config: Config, film_id: str, expected_path: Path, *, delete_files: bool = False):
     film = _validate_target(db, film_id, expected_path, allow_missing=delete_files)
     text_profile = resolve_ready_text_profile(config, db)
-    framing_profile = resolve_ready_framing_profile(config, db)
     tables = []
     for name in sorted(table_names(db) if film is not None else ()):
         # Authored records live outside these canonical/derived index tables.
         # Compiled evidence tables are derived too (artifacts stay on disk).
-        if name not in {"films", "units", "frames", "film_meta", "shot_evidence", "scenes", "dialogue_lines"}                 and not name.startswith(("unit_text_", "frame_framing_")):
+        if name not in {"films", "units", "frames", "film_meta", "shot_evidence", "scenes", "dialogue_lines"}                 and not name.startswith("unit_text_"):
             continue
         table = db.open_table(name)
         if "film_id" not in table.schema.names:
@@ -155,14 +150,13 @@ def _plan(db: Any, config: Config, film_id: str, expected_path: Path, *, delete_
         "tables": tables,
         "ready_profiles_before": {
             "text": asdict(text_profile) if text_profile else None,
-            "framing": asdict(framing_profile) if framing_profile else None,
         },
         "preserved": (["jobs", "bookmarks", "projects", "download records"] if delete_files
                       else ["source media", "asset files", "jobs", "bookmarks", "projects"]),
     }
     if delete_files:
         report["files"] = _file_targets(config, film_id, expected_path)
-    return report, text_profile, framing_profile
+    return report, text_profile
 
 
 def _write_receipt(path: Path, report: dict[str, Any], *, initial: bool = False) -> None:
@@ -182,7 +176,7 @@ def _write_receipt(path: Path, report: dict[str, Any], *, initial: bool = False)
         temporary.unlink(missing_ok=True)
 
 
-def _refresh_ready_profiles(db: Any, config: Config, text_profile, framing_profile) -> dict:
+def _refresh_ready_profiles(db: Any, config: Config, text_profile) -> dict:
     # Exact deletion of the same film from source and derived tables preserves
     # the previously proven coverage for every remaining film. Only profiles
     # ready before the operation qualify; an incomplete cache stays inactive.
@@ -190,22 +184,13 @@ def _refresh_ready_profiles(db: Any, config: Config, text_profile, framing_profi
         publish_text_index_manifest(config, db, text_profile)
         if resolve_ready_text_profile(config, db) != text_profile:
             raise RuntimeError("text profile failed post-removal readiness verification")
-    if framing_profile is not None and db.open_table("frames").count_rows() > 0:
-        frame_ids = [
-            row["frame_id"] for row in db.open_table("frames").search()
-            .select(["frame_id"]).limit(None).to_list()
-        ]
-        publish_framing_manifest(config, db, framing_profile, frame_ids=frame_ids)
-        if resolve_ready_framing_profile(config, db) != framing_profile:
-            raise RuntimeError("Framing profile failed post-removal readiness verification")
     return {
         "text": (profile.table_name if (profile := resolve_ready_text_profile(config, db)) else None),
-        "framing": (profile.table_name if (profile := resolve_ready_framing_profile(config, db)) else None),
     }
 
 
 def _apply(db: Any, config: Config, film_id: str, report: dict, text_profile,
-           framing_profile, receipt: Path) -> dict:
+           receipt: Path) -> dict:
     report["status"] = "applying"
     _write_receipt(receipt, report, initial=True)
     changed = []
@@ -225,9 +210,7 @@ def _apply(db: Any, config: Config, film_id: str, report: dict, text_profile,
             item["version_after"] = int(table.version)
             item["rows_after"] = int(table.count_rows())
         _ensure_search_indexes_locked(db)
-        report["ready_profiles_after"] = _refresh_ready_profiles(
-            db, config, text_profile, framing_profile,
-        )
+        report["ready_profiles_after"] = _refresh_ready_profiles(db, config, text_profile)
         # FTS synchronization may itself create another units generation.
         for item in report["tables"]:
             table = db.open_table(item["table"])
@@ -250,7 +233,7 @@ def _apply(db: Any, config: Config, film_id: str, report: dict, text_profile,
         if not failures:
             try:
                 _ensure_search_indexes_locked(db)
-                _refresh_ready_profiles(db, config, text_profile, framing_profile)
+                _refresh_ready_profiles(db, config, text_profile)
             except BaseException as restore_exc:
                 failures.append(f"profile/index recovery: {restore_exc}")
         report["status"] = "recovery_required" if failures else "rolled_back"
@@ -284,11 +267,11 @@ def remove_film_index(config: Config, film_id: str, expected_path: Path, *,
             with film_operation_lock(config.paths.assets_dir / film_id):
                 require_no_pending_film_relink(config.paths.assets_dir / film_id)
                 with _PUBLICATION_LOCK, _database_write_lock(db):
-                    report, text_profile, framing_profile = _plan(
+                    report, text_profile = _plan(
                         db, config, film_id, expected_path, delete_files=delete_files,
                     )
                     if report["film"] is not None:
-                        report = _apply(db, config, film_id, report, text_profile, framing_profile, receipt)
+                        report = _apply(db, config, film_id, report, text_profile, receipt)
                     else:
                         report["status"] = "already_withdrawn"
                         _write_receipt(receipt, report, initial=True)

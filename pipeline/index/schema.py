@@ -161,37 +161,6 @@ def make_text_features_schema(vector_dim: int) -> pa.Schema:
     )
 
 
-def make_framing_features_schema() -> pa.Schema:
-    """Return the schema for one compatible Framing spatial-cache profile.
-
-    ``descriptor`` stores a fixed-shape, row-major float matrix as bytes. Its
-    grid size, feature dimension, dtype, model lineage, and extraction
-    contract are fields in both the row and the active profile manifest.
-    Keeping this out of the ANN vector columns prevents Lance from treating a
-    reranking cache as a new candidate vector space.
-    """
-    return pa.schema(
-        [
-            pa.field("schema_version", pa.int16()),
-            pa.field("frame_id", pa.string()),
-            pa.field("profile_id", pa.string()),
-            pa.field("model_id", pa.string()),
-            pa.field("model_revision", pa.string()),
-            pa.field("extraction_contract_version", pa.int16()),
-            pa.field("grid_size", pa.int16()),
-            pa.field("feature_dim", pa.int32()),
-            pa.field("storage_dtype", pa.string()),
-            pa.field("film_id", pa.string()),
-            pa.field("unit_id", pa.string()),
-            pa.field("source_path", pa.string()),
-            pa.field("source_size", pa.int64()),
-            pa.field("source_mtime_ns", pa.int64()),
-            pa.field("descriptor_sha256", pa.string()),
-            pa.field("descriptor", pa.binary()),
-        ]
-    )
-
-
 #: Default schema for the ``units`` table (PE core L/14, 1024 dims).
 UNITS_SCHEMA: pa.Schema = make_units_schema()
 

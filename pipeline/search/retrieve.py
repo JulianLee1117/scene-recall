@@ -41,11 +41,6 @@ from pipeline.config import (
     DEFAULT_SEARCH_RESULT_WINDOW,
     Config,
 )
-from pipeline.index.framing_cache import resolve_partial_profile, resolve_candidate_grids, canonical_grid
-from pipeline.index.framing_features import (
-    load_framing_grids,
-    resolve_ready_framing_profile,
-)
 from pipeline.index.text_features import (
     TEXT_VIEWS,
     TextIndexProfile,
@@ -2832,7 +2827,6 @@ def _spatial_grid_scores(
 def _log_framing_query(
     *,
     started_at: float,
-    cache: str,
     reason: str,
     candidate_count: int,
     spatial_candidate_count: int,
@@ -2840,9 +2834,8 @@ def _log_framing_query(
     """Emit one compact server diagnostic for a Framing candidate query."""
     elapsed_ms = max(0.0, (perf_counter() - started_at) * 1000.0)
     _SERVER_LOGGER.info(
-        "framing_search cache=%s reason=%s elapsed_ms=%.1f "
+        "framing_search reason=%s elapsed_ms=%.1f "
         "candidates=%d spatial_candidates=%d",
-        cache,
         reason,
         elapsed_ms,
         candidate_count,
@@ -2859,63 +2852,19 @@ def _reference_frame_candidates(
     candidate_limit: int = _CANDIDATE_LIMIT,
     cross_film_reserve_limit: int = 0,
 ) -> list[dict[str, Any]]:
-    """Retrieve global image neighbors, then compare learned spatial grids."""
+    """Retrieve global image neighbors, then compare learned spatial grids.
+
+    The query and its candidates are encoded in the same request, by the same
+    loaded model; no grid is cached (ADR-0115).
+    """
     started_at = perf_counter()
     if "frames" not in table_names(db):
-        _log_framing_query(
-            started_at=started_at,
-            cache="unavailable",
-            reason="frames_table_missing",
-            candidate_count=0,
-            spatial_candidate_count=0,
-        )
+        _log_framing_query(started_at=started_at, reason="frames_table_missing",
+                           candidate_count=0, spatial_candidate_count=0)
         return []
-
-    from pipeline.search.composition import selected_profile, rank_candidates
-    composition = selected_profile(config, db)
-    partial_profile = resolve_partial_profile(config, db)
-    framing_profile = partial_profile or resolve_ready_framing_profile(
-        config, db, validate_frame_ids=False,
-    )
-    cache_reason = (
-        "profile_ready"
-        if framing_profile is not None
-        else "profile_unavailable"
-    )
-    query_model_revision = (
-        framing_profile.model_revision
-        if framing_profile is not None
-        else None
-    )
-    query_embed_kwargs: dict[str, Any] = {
-        "grid_size": _REFERENCE_SPATIAL_GRID_SIZE,
-    }
-    if query_model_revision is not None:
-        query_embed_kwargs["model_revision"] = query_model_revision
     query_global, query_spatial = embed_spatial_images(
-        [image],
-        config,
-        **query_embed_kwargs,
+        [image], config, grid_size=_REFERENCE_SPATIAL_GRID_SIZE,
     )
-    if composition is not None and query_spatial is not None:
-        from pipeline.index.framing_features import configured_framing_spatial_profile
-        source_profile = framing_profile or configured_framing_spatial_profile(config)
-        if source_profile is not None and composition[0].source_profile_id == source_profile.profile_id:
-            return rank_candidates(
-                db, config, composition, source_profile, query_global[0], query_spatial[0], film_ids,
-                limit=min(candidate_limit, _REFERENCE_SPATIAL_CANDIDATE_LIMIT),
-                reserve=min(cross_film_reserve_limit, _UNSCOPED_UPLOAD_FILM_RESERVE_LIMIT),
-                encode=embed_spatial_images, score=_spatial_grid_scores,
-            )
-        _LOGGER.warning("Composition profile does not match the current spatial encoder; using baseline Framing")
-    if framing_profile is not None and query_spatial is not None:
-        if query_spatial.shape[1:] != (
-            framing_profile.grid_size,
-            framing_profile.grid_size,
-            framing_profile.feature_dim,
-        ):
-            framing_profile = None
-            cache_reason = "query_grid_incompatible"
     frame_rows = _global_frame_candidate_rows(
         query_global[0],
         db,
@@ -2924,23 +2873,10 @@ def _reference_frame_candidates(
         cross_film_reserve_limit=cross_film_reserve_limit,
     )
     if not frame_rows:
-        _log_framing_query(
-            started_at=started_at,
-            cache="unavailable",
-            reason="no_candidates",
-            candidate_count=0,
-            spatial_candidate_count=0,
-        )
+        _log_framing_query(started_at=started_at, reason="no_candidates",
+                           candidate_count=0, spatial_candidate_count=0)
         return []
     frame_rows = _with_frame_sources(db, frame_rows)
-    if framing_profile is not None and partial_profile is None:
-        # Candidate retrieval and manifest resolution are separate reads. A
-        # film can publish a new frames generation between them, so validate
-        # the complete manifest again after the candidate snapshot was read.
-        if resolve_ready_framing_profile(config, db) != framing_profile:
-            framing_profile = None
-            cache_reason = "profile_changed"
-
     frame_rows, spatial_shortlist_limit = _reference_spatial_candidate_order(
         frame_rows,
         base_limit=min(
@@ -2956,85 +2892,23 @@ def _reference_frame_candidates(
         frame_rows,
         spatial_shortlist_limit=spatial_shortlist_limit,
         candidate_limit=len(frame_rows),
-        load_images=framing_profile is None,
+        load_images=True,
     )
-
     if not valid_rows:
-        _log_framing_query(
-            started_at=started_at,
-            cache="unavailable",
-            reason="no_valid_candidates",
-            candidate_count=0,
-            spatial_candidate_count=0,
-        )
+        _log_framing_query(started_at=started_at, reason="no_valid_candidates",
+                           candidate_count=0, spatial_candidate_count=0)
         return []
 
     spatial_scores: np.ndarray | None = None
-    candidate_spatial: np.ndarray | None = None
-    cache_path = "unavailable"
-    if query_spatial is not None and partial_profile is not None and framing_profile is not None:
-        valid_rows, candidate_spatial, hits = resolve_candidate_grids(
-            valid_rows, spatial_shortlist_limit, db, config, partial_profile, embed_spatial_images,
-        )
-        query_spatial = np.stack([canonical_grid(query_spatial[0], partial_profile)])
-        cache_path = "hit" if hits == len(candidate_spatial) else "partial" if hits else "live"
-        cache_reason = "source_hashed_v2"
-    elif query_spatial is not None and framing_profile is not None:
-        cached_frame_ids = [
-            str(row.get("frame_id") or "")
-            for row in valid_rows[:spatial_shortlist_limit]
-        ]
-        if all(cached_frame_ids):
-            candidate_spatial = load_framing_grids(
-                db,
-                framing_profile,
-                cached_frame_ids,
-            )
-        else:
-            cache_reason = "candidate_identity_missing"
-        if candidate_spatial is None:
-            # A malformed/unreadable active cache never contributes partially.
-            # Rebuild the whole shortlist through the established live path.
-            _LOGGER.warning(
-                "Framing spatial cache unavailable during query; "
-                "using complete live candidate reranking"
-            )
-            if cache_reason == "profile_ready":
-                cache_reason = "cache_read_failed"
-            valid_rows, candidate_images = _reference_valid_rows(
-                frame_rows,
-                spatial_shortlist_limit=spatial_shortlist_limit,
-                candidate_limit=len(frame_rows),
-                load_images=True,
-            )
-        else:
-            cache_path = "hit"
-    if (
-        query_spatial is not None
-        and candidate_spatial is None
-        and candidate_images
-    ):
-        cache_path = "live"
+    if query_spatial is not None and candidate_images:
         _candidate_global, candidate_spatial = embed_spatial_images(
             candidate_images,
             config,
             grid_size=_REFERENCE_SPATIAL_GRID_SIZE,
-            **(
-                {"model_revision": query_model_revision}
-                if query_model_revision is not None
-                else {}
-            ),
         )
-    elif query_spatial is None:
-        cache_reason = "query_grid_unavailable"
-    if query_spatial is not None and candidate_spatial is not None:
-        # The numeric scorer contract does not depend on cache occupancy,
-        # including a library with no cache table or an evicted old cache.
-        query_spatial = np.asarray(query_spatial, dtype="<f2").astype(np.float32)
-        candidate_spatial = np.asarray(candidate_spatial, dtype="<f2").astype(np.float32)
         spatial_scores = _spatial_grid_scores(
-            query_spatial[0],
-            candidate_spatial,
+            np.asarray(query_spatial[0], dtype=np.float32),
+            np.asarray(candidate_spatial, dtype=np.float32),
         )
 
     spatial_ranks: dict[int, int] = {}
@@ -3084,8 +2958,7 @@ def _reference_frame_candidates(
         valid_rows.sort(key=score_key)
         _log_framing_query(
             started_at=started_at,
-            cache=cache_path,
-            reason=cache_reason,
+            reason="unscored",
             candidate_count=len(valid_rows),
             spatial_candidate_count=0,
         )
@@ -3106,8 +2979,7 @@ def _reference_frame_candidates(
     results = [*spatial_shortlist, *semantic_backfill]
     _log_framing_query(
         started_at=started_at,
-        cache=cache_path,
-        reason=cache_reason,
+        reason="scored",
         candidate_count=len(results),
         spatial_candidate_count=spatial_count,
     )
@@ -3340,9 +3212,6 @@ def _search_by_image_only(
             "matched_frame": matched_frame,
         }
         channels: dict[str, dict[str, Any]] = {"img": image_channel}
-        if frame.get("_composition_profile"):
-            image_channel["rank_scope"] = frame["_semantic_rank_scope"]
-            image_channel["candidate_profile"] = frame["_composition_profile"]
         if frame.get("_spatial_score") is not None:
             channels["spatial"] = _channel_debug(
                 int(frame["_spatial_rank"]),

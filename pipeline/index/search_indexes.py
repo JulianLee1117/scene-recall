@@ -6,10 +6,10 @@ version change. An already stale manifest is never repaired by index creation.
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 import json
+import shutil
 from uuid import uuid4
 
-from pipeline.index import framing_features, text_features
-from pipeline.index.search_storage import reserve_search_storage
+from pipeline.index import text_features
 from pipeline.index.writer import _PUBLICATION_LOCK, _database_write_lock, table_names
 
 
@@ -31,20 +31,6 @@ def physical_index_change(config, db):
         if text is not None:
             path = text_features.manifest_path(config, text)
             manifests.append((path, text_features._read_manifest(path), "units", "units_version"))
-        framing = framing_features.resolve_ready_framing_profile(config, db)
-        if framing is not None:
-            path = framing_features.manifest_path(config, framing)
-            manifests.append((path, framing_features._read_manifest(path), "frames", "frames_version"))
-        from pathlib import Path
-        from pipeline.index.composition import ready_profile, _atomic_json
-        compact_manifests = []
-        for path in (Path(config.paths.assets_dir) / "search-profiles").glob("composition_*/coverage.json"):
-            try:
-                ready = ready_profile(config, db, path.parent.name)
-                if ready is not None:
-                    compact_manifests.append((path, ready[0], json.loads(path.read_text(encoding="utf-8"))))
-            except (OSError, ValueError, KeyError, TypeError):
-                continue
         yield
         for path, manifest, source_table, version_field in manifests:
             source = db.open_table(source_table)
@@ -54,11 +40,6 @@ def physical_index_change(config, db):
                 raise RuntimeError("Evidence rows changed during index-only maintenance")
             _write_manifest(path, replace(manifest, **{version_field: int(source.version),
                                                       "feature_table_version": int(features.version)}))
-        for path, profile, manifest in compact_manifests:
-            source, features = db.open_table("frames"), db.open_table(profile.table_name)
-            if source.count_rows() != manifest["frame_count"] or features.count_rows() != manifest["frame_count"]:
-                raise RuntimeError("Composition evidence changed during index-only maintenance")
-            _atomic_json(path, {**manifest, "frames_version": int(source.version), "feature_version": int(features.version)})
 
 
 def lookup_plan(db):
@@ -66,7 +47,7 @@ def lookup_plan(db):
     for name in table_names(db):
         table = db.open_table(name)
         fields = set(table.schema.names)
-        if name not in {"frames", "units", "films"} and not name.startswith(("unit_text_", "frame_framing", "frame_composition")):
+        if name not in {"frames", "units", "films"} and not name.startswith("unit_text_"):
             continue
         for column in ("film_id", "unit_id", "frame_id", "feature_id", "view", "is_representative"):
             if column not in fields:
@@ -92,7 +73,9 @@ def install_lookup_indexes(config, db):
         # String IDs dominate scalar index size. Reserve conservatively for
         # dictionary data, index structures, temporary files and one revision.
         estimate = int(table.count_rows()) * 512 + 4 * 1024**2
-        with reserve_search_storage(config, estimate), physical_index_change(config, db):
+        if shutil.disk_usage(config.paths.assets_dir).free < estimate + 1024**3:
+            raise RuntimeError("Not enough free disk space for a lookup index; free some space and retry")
+        with physical_index_change(config, db):
             table = db.open_table(item["table"])
             # Another managed invocation can finish between planning and locking.
             if not any(index.name == item["name"] for index in table.list_indices()):

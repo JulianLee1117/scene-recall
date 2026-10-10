@@ -15,9 +15,8 @@ def test_lookup_migration_preserves_text_readiness_and_is_idempotent(config, tmp
     db = open_db(config)
     before = resolve_ready_text_profile(config, db)
     assert before is not None
-    with patch("pipeline.index.framing_features.configured_framing_spatial_profile", return_value=None):
-        assert install_lookup_indexes(config, db)
-        assert install_lookup_indexes(config, db) == []
+    assert install_lookup_indexes(config, db)
+    assert install_lookup_indexes(config, db) == []
     assert resolve_ready_text_profile(config, db) == before
     assert all(item["ready"] for item in lookup_plan(db))
 
@@ -29,6 +28,5 @@ def test_index_creation_cannot_certify_stale_text_evidence(config, tmp_path):
     _write_unit(config, tmp_path, "film_b")
     db = open_db(config)
     assert resolve_ready_text_profile(config, db) is None
-    with patch("pipeline.index.framing_features.configured_framing_spatial_profile", return_value=None):
-        install_lookup_indexes(config, db)
+    install_lookup_indexes(config, db)
     assert resolve_ready_text_profile(config, db) is None

@@ -8,7 +8,6 @@ Usage::
     python -m pipeline.cli relink-film <new_path> [--apply]
     python -m pipeline.cli recover-relink <film_id>
     python -m pipeline.cli index-frames [--film-id FILM_ID]
-    python -m pipeline.cli index-framing [--film-id FILM_ID]
     python -m pipeline.cli index-text [--film-id FILM_ID]
 
 The ``ingest`` command runs the full ingest pipeline and prints a summary.
@@ -446,77 +445,11 @@ def temporal_jobs_cmd(cancel_id):
         raise click.ClickException(str(exc)) from exc
 
 
-@cli.command("index-framing")
-@click.option(
-    "--film-id",
-    default=None,
-    help="Only reconcile Framing descriptors for this film ID.",
-)
-@click.option(
-    "--batch-size",
-    type=click.IntRange(min=1),
-    default=512,
-    show_default=True,
-    help="Number of descriptor rows written per database batch.",
-)
-def index_framing_cmd(film_id: str | None, batch_size: int) -> None:
-    """Cache spatial grids for low-latency production Framing search.
-
-    A scoped run is incremental, but search uses the cache only after its
-    manifest exactly covers the current published frames generation.
-    """
-    from pipeline.index.backfill_framing import (
-        FramingBackfillProgress,
-        backfill_framing_features,
-    )
-
-    last_bucket = -10
-
-    def report_progress(progress: FramingBackfillProgress) -> None:
-        """Render at most one flushed line for each completed 10% bucket."""
-        nonlocal last_bucket
-        if progress.discovered <= 0:
-            return
-        bounded_completed = min(progress.completed, progress.discovered)
-        bucket = (100 * bounded_completed // progress.discovered) // 10 * 10
-        if bucket <= last_bucket:
-            return
-        last_bucket = bucket
-        stream = click.get_text_stream("stdout")
-        click.echo(
-            "[framing] caching spatial grids: "
-            f"{bucket}% ({bounded_completed:,}/{progress.discovered:,})",
-            file=stream,
-        )
-        stream.flush()
-
-    try:
-        result = backfill_framing_features(
-            load_config(),
-            film_id=film_id,
-            batch_size=batch_size,
-            progress_callback=report_progress,
-        )
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-    click.echo(
-        "Framing features: "
-        f"{result.discovered} found, "
-        f"{result.embedded} embedded, "
-        f"{result.upserted} indexed, "
-        f"{result.skipped_current} already current."
-    )
-    click.echo(
-        f"Profile {result.profile_id}: "
-        + ("active" if result.activated else "not active (coverage incomplete)")
-    )
 
 
 from pipeline.acquisition.cli import acquisition
-from pipeline.index.search_cli import search_features
 
 cli.add_command(acquisition)
-cli.add_command(search_features)
 
 
 if __name__ == "__main__":

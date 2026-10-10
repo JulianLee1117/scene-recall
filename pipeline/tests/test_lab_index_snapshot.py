@@ -17,8 +17,6 @@ from pipeline.tests.test_text_features import _write_unit, _fake_embeddings
 @pytest.fixture(autouse=True)
 def snapshots(monkeypatch):
     monkeypatch.setattr(index_snapshot, "_SNAPSHOTS", {})
-    # These tests exercise index versions, never load or download image models.
-    monkeypatch.setattr("pipeline.index.framing_features.configured_framing_spatial_profile", lambda *_: None)
 
 
 def _ready(config, tmp_path):

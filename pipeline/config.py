@@ -94,8 +94,6 @@ class RetrievalConfig:
     candidate_limit: int
     result_window: int
     max_result_limit: int
-    optional_storage_gib: int = 64
-    composition_profile: str | None = None
     rerank_shortlist: int = 0          # cross-encoder shortlist size; 0 keeps the fused order
 
 
@@ -317,13 +315,6 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         raise ValueError(
             "retrieval.candidate_limit must be at least max_result_limit"
         )
-    optional_storage_gib = r.get("optional_storage_gib", 64)
-    if type(optional_storage_gib) is not int or not 1 <= optional_storage_gib <= 1024:
-        raise ValueError("retrieval.optional_storage_gib must be an integer between 1 and 1024")
-    composition_profile = r.get("composition_profile")
-    if composition_profile is not None and (not isinstance(composition_profile, str)
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", composition_profile) is None):
-        raise ValueError("retrieval.composition_profile must be null or a simple profile identifier")
     rerank_shortlist = r.get("rerank_shortlist", 0)
     if type(rerank_shortlist) is not int or not 0 <= rerank_shortlist <= 200:
         raise ValueError("retrieval.rerank_shortlist must be an integer between 0 and 200")
@@ -333,8 +324,6 @@ def load_config(path: Optional[Path | str] = None) -> Config:
         candidate_limit=candidate_limit,
         result_window=result_window,
         max_result_limit=max_result_limit,
-        optional_storage_gib=optional_storage_gib,
-        composition_profile=composition_profile,
         rerank_shortlist=rerank_shortlist,
     )
 

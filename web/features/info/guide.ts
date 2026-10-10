@@ -131,7 +131,7 @@ export function buildGuide(config: ProjectInfo | null): GuideSection[] {
           detail: ["Credits, logos and blank frames are filtered out, and near-identical images are folded together. Shots from one dramatic scene become a single card with the others listed beneath.", "Broad searches spread results across scenes and films, but a film you name is never pushed down. Framing compares layout: 65% overall look, 35% where things sit in the picture."],
           method: config ? `Broad film-repeat penalty: original rank + ${config.retrieval.diversity.film_repeat_rank_strength} × repeats / (repeats + 1). Reference pages: ${config.retrieval.diversity.page_size}, soft target ${config.retrieval.diversity.film_results_per_page_target} results per film, with relevance backfill.` : "Visual deduplication, bounded temporal and film preferences, and optional spatial reranking.",
           output: "A ranked, less repetitive set. Diversity is a soft preference, not a quota.",
-          sources: ["pipeline/search/retrieve.py", "pipeline/index/framing_cache.py", "pipeline/search/composition.py"],
+          sources: ["pipeline/search/retrieve.py"],
         },
         {
           id: "results", title: "Return moments", summary: "Show the best frame, linked to its exact place in the film.",
@@ -204,7 +204,7 @@ export function buildGuide(config: ProjectInfo | null): GuideSection[] {
           detail: ["Keyframes, annotations, evidence, embeddings and caches each record the model and version behind them. Evidence is saved per film and profile, and a newer profile takes over only once it is complete.", "The search index checks compatibility so a half-built generation or a mismatched vector space can never silently become the index."],
           method: "Versioned manifests, model-scoped features, source checks and completeness gates.",
           output: "Rebuildable media and features, and one compatible searchable generation.",
-          sources: ["pipeline/index/writer.py", "pipeline/index/text_features.py", "pipeline/index/framing_features.py", "pipeline/evidence/store.py", "pipeline/evidence/compile.py"],
+          sources: ["pipeline/index/writer.py", "pipeline/index/text_features.py", "pipeline/evidence/store.py", "pipeline/evidence/compile.py"],
         },
         {
           id: "processes", title: "App state & workers", summary: "Keep the app responsive while queues do the work.",

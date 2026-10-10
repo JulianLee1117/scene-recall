@@ -4,7 +4,7 @@ WORKER_ROLES = ("editor", "ingest")
 ROLE_KINDS = {
     "editor": ("rhythm", "analyze", "plan", "draft", "generate", "render", "next-scene", "next-scene-preview",
                "transition-render", "transition-bridge", "transition-generate", "algmods-render"),
-    "ingest": ("ingest", "backfill-temporal", "prepare-search-features", "fit-search-composition"),
+    "ingest": ("ingest", "backfill-temporal"),
 }
 
 

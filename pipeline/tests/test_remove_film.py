@@ -2,16 +2,11 @@
 
 from dataclasses import replace
 import json
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 from pipeline.index import remove_film as removal
-from pipeline.index.framing_features import (
-    FramingSpatialSource, create_framing_feature_table, make_framing_feature_rows,
-    publish_framing_manifest, resolve_ready_framing_profile,
-)
 from pipeline.index.text_features import (
     build_text_feature_sources, configured_text_profile, create_text_feature_table,
     make_text_feature_rows, publish_text_index_manifest, resolve_ready_text_profile,
@@ -22,7 +17,6 @@ from pipeline.index.writer import (
 from pipeline.ingest.locks import global_ingest_lock
 from pipeline.ingest.probe import FilmRecord
 from pipeline.ingest.shots import Shot
-from pipeline.tests.test_framing_features import _profile
 
 
 TARGET = "a" * 64
@@ -67,21 +61,9 @@ def library(config, tmp_path, monkeypatch):
     create_text_feature_table(db, archived_text)
     db.open_table(archived_text.table_name).add(text_rows)
 
-    framing = _profile()
-    monkeypatch.setattr("pipeline.index.framing_features.configured_framing_spatial_profile", lambda config: framing)
-    frames = db.open_table("frames").search().limit(None).to_list()
-    frame_sources = [FramingSpatialSource(
-        frame_id=row["frame_id"], film_id=row["film_id"], unit_id=row["unit_id"],
-        path=Path(row["path"]), source_size=row["source_size"], source_mtime_ns=row["source_mtime_ns"],
-    ) for row in frames]
-    create_framing_feature_table(db, framing)
-    db.open_table(framing.table_name).add(make_framing_feature_rows(
-        frame_sources, np.ones((len(frames), 6, 6, 4), dtype=np.float32) / 2, framing,
-    ))
-    publish_framing_manifest(config, db, framing, frame_ids=[row["frame_id"] for row in frames])
     # Authored state is not a removal target, even if it contains a film ID.
     db.create_table("bookmarks", [{"film_id": TARGET, "note": "keep my saved selection"}])
-    return db, text, framing, tmp_path / f"{TARGET}.mkv"
+    return db, text, tmp_path / f"{TARGET}.mkv"
 
 
 def _versions(db):
@@ -89,7 +71,7 @@ def _versions(db):
 
 
 def test_dry_run_is_exact_and_does_not_change_tables(config, library):
-    db, text, framing, path = library
+    db, text, path = library
     before = _versions(db)
     report = removal.remove_film_index(config, TARGET, path)
     assert report["status"] == "dry_run"
@@ -98,20 +80,17 @@ def test_dry_run_is_exact_and_does_not_change_tables(config, library):
     assert all(item["target_rows"] == 1 for item in report["tables"])
     assert _versions(db) == before
     assert resolve_ready_text_profile(config, db) == text
-    assert resolve_ready_framing_profile(config, db) == framing
 
 
-def test_removal_preserves_other_rows_files_authored_state_and_both_profiles(config, library, tmp_path):
-    db, text, framing, path = library
+def test_removal_preserves_other_rows_files_authored_state_and_the_text_profile(config, library, tmp_path):
+    db, text, path = library
     path.write_bytes(b"replacement source already at the old filename")
     before = {name: db.open_table(name).search().where(f"film_id = '{OTHER}'").limit(None).to_list()
               for name in table_names(db)}
     receipt = tmp_path / "removal.json"
     report = removal.remove_film_index(config, TARGET, path, apply=True, receipt=receipt)
     assert report["status"] == "complete"
-    assert json.loads(receipt.read_text())["ready_profiles_after"] == {
-        "text": text.table_name, "framing": framing.table_name,
-    }
+    assert json.loads(receipt.read_text())["ready_profiles_after"] == {"text": text.table_name}
     for name in table_names(db) - {"bookmarks"}:
         assert db.open_table(name).count_rows(f"film_id = '{TARGET}'") == 0
         assert db.open_table(name).search().limit(None).to_list() == before[name]
@@ -119,20 +98,11 @@ def test_removal_preserves_other_rows_files_authored_state_and_both_profiles(con
     assert path.read_bytes() == b"replacement source already at the old filename"
     assert (config.paths.assets_dir / TARGET / "keyframes" / "a_0000_0.webp").read_bytes() == b"frame evidence"
     assert resolve_ready_text_profile(config, db) == text
-    assert resolve_ready_framing_profile(config, db) == framing
     assert db.open_table("units").search("red", query_type="fts").to_list()[0]["film_id"] == OTHER
 
 
-def test_incomplete_framing_stays_inactive(config, library, tmp_path):
-    db, text, framing, path = library
-    db.open_table(framing.table_name).delete(f"film_id = '{OTHER}'")
-    assert resolve_ready_framing_profile(config, db) is None
-    report = removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "removal.json")
-    assert report["ready_profiles_after"] == {"text": text.table_name, "framing": None}
-
-
 def test_wrong_path_and_active_ingest_refuse_before_mutation(config, library, tmp_path):
-    db, _, _, path = library
+    db, _, path = library
     before = _versions(db)
     with pytest.raises(ValueError, match="does not match"):
         removal.remove_film_index(config, TARGET, tmp_path / "another.mkv", apply=True, receipt=tmp_path / "wrong.json")
@@ -153,7 +123,7 @@ def test_wrong_path_and_active_ingest_refuse_before_mutation(config, library, tm
 
 @pytest.mark.parametrize("failure_type", [OSError, KeyboardInterrupt])
 def test_manifest_failure_restores_all_rows_and_profile_readiness(config, library, tmp_path, monkeypatch, failure_type):
-    db, text, framing, path = library
+    db, text, path = library
     before = {name: db.open_table(name).search().limit(None).to_list() for name in table_names(db)}
     publish = removal.publish_text_index_manifest
     calls = 0
@@ -172,7 +142,6 @@ def test_manifest_failure_restores_all_rows_and_profile_readiness(config, librar
     assert {name: db.open_table(name).search().limit(None).to_list() for name in table_names(db)} == before
     assert json.loads(receipt.read_text())["status"] == "rolled_back"
     assert resolve_ready_text_profile(config, db) == text
-    assert resolve_ready_framing_profile(config, db) == framing
 
 
 REJECTED = b"rejected release"
@@ -185,7 +154,7 @@ def _identify(monkeypatch):
 
 
 def test_delete_files_dry_run_lists_targets_and_changes_nothing(config, library, monkeypatch):
-    db, _, _, path = library
+    db, _, path = library
     path.write_bytes(REJECTED)
     _identify(monkeypatch)
     before = _versions(db)
@@ -198,7 +167,7 @@ def test_delete_files_dry_run_lists_targets_and_changes_nothing(config, library,
 
 
 def test_delete_files_rejects_the_release_and_keeps_everything_else(config, library, tmp_path, monkeypatch):
-    db, _, _, path = library
+    db, _, path = library
     playback = tmp_path / "playback"
     config.paths.playback_dir = playback
     (playback / TARGET / "video-copy").mkdir(parents=True)
@@ -222,7 +191,7 @@ def test_delete_files_rejects_the_release_and_keeps_everything_else(config, libr
 
 
 def test_delete_files_keeps_a_replacement_with_the_same_filename(config, library, tmp_path, monkeypatch):
-    _, _, _, path = library
+    _, _, path = library
     path.write_bytes(b"better copy")
     _identify(monkeypatch)
     report = removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "r.json", delete_files=True)
@@ -233,7 +202,7 @@ def test_delete_files_keeps_a_replacement_with_the_same_filename(config, library
 
 
 def test_delete_files_finishes_a_film_already_out_of_the_index(config, library, tmp_path, monkeypatch):
-    _, _, _, path = library
+    _, _, path = library
     path.write_bytes(REJECTED)
     _identify(monkeypatch)
     removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "index-only.json")
@@ -246,7 +215,7 @@ def test_delete_files_finishes_a_film_already_out_of_the_index(config, library, 
 
 
 def test_a_locked_file_leaves_files_pending_for_a_rerun(config, library, tmp_path, monkeypatch):
-    db, _, _, path = library
+    db, _, path = library
     path.write_bytes(REJECTED)
     _identify(monkeypatch)
     remove = removal._remove
@@ -268,11 +237,11 @@ def test_a_locked_file_leaves_files_pending_for_a_rerun(config, library, tmp_pat
 
 
 def test_final_film_removal_keeps_empty_text_profile_valid(config, library, tmp_path):
-    db, text, _, path = library
+    db, text, path = library
     removal.remove_film_index(config, TARGET, path, apply=True, receipt=tmp_path / "first.json")
     report = removal.remove_film_index(
         config, OTHER, tmp_path / f"{OTHER}.mkv", apply=True, receipt=tmp_path / "last.json",
     )
-    assert report["ready_profiles_after"] == {"text": text.table_name, "framing": None}
+    assert report["ready_profiles_after"] == {"text": text.table_name}
     for name in table_names(db) - {"bookmarks"}:
         assert db.open_table(name).count_rows() == 0

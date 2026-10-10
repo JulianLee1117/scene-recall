@@ -14,8 +14,6 @@ from pathlib import Path
 from pipeline.lab.models import ProjectDocument
 
 
-SEARCH_FEATURE_PAUSE_REASON = "Optional search preparation paused by operator; use search-features resume to continue"
-_SEARCH_FEATURE_KINDS = ("prepare-search-features", "fit-search-composition")
 
 
 class RevisionConflict(ValueError):
@@ -499,100 +497,6 @@ class LabStore:
                 "SELECT * FROM jobs WHERE kind='transition-generate'" + clause +
                 " ORDER BY created_at DESC,id DESC LIMIT ?", (*values, limit))]
 
-    def enqueue_search_features(self, options):
-        """One durable, resumable optional-feature job per film generation."""
-        if (not isinstance(options, dict) or set(options) not in ({"film_id", "source_generation", "profile", "frame_count"},
-                {"film_id", "source_generation", "profile", "frame_count", "composition_profile"})
-                or not isinstance(options["film_id"], str) or not options["film_id"]
-                or not isinstance(options["source_generation"], str) or len(options["source_generation"]) != 64
-                or type(options["frame_count"]) is not int or options["frame_count"] < 1):
-            raise ValueError("A validated film feature-preparation request is required")
-        encoded = json.dumps({"search_features": options}, sort_keys=True, allow_nan=False)
-        key = "prepare-search-features:" + hashlib.sha256(encoded.encode()).hexdigest()
-        with self.connection() as con:
-            con.execute("BEGIN IMMEDIATE")
-            row = con.execute("SELECT * FROM jobs WHERE kind='prepare-search-features' AND path_key=? AND status IN ('queued','waiting_worker','running','interrupted','failed') AND cancel_requested=0 ORDER BY created_at DESC LIMIT 1", (key,)).fetchone()
-            if row is not None:
-                if row["status"] in {"interrupted", "failed"} or (row["status"] == "waiting_worker" and row["error"]
-                        and row["error"] != SEARCH_FEATURE_PAUSE_REASON):
-                    con.execute("UPDATE jobs SET status='waiting_worker',error=NULL,finished_at=NULL WHERE id=?", (row["id"],))
-                identity = row["id"]
-            else:
-                identity = str(uuid.uuid4())
-                con.execute("INSERT INTO jobs (id,kind,status,snapshot,created_at,path_key) VALUES (?,?,?,?,?,?)",
-                            (identity, "prepare-search-features", "waiting_worker", encoded, time.time(), key))
-        return self.get_job(identity)
-
-    def continue_search_features(self, identity, result, *, error=None):
-        """Yield the worker after one batch; blocked jobs need explicit resume."""
-        with self.connection() as con:
-            con.execute("BEGIN IMMEDIATE")
-            row = con.execute("SELECT kind,status,cancel_requested FROM jobs WHERE id=?", (identity,)).fetchone()
-            if row is None or row["kind"] != "prepare-search-features" or row["status"] != "running":
-                raise ValueError("Only a running search-feature job can yield")
-            status = "cancelled" if row["cancel_requested"] else "waiting_worker"
-            con.execute("UPDATE jobs SET status=?,result=?,error=?,finished_at=? WHERE id=?",
-                        (status, json.dumps(result, allow_nan=False), error,
-                         time.time() if status == "cancelled" else None, identity))
-        return self.get_job(identity)
-
-    def enqueue_composition_fit(self):
-        """One explicit local fitting experiment after existing feature work."""
-        with self.connection() as con:
-            con.execute("BEGIN IMMEDIATE")
-            row = con.execute("SELECT id FROM jobs WHERE kind='fit-search-composition' AND status IN ('queued','waiting_worker','running') AND cancel_requested=0").fetchone()
-            if row is not None:
-                identity = row["id"]
-            else:
-                identity = str(uuid.uuid4())
-                con.execute("INSERT INTO jobs (id,kind,status,snapshot,created_at,path_key) VALUES (?,?,?,?,?,?)",
-                            (identity, "fit-search-composition", "waiting_worker", '{}', time.time(), "fit-search-composition:v1"))
-        return self.get_job(identity)
-
-    def search_feature_queue(self):
-        """Inspect optional preparation without loading film indexes or models."""
-        if not self.path.exists():
-            return []
-        with self.connection() as con:
-            rows = con.execute("SELECT id,kind,status,snapshot,result,error,cancel_requested FROM jobs "
-                               "WHERE kind IN (?,?) ORDER BY created_at,rowid", _SEARCH_FEATURE_KINDS).fetchall()
-        return [{"job_id": row["id"], "kind": row["kind"], "status": row["status"],
-                 "film_id": json.loads(row["snapshot"]).get("search_features", {}).get("film_id"),
-                 "cursor": json.loads(row["result"] or "{}").get("cursor"),
-                 "error": row["error"],
-                 "paused": (row["status"] == "waiting_worker" and not row["cancel_requested"]
-                            and row["error"] == SEARCH_FEATURE_PAUSE_REASON)} for row in rows]
-
-    def pause_search_features(self):
-        """Hold currently runnable optional jobs, after the active batch drains."""
-        if not self.path.exists():
-            return {"paused": 0, "job_ids": []}
-        with self.connection() as con:
-            con.execute("BEGIN IMMEDIATE")
-            if con.execute("SELECT 1 FROM jobs WHERE kind IN (?,?) AND status='running' LIMIT 1",
-                           _SEARCH_FEATURE_KINDS).fetchone():
-                raise ValueError("Optional search preparation is still running; stop the ingest worker "
-                                 "with --role ingest --stop and wait for the active batch to finish")
-            identities = [row[0] for row in con.execute(
-                "SELECT id FROM jobs WHERE kind IN (?,?) AND status IN ('queued','waiting_worker') "
-                "AND error IS NULL AND cancel_requested=0 ORDER BY created_at,rowid", _SEARCH_FEATURE_KINDS)]
-            con.executemany("UPDATE jobs SET status='waiting_worker',error=? WHERE id=?",
-                            [(SEARCH_FEATURE_PAUSE_REASON, identity) for identity in identities])
-        return {"paused": len(identities), "job_ids": identities}
-
-    def resume_search_features(self):
-        """Release only jobs held by pause_search_features, retaining their cursors."""
-        if not self.path.exists():
-            return {"resumed": 0, "job_ids": []}
-        with self.connection() as con:
-            con.execute("BEGIN IMMEDIATE")
-            identities = [row[0] for row in con.execute(
-                "SELECT id FROM jobs WHERE kind IN (?,?) AND status='waiting_worker' "
-                "AND error=? AND cancel_requested=0 ORDER BY created_at,rowid",
-                (*_SEARCH_FEATURE_KINDS, SEARCH_FEATURE_PAUSE_REASON))]
-            con.executemany("UPDATE jobs SET error=NULL WHERE id=?", [(identity,) for identity in identities])
-        return {"resumed": len(identities), "job_ids": identities}
-
     def enqueue_temporal_backfill(self, film_id, unit_ids, *, sampling_profile, batch_size=32):
         """Freeze bounded maintenance batches in the existing durable ledger.
 
@@ -657,9 +561,8 @@ class LabStore:
             # UUIDs carry no queue order. Preserve insertion order when the
             # system clock gives multiple jobs the same creation timestamp.
             row = con.execute(f"""SELECT * FROM jobs WHERE kind IN ({placeholders})
-                AND (status='queued' OR (kind='backfill-temporal' AND status='waiting_worker')
-                     OR (kind IN ('prepare-search-features','fit-search-composition') AND status='waiting_worker' AND error IS NULL))
-                ORDER BY CASE WHEN kind='fit-search-composition' THEN 2 WHEN kind IN ('backfill-temporal','prepare-search-features') THEN 1 ELSE 0 END,created_at,rowid LIMIT 1""", kinds).fetchone()
+                AND (status='queued' OR (kind='backfill-temporal' AND status='waiting_worker'))
+                ORDER BY CASE WHEN kind='backfill-temporal' THEN 1 ELSE 0 END,created_at,rowid LIMIT 1""", kinds).fetchone()
             if row is None:
                 return None
             con.execute("UPDATE jobs SET status='running',started_at=? WHERE id=?", (time.time(), row["id"]))

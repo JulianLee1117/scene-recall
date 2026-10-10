@@ -55,35 +55,6 @@ def execute_job(job, config, db, store, *, ingest_runner=None, role="all"):
         progress(f"Starting {job['kind']}")
         if role == "editor" and job["kind"] in {"generate", "plan", "draft", "next-scene"}:
             db = acquire_editor_snapshot(config, db, progress, cancelled)
-        if job["kind"] == "prepare-search-features":
-            from pipeline.index.search_features import prepare_batch
-            from pipeline.index.search_storage import SearchStorageFull
-            previous = job.get("result") or {}
-            try:
-                batch = prepare_batch(config, db, job["snapshot"]["search_features"],
-                                      previous.get("cursor", ""), cancelled=cancelled)
-            except (SearchStorageFull, Timeout) as exc:
-                return store.continue_search_features(job["id"], previous, error=str(exc))
-            result = {**batch, "written": previous.get("written", 0) + batch["written"],
-                      "composition_written": previous.get("composition_written", 0) + batch.get("composition_written", 0),
-                      "processed": previous.get("processed", 0) + batch.get("processed", 0)}
-            progress(f"Prepared search features for {result['processed']} frames")
-            if batch["done"]:
-                return store.finish(job["id"], result=result)
-            return store.continue_search_features(job["id"], result)
-        if job["kind"] == "fit-search-composition":
-            from pipeline.index.composition_build import fit_profiles
-            from pipeline.index.search_features import preparation_request
-            from pipeline.index.writer import published_film_ids
-            profiles = fit_profiles(config, db, progress=progress, cancelled=cancelled)
-            queued = []
-            for profile in profiles:
-                for film_id in sorted(published_film_ids(db)):
-                    progress(f"Queuing compact features for {film_id}")
-                    request = preparation_request(config, db, film_id, composition_profile=profile.profile_id)
-                    queued.append(store.enqueue_search_features(request)["id"])
-            return store.finish(job["id"], result={"profiles": [profile.profile_id for profile in profiles],
-                                                   "preparation_jobs": queued, "promoted": False})
         if job["kind"] == "backfill-temporal":
             from pipeline.ingest.backfill_temporal import backfill_temporal
             from pipeline.ingest.shots import SHORT_SHOT_SAMPLING_PROFILE
@@ -216,8 +187,7 @@ def execute_job(job, config, db, store, *, ingest_runner=None, role="all"):
         store.cancel(job["id"])
         return store.finish(job["id"], error="Job cancelled")
     except Exception as exc:
-        return store.finish(job["id"], error=str(exc) or type(exc).__name__,
-                            **({"result": job.get("result")} if job["kind"] == "prepare-search-features" else {}))
+        return store.finish(job["id"], error=str(exc) or type(exc).__name__)
 
 
 def run_worker(config, *, once=False, stop=None, db=None, reload_fingerprint=None, role="all"):
