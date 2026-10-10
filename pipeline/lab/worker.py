@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import signal
 import sys
 import threading
@@ -12,6 +13,21 @@ from pathlib import Path
 
 from pipeline.lab.job_roles import WORKER_ROLES
 from pipeline.lab.worker_runtime import RELOAD_EXIT_CODE, source_changed, source_fingerprint, supervise, supervise_roles, watch_parent
+
+# Failures that say the machine, not the film, ran short of memory: Windows' commit limit (error 1455,
+# NTSTATUS 0xC000012D), a DLL that could not initialise for want of it (0xC0000142), and allocators
+# giving up. After a reboot these failed every queued film within a minute; now the film waits instead.
+_TRANSIENT_MARKERS = ("error 1455", "paging file is too small", "memory allocation failed",
+                      "memory allocation still failed", "cuda out of memory")
+_TRANSIENT_EXIT_CODES = {3221225773, 3221225794}
+TRANSIENT_RETRIES = 3
+
+
+def transient_resource_failure(message: str) -> bool:
+    """Whether an ingest failure reads as memory exhaustion rather than a problem with the film."""
+    text = message.lower()
+    code = re.search(r"exited with code (\d+)", text)
+    return any(marker in text for marker in _TRANSIENT_MARKERS) or bool(code and int(code.group(1)) in _TRANSIENT_EXIT_CODES)
 
 
 def execute_job(job, config, db, store, *, ingest_runner=None, role="all"):
@@ -100,7 +116,14 @@ def execute_job(job, config, db, store, *, ingest_runner=None, role="all"):
                 from pipeline.api.main import _run_ingest_subprocess
                 ingest_runner = _run_ingest_subprocess
             # The CLI process still owns its existing global GPU/ingest lock.
-            ingest_runner(Path(job["snapshot"]["path"]), progress)
+            try:
+                ingest_runner(Path(job["snapshot"]["path"]), progress)
+            except RuntimeError as exc:
+                retries = int((job.get("result") or {}).get("transient_retries", 0))
+                if not transient_resource_failure(str(exc)) or retries >= TRANSIENT_RETRIES:
+                    raise
+                return store.requeue(job["id"], f"Paused: the system ran short of memory; retry {retries + 1} of "
+                                                f"{TRANSIENT_RETRIES} after a wait ({str(exc)[:200]})")
             return store.finish(job["id"])
         if job["kind"] == "render":
             result = render_reel(job, config, db, store, progress, cancelled)
@@ -233,6 +256,7 @@ def run_worker(config, *, once=False, stop=None, db=None, reload_fingerprint=Non
                 ).fetchone() is not None
 
         next_cleanup = 0.0
+        paused = 0                       # consecutive transient failures; each waits longer
         while not stop.is_set():
             if control.check_stop():
                 break
@@ -246,9 +270,19 @@ def run_worker(config, *, once=False, stop=None, db=None, reload_fingerprint=Non
             if job is not None:
                 control.set_job(job["id"])
                 try:
-                    execute_job(job, config, db, store, role=role)
+                    outcome = execute_job(job, config, db, store, role=role)
                 finally:
                     control.set_job(None)
+                if isinstance(outcome, dict) and outcome.get("status") == "queued" and not once:
+                    # A transient failure returned the job to the queue: let memory recover before claiming again.
+                    wait = min(60 * 2 ** paused, 900)
+                    paused += 1
+                    print(f"[{role}] {job['kind']} paused for lack of memory; claiming again in {wait} s", flush=True)
+                    deadline = time.monotonic() + wait
+                    while time.monotonic() < deadline and not stop.is_set() and not control.check_stop():
+                        stop.wait(min(5.0, max(0.0, deadline - time.monotonic())))
+                    continue
+                paused = 0
             if once:
                 break
             if job is None:

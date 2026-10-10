@@ -792,6 +792,78 @@ def test_ingest_queue_failure_does_not_block_next_film(config: Config) -> None:
     assert snapshots[1]["log"][-1] == "working"
 
 
+@pytest.mark.parametrize("message, transient", [
+    # Failures seen when a reboot left the machine short of memory (2026-10-07).
+    ("ingest exited with code 1: OSError: [WinError 1455] The paging file is too small for this operation", True),
+    ("ingest exited with code 1: error: uv trampoline failed to spawn Python child process | Caused by: uncategorized error (os error 1455)", True),
+    ("ingest exited with code 3: OMP: Error #111: Memory allocation failed.", True),
+    ("ingest exited with code 1: OpenBLAS error: Memory allocation still failed after 10 retries", True),
+    ("ingest exited with code 3221225773: no output", True),
+    ("ingest exited with code 3221225794: no output", True),
+    # Problems with the film itself stay failures.
+    ("ingest exited with code 1: subprocess.CalledProcessError: Command '['ffmpeg', ...]' returned non-zero exit status 4294967274.", False),
+    ("mock ingest failed", False),
+])
+def test_memory_exhaustion_reads_as_transient(message: str, transient: bool) -> None:
+    from pipeline.lab.worker import transient_resource_failure
+
+    assert transient_resource_failure(message) is transient
+
+
+def test_memory_exhaustion_requeues_an_ingest_in_place_a_bounded_number_of_times(config: Config) -> None:
+    from pipeline.api.main import _IngestQueue
+    from pipeline.lab.store import LabStore
+    from pipeline.lab.worker import TRANSIENT_RETRIES, execute_job
+
+    store = LabStore(config.paths.state_dir)
+    store.initialize()
+    queue = _IngestQueue(store)
+    queue.enqueue(config.paths.films_dir / "First.mkv")
+    queue.enqueue(config.paths.films_dir / "Second.mkv")
+    claimed = []
+
+    def runner(path, _progress):
+        claimed.append(path.name)
+        raise RuntimeError("ingest exited with code 3221225773: no output")
+
+    for _ in range(TRANSIENT_RETRIES):
+        assert execute_job(store.claim(), config, None, store, ingest_runner=runner)["status"] == "queued"
+    assert claimed == ["First.mkv"] * TRANSIENT_RETRIES          # the film keeps its place ahead of the next one
+    assert queue.snapshots()[0]["progress"].startswith("Paused: the system ran short of memory")
+    # Out of retries, the failure is reported like any other.
+    assert execute_job(store.claim(), config, None, store, ingest_runner=runner)["status"] == "failed"
+    assert [job["status"] for job in queue.snapshots()] == ["error", "queued"]
+
+
+def test_worker_waits_before_claiming_a_requeued_ingest_again(config: Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+    from unittest.mock import MagicMock
+
+    from pipeline.api.main import _IngestQueue
+    from pipeline.lab import worker
+    from pipeline.lab.store import LabStore
+
+    store = LabStore(config.paths.state_dir)
+    store.initialize()
+    _IngestQueue(store).enqueue(config.paths.films_dir / "First.mkv")
+    stop, waits, claims = threading.Event(), [], []
+
+    def wait(seconds):
+        waits.append(seconds)
+        stop.set()
+        return True
+
+    def execute(job, _config, _db, ledger, *, role):
+        claims.append(job["id"])
+        return ledger.requeue(job["id"], "Paused: the system ran short of memory")
+
+    monkeypatch.setattr(stop, "wait", wait)
+    monkeypatch.setattr(worker, "execute_job", execute)
+    assert worker.run_worker(config, db=MagicMock(), stop=stop, role="ingest") == 0
+    assert len(claims) == 1 and waits == [5.0]       # pausing in short, stoppable slices, not straight back to the queue
+    assert LabStore(config.paths.state_dir).ingest_snapshots()[0]["status"] == "queued"
+
+
 def test_import_preserves_explicit_sdh_when_regular_track_is_automatic(
     config: Config, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,7 +1,7 @@
 """Bring one film's evidence up to date: every pass in order, each skipped when current.
 
-    metadata -> subtitles -> adopt subtitles -> understanding -> measure -> moments -> hero
-      -> synthesis -> compile -> text views -> match-cut index (when a moments pass ran)
+    metadata -> subtitles -> adopt subtitles -> understanding (+ skipped shots) -> measure
+      -> moments -> hero -> synthesis -> compile -> text views -> match-cut index (when a moments pass ran)
 
 The adopt step re-derives a film's published dialogue from an accepted synced download
 (a Japanese film's English lines) so the understanding pass and search see it; it is
@@ -73,6 +73,8 @@ def refresh_films(config: Any, db: Any, films: list[FilmRef], *, hosted: bool = 
                                                         progress=progress))
         step("understanding", lambda: understanding.run(
             config, db, films, max_usd=FILM_UNDERSTANDING_MAX_USD * len(films), concurrency=4, progress=progress))
+        step("understanding_gaps", lambda: understanding.retry_missing(
+            config, db, films, max_usd=FILM_UNDERSTANDING_MAX_USD * len(films), progress=progress))
         step("highlights", lambda: highlights.run(config, db, films, progress=progress))
     if measure_pass:
         step("measure", lambda: measure.run(config, db, films, lock_films=not holding_ingest_lock, progress=progress))

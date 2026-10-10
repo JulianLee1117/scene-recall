@@ -27,6 +27,7 @@ uv run python -m pipeline.evidence subtitles --max-downloads 20  # OpenSubtitles
 uv run python -m pipeline.evidence refresh-dialogue            # adopt accepted subtitles not adopted yet (automatic for new films)
 uv run python -m pipeline.evidence understand --batch run --max-usd 110 [--wave-chunks 300]   # half-price Gemini batch, unattended
 uv run python -m pipeline.evidence understand --retry-refused  # recover filter-refused clips in smaller pieces
+uv run python -m pipeline.evidence understand --retry-missing  # re-request shots an answer skipped (automatic for new films)
 uv run python -m pipeline.evidence measure                     # local GPU pass (~3-4 min per film)
 uv run python -m pipeline.evidence hero
 uv run python -m pipeline.evidence moments                     # match-cut GPU pass, every instant at 4 fps (~4 min per film)
@@ -134,7 +135,10 @@ Newly launched services write logs under `.tmp/services/`; a previous launch's
 logs are retained as `.previous`. Reused services keep their existing log files.
 The launcher does not retry failed ingestions automatically. Their retained
 sources and job details remain available in **Films** for an explicit retry
-after the cause is addressed. Nothing is installed to run at Windows sign-in.
+after the cause is addressed. One exception: an ingest that fails because the
+machine ran short of memory (Windows error 1455, allocator failures) goes back
+to its place in the queue as **Paused**, and the worker waits (1, 2, 4, then up
+to 15 minutes) before trying again, up to three times. Nothing is installed to run at Windows sign-in.
 
 To load new code or configuration, restart the API and both Lab workers.
 Running jobs finish first and queued jobs are kept. The web server, downloads

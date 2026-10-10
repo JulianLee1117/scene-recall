@@ -301,6 +301,58 @@ def test_split_retry_pieces_keep_ordinals_and_combine_around_refused_pieces():
     assert len(combined["shots"]) == 30
 
 
+def test_missing_runs_group_skipped_shots_and_leave_filter_refused_pieces_alone():
+    chunk = u.plan_chunks(_units([2.0] * 10))[0]
+    present = {shot["unit_id"]: {} for shot in chunk.shots if shot["ordinal"] not in {3, 4, 7, 9, 10}}
+    receipt = {"result": {"shots": present}, "split": {"refused": [{"first_ordinal": 9, "last_ordinal": 10}]}}
+    assert [[shot["ordinal"] for shot in run] for run in u.missing_runs(chunk, receipt)] == [[3, 4], [7]]
+
+
+def test_splice_takes_the_run_from_the_piece_and_trims_scenes_around_it():
+    result = {"shots": {"a": 1}, "iconic": [{"unit_id": "a"}],
+              "scenes": [{"first_shot": 1, "last_shot": 2, "title": "A", "continues_previous": True},
+                         {"first_shot": 3, "last_shot": 10, "title": "B stretched", "continues_previous": False}]}
+    piece = {"shots": {"x": 2}, "iconic": [],
+             "scenes": [{"first_shot": 4, "last_shot": 5, "title": "C", "continues_previous": True},
+                        {"first_shot": 6, "last_shot": 8, "title": "D", "continues_previous": False}]}
+    spliced = u.splice_result(result, piece, 4, 8)
+    assert [(s["title"], s["first_shot"], s["last_shot"], s["continues_previous"]) for s in spliced["scenes"]] == [
+        ("A", 1, 2, True), ("B stretched", 3, 3, False), ("C", 4, 5, False), ("D", 6, 8, False),
+        ("B stretched", 9, 10, False)]
+    assert spliced["shots"] == {"a": 1, "x": 2} and spliced["iconic"] == [{"unit_id": "a"}]
+
+
+def test_retry_missing_fills_a_skipped_run_and_merges_the_film_again(config, tmp_path, monkeypatch):
+    import json
+    from pipeline.evidence import store
+    plan = _batch_plan(tmp_path)
+    plan = u.FilmPlan(film=plan.film, units=[s for c in plan.chunks for s in c.shots], chunks=plan.chunks,
+                      inputs={}, dialogue=[], contexts=("ctx", "ctx"))
+    prod = u.producer()
+    first, middle, last = plan.chunks
+    truncated = json.loads(_chunk_response(middle)["text"])
+    truncated["shots"] = truncated["shots"][:4]                       # the answer stopped after four of ten shots
+    for chunk, response in ((first, _chunk_response(first)),
+                            (middle, {**_chunk_response(middle), "text": json.dumps(truncated)}),
+                            (last, _chunk_response(last, continues=True))):
+        u.write_receipt(config, plan, prod, chunk, response, model="m", variant="full", transport="standard", proxy={})
+    asked = []
+
+    def request(_config, _plan, piece, _client, _model):
+        asked.append([shot["ordinal"] for shot in piece.shots])
+        return _chunk_response(piece), None
+
+    monkeypatch.setattr(u, "plan_films", lambda *args, **kwargs: ([plan], 0))
+    monkeypatch.setattr(u, "_client", lambda: object())
+    monkeypatch.setattr(u, "_request_piece", request)
+    summary = u.retry_missing(config, None, [plan.film], progress=lambda _message: None)
+    assert asked == [[15, 16, 17, 18, 19, 20]] and summary["shots_recovered"] == 6 and summary["films_done"] == 1
+    data = store.read_artifact(config.paths.assets_dir, plan.film.film_id, prod)["data"]
+    assert len(data["shots"]) == 30
+    # Nothing is left to ask for, so a second run spends nothing.
+    assert u.retry_missing(config, None, [plan.film], progress=lambda _message: None)["runs"] == 0 and len(asked) == 1
+
+
 def test_flow_size_keeps_raft_minimum_height_for_ultra_wide_frames():
     assert measure.flow_size(1080, 1920) == (176, 320)                 # ordinary frames: unchanged
     assert measure.flow_size(800, 1920) == (136, 320)

@@ -652,6 +652,113 @@ def combine_results(results: list[dict[str, Any] | None]) -> dict[str, Any]:
     return {"scenes": scenes, "shots": shots, "iconic": iconic}
 
 
+def _request_piece(config: Any, plan: FilmPlan, piece: Chunk, client: Any,
+                   model: str) -> tuple[dict[str, Any] | None, str | None]:
+    """One standard-price request for part of a chunk: with the synopsis, then without it if refused."""
+    reason = None
+    with tempfile.TemporaryDirectory(prefix="sr-und-", dir=_temp_root(config)) as temporary:
+        proxy = render_proxy(plan.film, piece, Path(temporary))
+        for variant in ("full", "no_plot"):
+            try:
+                return _call_with_retry(client, model, proxy, piece.fps, plan.prompt(piece, variant)), None
+            except Blocked as blocked:
+                reason = str(blocked)
+                if plan.contexts[0] == plan.contexts[1]:
+                    break
+    return None, reason
+
+
+def missing_runs(chunk: Chunk, receipt: dict[str, Any]) -> list[list[dict[str, Any]]]:
+    """Consecutive shots a chunk's answer skipped (not ones a filter refused), each re-requestable on its own."""
+    present = receipt["result"]["shots"]
+    refused = [(row["first_ordinal"], row["last_ordinal"]) for row in (receipt.get("split") or {}).get("refused") or []]
+    runs: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    for shot in chunk.shots:
+        if shot["unit_id"] not in present and not any(first <= shot["ordinal"] <= last for first, last in refused):
+            current.append(shot)
+        elif current:
+            runs.append(current)
+            current = []
+    return runs + ([current] if current else [])
+
+
+def splice_result(result: dict[str, Any], piece: dict[str, Any], first: int, last: int) -> dict[str, Any]:
+    """*result* with shots first..last taken from a re-requested piece: its shots, scenes and iconic moments.
+
+    Scenes overlapping the run keep only their parts outside it. Validation made
+    the piece's scenes cover the run exactly, so coverage stays whole and ordered.
+    """
+    scenes: list[dict[str, Any]] = []
+    for scene in result["scenes"]:
+        if scene["first_shot"] < first:
+            scenes.append({**scene, "last_shot": min(scene["last_shot"], first - 1)})
+        if scene["last_shot"] > last:
+            scenes.append({**scene, "first_shot": max(scene["first_shot"], last + 1)})
+    scenes = sorted(scenes + [dict(scene) for scene in piece["scenes"]], key=lambda scene: scene["first_shot"])
+    for scene in scenes[1:]:
+        scene["continues_previous"] = False      # only a chunk's first scene can continue the previous chunk
+    return {"scenes": scenes, "shots": {**result["shots"], **piece["shots"]}, "iconic": result["iconic"] + piece["iconic"]}
+
+
+def retry_missing(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFAULTS["model"],
+                  max_usd: float = 10.0, progress: Callable[[str], None] = print) -> dict[str, Any]:
+    """Re-request shots an answer skipped, one smaller piece per consecutive run, and splice them back in.
+
+    A long chunk's answer sometimes stops early (Inception lost 112 shots from
+    one chunk). Each run is asked once at standard price; what comes back is merged
+    into the chunk's receipt and the film is merged again. Shots a content filter
+    refused are left to ``retry_refused``.
+    """
+    prod = producer(model)
+    client = None
+    budget = Budget(max_usd)
+    plans, _cached = plan_films(config, db, films, prod, force=True)
+    summary: dict[str, Any] = {"runs": 0, "shots_recovered": 0, "usd": 0.0, "films_done": 0}
+    exhausted = False
+    for plan in plans:
+        touched = False
+        for chunk in plan.chunks:
+            path = receipt_path(config, plan.film.film_id, prod, chunk)
+            receipt = store.read_json(path)
+            if exhausted or not isinstance(receipt, dict) or receipt.get("refused") or not receipt.get("result"):
+                continue
+            for run in missing_runs(chunk, receipt):
+                piece = Chunk(chunk.index, run)
+                estimate = estimate_chunk_usd(model, piece)
+                if not budget.admit(estimate):
+                    progress(f"[understanding] gap budget of ${max_usd:.2f} reached; rerun to continue")
+                    exhausted = True
+                    break
+                client = client or _client()
+                summary["runs"] += 1
+                response, reason = _request_piece(config, plan, piece, client, model)
+                cost = cost_usd(model, response["usage"]) if response else 0.0
+                budget.settle(estimate, cost)
+                summary["usd"] = round(summary["usd"] + cost, 4)
+                first, last = run[0]["ordinal"], run[-1]["ordinal"]
+                try:
+                    output = json.loads(response["text"]) if response else None
+                except (json.JSONDecodeError, TypeError):
+                    output = None
+                if not isinstance(output, dict):
+                    progress(f"[understanding] {plan.film.title} S{first}-S{last}: {reason or 'unparseable response'}")
+                    continue
+                recovered, _issues = validate_chunk(piece, output)
+                receipt["result"] = splice_result(receipt["result"], recovered, first, last)
+                receipt["cost_usd"] = round(receipt.get("cost_usd", 0.0) + cost, 6)
+                receipt["issues"] = list(receipt.get("issues") or []) + [
+                    f"shots S{first}-S{last} re-requested: {len(recovered['shots'])}/{len(run)} recovered"]
+                store.write_json(path, receipt)
+                summary["shots_recovered"] += len(recovered["shots"])
+                touched = True
+                progress(f"[understanding] {plan.film.title} S{first}-S{last}: recovered "
+                         f"{len(recovered['shots'])}/{len(run)} shots (${cost:.2f})")
+        if touched:
+            summary["films_done"] += finalize(config, [plan], prod, model, progress)
+    return summary
+
+
 def retry_refused(config: Any, db: Any, films: list[FilmRef], *, model: str = DEFAULTS["model"], parts: int = 4,
                   max_usd: float = 10.0, progress: Callable[[str], None] = print) -> dict[str, Any]:
     """Recover chunks the content filter refused: retry smaller pieces at standard price.
@@ -683,17 +790,7 @@ def retry_refused(config: Any, db: Any, films: list[FilmRef], *, model: str = DE
                 if not budget.admit(estimate):
                     progress(f"[understanding] retry budget of ${max_usd:.2f} reached; rerun to continue")
                     return summary
-                response, reason = None, None
-                with tempfile.TemporaryDirectory(prefix="sr-und-", dir=_temp_root(config)) as temporary:
-                    proxy = render_proxy(plan.film, piece, Path(temporary))
-                    for variant in ("full", "no_plot"):
-                        try:
-                            response = _call_with_retry(client, model, proxy, piece.fps, plan.prompt(piece, variant))
-                            break
-                        except Blocked as blocked:
-                            reason = str(blocked)
-                            if plan.contexts[0] == plan.contexts[1]:
-                                break
+                response, reason = _request_piece(config, plan, piece, client, model)
                 piece_cost = cost_usd(model, response["usage"]) if response else 0.0
                 budget.settle(estimate, piece_cost)
                 cost += piece_cost

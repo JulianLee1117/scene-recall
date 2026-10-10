@@ -737,6 +737,23 @@ class LabStore:
                         (status, time.time(), error, json.dumps(result, allow_nan=False), identity))
         return self.get_job(identity)
 
+    def requeue(self, identity, message):
+        """Return a running job to its place in the queue after a transient failure, counting the retry."""
+        with self.connection() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT log,result,cancel_requested FROM jobs WHERE id=?", (identity,)).fetchone()
+            if row is None:
+                raise KeyError("Job not found")
+            if row["cancel_requested"]:
+                con.execute("UPDATE jobs SET status='cancelled',finished_at=? WHERE id=?", (time.time(), identity))
+            else:
+                result = json.loads(row["result"]) if row["result"] else {}
+                result["transient_retries"] = int(result.get("transient_retries", 0)) + 1
+                log = (json.loads(row["log"]) + [message])[-80:]
+                con.execute("UPDATE jobs SET status='queued',started_at=NULL,progress=?,log=?,result=? WHERE id=?",
+                            (message, json.dumps(log), json.dumps(result), identity))
+        return self.get_job(identity)
+
     def ingest_snapshots(self):
         with self.connection() as con:
             jobs = [self._job(row, private=True) for row in con.execute("SELECT * FROM jobs WHERE kind='ingest' ORDER BY created_at,rowid")]

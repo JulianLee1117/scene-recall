@@ -149,7 +149,7 @@ settings); recorded input digests make stale artifacts detectable. Producers:
 |---|---|---|
 | `metadata` | open data | Wikidata identity, cast and characters, directors, genres; Wikipedia plot; Wikiquote quotes; IMDb votes and Wikimedia pageviews (TMDB excluded by its terms) |
 | `audio`, `subtitles` | Silero VAD, OpenSubtitles | English subtitles for Whisper-only films, synced to speech (FFT alignment, frame-rate scales, windowed shifts) and accepted by lift/prominence/text agreement; raw downloads archived |
-| `understanding` | Gemini 3.8 Flash | per chunk of ≤160 shots: 240p shot-numbered proxy + shot table + dialogue + cast/plot context → scenes, per-shot characters, action, peak time, emotion, line, sound, fame 0-3, craft 0-3, cut hint, iconic moments; resumable chunk receipts; standard or half-price batch transport; a synopsis that trips a content filter is retried without it; a clip refused even without it is closed with no records and listed in the artifact |
+| `understanding` | Gemini 3.8 Flash | per chunk of ≤160 shots: 240p shot-numbered proxy + shot table + dialogue + cast/plot context → scenes, per-shot characters, action, peak time, emotion, line, sound, fame 0-3, craft 0-3, cut hint, iconic moments; resumable chunk receipts; standard or half-price batch transport; a synopsis that trips a content filter is retried without it; a clip refused even without it is closed with no records and listed in the artifact; shots an answer skipped are re-requested once per consecutive run and spliced into their chunk |
 | `highlights` | Gemini 3.8 Flash (text) | one call per film: merges the understanding pass's iconic flags into the film's best-known moments, ranked by recognizability (with Wikiquote quotes), plus visual motifs |
 | `measure` | RAFT-small, RF-DETR | one GPU decode per film: camera flow series (labels derived at compile time, including slow drift), hidden cuts, subject boxes and main-subject track, letterbox-aware look and palette, sharpness |
 | `hero` | frame pick, keyframe embeddings | how a shot is shown (ADR-0098): its pictures (split at hidden cuts and wherever neighbouring keyframes stop looking alike, black removed), the focus span (the picture holding the peak), the best still inside it at 1280 px, and a 4 s H.264 hover preview around the peak where the ingest one strays outside a focus span of at least 1 s |
@@ -508,7 +508,9 @@ Lifetime shared legacy-lock ownership and exclusive role locks prevent duplicate
 workers or a serial worker colliding with separate roles. Ingestion retains its
 isolated low-priority child and global ingest lock. API restart does not lose
 jobs. Only the restarting role's abandoned jobs become **interrupted**, with no
-automatic replay. Cancellation stops rendering subprocesses and is checked
+automatic replay. An ingest that fails for lack of memory (commit limit, allocator
+failure) returns to its queue position and the ingest worker backs off before the
+next claim, at most three times per job. Cancellation stops rendering subprocesses and is checked
 between model stages; an already-issued hosted call may complete and be cached
 but cannot apply a cancelled job's revision. Heartbeats expose activity and
 graceful stop requests; file locks, not heartbeat expiry, own execution. CLI
