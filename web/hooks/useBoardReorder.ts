@@ -66,6 +66,10 @@ export function useBoardReorder({ enabled, isHandle, onLift, onDrag, onDrop, onC
     if (current.hold !== null) window.clearTimeout(current.hold);
     if (current.element.hasPointerCapture(current.pointer)) current.element.releasePointerCapture(current.pointer);
     document.removeEventListener("touchmove", preventScroll);
+    // The press focused the tile's button, as a click would; after a lift that
+    // focus would keep the scene's controls showing, so the tile lets it go.
+    const focused = document.activeElement as HTMLElement | null;
+    if (current.active && focused && current.element.contains(focused)) focused.blur();
     gesture.current = null;
     setLifted(null);
   }, [preventScroll]);

@@ -36,13 +36,15 @@ function setup({ enabled = true } = {}) {
   };
   const rerender = () => { cursor = 0; result = exported.useBoardReorder(options); run(); };
   const exported = {};
+  const doc = {
+    activeElement: null,
+    addEventListener(type, callback) { (listeners[type] ??= []).push(callback); },
+    removeEventListener(type, callback) { listeners[type] = (listeners[type] ?? []).filter((item) => item !== callback); },
+  };
   vm.runInNewContext(compiled, {
     exports: exported,
     require: (name) => { if (name === "react") return react; throw new Error(name); },
-    document: {
-      addEventListener(type, callback) { (listeners[type] ??= []).push(callback); },
-      removeEventListener(type, callback) { listeners[type] = (listeners[type] ?? []).filter((item) => item !== callback); },
-    },
+    document: doc,
     window: {
       innerHeight: 800,
       setTimeout(callback) { const id = ++nextTimer; timers.set(id, callback); return id; },
@@ -53,20 +55,28 @@ function setup({ enabled = true } = {}) {
     Math, Number,
   });
   rerender();
-  const tiles = [0, 1, 2].map((index) => ({
-    captured: null,
-    getAttribute: (name) => (name === "data-board-index" ? String(index) : null),
-    setPointerCapture(id) { this.captured = id; },
-    hasPointerCapture(id) { return this.captured === id; },
-    releasePointerCapture() { this.captured = null; },
-  }));
+  const tiles = [0, 1, 2].map((index) => {
+    const tile = {
+      captured: null,
+      // The button inside the tile that a press focuses, as in a browser.
+      button: { blurred: false, blur() { this.blurred = true; doc.activeElement = null; } },
+      contains(element) { return element === tile.button; },
+      getAttribute: (name) => (name === "data-board-index" ? String(index) : null),
+      setPointerCapture(id) { this.captured = id; },
+      hasPointerCapture(id) { return this.captured === id; },
+      releasePointerCapture() { this.captured = null; },
+    };
+    return tile;
+  });
+  // A press focuses the pressed tile's button, as the browser does on mousedown.
+  const press = (index, extra = {}) => { doc.activeElement = tiles[index].button; return event({ index, ...extra }); };
   const event = ({ index = 0, ...extra } = {}) => ({
     pointerId: 1, pointerType: "mouse", button: 0, isPrimary: true, clientX: 0, clientY: 25, altKey: false,
     target: { handle: true }, currentTarget: tiles[index], prevented: false, stopped: false,
     preventDefault() { this.prevented = true; }, stopPropagation() { this.stopped = true; }, ...extra,
   });
   return {
-    calls, tiles, listeners, timers, scrolled, event,
+    calls, tiles, listeners, timers, scrolled, event, press, doc,
     get lifted() { return result.lifted; },
     get props() { return result.tileProps; },
     advance(ms) { now += ms; },
@@ -149,6 +159,24 @@ test("a finger scrolls unless it holds first; held, it drags and the page cannot
   app.props.onPointerUp(app.event({ index: 1, pointerType: "touch", clientX: 20 }));
   assert.deepEqual(app.calls.slice(1), [["drag", 20, 25], ["drop"]]);
   assert.deepEqual(app.listeners.touchmove, [], "scrolling is given back");
+});
+
+test("a drag lets go of the focus its press gave the tile; a plain click keeps it", () => {
+  const app = setup();
+  app.props.onPointerDown(app.press(1, { clientX: 50 }));
+  app.props.onPointerMove(app.event({ index: 1, clientX: 250 }));
+  app.props.onPointerUp(app.event({ index: 1, clientX: 250 }));
+  assert.ok(app.tiles[1].button.blurred, "after a drop the scene shows no focused controls");
+  assert.equal(app.doc.activeElement, null);
+
+  app.props.onPointerDown(app.press(2, { clientX: 50 }));
+  app.props.onPointerMove(app.event({ index: 2, clientX: 250 }));
+  app.listeners.keydown.forEach((callback) => callback({ key: "Escape", preventDefault() {} }));
+  assert.ok(app.tiles[2].button.blurred, "a cancelled drag too");
+
+  app.props.onPointerDown(app.press(0, { clientX: 50 }));
+  app.props.onPointerUp(app.event({ index: 0, clientX: 52 }));
+  assert.ok(!app.tiles[0].button.blurred, "a click is a click: its focus stays with the browser");
 });
 
 test("Alt with an arrow asks for a move one place either way", () => {
