@@ -351,3 +351,16 @@ def test_scoped_backfill_removes_film_with_no_remaining_frames(
         .to_list()
     )
     assert rows == [{"frame_id": "frame-b", "film_id": "film-b"}]
+
+
+def test_backfill_refuses_while_search_reads_the_partial_cache(config, tmp_path: Path) -> None:
+    path = tmp_path / "frame.webp"
+    Image.new("RGB", (32, 18), "navy").save(path)
+    _add_frame(config, path)
+    with patch("pipeline.index.backfill_framing.resolve_partial_profile", return_value=_profile()):
+        try:
+            backfill_framing_features(config)
+        except RuntimeError as exc:
+            assert "partial Framing cache" in str(exc)
+        else:
+            raise AssertionError("a complete cache must not be built beside the partial one")

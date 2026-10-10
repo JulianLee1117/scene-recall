@@ -2132,7 +2132,8 @@ load that exact checkpoint revision rather than resolving mutable `main`
 independently. Its manifest proves exact coverage of one published `frames`
 generation, including the frame-identity digest and profile-table generation.
 The idempotent `index-framing` command derives it from retained keyframes
-without raw-film decoding or hosted inference.
+without raw-film decoding or hosted inference. Search reads the source-hashed
+partial cache (ADR-0082) whenever one exists, so `index-framing` then refuses.
 
 The frontend exposes one result action for all five modular facets rather than
 a separate Framing shortcut. Choosing Framing, or dragging the same result onto
@@ -2392,9 +2393,8 @@ never a silent fallback.
   provider-resolved immutable revision.
 - Ordinary search matches up to three indexed keyframes per shot; only Match
   Cuts (ADR-0099) sees every 4 fps instant.
-- The optional Framing cache becomes inactive after any film publication until
-  `index-framing` reconciles the new frame generation; live Framing remains
-  available during that interval.
+- Framing grids are cached only for the frames of the 24 films the partial
+  cache (ADR-0082) covers; Framing encodes other candidates live.
 - Match cuts are not offered in ordinary search. Framing cannot reliably match
   pose, temporal direction, brief action or camera movement.
 - Semantic dialogue is embedded at shot level; utterance rows serve the quote

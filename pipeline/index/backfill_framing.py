@@ -17,6 +17,7 @@ from filelock import Timeout as FileLockTimeout
 from PIL import Image
 
 from pipeline.config import Config
+from pipeline.index.framing_cache import resolve_partial_profile
 from pipeline.index.framing_features import (
     FramingSpatialProfile,
     FramingSpatialSource,
@@ -390,6 +391,13 @@ def _backfill_framing_features_locked(
     db = open_db(config)
     if "frames" not in table_names(db):
         raise RuntimeError("no frames table exists; ingest a film first")
+    # Search reads the source-hashed partial cache whenever it exists
+    # (ADR-0082), so a complete cache built here would never be used.
+    if resolve_partial_profile(config, db) is not None:
+        raise RuntimeError(
+            "this library has the partial Framing cache (ADR-0082), which search reads instead; "
+            "a complete cache would never be used"
+        )
     require_visual_encoder_profile(db, config)
     profile = configured_framing_spatial_profile(
         config,

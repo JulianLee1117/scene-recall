@@ -1382,23 +1382,12 @@ uv run python -m pipeline.cli index-frames
 This step is local, idempotent, and does not call OpenAI or Gemini. New ingests
 build the frame index automatically.
 
-Cache the existing keyframes' 6x6 spatial grids so Framing queries encode only
-the reference image instead of re-encoding up to 96 candidate images:
-
-```bash
-uv run python -m pipeline.cli index-framing
-```
-
-This local, idempotent backfill does not decode or reingest source films and
-does not call a hosted model. It stores about 72 KiB per PE Core keyframe
-(roughly 3.94 GB for 53,414 frames, before database overhead). Search uses the
-cache only when its model- and contract-versioned manifest covers the complete
-current frame generation. Publishing another film makes that proof stale, so
-during a multi-film ingest Framing safely uses its existing live reranker; run
-`index-framing` once after the batch finishes to embed only new or changed
-frames and reactivate the cache. A completed single film can instead be filled
-with `index-framing --film-id FILM_ID`, but derived backfills do not run while
-an ingest owns the shared resource lock.
+Framing reads cached 6x6 spatial grids from the source-hashed partial cache
+([ADR-0082](docs/decisions/0082-shared-search-foundation-and-composition-challenger.md))
+and encodes any candidate without one live. The older complete cache
+(`index-framing`, [ADR-0009](docs/decisions/0009-complete-framing-spatial-cache.md))
+is superseded: the command refuses while a partial cache exists, because search
+would never read it.
 
 Build or repair the independent Qwen semantic-text profile from already
 published captions, dialogue, OCR, broad facets, and dedicated mood/energy

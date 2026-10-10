@@ -442,7 +442,12 @@ Wish and Starjunk stay as regression passages. Supersedes LLM numeric cut timing
   as blur (a shot of tape wrapped across a lens became "indistinct vertical
   forms and scattered lights"). Make it a versioned derivation that new films
   get first, and backfill the library only if a comparison on visual-detail
-  queries improves.
+  queries improves. Drop the stills camera guess (`camera_motion`) from that
+  prompt; measured movement replaced it.
+- One decode for both local GPU passes. Measurement (~3-4 min per film) and
+  match-cut moments (~4 min) each decode the film and run RF-DETR; they stay
+  separate so either can be re-versioned alone. Share the decode once new
+  films queue faster than the GPU clears them.
 
 ## Frozen (keep code and data; no new investment)
 

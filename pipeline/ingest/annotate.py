@@ -190,6 +190,9 @@ class _ShotAnnotation(BaseModel):
     energy: Literal["static", "calm", "moderate", "kinetic", "unknown"] = Field(
         description="How kinetic the shot feels."
     )
+    # Superseded by the measurement pass's camera movement. It stays in this
+    # schema only because the prompt and schema hash into every cached
+    # annotation: drop it with the next annotation profile.
     camera_motion: Literal[
         "static", "pan", "tilt", "tracking", "handheld", "zoom", "unknown"
     ] = Field(description="Best camera-movement guess from the ordered stills.")

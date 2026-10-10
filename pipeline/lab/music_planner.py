@@ -25,6 +25,7 @@ def _candidate(row):
         return None
     if not row.get("unit_id") or not row.get("film_id"):
         return None
+    # camera_motion is the annotator's stills guess; the measured movement replaces it, or drops it, once packed.
     metadata = {key: str(row[key])[:300] for key in ("framing", "setting", "time_of_day", "energy", "camera_motion") if row.get(key)}
     if isinstance(row.get("people_count"), int) and not isinstance(row["people_count"], bool) and row["people_count"] >= 0:
         metadata["people_count"] = row["people_count"]

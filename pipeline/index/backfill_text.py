@@ -43,7 +43,6 @@ _UNIT_TEXT_COLUMNS = (
     "setting",
     "time_of_day",
     "energy",
-    "camera_motion",
     "mood",
     "palette",
     "subjects",

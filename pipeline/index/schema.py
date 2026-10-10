@@ -94,6 +94,9 @@ def make_units_schema(vector_dim: int = VECTOR_DIM) -> pa.Schema:
             pa.field("time_of_day", pa.string()),
             pa.field("people_count", pa.int32()),       # null when the model can't tell
             pa.field("energy", pa.string()),
+            # A guess from the stills, superseded by the measured movement in
+            # shot_evidence.camera; only the music planner falls back on it, for
+            # a shot the measurement pass has not reached.
             pa.field("camera_motion", pa.string()),
             pa.field("palette", pa.string()),           # JSON-serialised list[str]
             pa.field("subjects", pa.string()),          # JSON-serialised list[str]
