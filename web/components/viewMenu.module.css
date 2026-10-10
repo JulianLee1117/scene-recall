@@ -38,11 +38,30 @@
   background: transparent;
   color: #a49e94;
   cursor: pointer;
+  transition: color 160ms ease;
 }
 
-.detailsToggle:hover { background: #ffffff06; color: #e8dece; }
-.detailsToggle[aria-pressed="true"] { border-color: #40382d; background: #b88a4710; color: #e2c49b; }
+.detailsToggle:hover { color: #e8dece; }
+.detailsToggle[aria-pressed="true"] { color: #e2c49b; }
 .detailsToggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.eyeClosed,
+.eyeOpen {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+  transition: opacity 100ms ease, transform 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.eyeClosed { opacity: 1; transform: scaleY(1); }
+.eyeOpen { opacity: 0; transform: scaleY(0.45); }
+.detailsToggle[aria-pressed="true"] .eyeClosed { opacity: 0; transform: scaleY(0.65); }
+.detailsToggle[aria-pressed="true"] .eyeOpen { opacity: 1; transform: scaleY(1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .detailsToggle,
+  .eyeClosed,
+  .eyeOpen { transition: none; }
+}
 
 @media (max-width: 600px), (pointer: coarse) {
   .detailsToggle { width: 44px; height: 44px; }

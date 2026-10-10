@@ -86,14 +86,19 @@ export default function ViewMenu({
         title={view.details ? "Hide match scores and descriptions" : "Show match scores and descriptions"}
         onClick={() => onChange({ details: !view.details })}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-          {view.details ? <>
-            <path d="M2.5 12C4.7 7.8 8 5.5 12 5.5S19.3 7.8 21.5 12C19.3 16.2 16 18.5 12 18.5S4.7 16.2 2.5 12Z" />
-            <circle cx="12" cy="12" r="2.75" />
-          </> : <>
-            <path d="M3 9c3 6 15 6 18 0" />
-            <path d="m5.4 12-1.6 2M12 13.5v2.8m6.6-4.3 1.6 2" />
-          </>}
+        {/* Lucide eye / eye-closed (ISC); see web/THIRD_PARTY_NOTICES.md. */}
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+          <g className={styles.eyeClosed}>
+            <path d="m15 18-.722-3.25" />
+            <path d="M2 8a10.645 10.645 0 0 0 20 0" />
+            <path d="m20 15-1.726-2.05" />
+            <path d="m4 15 1.726-2.05" />
+            <path d="m9 18 .722-3.25" />
+          </g>
+          <g className={styles.eyeOpen}>
+            <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+            <circle cx="12" cy="12" r="3" />
+          </g>
         </svg>
       </button>
     </div>
