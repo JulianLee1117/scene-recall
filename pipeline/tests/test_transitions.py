@@ -208,11 +208,11 @@ def test_worker_dispatch_and_explicit_video_download(config, sources):
 
 
 def test_source_trim_can_extend_shot_hints_but_not_cross_film_ids(config, sources, monkeypatch):
-    from pipeline.matching import cohort
+    from pipeline.lab import media as lab_media
     request, _films, _store = sources
     request["outgoing"]["unit_id"] = "hint"
     shot = {"film_id": request["outgoing"]["film_id"], "t_start": .5, "t_end": .7}
-    monkeypatch.setattr(cohort, "unit", lambda _db, _id: shot)
+    monkeypatch.setattr(lab_media, "resolve_unit", lambda _db, _id: shot)
     assert jobs.freeze(request, None)["request"]["outgoing"]["source_start"] == .1
     shot["film_id"] = "wrong-source"
     with pytest.raises(ValueError, match="different source film"):
@@ -220,17 +220,17 @@ def test_source_trim_can_extend_shot_hints_but_not_cross_film_ids(config, source
 
 
 def test_missing_shot_hint_does_not_invalidate_unchanged_film_and_time_anchors(config, sources, monkeypatch):
-    from pipeline.matching import cohort
+    from pipeline.lab import media as lab_media
     request, _films, store = sources
     request["outgoing"]["unit_id"] = "replaceable-shot-hint"
-    monkeypatch.setattr(cohort, "unit", lambda _db, _id: {"film_id": request["outgoing"]["film_id"]})
+    monkeypatch.setattr(lab_media, "resolve_unit", lambda _db, _id: {"film_id": request["outgoing"]["film_id"]})
     frozen = jobs.freeze(request, None)
     queued = store.enqueue_transition_render(frozen)
 
     def missing(_db, _identity):
         raise ValueError("The reference shot is no longer in the published index")
 
-    monkeypatch.setattr(cohort, "unit", missing)
+    monkeypatch.setattr(lab_media, "resolve_unit", missing)
     assert jobs.freeze(request, None) == frozen
     assert store.enqueue_transition_render(jobs.freeze(request, None))["id"] == queued["id"]
     jobs._verify(frozen, None)

@@ -16,7 +16,6 @@ from pipeline.lab.worker_runtime import RELOAD_EXIT_CODE, source_changed, source
 
 def execute_job(job, config, db, store, *, ingest_runner=None, role="all"):
     from filelock import Timeout
-    from pipeline.ingest.locks import global_ingest_lock
     from pipeline.lab.media import JobCancelled, render_reel, validate_sources
     from pipeline.lab.resources import editorial_lock, editor_config
     from pipeline.lab.index_snapshot import acquire_editor_snapshot, publication_read
@@ -121,23 +120,6 @@ def execute_job(job, config, db, store, *, ingest_runner=None, role="all"):
         if job["kind"] == "transition-generate":
             from pipeline.transitions.generation import run
             result = run(job, config, db, store, progress, cancelled)
-            return store.finish(job["id"], result=result)
-        if job["kind"] == "match-preview":
-            from pipeline.lab.matching import preview_run
-            result = preview_run(job, config, db, store, progress, cancelled)
-            return store.finish(job["id"], result=result)
-        if job["kind"] == "match":
-            from pipeline.lab.matching import run
-            with global_ingest_lock(config.paths.assets_dir):
-                result = run(job, config, db, store, progress, cancelled)
-            return store.finish(job["id"], result=result)
-        if job["kind"] in {"match-search", "match-search-preview"}:
-            from pipeline.matching.jobs import run, preview_run
-            if job["kind"] == "match-search":
-                with global_ingest_lock(config.paths.assets_dir):
-                    result = run(job, config, db, store, progress, cancelled)
-            else:
-                result = preview_run(job, config, db, store, progress, cancelled)
             return store.finish(job["id"], result=result)
         if job["kind"] == "next-scene":
             from pipeline.lab.next_scene import run

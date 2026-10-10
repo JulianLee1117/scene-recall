@@ -230,7 +230,6 @@ test("server deletion clears the workspace despite browser storage failure and p
   assert.equal(harness.state.name, "");
   assert.equal(harness.state.job, null);
   assert.equal(harness.state.render, null);
-  assert.equal(harness.state.matchJob, null);
   assert.equal(harness.state.nextSceneJob, null);
   assert.equal(harness.state.canUndo, false);
   assert.equal(harness.state.error, "");

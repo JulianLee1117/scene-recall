@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, RedirectResponse
 
 from pipeline.lab.media import import_track, render_manifest, validate_sources
-from pipeline.lab.models import JobRequest, MatchApply, MatchAdjust, NextSceneAdjust, NextSceneApply, ProjectCreate, ProjectDocument, ProjectUpdate, RestoreRequest
+from pipeline.lab.models import JobRequest, NextSceneAdjust, NextSceneApply, ProjectCreate, ProjectDocument, ProjectUpdate, RestoreRequest
 from pipeline.lab.registry import EXPERIMENTS
 from pipeline.lab.store import ActiveProjectJobs, DuplicateJob, RevisionConflict
 
@@ -276,35 +276,9 @@ def start_job(project_id: str, body: JobRequest, request: Request):
             _call(draft_targets, project["document"], body.slot_ids)
     elif body.kind == "render":
         _call(render_manifest, project["document"], request.app.state.db, store, mode=body.mode, experiment_id=project["experiment_id"])
-    elif body.kind == "match":
-        if project["experiment_id"] != "visual-rhymes":
-            raise HTTPException(422, "Matching is available in Match Cuts")
-        from pipeline.matching.service import validate_request
-        options = body.match.model_dump()
-        profile_id = _call(validate_request, request.app.state.config, request.app.state.db, project["document"], options)
-        return _call(store.enqueue, body.kind, project_id, body.base_revision, match={**options, "profile_id": profile_id})
     return _call(store.enqueue, body.kind, project_id, body.base_revision, mode=body.mode, slot_ids=body.slot_ids,
                  replan_timing=body.replan_timing, generate=body.generate.model_dump() if body.generate else None,
                  suggest_only=body.suggest_only)
-
-
-@router.get("/matching/cohorts")
-def matching_cohorts(request: Request):
-    from pipeline.matching.cohort import listed
-    return {"cohorts": listed(request.app.state.config)}
-
-
-@router.get("/matching/frames")
-def matching_frames(request: Request, unit_id: str, time: float = Query(ge=0)):
-    from pipeline.matching import cohort, media
-    source = _call(cohort.unit, request.app.state.db, unit_id)
-    if not source["t_start"] <= time < source["t_end"]:
-        raise HTTPException(422, "Choose a moment inside this shot")
-    path = Path(_call(cohort.resolve_film, request.app.state.db, source["film_id"])["path"])
-    rows = _call(media.samples, path, max(source["t_start"], time - 0.6),
-                 min(source["t_end"], time + 0.6), native=True)
-    return {"frames": [{"time": row.time, "end": row.end} for row in rows],
-            "t_start": source["t_start"], "t_end": source["t_end"]}
 
 
 def _next_scene_candidate(request, job_id, candidate_id):
@@ -378,160 +352,6 @@ def apply_next_scene(job_id: str, body: NextSceneApply, request: Request):
     if current_manifest != preview_candidate.get("manifest"):
         raise HTTPException(409, "The source or preview settings changed; prepare the transition preview again")
     return _call(store.update_project, current["id"], body.base_revision, document, current["name"])
-
-
-def _match_candidate(request, job_id, candidate_id):
-    job = _call(_store(request).get_job, job_id, private=True)
-    if job["kind"] not in {"match", "match-preview"} or job["status"] not in {"running", "completed"}:
-        raise HTTPException(409, "Matching has not completed")
-    result = job["result"] or {}
-    rows = result.get("candidates", []) if job["kind"] == "match" else [result.get("candidate")]
-    candidate = next((row for row in rows if row and row["id"] == candidate_id), None)
-    if candidate is None:
-        raise HTTPException(404, "Match not found")
-    return job, candidate
-
-
-def _same_match_proposal(first, second):
-    fields = ("outgoing", "incoming", "reference_frame_pts", "candidate_frame_pts", "crop")
-    return all(first.get(key) == second.get(key) for key in fields)
-
-
-def _current_match_preview(request, parent, preview_job, preview, candidate):
-    """A reusable preview proves this exact proposal and current render contract."""
-    from pipeline.matching.cohort import read
-
-    if not preview.get("preview_ready") or not _same_match_proposal(preview, candidate):
-        return False
-    if preview_job["kind"] == "match-preview" and not _same_match_proposal(
-        preview, preview_job["snapshot"]["match"]["candidate"]
-    ):
-        return False
-    directory = request.app.state.config.paths.assets_dir / "lab" / "renders" / f"{preview_job['id']}-{candidate['id']}-proposed"
-    if not (directory / "output.mp4").is_file():
-        return False
-    try:
-        actual = read(directory / "manifest.json")
-    except (OSError, ValueError):
-        return False
-    document = {**parent["snapshot"]["document"], "clips": [candidate["outgoing"], candidate["incoming"]]}
-    expected = _call(render_manifest, document, request.app.state.db, _store(request),
-                     mode="preview", experiment_id="visual-rhymes")
-    return actual == expected
-
-
-def _require_current_match_preview(request, parent, selected_job, candidate):
-    """Keep the exact modern proposal whose current render was verified."""
-    store = _store(request)
-    choices = [(selected_job, candidate)]
-    if selected_job["kind"] == "match":
-        prepared = _prepared_match_preview(store, parent, candidate["id"])
-        if prepared:
-            prepared = _call(store.get_job, prepared["id"], private=True)
-            choices.append((prepared, prepared["result"]["candidate"]))
-    for preview_job, preview in choices:
-        if _current_match_preview(request, parent, preview_job, preview, candidate):
-            return
-    raise HTTPException(409, "Prepare a verified preview of this exact cut before keeping it")
-
-
-@router.post("/jobs/{job_id}/apply-match")
-def apply_match(job_id: str, body: MatchApply, request: Request):
-    job, candidate = _match_candidate(request, job_id, body.candidate_id)
-    selected_job = job
-    store = _store(request)
-    if job["status"] != "completed":
-        raise HTTPException(409, "Wait for matching to finish before keeping this cut")
-    if job["kind"] == "match-preview":
-        rendered = request.app.state.config.paths.assets_dir / "lab" / "renders" / f"{job['id']}-{candidate['id']}-proposed" / "output.mp4"
-        if not candidate.get("preview_ready") or not rendered.is_file():
-            raise HTTPException(409, "Prepare the adjusted transition before keeping it")
-        parent = _call(store.get_job, job["result"]["match_job_id"], private=True)
-        if parent["project_id"] != job["project_id"] or parent["kind"] != "match" or parent["status"] != "completed":
-            raise HTTPException(409, "This preview does not belong to a completed matching search")
-        job = parent
-    project = _call(store.get_project, job["project_id"])
-    if project["revision"] != body.base_revision or project["revision"] != job["base_revision"]:
-        raise HTTPException(409, "The reference changed after matching; run Find matches again")
-    clips = list(project["document"]["clips"])
-    index = next((i for i, row in enumerate(clips) if row["id"] == job["result"]["reference_clip_id"]), None)
-    if index is None:
-        raise HTTPException(409, "Reference is no longer in this project")
-    if clips[index]["locked"] or (index+1 < len(clips) and clips[index+1]["locked"]):
-        raise HTTPException(409, "Unlock the reference and following clip before applying a match")
-    if job["snapshot"].get("match", {}).get("focus"):
-        _require_current_match_preview(request, job, selected_job, candidate)
-    clips[index] = candidate["outgoing"]
-    clips[index+1:index+2] = [candidate["incoming"]]
-    document = {**project["document"], "clips": clips}
-    _call(validate_sources, document, request.app.state.db, store, require_media=True)
-    return _call(store.update_project, project["id"], body.base_revision, document, project["name"])
-
-
-@router.get("/jobs/{job_id}/matches/{candidate_id}/preview")
-def match_preview(job_id: str, candidate_id: str, request: Request, original: bool = False):
-    job, candidate = _match_candidate(request, job_id, candidate_id)
-    render_id = job["id"]
-    if not candidate.get("preview_ready"):
-        prepared = _prepared_match_preview(_store(request), job, candidate_id)
-        if prepared is None or not prepared["result"]["candidate"].get("preview_ready"):
-            raise HTTPException(409, "Prepare this transition preview first")
-        render_id = prepared["id"]
-        candidate = prepared["result"]["candidate"]
-    suffix = "original" if original and not candidate.get("original_is_proposed") else "proposed"
-    path = request.app.state.config.paths.assets_dir / "lab" / "renders" / f"{render_id}-{candidate['id']}-{suffix}" / "output.mp4"
-    if not path.is_file():
-        raise HTTPException(404, "Preview cache is unavailable; run matching again")
-    return FileResponse(path, media_type="video/mp4")
-
-
-def _prepared_match_preview(store, job, candidate_id):
-    return next((row for row in store.project_jobs(job["project_id"])
-                 if row["kind"] == "match-preview" and row["status"] == "completed"
-                 and (row["result"] or {}).get("match_job_id") == job["id"]
-                 and (row["result"] or {}).get("candidate", {}).get("id") == candidate_id
-                 and not (row["result"] or {}).get("candidate", {}).get("adjusted")), None)
-
-
-@router.post("/jobs/{job_id}/matches/{candidate_id}/preview")
-def prepare_match_preview(job_id: str, candidate_id: str, request: Request):
-    job, candidate = _match_candidate(request, job_id, candidate_id)
-    if job["kind"] != "match":
-        raise HTTPException(422, "Prepare a suggestion from its original matching search")
-    store = _store(request)
-    prepared = _prepared_match_preview(store, job, candidate_id)
-    if prepared:
-        preview_job = _call(store.get_job, prepared["id"], private=True)
-        if _current_match_preview(request, job, preview_job, prepared["result"]["candidate"], candidate):
-            return prepared
-    current = _call(store.get_project, job["project_id"])
-    # Preview the immutable suggestion even if the user has since edited A.
-    return _call(store.enqueue, "match-preview", current["id"], current["revision"],
-                 match={"candidate": candidate, "document": job["snapshot"]["document"], "match_job_id": job["id"]})
-
-
-@router.post("/jobs/{job_id}/matches/{candidate_id}/adjust")
-def adjust_match(job_id: str, candidate_id: str, body: MatchAdjust, request: Request):
-    job, candidate = _match_candidate(request, job_id, candidate_id)
-    if job["kind"] != "match" or job["status"] != "completed":
-        raise HTTPException(409, "Adjust a suggestion from its completed matching search")
-    store = _store(request)
-    current = _call(store.get_project, job["project_id"])
-    if current["revision"] != body.base_revision or current["revision"] != job["base_revision"]:
-        raise HTTPException(409, "Your edit changed; find matches again")
-    from pipeline.lab.matching import adjusted_candidate
-    adjusted = _call(adjusted_candidate, candidate, request.app.state.db, body.model_dump())
-    return _call(store.enqueue, "match-preview", current["id"], current["revision"],
-                 match={"candidate": adjusted, "document": job["snapshot"]["document"], "match_job_id": job["id"]})
-
-
-@router.get("/jobs/{job_id}/matches/{candidate_id}/frame")
-def match_frame(job_id: str, candidate_id: str, request: Request):
-    job,candidate=_match_candidate(request,job_id,candidate_id)
-    path=request.app.state.config.paths.assets_dir/"matching"/"results"/job["id"]/(candidate["id"]+".jpg")
-    if not path.is_file():
-        raise HTTPException(404,"Match frame cache is unavailable")
-    return FileResponse(path,media_type="image/jpeg")
 
 
 @router.get("/jobs/{job_id}")

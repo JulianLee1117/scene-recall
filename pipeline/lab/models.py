@@ -510,34 +510,6 @@ class RestoreRequest(LabModel):
     revision: int = Field(ge=1)
 
 
-class MatchPoint(LabModel):
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
-
-
-class MatchOptions(LabModel):
-    cohort_id: str = Field(pattern=r"^cohort-[a-f0-9]{16}$")
-    reference_clip_id: str = Field(min_length=1, max_length=100)
-    mode: Literal["image", "movement"] = "image"
-    movement: Literal["camera", "subject"] = "camera"
-    allow_reframing: bool = False
-    # Omission retains the original experiment for saved jobs and evaluation.
-    focus: Literal["auto", "subject", "camera", "image"] | None = None
-    timing: Literal["nearby", "fixed"] | None = None
-    subject_point: MatchPoint | None = None
-
-
-class MatchApply(LabModel):
-    base_revision: int = Field(ge=1)
-    candidate_id: str = Field(pattern=r"^match-[a-f0-9]{16}$")
-
-
-class MatchAdjust(LabModel):
-    base_revision: int = Field(ge=1)
-    outgoing_time: float | None = Field(default=None, ge=0)
-    incoming_time: float | None = Field(default=None, ge=0)
-
-
 class GenerateOptions(LabModel):
     mode: Literal["fill", "improve", "regenerate"] = "fill"
 
@@ -567,10 +539,9 @@ class NextSceneApply(NextSceneAdjust):
 
 
 class JobRequest(LabModel):
-    kind: Literal["rhythm", "analyze", "plan", "draft", "generate", "render", "match", "next-scene"]
+    kind: Literal["rhythm", "analyze", "plan", "draft", "generate", "render", "next-scene"]
     base_revision: int = Field(ge=1)
     mode: Literal["preview", "export"] = "preview"
-    match: MatchOptions | None = None
     slot_ids: list[str] | None = Field(default=None, min_length=1, max_length=100)
     replan_timing: bool = False
     generate: GenerateOptions | None = None
@@ -578,15 +549,13 @@ class JobRequest(LabModel):
     next_scene: NextSceneOptions | None = None
 
     @model_validator(mode="after")
-    def match_contract(self):
+    def job_contract(self):
         if (self.kind == "next-scene") != (self.next_scene is not None):
             raise ValueError("Next-scene jobs require next-scene options; other jobs cannot carry them")
         if self.suggest_only and (self.kind != "draft" or self.slot_ids is None or len(self.slot_ids) != 1):
             raise ValueError("Finding alternatives requires a draft job with exactly one selected music slot")
         if self.replan_timing and self.kind not in {"rhythm", "analyze"}:
             raise ValueError("Only rhythm or analyze jobs can explicitly replan musical timing")
-        if (self.kind == "match") != (self.match is not None):
-            raise ValueError("Match jobs require matching options; other jobs cannot carry them")
         if self.generate is not None and self.kind != "generate":
             raise ValueError("Only generate jobs accept generation options")
         if self.kind == "generate":

@@ -25,7 +25,7 @@ OWNER = re.compile(rf"^({UUID})(?:$|[-.])")
 INTERMEDIATE = re.compile(r"(?:clip-\d+\.mp4|clip-[01]\.(?:native|flow)\.nut|clips\.txt|audio-filters\.txt|output\.partial\.mp4)")
 TRANSITION_INTERMEDIATE = re.compile(r"(?:original\.partial|manifest\.json\.partial)")
 TRANSITION_KINDS = {"transition-render", "transition-bridge", "transition-generate"}
-OWNED_ROOTS = ("lab/renders", "lab/requests", "matching/results")
+OWNED_ROOTS = ("lab/renders", "lab/requests", "matching/results")  # the last: frame caches of the retired finder, reclaimed by job id
 ACTIVE = {"queued", "running", "waiting_worker"}
 
 

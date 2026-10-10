@@ -246,7 +246,7 @@ class LabStore:
                 result.pop(field, None)
         return result
 
-    def enqueue(self, kind, project_id=None, base_revision=None, *, mode="preview", path=None, match=None, slot_ids=None, replan_timing=False, generate=None, suggest_only=False, next_scene=None, next_scene_preview=None):
+    def enqueue(self, kind, project_id=None, base_revision=None, *, mode="preview", path=None, slot_ids=None, replan_timing=False, generate=None, suggest_only=False, next_scene=None, next_scene_preview=None):
         if (kind == "next-scene") != (next_scene is not None):
             raise ValueError("Next-scene jobs require their own options")
         if (kind == "next-scene-preview") != (next_scene_preview is not None):
@@ -307,8 +307,6 @@ class LabStore:
                         from pipeline.lab.timeline import require_replan_unlocked
                         require_replan_unlocked(project["document"])
                     snapshot["replan_timing"] = replan_timing
-                if match is not None:
-                    snapshot["match"] = match
                 if kind == "generate":
                     if project["experiment_id"] != "music-sketch":
                         raise ValueError("Music edit generation belongs to AI Music Video")
@@ -636,51 +634,6 @@ class LabStore:
             return [self._job(row, private=True) for row in con.execute(
                 "SELECT * FROM jobs WHERE kind='backfill-temporal' ORDER BY created_at,rowid")]
 
-    def enqueue_match_search(self, request, profile_id, reference):
-        """Freeze an explicit discovery request without creating an edit/project."""
-        from pipeline.matching.contracts import SearchRequest
-        request = SearchRequest.model_validate(request).model_dump(mode="json")
-        snapshot = {"match_search": {"request": {**request, "profile_id": profile_id},
-                                     "reference": reference}}
-        encoded = json.dumps(snapshot, allow_nan=False, sort_keys=True)
-        key = "match-search:" + hashlib.sha256(encoded.encode()).hexdigest()
-        with self.connection() as con:
-            con.execute("BEGIN IMMEDIATE")
-            previous = con.execute("SELECT * FROM jobs WHERE kind='match-search' AND path_key=? AND status IN ('queued','running') AND cancel_requested=0", (key,)).fetchone()
-            if previous is not None:
-                return self._job(previous)
-            identity = str(uuid.uuid4())
-            con.execute("INSERT INTO jobs (id,kind,status,snapshot,created_at,path_key) VALUES (?,?,?,?,?,?)",
-                        (identity, "match-search", "queued", encoded, time.time(), key))
-        return self.get_job(identity)
-
-    def enqueue_match_search_preview(self, search_id, candidate_id):
-        """Copy only an actual server candidate; a client cannot supply footage."""
-        key = f"match-search-preview:{search_id}:{candidate_id}"
-        with self.connection() as con:
-            con.execute("BEGIN IMMEDIATE")
-            parent = self._job(con.execute("SELECT * FROM jobs WHERE id=?", (search_id,)).fetchone(), private=True)
-            if parent["kind"] != "match-search" or parent["status"] != "completed" or parent["cancel_requested"]:
-                raise ValueError("Wait for this match search to complete before preparing another preview")
-            candidate = next((row for row in (parent["result"] or {}).get("candidates", []) if row["id"] == candidate_id), None)
-            if candidate is None:
-                raise KeyError("This match suggestion is unavailable")
-            previous = con.execute("SELECT * FROM jobs WHERE kind='match-search-preview' AND path_key=? AND status IN ('queued','running') AND cancel_requested=0", (key,)).fetchone()
-            if previous is not None:
-                return self._job(previous)
-            snapshot = {"match_search_preview": {"search_id": search_id, "candidate": candidate,
-                                                "reference": parent["snapshot"]["match_search"]["reference"]}}
-            identity = str(uuid.uuid4())
-            con.execute("INSERT INTO jobs (id,kind,status,snapshot,created_at,path_key) VALUES (?,?,?,?,?,?)",
-                        (identity, "match-search-preview", "queued", json.dumps(snapshot, allow_nan=False), time.time(), key))
-        return self.get_job(identity)
-
-    def match_search_previews(self, search_id, candidate_id):
-        with self.connection() as con:
-            return [self._job(row, private=True) for row in con.execute(
-                "SELECT * FROM jobs WHERE kind='match-search-preview' AND path_key=? ORDER BY created_at DESC,id DESC",
-                (f"match-search-preview:{search_id}:{candidate_id}",))]
-
     def project_jobs(self, identity):
         self.get_project(identity)
         with self.connection() as con:
@@ -731,12 +684,6 @@ class LabStore:
             log = (json.loads(row["log"]) + [message])[-80:]
             con.execute("UPDATE jobs SET progress=?,log=? WHERE id=?", (message, json.dumps(log), identity))
 
-    def publish_match_progress(self, identity, result):
-        """Publish immutable suggestions as previews arrive; never edit a project."""
-        with self.connection() as con:
-            con.execute("UPDATE jobs SET result=? WHERE id=? AND kind IN ('match','match-search') AND status='running' AND cancel_requested=0",
-                        (json.dumps(result, allow_nan=False), identity))
-
     def cancel(self, identity):
         with self.connection() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -747,15 +694,6 @@ class LabStore:
                 con.execute("UPDATE jobs SET status='cancelled',cancel_requested=1,finished_at=? WHERE id=?", (time.time(), identity))
             elif row["status"] == "running":
                 con.execute("UPDATE jobs SET cancel_requested=1,progress=? WHERE id=?", ("Cancellation requested; waiting for the active operation to stop", identity))
-            # A cancelled search must not be revived by a queued or running child.
-            kind = con.execute("SELECT kind FROM jobs WHERE id=?", (identity,)).fetchone()[0]
-            if kind == "match-search":
-                con.execute("UPDATE jobs SET cancel_requested=1 WHERE id=?", (identity,))
-                for child in con.execute("SELECT id,status,snapshot FROM jobs WHERE kind='match-search-preview' AND status IN ('queued','running')").fetchall():
-                    if json.loads(child["snapshot"])["match_search_preview"]["search_id"] == identity:
-                        con.execute("UPDATE jobs SET cancel_requested=1,status=?,progress=?,finished_at=? WHERE id=?",
-                                    ("cancelled" if child["status"] == "queued" else "running", "Parent match search cancelled",
-                                     time.time() if child["status"] == "queued" else None, child["id"]))
         return self.get_job(identity)
 
     def is_cancelled(self, identity):

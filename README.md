@@ -622,8 +622,8 @@ model/GPU throughput are the practical scaling limits. Pagination/retention can 
 added when measured need arises. Multiuser hosting would also need user isolation,
 shared object storage and a leased job queue; those are not implemented.
 
-The earlier Match Cuts editor at `/lab/visual-rhymes` is retired (ADR-0116);
-`/match` is the one entry. The separate
+The earlier Match Cuts editor and its prepared-cohort finder are retired
+(ADR-0116, ADR-0117); `/match` is the one entry. The separate
 [shadow evaluation workflow](docs/experiments/visual-rhymes.md) measures whether
 better instants and resizing help before admitting new retrieval machinery.
 An [offline DINOv3 challenger](docs/experiments/dense-geometry.md) can compare
@@ -1739,11 +1739,4 @@ Limits:
   frame off; renders use exact source times.
 - Conceptual rhymes, such as 2001's bone into satellite, are not found by
   geometry.
-
-## Prepared-cohort Match Cuts (frozen)
-
-The prepared-cohort editor (ADR-0027, ADR-0038) is no longer served; saved
-Match Cuts projects open `/match` (ADR-0116). Its preparation commands still
-live in `pipeline/matching/prepare.py` and `pipeline/matching/prepare_subjects.py`
-until that code is removed.
 

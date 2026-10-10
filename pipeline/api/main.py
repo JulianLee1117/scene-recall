@@ -102,7 +102,6 @@ from pipeline.intake import (
 from pipeline.ingest.subtitles import validate_external_srt
 from pipeline.ingest.playback import PlaybackPreparationError, lookup_playback, playback_representation_token
 from pipeline.lab.api import router as lab_router
-from pipeline.matching.api import router as matching_router
 from pipeline.matching.moments.api import router as match_moments_router
 from pipeline.transitions.api import router as transitions_router
 from pipeline.algmods.api import router as algmods_router
@@ -341,7 +340,6 @@ app = FastAPI(title="scene-recall", version="0.1.0", lifespan=lifespan)
 async def search_publication_busy(_request, exc):
     return JSONResponse(status_code=503, content={"detail": str(exc)}, headers={"Retry-After": "1"})
 app.include_router(lab_router)
-app.include_router(matching_router)
 app.include_router(match_moments_router)
 app.include_router(transitions_router)
 app.include_router(algmods_router)

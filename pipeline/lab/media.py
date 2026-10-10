@@ -109,6 +109,24 @@ def resolve_film(db, film_id):
     return dict(rows[0])
 
 
+def resolve_unit(db, identity):
+    """The published shot row behind a unit hint, or a ValueError once it is gone."""
+    rows = (db.open_table("units").search().where(col("unit_id") == lit(identity))
+            .select(["unit_id", "film_id", "t_start", "t_end", "caption"]).limit(2).to_list())
+    if len(rows) != 1:
+        raise ValueError("The reference shot is no longer in the published index")
+    return rows[0]
+
+
+def resolve_unit(db, identity):
+    """The published shot row behind a unit hint, or a ValueError once it is gone."""
+    rows = (db.open_table("units").search().where(col("unit_id") == lit(identity))
+            .select(["unit_id", "film_id", "t_start", "t_end", "caption"]).limit(2).to_list())
+    if len(rows) != 1:
+        raise ValueError("The reference shot is no longer in the published index")
+    return rows[0]
+
+
 def validate_sources(document, db, store, *, require_media=False, clip_ids=None, dialogue_ids=None):
     """Unit IDs remain hints; durable film/time anchors are authoritative."""
     doc = ProjectDocument.model_validate(document).model_dump(mode="json")

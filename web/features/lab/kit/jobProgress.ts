@@ -3,7 +3,6 @@ import type { LabJob, WorkerStatus } from "@/types/lab";
 const jobNames: Record<LabJob["kind"], string> = {
   generate: "Generate edit", rhythm: "Detect beats", analyze: "Analyze music",
   plan: "Plan scenes", draft: "Find scenes", render: "Export video",
-  match: "Find match cuts", "match-preview": "Prepare match preview",
   "next-scene": "Find next scene", "next-scene-preview": "Prepare scene preview",
 };
 
@@ -12,7 +11,7 @@ export const jobName = (job: LabJob) => jobNames[job.kind] ?? "Editor task";
 
 export function queuedWorkerSummary(job: LabJob, status: WorkerStatus | null): string | null {
   if (job.status !== "queued" || job.cancel_requested || !status) return null;
-  const role = job.worker_role ?? (job.kind === "match" ? "ingest" : "editor");
+  const role = job.worker_role ?? "editor";
   const worker = status.workers.find((row) => row.role === role);
   if (!worker) return null;
   const label = role === "editor" ? "Editor" : "Library";

@@ -28,10 +28,9 @@ def _queue(store, kinds):
 def test_explicit_routing_keeps_gpu_matching_with_ingestion_and_previews_with_editor():
     assert set(kinds_for_role()) == set(ROLE_KINDS["editor"] + ROLE_KINDS["ingest"])
     assert len(kinds_for_role()) == len(set(kinds_for_role()))
-    for kind in ("ingest", "backfill-temporal", "match", "match-search"):
+    for kind in ("ingest", "backfill-temporal"):
         assert role_for_kind(kind) == "ingest"
-    for kind in ("generate", "rhythm", "analyze", "draft", "plan", "next-scene", "render",
-                 "match-preview", "match-search-preview", "next-scene-preview"):
+    for kind in ("generate", "rhythm", "analyze", "draft", "plan", "next-scene", "render", "next-scene-preview"):
         assert role_for_kind(kind) == "editor"
     assert role_for_kind("future-unknown-job") is None
     with pytest.raises(ValueError):
@@ -40,7 +39,7 @@ def test_explicit_routing_keeps_gpu_matching_with_ingestion_and_previews_with_ed
 
 def test_each_lane_claims_fifo_without_waiting_for_the_other_and_maintenance_stays_last(tmp_path):
     store = LabStore(tmp_path)
-    _queue(store, ["backfill-temporal", "ingest", "generate", "match-search", "plan", "backfill-temporal", "render"])
+    _queue(store, ["backfill-temporal", "ingest", "generate", "ingest", "plan", "backfill-temporal", "render"])
     assert [store.claim("editor")["id"] for _ in range(3)] == ["job-2", "job-4", "job-6"]
     assert store.claim("editor") is None
     assert [store.claim("ingest")["id"] for _ in range(4)] == ["job-1", "job-3", "job-0", "job-5"]

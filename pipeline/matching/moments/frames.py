@@ -54,7 +54,7 @@ def decode(path: Path, time_value: float):
 def frame(config: Any, db: Any, film_id: str, time_value: float, width: int, content_box: list[float] | None) -> Path:
     """Path of the cached content-picture JPEG for one instant (decoding it when missing)."""
     from PIL import Image
-    from pipeline.matching.cohort import resolve_film
+    from pipeline.lab.media import resolve_film
     width = min(WIDTHS, key=lambda value: abs(value - width))
     path = cache_path(config, film_id, time_value, width)
     if path.is_file():

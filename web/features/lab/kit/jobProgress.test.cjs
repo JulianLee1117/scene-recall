@@ -20,7 +20,7 @@ test("queued editor reports its own lane rather than waiting on ingestion", () =
   assert.equal(progress.queuedWorkerSummary(queued, { workers: [editor, ingestion] }), "Queued for the editor worker.");
   assert.match(progress.queuedWorkerSummary(queued, { workers: [{ ...editor, online: false }] }), /offline/);
   assert.match(progress.queuedWorkerSummary(queued, { workers: [{ ...editor, state: "stopping" }] }), /stopping/);
-  assert.match(progress.queuedWorkerSummary({ ...queued, kind: "match", worker_role: "ingest" }, { workers: [editor, ingestion] }), /release the GPU/);
+  assert.match(progress.queuedWorkerSummary({ ...queued, kind: "ingest", worker_role: "ingest" }, { workers: [editor, ingestion] }), /release the GPU/);
   assert.equal(progress.queuedWorkerSummary({ ...queued, cancel_requested: true }, { workers: [editor] }), null);
   assert.equal(progress.queuedWorkerSummary(job(), { workers: [editor] }), null);
   assert.equal(progress.queuedWorkerSummary(queued, null), null);

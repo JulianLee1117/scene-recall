@@ -32,9 +32,9 @@ def freeze(request, db):
         if clip["source_end"] > float(film["duration"]):
             raise ValueError("A selected window extends beyond the source film")
         if clip["unit_id"]:
-            from pipeline.matching.cohort import unit
+            from pipeline.lab.media import resolve_unit
             try:
-                shot = unit(db, clip["unit_id"])
+                shot = resolve_unit(db, clip["unit_id"])
             except ValueError:
                 # Shot rows are replaceable derivations. The immutable film
                 # and timestamp anchors remain valid after a hint disappears.

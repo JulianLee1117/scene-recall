@@ -9,14 +9,12 @@ import type {
   LabJob,
   LabProject,
   LabProjectDeletion,
-  MatchOptions,
   NextSceneAdjustment,
   NextSceneOptions,
 } from "@/types/lab";
 
 type StartJobOptions = {
   mode?: "preview" | "export";
-  match?: MatchOptions;
   slotIds?: string[];
   replanTiming?: boolean;
   generate?: { mode: "fill" | "improve" | "regenerate" };
@@ -74,7 +72,6 @@ export function useLabProject(experiment: ExperimentId) {
   const [conflict, setConflict] = useState(false);
   const [job, setJob] = useState<LabJob | null>(null);
   const [render, setRender] = useState<LabJob | null>(null);
-  const [matchJob, setMatchJob] = useState<LabJob | null>(null);
   const [nextSceneJob, setNextSceneJob] = useState<LabJob | null>(null);
   const nextSceneAction = useRef(false);
   const pendingSave = useRef<Promise<LabProject | null> | null>(null);
@@ -164,11 +161,6 @@ export function useLabProject(experiment: ExperimentId) {
               (item) => item.kind === "render" && item.status === "completed",
             );
             if (latestRender) setRender(latestRender);
-            setMatchJob(
-              jobs.find(
-                (item) => item.kind === "match" && item.status === "completed",
-              ) ?? null,
-            );
             setNextSceneJob(
               jobs.find((item) => item.kind === "next-scene" &&
                 item.base_revision === next.revision &&
@@ -340,7 +332,6 @@ export function useLabProject(experiment: ExperimentId) {
       replaceHistory([]);
       setJob(null);
       setRender(null);
-      setMatchJob(null);
       setNextSceneJob(null);
       setNotice("");
       setConflict(false);
@@ -410,7 +401,6 @@ export function useLabProject(experiment: ExperimentId) {
   const startJob = async (
     kind: LabJob["kind"],
     {
-      match,
       slotIds,
       replanTiming = false,
       generate,
@@ -437,7 +427,6 @@ export function useLabProject(experiment: ExperimentId) {
           kind,
           ...(mode ? { mode } : {}),
           base_revision: saved.revision,
-          ...(match ? { match } : {}),
           ...(slotIds ? { slot_ids: slotIds } : {}),
           ...(replanTiming ? { replan_timing: true } : {}),
           ...(generate ? { generate } : {}),
@@ -478,12 +467,7 @@ export function useLabProject(experiment: ExperimentId) {
         }
         window.localStorage.removeItem(`lab-job:${next.project_id}`);
         if (next.status === "completed") {
-          if (next.kind === "match") {
-            setMatchJob(next);
-            setNotice("Matches ready. Play a transition before choosing one.");
-          } else if (next.kind === "match-preview") {
-            setNotice("Transition preview ready.");
-          } else if (next.kind === "next-scene") {
+          if (next.kind === "next-scene") {
             setNextSceneJob(next);
             setNotice("Next-scene alternatives are ready. Play them with your music before choosing.");
           } else if (next.kind === "next-scene-preview") {
@@ -619,38 +603,6 @@ export function useLabProject(experiment: ExperimentId) {
       setBusy(false);
     }
   };
-  const applyMatch = async (candidateId: string, previewJobId?: string) => {
-    endChange();
-    if (!matchJob || !project || !document) return false;
-    if (dirty) {
-      setError(
-        "Your reference or edit changed. Save and find matches again before applying a result.",
-      );
-      return false;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const next = await labRequest<LabProject>(
-        `/jobs/${previewJobId ?? matchJob.id}/apply-match`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            base_revision: project.revision,
-            candidate_id: candidateId,
-          }),
-        },
-      );
-      accept(next, true);
-      setNotice("Cut kept. Undo restores the previous edit.");
-      return true;
-    } catch (reason) {
-      fail(reason);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
   const captureDraft = (): LabDraftSnapshot | null => {
     const current = projectRef.current;
     const value = documentRef.current;
@@ -756,11 +708,9 @@ export function useLabProject(experiment: ExperimentId) {
     job,
     activeJob,
     render,
-    matchJob,
     nextSceneJob,
     prepareNextScene,
     applyNextScene,
-    applyMatch,
     create,
     change,
     endChange,

@@ -231,11 +231,8 @@ def test_inspection_cache_identity_includes_the_actual_window_and_crop(media):
 @pytest.mark.parametrize("media", ["anamorphic"], indirect=True)
 def test_inspection_normalizes_display_shape_without_relaxing_match_cuts(media):
     from PIL import Image
-    from pipeline.matching.media import at
     config, db, _, document, video, _ = media
     anchor, offer = document["clips"][1:3]
-    with pytest.raises(ValueError, match="Non-square"):
-        at(video, anchor["source_start"], anchor["source_start"], anchor["source_end"])
     result = sample_frames(anchor, [offer], config, db)
     assert result["profile"] == "next-scene-three-pts-display-cropped-jpeg640-v2"
     for window, source, size in zip(result["windows"], (anchor, offer), ((120, 90), (240, 90))):

@@ -464,8 +464,8 @@ Wish and Starjunk stay as regression passages. Supersedes LLM numeric cut timing
   replaces embedding grids for Framing. Reclaim that storage after Phase 1
   layout works.
 - Jev/intent-routing experiments (ADR-0086 to ADR-0091).
-- Match Cuts cohorts (SAM/RAFT/DINOv3); their RAFT/SAM code is reused in
-  Phase 1.
+- Match Cuts cohorts (SAM/RAFT/DINOv3): removed on 2026-10-09 (ADR-0117); the
+  DINOv3 challenger stays under `pipeline/experiments`.
 - Transitions lab and Runway generation; finishing moves to Resolve.
 - Source-context pilot; superseded by the Phase 1 understanding pass.
 - Targeted footage inspection; superseded by the Phase 3 critique loop.

@@ -4,7 +4,7 @@ One streaming decode per film at ``ANALYSIS_FPS`` feeds groups of consecutive
 shots to the GPU:
 
 * camera motion — RAFT-small optical flow between consecutive frames, robust
-  affine fit (``pipeline.matching.motion.summarize``) and a labelled time
+  affine fit (the former ``pipeline.matching.motion.summarize``, ADR-0117) and a labelled time
   series (static / pan / tilt / push / pull / roll / handheld / unknown);
 * hidden cuts — frame pairs the flow cannot explain and whose colour
   distribution jumps, away from the shot's own boundaries;
@@ -282,7 +282,7 @@ _HYPOTHESES: dict[int, np.ndarray] = {}
 
 
 def _ransac_hypotheses(count: int) -> np.ndarray:
-    """The 64 seeded point triples of ``pipeline.matching.motion.summarize`` for *count* grid points."""
+    """The 64 seeded point triples of the former ``pipeline.matching.motion.summarize`` for *count* grid points."""
     if count not in _HYPOTHESES:
         rng = np.random.default_rng(817)
         _HYPOTHESES[count] = np.stack([rng.choice(count, 3, replace=False) for _ in range(64)])
@@ -292,7 +292,7 @@ def _ransac_hypotheses(count: int) -> np.ndarray:
 def summarize_pairs(flow: Any, first: Any, second: Any, seconds: Any) -> dict[str, Any]:
     """Batched dominant-affine camera fit, residual subject motion and photometric support.
 
-    A tensor port of ``pipeline.matching.motion.summarize`` (same 8-px grid,
+    A tensor port of the former ``pipeline.matching.motion.summarize`` (same 8-px grid,
     seeded hypotheses, 2-px inlier tolerance, 55% support rule and
     least-squares refit), plus the flow-warp support check.
 

@@ -284,7 +284,7 @@ export interface LabJob {
   worker_role?: "editor" | "ingest";
   id: string;
   project_id: string;
-  kind: "generate" | "rhythm" | "analyze" | "plan" | "draft" | "render" | "match" | "match-preview" | "next-scene" | "next-scene-preview";
+  kind: "generate" | "rhythm" | "analyze" | "plan" | "draft" | "render" | "next-scene" | "next-scene-preview";
   status:
     "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
   base_revision: number;
@@ -355,13 +355,3 @@ export interface NextScenePreviewResult {
   candidate: NextSceneCandidate;
 }
 
-export interface MatchOptions {
-  cohort_id: string;
-  reference_clip_id: string;
-  mode: "image" | "movement";
-  movement: "camera" | "subject";
-  allow_reframing: boolean;
-  focus?: "auto" | "subject" | "camera" | "image";
-  timing?: "nearby" | "fixed";
-  subject_point?: { x: number; y: number };
-}

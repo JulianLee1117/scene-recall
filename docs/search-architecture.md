@@ -33,7 +33,7 @@ records.
 Frozen: kept runnable, with no new investment. Their decision records hold the
 detail.
 - Transitions Lab: 0070-0076.
-- The saved-project Match Cuts editor: 0026, 0027, 0038.
+- The saved-project Match Cuts editor and its finder, removed: 0026, 0027, 0038 (0116, 0117).
 - Source context: 0066.
 - Targeted footage inspection: 0061.
 - Flexible-assembly comparison: 0065.
@@ -501,7 +501,7 @@ revision conflicts retain unapplied proposals rather than overwrite new work.
 The API transactionally enqueues Lab and ingestion jobs in one SQLite WAL ledger.
 ADR-0059 separates two local roles: the CPU editor runs music generation,
 analysis, searches, next-scene work, transition renders, previews and export; the ingestion/GPU role
-runs ingestion, temporal backfill and advanced `match`/`match-search`. Each role
+runs ingestion and temporal backfill. Each role
 claims FIFO work transactionally; library maintenance follows its foreground jobs.
 Lifetime shared legacy-lock ownership and exclusive role locks prevent duplicate
 workers or a serial worker colliding with separate roles. Ingestion retains its
@@ -2666,8 +2666,7 @@ compared in output coordinates.
   an ordinary-search option wait for played-cut evidence (ADR-0099).
 
 The former scene-based search (ADR-0040/0046/0048) no longer backs `/match`.
-The frozen prepared-cohort editor (ADR-0027, ADR-0038) is no longer served
-(ADR-0116). Its Python code in `pipeline/matching/` outside `moments/`, the
-match job endpoints and the project hook's handling of them remain until their
-own cleanup.
+The prepared-cohort finder (ADR-0027, ADR-0038) is removed with its editor,
+endpoints, job kinds and tests (ADR-0116, ADR-0117); `pipeline/matching/` is
+`moments/` alone.
 

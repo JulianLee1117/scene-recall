@@ -88,7 +88,7 @@ The accepted boundary or behavior.
 | [0024](0024-source-backed-lab-and-music-sketch.md) | Accepted | Add durable Lab projects and bounded audio-to-source edit planning |
 | [0025](0025-durable-standalone-job-worker.md) | Accepted | Execute durable ingestion and Lab jobs in a standalone local worker |
 | [0026](0026-region-aware-visual-rhymes-research.md) | Frozen | Evaluate within-shot instants and whole-picture region alignment in shadow |
-| [0027](0027-bounded-lab-match-finder.md) | Frozen; web editor removed by 0116 | Admit bounded image and movement matching in Visual Rhymes before production promotion |
+| [0027](0027-bounded-lab-match-finder.md) | Superseded by 0099; removed by 0116 and 0117 | Admit bounded image and movement matching in Visual Rhymes before production promotion |
 | [0028](0028-explicit-music-audio-provider-and-progress.md) | Accepted | Select the music audio provider explicitly, persist progress and apply passage-relative fade-in |
 | [0029](0029-authoritative-music-timeline-and-gap-filling.md) | Accepted | Make music cuts authoritative and fill or replace explicit slots with whole-sequence context |
 | [0030](0030-song-specific-moments-and-clip-directions.md) | Accepted | Plan song-specific moments, keep directions per clip, and make timing regeneration explicit |
@@ -99,7 +99,7 @@ The accepted boundary or behavior.
 | [0035](0035-local-timing-and-editor-lifecycle.md) | Accepted | Prepare local timing before creative generation, browse scenes in the editor, and manage project deletion and exit |
 | [0036](0036-next-scene-proposals-and-pair-audition.md) | Accepted | Audition bounded next-scene proposals with original music, explicit application and optional sampled-frame inspection |
 | [0037](0037-manual-moment-and-crop-in-pair-preview.md) | Accepted | Adjust a suggested scene's source moment and framing in the pair preview with exact crop proof |
-| [0038](0038-played-match-cuts-and-tracked-subjects.md) | Frozen (saved Match Cuts projects) | Simplify played match cuts, track subjects, and compare boundary timing with explicit effectiveness gates |
+| [0038](0038-played-match-cuts-and-tracked-subjects.md) | Superseded by 0099; removed by 0117 | Simplify played match cuts, track subjects, and compare boundary timing with explicit effectiveness gates |
 | [0039](0039-song-informed-first-edit-timing.md) | Accepted | Let untouched rhythm starters acquire song-informed first-edit timing while preserving manual work |
 | [0040](0040-scene-based-match-search.md) | Superseded by 0099 | Discover next clips from a scene with projectless jobs and independent cues measured at one exact cut |
 | [0041](0041-simple-editor-and-source-aware-first-cuts.md) | Accepted | Simplify the editor, expose real progress and choose bounded first-edit cuts with available footage and explicit abstention |
@@ -178,4 +178,5 @@ The accepted boundary or behavior.
 | [0114](0114-shot-filters-inside-retrieval.md) | Accepted | Shot filters (dialogue, size, people, camera, color, time, place) derived in memory from stored evidence; a request-bound scope masks every resident channel before top-k and is checked on every database path; a Shots group in the Filter menu |
 | [0115](0115-app-chrome-over-lab-screens.md) | Accepted | The home page's bar over every Lab screen and the Lab directory as a page-chrome page; a lab renders the shared header first and owns everything below it; every exit from a project editor passes the one unsaved-edits guard; the project listing carries summaries, not documents |
 | [0116](0116-lab-folders-by-experiment.md) | Accepted | The Lab as one folder, `web/features/lab`: its directory, a shared `kit/` and one folder per experiment; the frozen rhymes editor at `/lab/visual-rhymes` removed, `/match` the one Match Cuts address; experiment names from the registry alone |
+| [0117](0117-remove-prepared-cohort-match-finder.md) | Accepted | The prepared-cohort Match Finder is removed: its modules under `pipeline/matching` outside `moments/`, the `/matching` router, four job kinds, the lab API's match endpoints and models, the web hook's match branches and their tests; the two lookups it housed live in `pipeline/lab/media.py` |
 | [0117](0117-matched-words-and-shot-dialogue.md) | Accepted | Main-query and explicit Words evidence share a minimal hover; clause-owned text and timing survive fusion; shot details read bounded source dialogue on demand |
