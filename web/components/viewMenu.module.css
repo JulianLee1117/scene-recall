@@ -20,7 +20,8 @@
   font-size: 12px;
 }
 
-/* A tiny 35mm premiere machine. Static SVG detail; one finite activation. */
+/* A miniature projection booth: cool steel at rest, cyan and tungsten live.
+   Detail is static SVG. Only the brief click sequences do any moving. */
 .debugSection {
   flex-shrink: 0;
   padding-top: 14px;
@@ -28,6 +29,17 @@
 }
 
 .debugButton {
+  --cinema-shadow: #080e18;
+  --cinema-dark: #111c2b;
+  --cinema-frame: #26384c;
+  --cinema-body: #34475c;
+  --cinema-metal: #53697e;
+  --cinema-edge: #7a91a5;
+  --cinema-shine: #b1c3d1;
+  --cinema-film: #44556c;
+  --cinema-warm: #718297;
+  --cinema-hot: #a0afbf;
+  --cinema-power: #48687a;
   position: relative;
   isolation: isolate;
   display: grid;
@@ -36,65 +48,118 @@
   padding: 20px 26px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid #494638;
+  border: 1px solid #45566a;
   border-radius: 6px;
-  background: linear-gradient(180deg, #172123, #101617 52%, #182020);
-  color: #deeee5;
+  background: #0b1420;
+  color: #d8e5ee;
   text-align: center;
   cursor: pointer;
   transition: border-color .12s ease;
 }
 
-.debugButton:hover { border-color: #9d9974; }
-.debugButton:focus-visible { outline: 2px solid #a7d7c9; outline-offset: 3px; }
-.debugButton[aria-pressed="true"] { border-color: #927c48; }
+.debugButton:hover { border-color: #9cb8cd; }
+.debugButton:focus-visible { outline: 2px solid #edfaff; outline-offset: 3px; }
+.debugButton[aria-pressed="true"] {
+  --cinema-shadow: #061722;
+  --cinema-dark: #102e3d;
+  --cinema-frame: #23758b;
+  --cinema-body: #317b91;
+  --cinema-metal: #5fb6c6;
+  --cinema-edge: #91e2ea;
+  --cinema-shine: #e0fcff;
+  --cinema-film: #487bab;
+  --cinema-warm: #f9b86b;
+  --cinema-hot: #fff0c7;
+  --cinema-power: #70e9f6;
+  border-color: #8cefff;
+}
 
 .debugFrame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.cinemaChassis { fill: #111d19; }
-.debugButton[aria-pressed="true"] .cinemaChassis { fill: #24261b; }
+.cinemaChassis { fill: #0b1420; }
+.debugButton[aria-pressed="true"] .cinemaChassis { fill: #0c2633; }
 .debugCopy { position: relative; display: grid; min-width: 0; justify-items: center; gap: 4px; }
-.debugCrest { overflow: visible; color: #8bc4b5; }
-.debugButton[aria-pressed="true"] .debugCrest { color: #efc47a; }
+.debugHero { display: flex; align-items: center; justify-content: center; gap: 9px; height: 24px; }
+.debugCrest { overflow: visible; }
 .debugTitle {
-  color: #f0f2e8;
+  color: #d9e3ee;
   font: 800 12px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 1.8px;
   text-indent: 1.8px;
   white-space: nowrap;
 }
 
-.debugHint { color: #9eafa7; font-family: inherit; font-size: 10px; line-height: 1.35; }
+.debugButton[aria-pressed="true"] .debugTitle { color: #f2fcff; }
+.debugHint { color: #a1b1c0; font-family: inherit; font-size: 10px; line-height: 1.35; }
+.debugButton[aria-pressed="true"] .debugHint { color: #b3d7e3; }
 .debugState {
-  position: absolute;
-  top: 25px;
-  right: 21%;
-  color: #82988c;
-  font: 8px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: .7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 46px;
+  height: 20px;
+  border: 1px solid #738799;
+  border-radius: 2px;
+  background: #263646;
+  color: #e2eaf2;
+  font: 800 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .8px;
 }
-.debugButton[aria-pressed="true"] .debugState { color: #ffd494; }
-.chargeTop, .chargeBottom, .impact, .beamLeft, .beamRight { opacity: 0; }
+.stateLamp { width: 5px; height: 5px; border: 1px solid currentColor; }
+.debugButton[aria-pressed="true"] .debugState { border-color: #fff0c5; background: #ffd18e; color: #39210d; }
+.debugButton[aria-pressed="true"] .stateLamp { background: currentColor; }
+.powerTrim { opacity: .22; }
+.lampLight, .standbyBeam, .chargeTop, .chargeBottom, .impact, .shutdown, .beamLeft, .beamRight { opacity: 0; }
+.debugButton[aria-pressed="true"] .powerTrim { opacity: 1; }
+.debugButton[aria-pressed="true"] .lampLight { opacity: 1; }
+.debugButton[aria-pressed="true"] .standbyBeam { opacity: .2; }
 .reelLeft, .reelRight { transform-box: fill-box; transform-origin: center; }
+.reelRight { --reel-turn: -360deg; --reel-overshoot: -365deg; }
 .slateHinge { transform-origin: 3px 9px; }
 .beamLeft { transform-origin: 38px 60px; }
 .beamRight { transform-origin: 202px 60px; }
+.shutterLeft, .shutterRight { transform-origin: 0 0; }
+.debugButton[aria-pressed="true"] :is(.shutterLeft, .shutterRight) { transform: scaleY(0); }
+.lampLight { transform-origin: 120px 60px; }
 .impactFrame { transform-box: fill-box; transform-origin: center; }
+.shutdownRails { transform-origin: 120px 52px; }
 
-/* Clap → transport → light → settle. Only transform/opacity animate.
-   The terminal impact releases the activation lock at 580ms. No idle loops. */
-.debugButton[data-firing] .slateHinge { animation: slate-snap .28s cubic-bezier(.2, .8, .3, 1) both; }
-.debugButton[data-firing] .debugCrest { animation: crest-kick .34s cubic-bezier(.16, 1, .3, 1); }
-.debugButton[data-firing] .reelLeft { animation: reel-turn .46s .04s cubic-bezier(.2, .8, .3, 1) both; }
-.debugButton[data-firing] .reelRight { animation: reel-turn .46s .04s cubic-bezier(.2, .8, .3, 1) reverse both; }
-.debugButton[data-firing] .filmStripTop { animation: perforation-advance .32s .08s steps(6, end) both; }
-.debugButton[data-firing] .filmStripBottom { animation: film-advance .32s .08s steps(9, end) reverse both; }
-.debugButton[data-firing] .beamLeft { animation: projector-left .4s .1s ease-out both; }
-.debugButton[data-firing] .beamRight { animation: projector-right .4s .1s ease-out both; }
-.debugButton[data-firing] .chargeTop, .debugButton[data-firing] .chargeBottom { animation: rail-charge .24s .1s cubic-bezier(.2, .65, .3, 1) both; }
-.debugButton[data-firing] .impact { animation: frame-impact .58s linear both; }
-.debugButton[data-firing] .impactFrame { animation: frame-punch .26s .26s cubic-bezier(.16, 1, .3, 1) both; }
-.debugButton[data-firing] .sparksTop { animation: spark-top .25s .27s steps(5, end) both; }
-.debugButton[data-firing] .sparksBottom { animation: spark-bottom .25s .27s steps(5, end) both; }
+/* Clap, advance, strike the lamp, settle. The label never shakes.
+   Every child finishes before its direction's terminal event. */
+.debugButton[data-motion="on"] .slateHinge { animation: slate-snap .28s cubic-bezier(.2, .8, .3, 1) both; }
+.debugButton[data-motion="on"] .debugCrest { animation: crest-kick .34s cubic-bezier(.16, 1, .3, 1); }
+.debugButton[data-motion="on"] :is(.reelLeft, .reelRight) { animation: reel-turn .5s .04s cubic-bezier(.2, .8, .3, 1) both; }
+.debugButton[data-motion="on"] .filmStripTop { animation: perforation-advance .32s .08s steps(6, end) both; }
+.debugButton[data-motion="on"] .filmStripBottom { animation: film-advance .32s .08s steps(9, end) reverse both; }
+.debugButton[data-motion="on"] .beamLeft { animation: projector-left .43s .09s ease-out both; }
+.debugButton[data-motion="on"] .beamRight { animation: projector-right .43s .09s ease-out both; }
+.debugButton[data-motion="on"] :is(.shutterLeft, .shutterRight) { animation: shutter-open .18s .06s cubic-bezier(.16, 1, .3, 1) both; }
+.debugButton[data-motion="on"] .lampLight { animation: lamp-strike .4s .08s ease-out both; }
+.debugButton[data-motion="on"] .powerTrim { animation: trim-strike .52s ease-out both; }
+.debugButton[data-motion="on"] .standbyBeam { animation: light-settle .52s ease-out both; }
+.debugButton[data-motion="on"] :is(.chargeTop, .chargeBottom) { animation: rail-charge .24s .08s cubic-bezier(.2, .65, .3, 1) both; }
+.debugButton[data-motion="on"] .impact { animation: frame-impact .62s linear both; }
+.debugButton[data-motion="on"] .impactFrame { animation: frame-punch .28s .2s cubic-bezier(.16, 1, .3, 1) both; }
+.debugButton[data-motion="on"] .sparksTop { animation: spark-top .29s .21s steps(5, end) both; }
+.debugButton[data-motion="on"] .sparksBottom { animation: spark-bottom .29s .21s steps(5, end) both; }
+.debugButton[data-motion="on"] .debugState { animation: state-seat .28s cubic-bezier(.16, 1, .3, 1); }
+
+/* Cut. The lamp pinches out, the film coasts, and the reels brake.
+   Repeated stock and whole reel turns return to exactly the resting artwork. */
+.debugButton[data-motion="off"] .shutdown { animation: power-down .34s linear both; }
+.debugButton[data-motion="off"] .shutdownRails { animation: rails-close .26s cubic-bezier(.5, 0, .3, 1) both; }
+.debugButton[data-motion="off"] .lastFrame { animation: last-frame .31s linear both; }
+.debugButton[data-motion="off"] :is(.reelLeft, .reelRight) { animation: reel-brake .3s cubic-bezier(.1, .65, .25, 1) both; }
+.debugButton[data-motion="off"] .filmStripTop { animation: perforation-coast .24s steps(6, end) both; }
+.debugButton[data-motion="off"] .filmStripBottom { animation: film-coast .24s steps(9, end) reverse both; }
+.debugButton[data-motion="off"] .slateHinge { animation: slate-cut .24s ease-out both; }
+.debugButton[data-motion="off"] :is(.shutterLeft, .shutterRight) { animation: shutter-close .2s .02s ease-out both; }
+.debugButton[data-motion="off"] .lampLight { --cinema-hot: #fff0c7; --cinema-warm: #f9b86b; animation: lamp-out .28s ease-out both; }
+.debugButton[data-motion="off"] .standbyBeam { animation: light-out .24s ease-out both; }
+.debugButton[data-motion="off"] .beamLeft { fill: #b5efff; animation: projector-retract-left .25s ease-in both; }
+.debugButton[data-motion="off"] .beamRight { fill: #b5efff; animation: projector-retract-right .25s ease-in both; }
+.debugButton[data-motion="off"] .powerTrim { animation: trim-out .3s ease-out both; }
+.debugButton[data-motion="off"] .debugState { animation: state-cut .2s ease-out; }
 
 @keyframes rail-charge {
   0% { opacity: 0; transform: translateX(0); }
@@ -102,9 +167,9 @@
   100% { opacity: 0; transform: translateX(210px); }
 }
 @keyframes frame-impact {
-  0%, 44% { opacity: 0; }
-  52% { opacity: 1; }
-  70% { opacity: .5; }
+  0%, 30% { opacity: 0; }
+  36% { opacity: 1; }
+  58% { opacity: .35; }
   100% { opacity: 0; }
 }
 @keyframes crest-kick {
@@ -120,9 +185,16 @@
   64% { transform: rotate(-5deg); }
   100% { transform: rotate(0); }
 }
-@keyframes reel-turn { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes reel-turn { from { transform: rotate(0); } to { transform: rotate(var(--reel-turn, 360deg)); } }
+@keyframes reel-brake {
+  0% { transform: rotate(0); }
+  72% { transform: rotate(var(--reel-overshoot, 365deg)); }
+  100% { transform: rotate(var(--reel-turn, 360deg)); }
+}
 @keyframes perforation-advance { from { transform: translateX(0); } to { transform: translateX(-12px); } }
 @keyframes film-advance { from { transform: translateX(0); } to { transform: translateX(-72px); } }
+@keyframes perforation-coast { from { transform: translateX(0); } to { transform: translateX(-12px); } }
+@keyframes film-coast { from { transform: translateX(0); } to { transform: translateX(-72px); } }
 @keyframes projector-left {
   0% { opacity: 0; transform: rotate(-12deg) scaleX(.6); }
   28% { opacity: .9; }
@@ -140,6 +212,36 @@
   35% { transform: scale(1.02); }
   100% { transform: scale(1); }
 }
+@keyframes shutter-open { from { transform: scaleY(1); } to { transform: scaleY(0); } }
+@keyframes shutter-close { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes lamp-strike {
+  0% { opacity: 0; transform: scaleY(.2); }
+  25% { opacity: 1; transform: scaleY(1.3); }
+  100% { opacity: 1; transform: scaleY(1); }
+}
+@keyframes lamp-out {
+  0% { opacity: 1; transform: scaleY(1); }
+  55% { opacity: .9; transform: scaleY(.15); }
+  100% { opacity: 0; transform: scaleY(0); }
+}
+@keyframes trim-strike { 0% { opacity: .2; } 40% { opacity: 1; } 60% { opacity: .55; } 100% { opacity: 1; } }
+@keyframes trim-out { from { opacity: 1; } to { opacity: .22; } }
+@keyframes light-settle { 0%, 18% { opacity: 0; } 44% { opacity: .5; } 100% { opacity: .2; } }
+@keyframes light-out { from { opacity: .2; } to { opacity: 0; } }
+@keyframes power-down { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes rails-close { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@keyframes last-frame { 0%, 68% { opacity: 0; } 78% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes projector-retract-left {
+  from { opacity: .45; transform: scaleX(1); }
+  to { opacity: 0; transform: scaleX(0); }
+}
+@keyframes projector-retract-right {
+  from { opacity: .45; transform: scaleX(1); }
+  to { opacity: 0; transform: scaleX(0); }
+}
+@keyframes slate-cut { 0% { transform: rotate(-9deg); } 50% { transform: rotate(2deg); } 100% { transform: rotate(0); } }
+@keyframes state-seat { 0% { transform: scale(.9); } 55% { transform: scale(1.08); } 100% { transform: scale(1); } }
+@keyframes state-cut { 0% { transform: translateY(1px); } 100% { transform: translateY(0); } }
 @keyframes spark-top {
   0% { transform: translateY(3px); }
   100% { transform: translateY(-3px); }
@@ -151,6 +253,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .debugButton { transition: none; }
-  .debugButton[data-firing] :is(.debugCrest, .slateHinge, .reelLeft, .reelRight, .filmStripTop, .filmStripBottom, .beamLeft, .beamRight, .chargeTop, .chargeBottom, .impact, .impactFrame, .sparksTop, .sparksBottom) { animation: none; }
-  .chargeTop, .chargeBottom, .impact, .beamLeft, .beamRight { display: none; }
+  .debugButton[data-motion] [class] { animation: none; }
+  .chargeTop, .chargeBottom, .impact, .shutdown, .beamLeft, .beamRight { display: none; }
 }
