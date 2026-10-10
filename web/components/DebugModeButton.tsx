@@ -41,57 +41,39 @@ export default function DebugModeButton({ enabled, onChange }: {
         onChange(!enabled);
       }}
     >
-      <svg className={styles.cinema} width="96" height="44" viewBox="0 0 96 44" fill="none" shapeRendering="crispEdges" aria-hidden="true">
-        <defs>
-          {/* The tail is revealed from the lens, never drawn over the camera. */}
-          <clipPath id={`${id}-beam`}><path d="M35 0h61v44H35Z" /></clipPath>
-        </defs>
-        <path className={styles.projection} d="M35 23h8v-2h10v-2h10v-2h7v18h-7v-2H53v-2H43v-2h-8Z" fill="#f0cd87" />
-        <path d="M2 39h33v1H2Zm68 2h28v1H68Z" fill="#2b3936" />
-        <g transform="translate(0 6)">
-          <path d="M5 2h6v2h2v6h-2v2H5v-2H3V4h2Zm13 0h6v2h2v6h-2v2h-6v-2h-2V4h2Z" fill="#758d8b" />
-          <path d="M5 2h6v2H5Zm13 0h6v2h-6Z" fill="#c3d7cb" />
-          <path className={styles.reelHoles} d="M7 4h2v2H7Zm-2 3h2v2H5Zm4 1h2v2H9Zm11-4h2v2h-2Zm-2 3h2v2h-2Zm4 1h2v2h-2Z" fill="#182326" />
-          <path d="M5 13h21v13H5Z" fill="#53696b" />
-          <path d="M5 13h21v3H5Z" fill="#b0c6b9" />
-          <path d="M5 24h21v2H5Z" fill="#304747" />
-          <path d="M8 18h7v5H8Z" fill="#25383b" />
-          <path d="M9 18h1v4H9Zm3 0h1v4h-1Z" fill="#829995" />
-          <path d="M19 18h4v5h-4Z" fill="#d19a5e" />
-          <path d="M20 18h3v2h-3Z" fill="#f7d99b" />
-          <path d="M26 17h3v-2h4v10h-4v-2h-3Z" fill="#8da99e" />
-          <path d="M29 15h4v3h-4Z" fill="#d8e7d4" />
-          <path className={styles.lens} d="M33 17h2v6h-2Z" fill="#d9995b" />
-          <path d="M13 26h5v3h5v2H8v-2h5Z" fill="#84999a" />
+      <svg className={styles.debugFrame} viewBox="0 0 240 88" preserveAspectRatio="none" fill="none" shapeRendering="crispEdges" aria-hidden="true">
+        <path className={styles.frameLine} d="M18 7h204v4h7v7h4v52h-4v7h-7v4H18v-4h-7v-7H7V18h4v-7h7Z" stroke="currentColor" />
+        <path className={styles.frameBrackets} d="M7 25V14h7V7h16M210 7h16v7h7v11M233 63v11h-7v7h-16M30 81H14v-7H7V63" stroke="currentColor" strokeWidth="2" />
+        <path className={styles.sprockets} d="M12 30h3v5h-3Zm0 12h3v5h-3Zm0 12h3v5h-3ZM225 30h3v5h-3Zm0 12h3v5h-3Zm0 12h3v5h-3Z" fill="currentColor" />
+        <g className={styles.chargeTop}>
+          <path d="M0 7h8v2H0Z" fill="#bc6d3c" /><path d="M7 6h10v4H7Z" fill="#ffc873" /><path d="M16 5h6v6h-6Z" fill="#fff0c0" />
         </g>
-        <path d="M79 36h4v4h4v1H75v-1h4Z" fill="#536861" />
-        <path className={styles.screenFrame} d="M68 14h26v22H68Z" fill="#536861" />
-        <path d="M70 16h22v18H70Z" fill="#111c1d" />
-        <path d="M70 16h2v2h-2Zm20 0h2v2h-2Zm-20 16h2v2h-2Zm20 0h2v2h-2Z" fill="#3d5049" />
-        <g className={styles.screenImage}>
-          <path d="M72 18h18v14H72Z" fill="#233e44" />
-          <path d="M85 19h3v3h-3Z" fill="#ffe1a0" />
-          <path d="M72 27h2v-2h2v-2h2v2h2v3h4v-2h2v2h4v4H72Z" fill="#739c8b" />
-          <path d="M72 30h11v-2h3v-2h2v3h2v3H72Z" fill="#456960" />
-        </g>
-        <g clipPath={`url(#${id}-beam)`}>
-          <g className={styles.fireball}>
-            <path d="M17 26h3v2h-3Zm5-2h5v3h-5Z" fill="#b35942" />
-            <path d="M27 23h5v1h4v5h-4v1h-5v-2h-3v-2h3Z" fill="#ed864c" />
-            <path d="M32 22h6v2h3v4h-3v2h-6v-2h-3v-4h3Z" fill="#ffc16a" />
-            <path d="M35 24h4v4h-4Z" fill="#fff0b6" />
+        <g transform="translate(240 88) rotate(180)">
+          <g className={styles.chargeBottom}>
+            <path d="M0 7h8v2H0Z" fill="#39686b" /><path d="M7 6h10v4H7Z" fill="#76dacb" /><path d="M16 5h6v6h-6Z" fill="#d7fff0" />
           </g>
-          {/* This is the last animation to finish, so it releases the lock. */}
-          <g className={styles.impact} data-debug-impact="true" onAnimationEnd={(event) => {
-            if (event.target === event.currentTarget) finish();
-          }}>
-            <path d="M80 22h4v8h-4Zm-2 2h8v4h-8Z" fill="#fff0b6" />
-            <path d="M75 18h2v2h-2Zm12 1h2v3h-2Zm-13 12h3v2h-3Zm12 3h2v2h-2Z" fill="#f1b06c" />
-            <path d="M79 15h2v2h-2Zm11 14h2v2h-2Z" fill="#85d6bd" />
+        </g>
+        {/* The perimeter impact owns the full sequence, including its settle. */}
+        <g className={styles.impact} data-debug-impact="true" onAnimationEnd={(event) => {
+          if (event.target === event.currentTarget) finish();
+        }}>
+          <path className={styles.impactFrame} d="M18 7h204v4h7v7h4v52h-4v7h-7v4H18v-4h-7v-7H7V18h4v-7h7Z" stroke="#f9d693" strokeWidth="2" />
+          <g className={styles.sparksTop}>
+            <path d="M214 4h3v3h-3Zm11 10h4v3h-4Zm6 10h2v4h-2Z" fill="#ffdc91" />
+            <path d="M226 3h2v3h-2Zm10 12h2v2h-2Z" fill="#9cf4da" />
+          </g>
+          <g className={styles.sparksBottom}>
+            <path d="M23 81h3v3h-3Zm-12-10h4v3h-4Zm-4-11h2v4H7Z" fill="#9cf4da" />
+            <path d="M12 82h2v3h-2ZM2 74h2v2H2Z" fill="#ffdc91" />
           </g>
         </g>
       </svg>
       <span className={styles.debugCopy}>
+        <svg className={styles.debugCrest} width="18" height="18" viewBox="0 0 20 20" fill="none" shapeRendering="crispEdges" aria-hidden="true">
+          <path d="M6 1h8v2h3v3h2v8h-2v3h-3v2H6v-2H3v-3H1V6h2V3h3Z" fill="currentColor" opacity=".25" />
+          <path d="M7 2h6v3H7ZM3 6h4v4H3Zm10-1h4v5h-4ZM3 12h4v4H3Zm4 4h6v2H7Zm6-5h4v5h-4Z" fill="currentColor" />
+          <path d="M8 7h4v1h1v4h-1v1H8v-1H7V8h1Z" fill="#f5ead2" />
+        </svg>
         <span className={styles.debugTitle} aria-hidden="true">DEBUG MODE</span>
         <span id={`${id}-hint`} className={styles.debugHint}>Match scores &amp; descriptions</span>
       </span>
