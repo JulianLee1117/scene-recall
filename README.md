@@ -318,10 +318,15 @@ shot on screen: play or scrub elsewhere in the film and the line above the
 actions names the scene you are in, with **Back to result** to return. Its details describe
 the result, labelled **Scene** (the story), **Shot** (what happens, and who) and
 **Picture** (what the frame shows).
-**Show details** (under **View**) shows each result's description and how each
+Hovering a result shows one line of evidence named by the same words: a spoken
+line (**Dialogue**), else the text that matched best in meaning (**Picture**,
+**Shot**, **Scene**, **On-screen text**, **Mood** or **Shot details**), else
+what happens in the shot when only the picture matched; the line under the
+title names the finders.
+**Show details** (under **View**) shows each result's Picture text and how each
 retrieval channel ranked it. Every card in a search lists the same rows in a fixed order: Visual (image-text
-embedding), Semantic (text embedding, with the view it matched such as Story or
-On-screen text), Lexical (BM25 keywords over the description and subtitles; it needs
+embedding), Semantic (text embedding, with the view it matched such as Shot or
+On-screen text), Lexical (BM25 keywords over the Picture text and subtitles; it needs
 two of your words and shows the ones it shares and where), Quote (spoken lines), any
 categories, then the Rerank score. Each
 channel keeps only its top few hundred scenes; one that did not return a scene shows

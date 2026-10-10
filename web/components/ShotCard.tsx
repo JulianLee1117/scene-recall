@@ -7,7 +7,7 @@ import BookmarkIcon from "./BookmarkIcon";
 import { FACET_LABELS, sourceDraftFromShot, writeSceneSourceDrag } from "@/lib/searchRecipe";
 import { useScenePointerDrag } from "@/hooks/useScenePointerDrag";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
-import { foundBy, readableEvidence, type MatchColumn } from "@/lib/matchReasons";
+import { foundBy, hoverEvidence, type MatchColumn } from "@/lib/matchReasons";
 import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { displayTitle, formatTime, filmLabel } from "@/lib/format";
@@ -60,12 +60,7 @@ export default function ShotCard({
     shot.matched_line?.t_start ?? shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
   const filmTitle = displayTitle(shot.film_title ?? filmLabel(shot.film_id));
   const sceneMore = shot.scene_alternatives?.length ?? 0;
-  // One line of what matched: the spoken line, else the matched text, else the action.
-  const overlayEvidence = shot.matched_line
-    ? `“${shot.matched_line.text}”`
-    : shot.matched_text
-      ? readableEvidence(shot.matched_text_view ?? "", shot.matched_text)
-      : shot.action;
+  const evidence = hoverEvidence(shot);
   const finders = foundBy(shot);
   const sourceAvailable = Number.isInteger(shot.keyframe_index);
   // Scenes are modular: drag one onto a search category, or use its Related menu.
@@ -130,7 +125,6 @@ export default function ShotCard({
         onClick={handleClick}
         onFocus={handleMouseEnter}
         onBlur={handleMouseLeave}
-        title={shot.caption}
         aria-label={`Result ${displayedRank}: ${filmTitle} at ${formatTime(evidenceTime)}. ${shot.caption}`}
         aria-describedby={showDetails ? detailsId : undefined}
       >
@@ -182,7 +176,12 @@ export default function ShotCard({
           )}
 
           <span className="result-card-overlay" style={{ opacity: hovered ? 1 : 0 }}>
-            {overlayEvidence && <span className="result-overlay-evidence">{overlayEvidence}</span>}
+            {evidence && (
+              <span className="result-overlay-evidence">
+                <span className="result-overlay-kind">{evidence.kind}</span>{" "}
+                {evidence.text}
+              </span>
+            )}
             <span className="result-overlay-title">
               <span className="result-film">{filmTitle}</span>
               <span className="result-time">{formatTime(evidenceTime)}</span>

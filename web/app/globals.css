@@ -2126,6 +2126,16 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   gap: 8px;
 }
 
+/* What kind of text the hover line is, in the player's words. */
+.result-overlay-kind {
+  margin-right: 2px;
+  color: #b3a184;
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
 .result-overlay-finders {
   color: #c8ab7f;
   font-size: 0.58rem;

@@ -1,14 +1,17 @@
 import { formatTime } from "./format";
 import type { SearchMatch, SearchResult } from "@/types/api";
 
-/** Plain names for the text views a result can match. Product copy only. */
+/**
+ * Plain names for the text views a result can match, the same words the
+ * player labels its details with (Scene, Shot, Picture). Product copy only.
+ */
 export const TEXT_VIEW_LABELS: Record<string, string> = {
-  caption: "Description",
+  caption: "Picture",
   dialogue: "Dialogue",
   ocr: "On-screen text",
   facets: "Shot details",
   mood: "Mood",
-  story: "Story",
+  story: "Shot",
   scene: "Scene",
   legacy_combined_text: "Text",
 };
@@ -21,7 +24,7 @@ const VALUE_WORDS: Record<string, string> = {
 };
 
 const DETAIL_KEYS: Record<string, string> = {
-  framing: "Shot",
+  framing: "Size",
   "time of day": "Time",
   "camera movement": "Camera",
   palette: "Colors",
@@ -80,8 +83,8 @@ const COLUMN_LABELS: Record<MatchColumn, string> = {
 
 const COLUMN_HINTS: Record<MatchColumn, string> = {
   img: "Visual: image-text embedding. Rank among frames whose picture is closest to your words.",
-  txt: "Semantic: text embedding. Rank among scenes whose description, dialogue, on-screen text, story or mood means the closest thing to your words.",
-  lex: "Lexical: keyword search (BM25). A scene qualifies when its description or dialogue contains at least two of your words; rank by how well they match.",
+  txt: "Semantic: text embedding. Rank among scenes whose picture, shot or scene text, dialogue, on-screen text or mood means the closest thing to your words.",
+  lex: "Lexical: keyword search (BM25). A scene qualifies when its picture text or dialogue contains at least two of your words; rank by how well they match.",
   quote: "Quote: rank among spoken lines that match your words.",
   scene: "Rank in the Scene category",
   words: "Rank in the Words category",
@@ -104,7 +107,7 @@ export interface MatchRow {
   detail: string;
   /** Lexical: the query words the scene's text shares, shown as tokens before the detail. */
   terms?: string[];
-  /** Short name for hover labels: Picture, Story, Dialogue, Look… */
+  /** Short name for the hover's finders: Visual, Semantic, Look… */
   short: string;
   /** What this finder measures, for the label's tooltip. */
   hint: string;
@@ -192,9 +195,9 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
       const viewLabel = TEXT_VIEW_LABELS[view] ?? "Text";
       const text = txt.matched_text?.text ?? (main?.evidence?.type === "text" ? main.evidence.text : "");
       const detail = view === "caption" && text === shot.caption
-        ? "Description (above)"
+        ? "Picture (above)"
         : `${viewLabel}${text ? ` · ${readableEvidence(view, text)}` : ""}`;
-      return row(column, { value: `#${txt.rank}`, rank: txt.rank, matched: true, detail, short: viewLabel });
+      return row(column, { value: `#${txt.rank}`, rank: txt.rank, matched: true, detail });
     }
     if (column === "lex") {
       const lex = channels?.lex;
@@ -226,6 +229,21 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
       : row(column, { matched: false, detail: below(shot.debug?.depth) });
   });
   return { rows, score };
+}
+
+/**
+ * The one line a result shows on hover, named by its kind: a spoken line the
+ * Quote finder found, else the text that matched best in meaning, else what
+ * happens in the shot (context, when only the picture matched).
+ */
+export function hoverEvidence(shot: SearchResult): { kind: string; text: string } | null {
+  if (shot.matched_line) return { kind: TEXT_VIEW_LABELS.dialogue, text: `“${shot.matched_line.text}”` };
+  if (shot.matched_text) {
+    const view = shot.matched_text_view ?? "";
+    const text = readableEvidence(view, shot.matched_text);
+    return { kind: TEXT_VIEW_LABELS[view] ?? "Text", text: view === "dialogue" ? `“${text}”` : text };
+  }
+  return shot.action ? { kind: TEXT_VIEW_LABELS.story, text: shot.action } : null;
 }
 
 /** What found a scene well (top 30 in that finder), for the hover label. */

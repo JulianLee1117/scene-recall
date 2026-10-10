@@ -39,7 +39,7 @@ test("every card in a search lists the same finders in the same fixed order", ()
   assert.deepEqual(table(words, columns), [
     ["Visual", "–", "not in its top 600"],
     ["Semantic", "#18", "On-screen text · LOVE"],
-    ["Lexical", "#3", ["love", "neon"], "in description and dialogue"],
+    ["Lexical", "#3", ["love", "neon"], "in picture and dialogue"],
     ["Quote", "#1", "“love.”"],
     ["Rerank", "–", "not in the top 40 it scores"],
   ]);
@@ -59,7 +59,7 @@ test("a recipe adds a row per category after the description's finders", () => {
   };
   assert.deepEqual(table(shot, plain(lib.matchColumns([shot]))), [
     ["Visual", "–", "not in its top 600"],
-    ["Semantic", "#39", "Story · Caleb clinks his beer bottle."],
+    ["Semantic", "#39", "Shot · Caleb clinks his beer bottle."],
     ["Words", "#25", "Dialogue · Cheers."],
     ["Look", "#2", "frame 90s"],
   ]);
@@ -67,12 +67,25 @@ test("a recipe adds a row per category after the description's finders", () => {
 
 test("the caption shown above is not repeated, and shot details and mood read as words", () => {
   const shot = typed({ txt: { rank: 38, score: 0.6, distance: 0.4, source: "caption", matched_text: { view: "caption", text: "A caption." } } });
-  assert.equal(table(shot)[1][2], "Description (above)");
-  assert.equal(lib.readableEvidence("facets", "framing: close_up; time of day: dawn_dusk"), "Shot: close-up · Time: dawn or dusk");
+  assert.equal(table(shot)[1][2], "Picture (above)");
+  assert.equal(lib.readableEvidence("facets", "framing: close_up; time of day: dawn_dusk"), "Size: close-up · Time: dawn or dusk");
   assert.equal(lib.readableEvidence("mood", "emotion: mild; scene tone: tense, social"), "Emotion: mild · Scene tone: tense, social");
 });
 
 test("the hover label names the finders that ranked the scene in their top 30", () => {
   const shot = typed({ img: { rank: 1, score: 0.3, distance: 0.7 }, txt: { rank: 12, score: 0.6, distance: 0.4, source: "scene", matched_text: { view: "scene", text: "x" } } });
-  assert.deepEqual(plain(lib.foundBy(shot)), ["Visual", "Scene"]);
+  assert.deepEqual(plain(lib.foundBy(shot)), ["Visual", "Semantic"], "the text's kind is named on its own line");
+});
+
+test("the hover line names its kind: a spoken line, else the text that matched in meaning, else the shot", () => {
+  assert.deepEqual({ ...lib.hoverEvidence({ matched_line: { text: "Cheers." }, matched_text: "x", matched_text_view: "caption" }) },
+    { kind: "Dialogue", text: "“Cheers.”" });
+  assert.deepEqual({ ...lib.hoverEvidence({ matched_text: "A man runs.", matched_text_view: "caption", action: "y" }) },
+    { kind: "Picture", text: "A man runs." });
+  assert.deepEqual({ ...lib.hoverEvidence({ matched_text: "Not here.", matched_text_view: "dialogue" }) },
+    { kind: "Dialogue", text: "“Not here.”" }, "dialogue matched in meaning is quoted too");
+  assert.deepEqual({ ...lib.hoverEvidence({ matched_text: "framing: close_up", matched_text_view: "facets" }) },
+    { kind: "Shot details", text: "Size: close-up" });
+  assert.deepEqual({ ...lib.hoverEvidence({ action: "Jake flies." }) }, { kind: "Shot", text: "Jake flies." });
+  assert.equal(lib.hoverEvidence({}), null);
 });

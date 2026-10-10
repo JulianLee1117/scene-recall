@@ -42,7 +42,7 @@ const READING_HEADINGS: Record<RecipeMatchFacet, string> = {
 };
 
 const SOURCE_VIEW_LABELS: Record<string, string> = {
-  caption: "Description",
+  caption: "Picture",
   dialogue: "Dialogue",
   ocr: "On-screen text",
   mood: "Mood",
