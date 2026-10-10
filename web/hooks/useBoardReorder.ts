@@ -102,6 +102,9 @@ export function useBoardReorder({ enabled, isHandle, onLift, onDrag, onDrop, onC
     if (!current || current.active) return;
     current.active = true;
     current.hold = null;
+    // Captured only now. Capturing at the press would make the browser deliver
+    // a plain click to the tile instead of the scene's own button under it.
+    current.element.setPointerCapture(current.pointer);
     if (current.type === "touch") document.addEventListener("touchmove", preventScroll, { passive: false });
     setLifted(current.index);
     latest.current.onLift(current.index, x, y);
@@ -133,7 +136,6 @@ export function useBoardReorder({ enabled, isHandle, onLift, onDrag, onDrop, onC
           hold: event.pointerType === "touch" ? window.setTimeout(() => lift(clientX, clientY), TOUCH_HOLD_MS) : null,
           element,
         };
-        element.setPointerCapture(event.pointerId);
       },
       onPointerMove(event: ReactPointerEvent<HTMLElement>) {
         const current = gesture.current;

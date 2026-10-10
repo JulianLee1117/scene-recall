@@ -96,11 +96,12 @@ test("one stable set of handlers serves every tile, reading the tile's index fro
 test("a mouse drag lifts after a short move, reports every move, and drops on release", () => {
   const app = setup();
   app.props.onPointerDown(app.event({ index: 2, clientX: 50 }));
-  assert.equal(app.tiles[2].captured, 1, "the tile owns the pointer");
+  assert.equal(app.tiles[2].captured, null, "a press alone captures nothing, so a click still reaches the scene's button");
   app.props.onPointerMove(app.event({ index: 2, clientX: 53 }));
   assert.deepEqual(app.calls, [], "a few pixels is not yet a drag");
   app.props.onPointerMove(app.event({ index: 2, clientX: 250 }));
   assert.equal(app.lifted, 2);
+  assert.equal(app.tiles[2].captured, 1, "lifted, the tile owns the pointer");
   app.props.onPointerMove(app.event({ index: 2, clientX: 120, clientY: 60 }));
   app.props.onPointerUp(app.event({ index: 2, clientX: 120, clientY: 60 }));
   assert.deepEqual(app.calls, [["lift", 2, 250, 25], ["drag", 250, 25], ["drag", 120, 60], ["drop"]]);
@@ -149,8 +150,10 @@ test("a finger scrolls unless it holds first; held, it drags and the page cannot
   assert.equal(app.tiles[0].captured, null);
 
   app.props.onPointerDown(app.event({ index: 1, pointerType: "touch", clientX: 150 }));
+  assert.equal(app.tiles[1].captured, null);
   app.fireHold();
   assert.equal(app.lifted, 1, "held: lifted before it moves");
+  assert.equal(app.tiles[1].captured, 1, "and owns the pointer from the hold on");
   assert.deepEqual(app.calls, [["lift", 1, 150, 25]], "lifted where the finger rests");
   const touchmove = { prevented: false, preventDefault() { this.prevented = true; } };
   app.listeners.touchmove.forEach((callback) => callback(touchmove));
