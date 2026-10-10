@@ -1,5 +1,5 @@
 import { formatTime } from "./format";
-import type { SearchMatch, SearchResult } from "@/types/api";
+import type { SearchMatch, SearchResult, SearchTextMatchEvidence } from "@/types/api";
 
 /**
  * Plain names for the text views a result can match, the same words the
@@ -102,7 +102,7 @@ export interface MatchRow {
   label: string;
   /** "#2", "0.52" for the rerank score, or "–" when this finder did not return it. */
   value: string;
-  /** The rank, for finders that rank; drives the hover summary. */
+  /** The rank, for finders that rank. */
   rank?: number;
   matched: boolean;
   /** What matched (frame time, text view and words), or why nothing did. */
@@ -212,8 +212,11 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
     }
     if (column === "quote") {
       const quote = channels?.quote;
-      return quote && shot.matched_line
-        ? row(column, { value: `#${quote.rank}`, rank: quote.rank, matched: true, detail: `“${shot.matched_line.text}”` })
+      const ownQuote = main?.evidence?.type === "text" && main.evidence.source === "quote"
+        ? main.evidence.text
+        : (shot.matches ?? []).length === 1 ? shot.matched_line?.text : undefined;
+      return quote
+        ? row(column, { value: `#${quote.rank}`, rank: quote.rank, matched: true, detail: ownQuote ? `“${ownQuote}”` : "" })
         : row(column, { matched: false, detail: "no matching spoken line" });
     }
     if (column === "rerank") {
@@ -230,30 +233,61 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
   return { rows, score };
 }
 
-/** The rank within which a finder counts as having found a scene well. */
-const FOUND_WELL = 30;
+export interface MatchedWordsEvidence {
+  kind: "Spoken" | "On screen";
+  /** Raw source words, shared by the hover and the player's evidence section. */
+  text: string;
+  t_start?: number;
+  t_end?: number;
+  source?: "quote" | "semantic";
+  score?: number;
+}
 
-interface Evidence { kind: string; text: string; rank: number }
+// Same ordered-overlap threshold as pipeline/search/quotes.py. This gates only
+// ordinary-search quote presentation; it never changes retrieval or ranking.
+const STRONG_QUOTE_SCORE = 0.8;
+
+function wordsEvidence(evidence: SearchTextMatchEvidence, requireStrongQuote: boolean): MatchedWordsEvidence | null {
+  const text = evidence.text.trim();
+  if (!text || (evidence.view !== "dialogue" && evidence.view !== "ocr")) return null;
+  if (requireStrongQuote && evidence.source === "quote" && !(typeof evidence.score === "number" && evidence.score >= STRONG_QUOTE_SCORE)) return null;
+  const selected: MatchedWordsEvidence = { kind: evidence.view === "dialogue" ? "Spoken" : "On screen", text };
+  if (evidence.source) selected.source = evidence.source;
+  if (typeof evidence.score === "number" && Number.isFinite(evidence.score)) selected.score = evidence.score;
+  if (typeof evidence.t_start === "number" && Number.isFinite(evidence.t_start) && evidence.t_start >= 0) selected.t_start = evidence.t_start;
+  if (typeof evidence.t_end === "number" && Number.isFinite(evidence.t_end) && evidence.t_end > (selected.t_start ?? 0)) selected.t_end = evidence.t_end;
+  return selected;
+}
 
 /**
- * The one line a result shows on hover, named by its kind. When a typed
- * search's words found the shot well, it is the spoken line or the text that
- * matched in meaning, whichever ranked the shot higher; otherwise it is what
- * happens in the shot, as context (else what the picture shows). A category
- * search has no finder ranks, so the words its clauses matched show as they are.
+ * Prefer explicit Words, then the main query's selected dialogue or on-screen
+ * evidence. Other categories and their ranks cannot replace the description.
+ * Recipe evidence is clause-owned: never borrow a fused top-level line.
  */
-export function hoverEvidence(shot: SearchResult): { kind: string; text: string } | null {
-  const rows = matchBreakdown(shot).rows;
-  const ranked = rows.some((row) => row.column === "txt" || row.column === "quote");
-  const rankOf = (column: MatchColumn) => rows.find((row) => row.column === column && row.matched)?.rank ?? Infinity;
-  const view = shot.matched_text_view ?? "";
-  const meaning = shot.matched_text ? readableEvidence(view, shot.matched_text) : "";
-  const words = [
-    shot.matched_line ? { kind: TEXT_VIEW_LABELS.dialogue, text: `“${shot.matched_line.text}”`, rank: rankOf("quote") } : null,
-    meaning ? { kind: TEXT_VIEW_LABELS[view] ?? "Text", text: view === "dialogue" ? `“${meaning}”` : meaning, rank: rankOf("txt") } : null,
-  ].filter((item): item is Evidence => item !== null);
-  const [best] = ranked ? words.filter((item) => item.rank <= FOUND_WELL).sort((a, b) => a.rank - b.rank) : words;
-  if (best) return { kind: best.kind, text: best.text };
-  if (shot.action) return { kind: TEXT_VIEW_LABELS.story, text: shot.action };
-  return shot.caption ? { kind: TEXT_VIEW_LABELS.caption, text: shot.caption } : null;
+export function matchedWordsEvidence(shot: SearchResult): MatchedWordsEvidence | null {
+  const matches = shot.matches ?? [];
+  for (const facet of ["words", "all"] as const) {
+    for (const match of matches) {
+      if (match.facet !== facet || match.evidence?.type !== "text") continue;
+      const selected = wordsEvidence(match.evidence, facet === "all");
+      if (selected) return selected;
+    }
+  }
+  if (matches.length > 0) return null;
+  // Compatibility for standalone search results without recipe provenance.
+  if (shot.matched_line && shot.matched_line.score >= STRONG_QUOTE_SCORE) {
+    const selected = wordsEvidence({ type: "text", view: "dialogue", source: "quote", ...shot.matched_line }, true);
+    if (selected) return selected;
+  }
+  return shot.matched_text && shot.matched_text_view
+    ? wordsEvidence({ type: "text", view: shot.matched_text_view, text: shot.matched_text, source: "semantic" }, false)
+    : null;
+}
+
+/** One small match snippet; ordinary shot descriptions need no category label. */
+export function hoverEvidence(shot: SearchResult): { kind?: "Spoken" | "On screen"; text: string } | null {
+  const selected = matchedWordsEvidence(shot);
+  if (selected) return { kind: selected.kind, text: `“${selected.text}”` };
+  const text = shot.action?.trim() || shot.caption?.trim();
+  return text ? { text } : null;
 }

@@ -85,8 +85,21 @@ export interface ResolvedSourceEvidence {
   evidence: SourceInputEvidence[];
 }
 
+export interface SearchTextMatchEvidence {
+  type: "text";
+  view: string;
+  text: string;
+  /** Retrieval source of these words, scoped to this clause. */
+  source?: "quote" | "semantic";
+  /** Exact source-line range when quote retrieval supplied one. */
+  t_start?: number;
+  t_end?: number;
+  /** Ordered word overlap for quote evidence, not a semantic similarity. */
+  score?: number;
+}
+
 export type SearchMatchEvidence =
-  | { type: "text"; view: string; text: string }
+  | SearchTextMatchEvidence
   | { type: "frame"; frame_index: number; timestamp?: number };
 
 export interface SearchMatch {

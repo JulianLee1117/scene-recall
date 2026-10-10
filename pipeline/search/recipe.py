@@ -19,6 +19,7 @@ from PIL import Image, UnidentifiedImageError
 
 from pipeline.config import Config
 from pipeline.search.request import bind_unit_scope, search_execution
+from pipeline.search.quotes import STRONG_SCORE
 from pipeline.search.shot_facets import unit_scope, validate_shot_filters
 from pipeline.index.text_features import build_mood_view_text
 from pipeline.search.retrieve import (
@@ -663,6 +664,28 @@ def _match_evidence(
             evidence["timestamp"] = float(timestamp)
         match["evidence"] = evidence
         return match
+    # Keep the selected words and their provenance together before fusion can
+    # choose another clause for the result's top-level display fields. Ordinary
+    # search needs a strong quote; weaker overlap keeps its semantic evidence.
+    matched_line = result.get("matched_line")
+    if clause.facet in {"all", "words"} and isinstance(matched_line, dict):
+        line_text = matched_line.get("text")
+        line_score = matched_line.get("score")
+        strong_quote = isinstance(line_score, (int, float)) and line_score >= STRONG_SCORE
+        if isinstance(line_text, str) and line_text.strip() and (
+            clause.facet == "words" or strong_quote
+        ):
+            line_evidence: dict[str, Any] = {
+                "type": "text",
+                "view": "dialogue",
+                "text": line_text,
+                "source": "quote",
+            }
+            for key in ("t_start", "t_end", "score"):
+                if isinstance(matched_line.get(key), (int, float)):
+                    line_evidence[key] = float(matched_line[key])
+            match["evidence"] = line_evidence
+            return match
     matched_text = result.get("matched_text")
     matched_view = result.get("matched_text_view")
     if isinstance(matched_text, str) and matched_text:
@@ -671,6 +694,8 @@ def _match_evidence(
             "view": str(matched_view or "text"),
             "text": matched_text,
         }
+        if matched_view in {"dialogue", "ocr"}:
+            match["evidence"]["source"] = "semantic"
     elif isinstance(result.get("matched_frame_index"), int):
         evidence = {
             "type": "frame",

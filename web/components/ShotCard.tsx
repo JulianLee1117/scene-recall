@@ -7,7 +7,7 @@ import BookmarkIcon from "./BookmarkIcon";
 import { FACET_LABELS, sourceDraftFromShot, writeSceneSourceDrag } from "@/lib/searchRecipe";
 import { useScenePointerDrag } from "@/hooks/useScenePointerDrag";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
-import { hoverEvidence, type MatchColumn } from "@/lib/matchReasons";
+import { hoverEvidence, matchedWordsEvidence, type MatchColumn } from "@/lib/matchReasons";
 import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { displayTitle, formatTime, filmLabel } from "@/lib/format";
@@ -57,7 +57,7 @@ export default function ShotCard({
   const detailsId = useId();
   const displayedRank = shot.rank ?? position;
   const evidenceTime =
-    shot.matched_line?.t_start ?? shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
+    matchedWordsEvidence(shot)?.t_start ?? shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
   const filmTitle = displayTitle(shot.film_title ?? filmLabel(shot.film_id));
   const sceneMore = shot.scene_alternatives?.length ?? 0;
   const evidence = hoverEvidence(shot);
@@ -175,14 +175,14 @@ export default function ShotCard({
           )}
 
           <span className="result-card-overlay" style={{ opacity: hovered ? 1 : 0 }}>
-            {/* The film first; beneath it, quieter, the line that says why it is here. */}
+            {/* Film and time first, then shot context or useful matched words. */}
             <span className="result-overlay-title">
               <span className="result-film">{filmTitle}</span>
               <span className="result-time">{formatTime(evidenceTime)}</span>
             </span>
             {evidence && (
               <span className="result-overlay-evidence">
-                <span className="result-overlay-kind">{evidence.kind}</span>{" "}
+                {evidence.kind && <><span className="result-overlay-kind">{evidence.kind}</span>{" "}</>}
                 {evidence.text}
               </span>
             )}

@@ -130,6 +130,30 @@ test("compatible playback URL loads only after metadata and retains evidence see
   } finally { app.dispose(); }
 });
 
+test("main-query spoken evidence controls opening and dialogue playback while the source frame stays anchored", async () => {
+  const result = { ...film(), matches: [{ clause_id: "main", facet: "all", rank: 1,
+    evidence: { type: "text", view: "dialogue", text: "Come with me.", source: "quote", score: .9, t_start: 25, t_end: 27 } }],
+    matched_line: { text: "Unrelated words", score: .6, t_start: 80, t_end: 81 } };
+  const app = harness({ shot: result });
+  try {
+    await app.resolve(0, { url: "/video/film-a" });
+    const video = app.video();
+    video.props.onCanPlay();
+    assert.equal(video.props.ref.current.currentTime, 24);
+    const dialogue = app.find((node) => node.type === "./ShotDialogue");
+    assert.equal(dialogue.props.shot, result, "details stay attached to the result");
+    dialogue.props.onSeek(26); await app.flush();
+    assert.equal(video.props.ref.current.currentTime, 26);
+    assert.equal(video.props.ref.current.plays, 2, "timestamp activation plays even after a pause");
+    app.button("Back to result · 25s").props.onClick();
+    assert.equal(video.props.ref.current.currentTime, 25);
+    app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
+    assert.equal(app.bookmarks[0].matched_frame_timestamp, 23);
+    await app.updateShot({ ...result, matches: [{ ...result.matches[0], evidence: { ...result.matches[0].evidence, t_start: 28, t_end: 29 } }] });
+    assert.notEqual(app.video().key, video.key, "new selected passage remounts even on the same shot");
+  } finally { app.dispose(); }
+});
+
 test("same-film scene or evidence changes remount the player while reusing playback metadata", async () => {
   const app = harness({ shot: { ...film(), matched_frame_timestamp: undefined } });
   try {

@@ -6,8 +6,9 @@ import FacetIcon from "./FacetIcon";
 import BookmarkIcon from "./BookmarkIcon";
 import { displayTitle, filmLabel, formatTime } from "@/lib/format";
 import { FACET_LABELS } from "@/lib/searchRecipe";
-import { matchBreakdown } from "@/lib/matchReasons";
+import { matchBreakdown, matchedWordsEvidence } from "@/lib/matchReasons";
 import MatchBreakdown from "./MatchBreakdown";
+import ShotDialogue from "./ShotDialogue";
 import type { RecipeMatchFacet, SceneAlternative, SearchResult } from "@/types/api";
 
 interface VideoModalProps {
@@ -71,9 +72,12 @@ export default function VideoModal({
   } | null>(null);
   const currentPlayback = playback?.filmId === shot.film_id && playback.attempt === playbackAttempt ? playback : null;
   const evidenceTime = shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
-  const [playheadTime, setPlayheadTime] = useState(evidenceTime);
-  // A matched subtitle line is the most precise moment to start from.
-  const seekTarget = Math.max(0, (shot.matched_line?.t_start ?? evidenceTime) - 1);
+  const wordsEvidence = matchedWordsEvidence(shot);
+  const resultTime = wordsEvidence?.t_start ?? evidenceTime;
+  const [playheadTime, setPlayheadTime] = useState(resultTime);
+  // Open on the same passage shown on hover, retaining the indexed frame for
+  // source/save actions. Incidental quote hits never move playback.
+  const seekTarget = Math.max(0, resultTime - 1);
   const filmTitle = displayTitle(shot.film_title ?? filmLabel(shot.film_id));
   const hasBreakdown = matchBreakdown(shot).rows.length > 0;
   // The scene's shots from this search. Picking one makes it the shot the
@@ -113,6 +117,12 @@ export default function VideoModal({
     setPlayheadTime(momentOf(item));
     if (videoRef.current) videoRef.current.currentTime = momentOf(item);
   };
+  const seekDialogue = (time: number) => {
+    if (!videoRef.current) return;
+    videoRef.current.currentTime = time;
+    void videoRef.current.play().catch(() => { /* Native controls remain available. */ });
+    setPlayheadTime(time);
+  };
   // Ask which shot is on screen only beyond this scene, and only until one answers.
   const lookup = sceneTarget || playing(onScreen) || !currentPlayback?.url ? null : Math.round(playheadTime * 10) / 10;
   useEffect(() => {
@@ -127,11 +137,11 @@ export default function VideoModal({
 
   useEffect(() => {
     hasSeenCanPlay.current = false;
-    setPlayheadTime(evidenceTime);
+    setPlayheadTime(resultTime);
     setTimestampCopied(false);
     setPickedUnitId(shot.unit_id);
     setOnScreen(null);
-  }, [shot, evidenceTime]);
+  }, [shot, resultTime]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -255,8 +265,8 @@ export default function VideoModal({
         <div className="modal-header">
           <span id={titleId} className="modal-title">{filmTitle}</span>
           <span className="modal-time">
-            {onResult && typeof shot.matched_frame_timestamp === "number"
-              ? `${formatTime(evidenceTime)} match`
+            {onResult && (typeof shot.matched_frame_timestamp === "number" || wordsEvidence?.t_start !== undefined)
+              ? `${formatTime(resultTime)} match`
               : `${formatTime(target.t_start)} – ${formatTime(target.t_end)}`}
           </span>
           <div className="modal-header-actions">
@@ -268,7 +278,7 @@ export default function VideoModal({
           <p role="alert">{currentPlayback.error}</p>
           <div className="modal-actions"><button type="button" onClick={() => setPlaybackAttempt((attempt) => attempt + 1)}>Retry playback</button></div>
         </div> : currentPlayback?.url ? <video
-          key={`${shot.unit_id}:${evidenceTime}:${currentPlayback.url}`}
+          key={`${shot.unit_id}:${resultTime}:${currentPlayback.url}`}
           ref={videoRef}
           src={`${apiUrl}${currentPlayback.url}`}
           controls
@@ -288,8 +298,8 @@ export default function VideoModal({
               Playing <strong>{formatTime(playheadTime)}</strong>
               {nowShowing && <span className="modal-now-line"> · {nowShowing}</span>}
             </span>
-            <button type="button" onClick={() => pickShot(shot)}>
-              Back to result · {formatTime(evidenceTime)}
+            <button type="button" onClick={() => { setPickedUnitId(shot.unit_id); seekDialogue(resultTime); }}>
+              Back to result · {formatTime(resultTime)}
             </button>
           </div>
           <div className="modal-actions">
@@ -376,6 +386,7 @@ export default function VideoModal({
                 </dd>
               </div>
             )}
+            <ShotDialogue shot={shot} onSeek={seekDialogue} canSeek={Boolean(currentPlayback?.url)} />
             {shot.caption && (
               <div>
                 <dt>Picture</dt>

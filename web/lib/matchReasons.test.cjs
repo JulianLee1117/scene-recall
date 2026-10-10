@@ -65,6 +65,20 @@ test("a recipe adds a row per category after the description's finders", () => {
   ]);
 });
 
+test("mixed-recipe Quote details use main-query provenance and never another clause's global line", () => {
+  const shot = {
+    matched_line: { text: "Wrong Words line." },
+    matches: [
+      { clause_id: "main", facet: "all", rank: 5, evidence: { type: "text", view: "dialogue", source: "quote", text: "Right main-query line.", score: 1 } },
+      { clause_id: "words", facet: "words", rank: 1, evidence: { type: "text", view: "dialogue", source: "quote", text: "Wrong Words line." } },
+    ],
+    debug: { clauses: { main: { channels: { quote: { rank: 2 } } } } },
+  };
+  assert.deepEqual(table(shot, ["quote"]), [["Quote", "#2", "“Right main-query line.”"]]);
+  shot.matches[0].evidence = { type: "text", view: "caption", text: "A doorway." };
+  assert.deepEqual(table(shot, ["quote"]), [["Quote", "#2", ""]], "quote participation remains visible without inventing its words");
+});
+
 test("the caption shown above is not repeated, and shot details and mood read as words", () => {
   const shot = typed({ txt: { rank: 38, score: 0.6, distance: 0.4, source: "caption", matched_text: { view: "caption", text: "A caption." } } });
   assert.equal(table(shot)[1][2], "Picture (above)");
@@ -73,21 +87,93 @@ test("the caption shown above is not repeated, and shot details and mood read as
   assert.equal(lib.readableEvidence("scene", "You Talkin' to Me?. Back home. Wait!."), "You Talkin' to Me? Back home. Wait!");
 });
 
-test("the hover line shows the words that found a shot well, else what happens in it", () => {
-  const shot = (channels, extra) => plain(lib.hoverEvidence(typed(channels, {
-    matched_line: { text: "Cheers." }, matched_text: "A man runs.", matched_text_view: "caption", action: "He runs.", ...extra,
-  })));
-  const meaning = (rank) => ({ rank, score: 0.6, distance: 0.4, source: "caption", matched_text: { view: "caption", text: "A man runs." } });
-  const quote = (rank) => ({ rank, score: 1, distance: null });
-  assert.deepEqual(shot({ txt: meaning(12), quote: quote(2) }), { kind: "Dialogue", text: "“Cheers.”" }, "the line ranked it higher");
-  assert.deepEqual(shot({ txt: meaning(12), quote: quote(80) }), { kind: "Picture", text: "A man runs." }, "a weak line gives way");
-  assert.deepEqual(shot({ txt: meaning(50), quote: quote(80) }), { kind: "Shot", text: "He runs." }, "words that ranked it low are not evidence");
-  assert.deepEqual(shot({ img: { rank: 1, score: 0.3, distance: 0.7 } }, { action: undefined, matched_line: undefined, matched_text: undefined }),
-    { kind: "Picture", text: "A caption." }, "without a story, what the picture shows");
-  assert.deepEqual(shot({ txt: { ...meaning(5), source: "facets" } }, { matched_text: "framing: close_up", matched_text_view: "facets", matched_line: undefined }),
-    { kind: "Shot details", text: "Size: close-up" });
-  // A category search has no finder ranks: the words its clause matched stand as they are, dialogue quoted.
-  assert.deepEqual(plain(lib.hoverEvidence({ matches: [{ clause_id: "words", facet: "words", rank: 25 }], matched_text: "Not here.", matched_text_view: "dialogue" })),
-    { kind: "Dialogue", text: "“Not here.”" });
-  assert.equal(lib.hoverEvidence({}), null);
+test("ordinary hover stays on shot context when ranks offer only mood or incidental quote overlap", () => {
+  const shot = typed({
+    txt: { rank: 1, source: "mood", matched_text: { view: "mood", text: "tense" } },
+    quote: { rank: 1 },
+  }, { action: "He raises an axe.", matched_text: "tense", matched_text_view: "mood", matched_line: { text: "Cheers.", score: 0.6 },
+    matches: [{ clause_id: "main", facet: "all", rank: 1, evidence: { type: "text", view: "mood", text: "tense" } }],
+  });
+  assert.deepEqual(plain(lib.hoverEvidence(shot)), { text: "He raises an axe." });
+  assert.deepEqual(plain(lib.hoverEvidence({ ...shot, action: "  " })), { text: "A caption." });
+  assert.deepEqual(plain(lib.hoverEvidence({ caption: "A still lake." })), { text: "A still lake." }, "saved scenes need no search evidence");
+  assert.equal(lib.hoverEvidence({ action: " ", caption: " " }), null);
+});
+
+test("ordinary search exposes its strong quote and keeps text, time and score together", () => {
+  const evidence = { type: "text", view: "dialogue", text: " You talking to me? ", source: "quote", score: 0.8, t_start: 42.5, t_end: 46 };
+  const shot = { action: "He looks in the mirror.", matches: [{ clause_id: "main", facet: "all", rank: 5, evidence }] };
+  assert.deepEqual(plain(lib.hoverEvidence(shot)), { kind: "Spoken", text: "“You talking to me?”" });
+  assert.deepEqual(plain(lib.matchedWordsEvidence(shot)), { kind: "Spoken", text: "You talking to me?", source: "quote", score: 0.8, t_start: 42.5, t_end: 46 });
+  for (const score of [undefined, 0.79, NaN]) {
+    const weak = { ...shot, matches: [{ ...shot.matches[0], evidence: { ...evidence, score } }] };
+    assert.deepEqual(plain(lib.hoverEvidence(weak)), { text: "He looks in the mirror." });
+    assert.equal(lib.matchedWordsEvidence(weak), null);
+  }
+});
+
+test("ordinary search exposes selected semantic dialogue or on-screen text without a Words filter", () => {
+  for (const [view, kind, text] of [["dialogue", "Spoken", "Please don't leave me."], ["ocr", "On screen", "NO VACANCY"]]) {
+    const shot = {
+      action: "He waits.",
+      matched_line: { text: "Unrelated weak quote.", score: 0.55, t_start: 7 },
+      matches: [{ clause_id: "main", facet: "all", rank: 25, evidence: { type: "text", source: "semantic", view, text } }],
+    };
+    assert.deepEqual(plain(lib.hoverEvidence(shot)), { kind, text: `“${text}”` });
+    assert.deepEqual(plain(lib.matchedWordsEvidence(shot)), { kind, text, source: "semantic" }, "semantic text has no invented quote timestamp");
+  }
+});
+
+test("Words hover uses its own spoken or on-screen match in a mixed recipe", () => {
+  for (const [view, kind, text] of [["dialogue", "Spoken", "Not here."], ["ocr", "On screen", "EXIT"]]) {
+    const shot = {
+      action: "He runs.", matched_line: { text: "Unrelated main-query dialogue." },
+      matched_text: "Unrelated main-query description.", matched_text_view: "story",
+      matches: [
+        { clause_id: "main", facet: "all", rank: 1, evidence: { type: "text", view: "dialogue", text: "Wrong line." } },
+        { clause_id: "words", facet: "words", rank: 90, evidence: { type: "text", view, text } },
+      ],
+    };
+    assert.deepEqual(plain(lib.hoverEvidence(shot)), { kind, text: `“${text}”` });
+  }
+});
+
+test("Words without usable text keeps the shot description and never borrows another clause's words", () => {
+  for (const evidence of [undefined, { type: "text", view: "dialogue", text: " " }, { type: "text", view: "story", text: "Unrelated story." }, { type: "frame", frame_index: 0 }]) {
+    assert.deepEqual(plain(lib.hoverEvidence({
+      action: "He runs.", matched_line: { text: "Unrelated quote." }, matched_text: "EXIT", matched_text_view: "ocr",
+      matches: [{ clause_id: "words", facet: "words", rank: 1, evidence }],
+    })), { text: "He runs." });
+  }
+});
+
+test("a main query can explain a result when its Words refinement has no usable match", () => {
+  const shot = {
+    action: "He waits.",
+    matches: [
+      { clause_id: "words", facet: "words", rank: 1 },
+      { clause_id: "main", facet: "all", rank: 12, evidence: { type: "text", view: "ocr", text: "EXIT", source: "semantic" } },
+    ],
+  };
+  assert.deepEqual(plain(lib.hoverEvidence(shot)), { kind: "On screen", text: "“EXIT”" });
+});
+
+test("mixed recipes never borrow globally selected words or show another category's snippet", () => {
+  const shot = {
+    action: "She opens the door.",
+    matched_line: { text: "Unrelated quote.", t_start: 300, t_end: 302, score: 1 },
+    matched_text: "WRONG EXIT", matched_text_view: "ocr",
+    matches: [
+      { clause_id: "main", facet: "all", rank: 20, evidence: { type: "text", view: "caption", text: "The doorway." } },
+      { clause_id: "scene", facet: "scene", rank: 1, evidence: { type: "text", view: "dialogue", text: "Don't show this." } },
+    ],
+  };
+  assert.deepEqual(plain(lib.hoverEvidence(shot)), { text: "She opens the door." });
+  assert.equal(lib.matchedWordsEvidence(shot), null);
+});
+
+test("standalone results retain supported words without relying on diagnostic ranks", () => {
+  assert.deepEqual(plain(lib.hoverEvidence({ matched_line: { text: "Come with me.", score: 0.9, t_start: 0, t_end: 2 } })), { kind: "Spoken", text: "“Come with me.”" });
+  assert.equal(lib.matchedWordsEvidence({ matched_line: { text: "Come with me.", score: 0.79 } }), null);
+  assert.deepEqual(plain(lib.hoverEvidence({ matched_text_view: "ocr", matched_text: "EXIT" })), { kind: "On screen", text: "“EXIT”" });
 });

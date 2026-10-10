@@ -16,6 +16,7 @@ GET /video/{film_id}                Stream source video with HTTP range support
 GET /video/{film_id}/playback       Resolve the scene player's prepared media URL
 GET /library                        List indexed films plus source-directory files
 GET /library/scenes                 Browse selected published films chronologically
+GET /library/shot/{unit_id}/dialogue Source-timed dialogue overlapping a published shot
 GET /library/storage                Cached background inventory of library files
 GET /incoming                       List completed downloads awaiting review
 POST /films/import                  Move a reviewed film into the library
@@ -119,6 +120,7 @@ from pipeline.search.retrieve import (
     search_by_image as _search_by_image,
 )
 from pipeline.search.browse import browse_highlights as _browse_highlights, browse_scenes as _browse_scenes, shot_at as _shot_at
+from pipeline.search.dialogue import MAX_SHOT_DIALOGUE_LINES, shot_dialogue as _shot_dialogue
 from pipeline.search.film_facets import film_facets as _film_facets
 from pipeline.search.shot_facets import shot_facet_vocabulary as _shot_facet_vocabulary, validate_shot_filters
 from pipeline.search.recipe import (
@@ -1823,6 +1825,36 @@ def library_shot_endpoint(
     if result is None:
         raise HTTPException(status_code=404, detail="No shot of this film at that time")
     return _with_film_titles(request, [result])[0]
+
+
+class ShotDialogueLine(BaseModel):
+    line_id: str
+    t_start: float
+    t_end: float
+    text: str
+    source: str | None
+
+
+class ShotDialogueResponse(BaseModel):
+    unit_id: str
+    film_id: str
+    t_start: float
+    t_end: float
+    status: Literal["available", "unavailable"]
+    lines: list[ShotDialogueLine] = Field(max_length=MAX_SHOT_DIALOGUE_LINES)
+    truncated: bool
+
+
+@app.get("/library/shot/{unit_id}/dialogue", response_model=ShotDialogueResponse)
+def library_shot_dialogue_endpoint(
+    request: Request,
+    unit_id: Annotated[str, ApiPath(min_length=1, max_length=256)],
+) -> dict[str, Any]:
+    """Inspect the selected shot's existing dialogue, including lines crossing cuts."""
+    result = _shot_dialogue(request.app.state.db, request.app.state.config, unit_id=unit_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Shot not found in the published library")
+    return result
 
 
 @app.get("/search/shot-facets")

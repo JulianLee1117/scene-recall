@@ -41,7 +41,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const IMAGE_SOURCE_MIME = "application/x-scene-recall-image-source";
 const PLACEHOLDERS: Record<TextMatchFacet, string> = {
   scene: "A person running through a city…",
-  words: "Something someone says…",
+  words: "Spoken or on-screen words…",
   look: "Blue light, warm grain, silhouettes…",
   mood: "Dreamlike, tense, joyful…",
 };

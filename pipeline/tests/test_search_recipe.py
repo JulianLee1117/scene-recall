@@ -159,6 +159,98 @@ def test_broad_recipe_clause_defers_product_preferences(config: Config) -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("word_fields", "expected_view", "expected_text", "expected_source"),
+    [
+        ({"matched_line": {"text": "Stay with me."}}, "dialogue", "Stay with me.", "quote"),
+        (
+            {"matched_text_view": "dialogue", "matched_text": "Wait here."},
+            "dialogue",
+            "Wait here.",
+            "semantic",
+        ),
+        (
+            {"matched_text_view": "ocr", "matched_text": "EXIT"},
+            "ocr",
+            "EXIT",
+            "semantic",
+        ),
+        (
+            {
+                "matched_line": {"text": "   "},
+                "matched_text_view": "ocr",
+                "matched_text": "EXIT",
+            },
+            "ocr",
+            "EXIT",
+            "semantic",
+        ),
+    ],
+)
+def test_words_evidence_survives_fusion_with_unrelated_main_match(
+    word_fields: dict, expected_view: str, expected_text: str, expected_source: str,
+) -> None:
+    main = {
+        **_result("match"),
+        "matched_line": {"text": "Unrelated main-query line."},
+        "matched_text_view": "caption",
+        "matched_text": "A figure waits.",
+    }
+    words = {**_result("match"), "rank": 2, **word_fields}
+
+    fused = _fuse_rankings(
+        [
+            _ClauseRanking(SearchClause("main", "text", "all", text="figure"), [main], "figure"),
+            _ClauseRanking(SearchClause("words", "text", "words", text="wait"), [words], "wait"),
+        ],
+        set(),
+    )
+
+    assert fused[0]["matched_text"] == "A figure waits."
+    assert fused[0]["matched_line"]["text"] == "Unrelated main-query line."
+    assert fused[0]["matches"][1] == {
+        "clause_id": "words",
+        "facet": "words",
+        "rank": 2,
+        "evidence": {
+            "type": "text", "view": expected_view, "text": expected_text,
+            "source": expected_source,
+        },
+    }
+
+
+@pytest.mark.parametrize("main_score", [0.79, 0.8, 1.0])
+def test_fusion_keeps_main_and_words_text_with_their_own_quote_times(main_score: float) -> None:
+    main = {
+        **_result("match"),
+        "matched_line": {"text": "Main query line.", "t_start": 21, "t_end": 24, "score": main_score},
+        "matched_text_view": "ocr",
+        "matched_text": "OPEN",
+    }
+    words = {
+        **_result("match"),
+        "matched_line": {"text": "Words query line.", "t_start": 25, "t_end": 27, "score": 0.6},
+    }
+    fused = _fuse_rankings([
+        _ClauseRanking(SearchClause("main", "text", "all", text="main query"), [main], "main query"),
+        _ClauseRanking(SearchClause("words", "text", "words", text="words query"), [words], "words query"),
+    ], set())
+
+    main_match, words_match = fused[0]["matches"]
+    assert main_match["evidence"] == (
+        {"type": "text", "view": "dialogue", "text": "Main query line.",
+         "source": "quote", "t_start": 21, "t_end": 24, "score": main_score}
+        if main_score >= 0.8 else
+        {"type": "text", "view": "ocr", "text": "OPEN", "source": "semantic"}
+    )
+    assert words_match["evidence"] == {
+        "type": "text", "view": "dialogue", "text": "Words query line.",
+        "source": "quote", "t_start": 25, "t_end": 27, "score": 0.6,
+    }
+    assert main["matched_line"]["text"] == "Main query line."
+    assert words["matched_line"]["text"] == "Words query line."
+
+
 def test_mood_text_clause_searches_only_the_narrow_mood_view(
     config: Config,
 ) -> None:
