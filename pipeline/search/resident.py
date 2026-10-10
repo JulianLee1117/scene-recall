@@ -98,6 +98,7 @@ def _device_for(bytes_needed: int) -> Any:
     import torch
     if torch.cuda.is_available():
         free, _total = torch.cuda.mem_get_info()
+        free += torch.cuda.memory_reserved() - torch.cuda.memory_allocated()   # this process's own reusable cache
         if free - bytes_needed > _GPU_HEADROOM_BYTES:
             return torch.device("cuda")
     return torch.device("cpu")
@@ -180,8 +181,12 @@ def matrix(db: Any, name: str, *, vector_column: str, key_column: str, group_col
                 cached = _MATRICES.get(key)
                 if cached is not None and cached.version == version:
                     return cached
-                if cached is not None:
-                    del _MATRICES[key]      # release the previous generation before loading the next
+                stale_on_gpu = cached is not None and cached.device.type == "cuda"
+                _MATRICES.pop(key, None)    # release the previous generation before loading the next,
+                cached = None               # this reference included, or it stays allocated during the load
+            if stale_on_gpu:
+                import torch
+                torch.cuda.empty_cache()    # hand its blocks back so this load and other processes can use them
             started = time.perf_counter()
             loaded = _load(table, name, vector_column=vector_column, key_column=key_column,
                            group_column=group_column, extra_columns=extra_columns, where=where)

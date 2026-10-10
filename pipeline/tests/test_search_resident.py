@@ -8,6 +8,8 @@ import pytest
 
 from pipeline.search import resident
 
+_REAL_DEVICE_FOR = resident._device_for      # the autouse fixture pins tests to CPU
+
 
 class _Table:
     def __init__(self, batch: pa.RecordBatch, version: int = 3):
@@ -73,6 +75,46 @@ def test_top_units_takes_each_shots_best_frame():
     units = resident.top_units(matrix, np.array([1, 0, 0]), limit=5)
     assert [(unit, matrix.row_keys[row]) for unit, _score, row in units] == [("a", "a1"), ("b", "b0")]
     assert matrix.row_extra["timestamp"][units[0][2]] == 2.0
+
+
+def test_a_new_version_releases_the_previous_generation_before_loading(monkeypatch):
+    import gc
+    import weakref
+
+    batch = pa.RecordBatch.from_pydict({
+        "frame_id": ["a0", "b0"], "unit_id": ["a", "b"], "film_id": ["f", "f"],
+        "visual_vec": _vectors([[1, 0, 0], [0, 1, 0]]),
+    })
+    table = _Table(batch, version=3)
+    db = _Snapshot({"frames": table})
+    previous = weakref.ref(resident.matrix(db, "frames", vector_column="visual_vec", key_column="frame_id"))
+    alive_during_load = []
+    real_load = resident._load
+
+    def load(*args, **kwargs):
+        gc.collect()
+        alive_during_load.append(previous() is not None)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(resident, "_load", load)
+    table.version = 4
+    assert resident.matrix(db, "frames", vector_column="visual_vec", key_column="frame_id").version == 4
+    # Otherwise both generations occupy memory at once and the new one is pushed off the GPU.
+    assert alive_during_load == [False]
+
+
+def test_gpu_placement_counts_this_process_reusable_cache(monkeypatch):
+    import torch
+
+    gb = 1024 ** 3
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda: (1 * gb, 16 * gb))
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda: 1 * gb)
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda: 6 * gb)
+    # 1 GB free on the device plus 5 GB of this process's own released cache leaves room past the headroom.
+    assert _REAL_DEVICE_FOR(1 * gb).type == "cuda"
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda: 1 * gb)
+    assert _REAL_DEVICE_FOR(1 * gb).type == "cpu"
 
 
 def test_only_pinned_snapshots_are_loaded():
