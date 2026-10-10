@@ -20,7 +20,7 @@
   font-size: 12px;
 }
 
-/* A centered cinema badge. The fast burst stays on the perimeter. */
+/* A tiny 35mm premiere machine. Static SVG detail; one finite activation. */
 .debugSection {
   flex-shrink: 0;
   padding-top: 14px;
@@ -32,43 +32,28 @@
   isolation: isolate;
   display: grid;
   width: 100%;
-  min-height: 88px;
-  padding: 14px 26px;
+  min-height: 104px;
+  padding: 20px 26px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid #2e3e40;
+  border: 1px solid #494638;
   border-radius: 6px;
-  background: linear-gradient(180deg, #142024, #0c1215);
+  background: linear-gradient(180deg, #172123, #101617 52%, #182020);
   color: #deeee5;
   text-align: center;
   cursor: pointer;
   transition: border-color .12s ease;
 }
 
-.debugButton::before {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  background: radial-gradient(ellipse at 50% 50%, #d1a44720, transparent 80%);
-  opacity: 0;
-  pointer-events: none;
-  content: "";
-}
-.debugButton:hover { border-color: #648f87; }
+.debugButton:hover { border-color: #9d9974; }
 .debugButton:focus-visible { outline: 2px solid #a7d7c9; outline-offset: 3px; }
 .debugButton[aria-pressed="true"] { border-color: #927c48; }
-.debugButton[aria-pressed="true"]::before { opacity: 1; }
 
 .debugFrame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.frameLine { color: #335050; }
-.frameBrackets { color: #689188; }
-.sprockets { color: #36514e; }
-.debugButton:hover .frameBrackets { color: #a7d7c9; }
-.debugButton[aria-pressed="true"] .frameLine { color: #605437; }
-.debugButton[aria-pressed="true"] .frameBrackets { color: #e2bd79; }
-.debugButton[aria-pressed="true"] .sprockets { color: #79673f; }
-.debugCopy { position: relative; display: grid; min-width: 0; justify-items: center; gap: 5px; }
-.debugCrest { color: #8bc4b5; }
+.cinemaChassis { fill: #111d19; }
+.debugButton[aria-pressed="true"] .cinemaChassis { fill: #24261b; }
+.debugCopy { position: relative; display: grid; min-width: 0; justify-items: center; gap: 4px; }
+.debugCrest { overflow: visible; color: #8bc4b5; }
 .debugButton[aria-pressed="true"] .debugCrest { color: #efc47a; }
 .debugTitle {
   color: #f0f2e8;
@@ -81,40 +66,74 @@
 .debugHint { color: #9eafa7; font-family: inherit; font-size: 10px; line-height: 1.35; }
 .debugState {
   position: absolute;
-  top: 12px;
-  right: 18px;
+  top: 25px;
+  right: 21%;
   color: #82988c;
   font: 8px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: .7px;
 }
 .debugButton[aria-pressed="true"] .debugState { color: #ffd494; }
-.chargeTop, .chargeBottom, .impact { opacity: 0; }
+.chargeTop, .chargeBottom, .impact, .beamLeft, .beamRight { opacity: 0; }
+.reelLeft, .reelRight { transform-box: fill-box; transform-origin: center; }
+.slateHinge { transform-origin: 3px 9px; }
+.beamLeft { transform-origin: 38px 60px; }
+.beamRight { transform-origin: 202px 60px; }
 .impactFrame { transform-box: fill-box; transform-origin: center; }
 
-/* The impact owns the 450ms burst. All other motion finishes before it;
-   the existing lock keeps hover and rapid toggles from restarting it. */
-.debugButton[data-firing] .debugCrest { animation: crest-kick .38s cubic-bezier(.16, 1, .3, 1); }
-.debugButton[data-firing] .chargeTop, .debugButton[data-firing] .chargeBottom { animation: rail-charge .25s cubic-bezier(.2, .65, .3, 1) both; }
-.debugButton[data-firing] .impact { animation: frame-impact .45s linear both; }
-.debugButton[data-firing] .impactFrame { animation: frame-punch .22s .2s cubic-bezier(.16, 1, .3, 1) both; }
-.debugButton[data-firing] .sparksTop { animation: spark-top .22s .21s steps(5, end) both; }
-.debugButton[data-firing] .sparksBottom { animation: spark-bottom .22s .21s steps(5, end) both; }
+/* Clap → transport → light → settle. Only transform/opacity animate.
+   The terminal impact releases the activation lock at 580ms. No idle loops. */
+.debugButton[data-firing] .slateHinge { animation: slate-snap .28s cubic-bezier(.2, .8, .3, 1) both; }
+.debugButton[data-firing] .debugCrest { animation: crest-kick .34s cubic-bezier(.16, 1, .3, 1); }
+.debugButton[data-firing] .reelLeft { animation: reel-turn .46s .04s cubic-bezier(.2, .8, .3, 1) both; }
+.debugButton[data-firing] .reelRight { animation: reel-turn .46s .04s cubic-bezier(.2, .8, .3, 1) reverse both; }
+.debugButton[data-firing] .filmStripTop { animation: perforation-advance .32s .08s steps(6, end) both; }
+.debugButton[data-firing] .filmStripBottom { animation: film-advance .32s .08s steps(9, end) reverse both; }
+.debugButton[data-firing] .beamLeft { animation: projector-left .4s .1s ease-out both; }
+.debugButton[data-firing] .beamRight { animation: projector-right .4s .1s ease-out both; }
+.debugButton[data-firing] .chargeTop, .debugButton[data-firing] .chargeBottom { animation: rail-charge .24s .1s cubic-bezier(.2, .65, .3, 1) both; }
+.debugButton[data-firing] .impact { animation: frame-impact .58s linear both; }
+.debugButton[data-firing] .impactFrame { animation: frame-punch .26s .26s cubic-bezier(.16, 1, .3, 1) both; }
+.debugButton[data-firing] .sparksTop { animation: spark-top .25s .27s steps(5, end) both; }
+.debugButton[data-firing] .sparksBottom { animation: spark-bottom .25s .27s steps(5, end) both; }
 
 @keyframes rail-charge {
   0% { opacity: 0; transform: translateX(0); }
   10%, 82% { opacity: 1; }
-  100% { opacity: 0; transform: translateX(204px); }
+  100% { opacity: 0; transform: translateX(210px); }
 }
 @keyframes frame-impact {
   0%, 44% { opacity: 0; }
-  53% { opacity: 1; }
-  72% { opacity: .6; }
+  52% { opacity: 1; }
+  70% { opacity: .5; }
   100% { opacity: 0; }
 }
 @keyframes crest-kick {
-  0% { transform: scale(.8); }
-  35% { transform: scale(1.2); }
+  0%, 20% { transform: translateY(0) scale(1); }
+  38% { transform: translateY(1px) scale(.92); }
+  63% { transform: translateY(-1px) scale(1.06); }
   100% { transform: scale(1); }
+}
+@keyframes slate-snap {
+  0% { transform: rotate(0); }
+  26% { transform: rotate(-14deg); }
+  42% { transform: rotate(0); }
+  64% { transform: rotate(-5deg); }
+  100% { transform: rotate(0); }
+}
+@keyframes reel-turn { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes perforation-advance { from { transform: translateX(0); } to { transform: translateX(-12px); } }
+@keyframes film-advance { from { transform: translateX(0); } to { transform: translateX(-72px); } }
+@keyframes projector-left {
+  0% { opacity: 0; transform: rotate(-12deg) scaleX(.6); }
+  28% { opacity: .9; }
+  65% { opacity: .45; }
+  100% { opacity: 0; transform: rotate(10deg) scaleX(1); }
+}
+@keyframes projector-right {
+  0% { opacity: 0; transform: rotate(12deg) scaleX(.6); }
+  28% { opacity: .9; }
+  65% { opacity: .45; }
+  100% { opacity: 0; transform: rotate(-10deg) scaleX(1); }
 }
 @keyframes frame-punch {
   0% { transform: scale(.97); }
@@ -122,16 +141,16 @@
   100% { transform: scale(1); }
 }
 @keyframes spark-top {
-  0% { transform: translate(-3px, 3px); }
-  100% { transform: translate(3px, -3px); }
+  0% { transform: translateY(3px); }
+  100% { transform: translateY(-3px); }
 }
 @keyframes spark-bottom {
-  0% { transform: translate(3px, -3px); }
-  100% { transform: translate(-3px, 3px); }
+  0% { transform: translateY(-3px); }
+  100% { transform: translateY(3px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .debugButton { transition: none; }
-  .debugButton[data-firing] :is(.debugCrest, .chargeTop, .chargeBottom, .impact, .impactFrame, .sparksTop, .sparksBottom) { animation: none; }
-  .chargeTop, .chargeBottom, .impact { display: none; }
+  .debugButton[data-firing] :is(.debugCrest, .slateHinge, .reelLeft, .reelRight, .filmStripTop, .filmStripBottom, .beamLeft, .beamRight, .chargeTop, .chargeBottom, .impact, .impactFrame, .sparksTop, .sparksBottom) { animation: none; }
+  .chargeTop, .chargeBottom, .impact, .beamLeft, .beamRight { display: none; }
 }

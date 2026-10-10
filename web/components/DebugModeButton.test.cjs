@@ -53,6 +53,7 @@ function setup({ enabled = false, reducedMotion = false } = {}) {
   } }, require(name) {
     if (name === "react") return react;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "fragment" };
+    if (name === "./DebugCinemaArt") return { CinemaFrame: "CinemaFrame", CinemaSlate: "CinemaSlate" };
     if (name.endsWith(".css")) return { default: new Proxy({}, { get: (_target, key) => key }) };
     throw new Error(`Unexpected module ${name}`);
   } });
