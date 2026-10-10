@@ -878,14 +878,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clues-refine-count { display: inline-grid; min-width: 17px; height: 17px; place-items: center; border-radius: 50%; background: #c8a37323; color: #e2c49b; font-size: .64rem; }
 .clues-refine-chevron { color: #857c6f; transition: transform .15s ease; }
 .clues-refine-toggle[aria-expanded="true"] .clues-refine-chevron { transform: rotate(180deg); }
-.clues-panel { box-sizing: border-box; position: absolute; z-index: 35; top: calc(100% + 6px); left: 50%; width: min(100%, 580px); padding: 8px 12px 0; transform: translateX(-50%); border: 1px solid #2c2822; border-radius: 10px; background: #121110; box-shadow: 0 18px 44px rgba(0, 0, 0, .55); }
+.clues-panel { box-sizing: border-box; position: absolute; z-index: 35; top: calc(100% + 8px); left: 50%; width: min(100%, 580px); padding: 12px; transform: translateX(-50%); border: 1px solid #2c2822; border-radius: 10px; background: #121110; box-shadow: 0 18px 44px rgba(0, 0, 0, .55); }
 .clues-panel[hidden] { display: none; }
 .clues-panel.has-reference-results { width: min(100%, 640px); }
-.clues-panel-hint { margin: 0; padding: 16px 6px; color: #a49e94; font-size: 12px; line-height: 1.5; text-align: center; }
-.clues-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); min-height: 46px; align-items: stretch; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid #302b25; }
-.clue-card { display: flex; min-width: 0; align-items: center; border: 1px solid #2b2722; border-radius: 6px; background: #ffffff03; color: #a49e94; }
-.clue-card.is-active { border-color: #4c4030; box-shadow: inset 0 -2px #766044; color: #e2c49b; }
-.clue-card.is-open { border-color: #655036; box-shadow: inset 0 -2px #d4a96a; color: #f0dfc6; }
+.clues-panel-hint { margin: 0; padding: 16px 4px 4px; color: #a49e94; font-size: 12px; line-height: 1.5; text-align: center; }
+/* Categories share the quiet segmented treatment used by Filter and View. */
+.clues-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; gap: 3px; padding: 3px; border-radius: 8px; background: #ffffff05; }
+.clue-card { display: flex; min-width: 0; align-items: center; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #a49e94; }
+.clue-card.is-active { background: #c8a3730f; color: #e2c49b; }
+.clue-card.is-open { border-color: #c8a37338; background: #c8a37324; box-shadow: 0 1px 2px #00000040; color: #f0dfc6; }
 .clue-card.is-disabled { opacity: .35; }
 .clue-card.is-drag-over { border-color: #f0c58a; border-style: solid; background: #c99d6030; box-shadow: inset 0 0 0 1px #f0c58a; color: #f4dfbf; }
 .clue-chip { display: flex; justify-content: center; width: 100%; min-width: 0; min-height: 44px; padding: 8px 6px; align-items: center; gap: 8px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: .78rem; line-height: 18px; white-space: nowrap; cursor: pointer; }
@@ -914,25 +915,26 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-editor-close:hover { color: #fff; background: #ffffff0c; }
 .clues-framing-note { margin: 8px auto 0; max-width: 620px; color: #a49e94; font-size: 12px; line-height: 1.6; text-align: center; }
 .clues-framing-note button { padding: 0; border: 0; background: transparent; color: #c9ac85; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
-.clue-editor { box-sizing: border-box; max-height: min(480px, calc(100dvh - 310px)); overflow: auto; padding: 16px 4px; }
+.clue-editor { box-sizing: border-box; max-height: min(480px, calc(100dvh - 310px)); overflow: auto; padding: 14px 4px 4px; scrollbar-width: thin; scrollbar-color: #36312a transparent; }
 .search-hero.is-home .clue-editor { max-height: max(200px, min(520px, calc(100dvh - var(--home-top) - 290px))); }
-.clue-editor-heading, .clue-reference-picker > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.clue-editor-heading strong, .clue-reference-picker > header strong { color: #d8d0c4; font-size: 12px; font-weight: 500; line-height: 32px; }
+.clue-editor-heading, .clue-reference-picker > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.clue-editor-heading strong, .clue-reference-picker > header strong { display: block; color: #d8d0c4; font-size: 12px; font-weight: 500; line-height: 1.5; }
 .clue-editor-heading p, .clue-reference-picker > header p { margin: 3px 0 0; color: #a49e94; font-size: 12px; line-height: 1.5; }
-.clue-text-editor, .clue-reference-search { display: flex; gap: 8px; margin-top: 9px; }
-.clue-input, .clue-reference-search > input { box-sizing: border-box; flex: 1; width: 100%; min-width: 0; height: 38px; padding: 8px 11px; border: 1px solid #36312a; border-radius: 7px; background: #10100f; color: #e8dfd0; font: inherit; font-size: .8rem; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.clue-text-editor, .clue-reference-search { display: flex; align-items: stretch; gap: 8px; margin-top: 10px; }
+.clue-input, .clue-reference-search > input { box-sizing: border-box; flex: 1; width: 100%; min-width: 0; height: 40px; padding: 8px 11px; border: 1px solid #36312a; border-radius: 7px; background: #10100f; color: #e8dfd0; font: inherit; font-size: .8rem; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
 .clue-input:focus, .clue-reference-search > input:focus { border-color: var(--field-border-focus); box-shadow: var(--field-ring); }
 .clue-input::placeholder { color: #756d62; }
-.clue-editor-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
-.clue-editor-footer > .clue-text-button { padding: 2px 0; border-color: transparent; background: transparent; color: #a3937d; }
-.clue-editor-footer > .clue-text-button:hover { background: transparent; border-color: transparent; color: #e2c49b; }
-.clue-editor-footer > .clue-clear { margin-left: auto; color: #857e74; }
-.clue-editor-footer > span { color: #a49e94; font-size: 12px; }
 .clue-text-button, .clue-apply { width: fit-content; min-height: 32px; padding: 6px 9px; border: 1px solid #443a2d; border-radius: 6px; background: #211c15; color: #d2b78f; cursor: pointer; font: inherit; font-size: 12px; line-height: 1.4; }
 .clue-text-button:hover:not(:disabled), .clue-apply:hover:not(:disabled) { border-color: #94744d; background: #2b2218; }
 .clue-apply { padding-inline: 14px; background: #c8a373; border-color: #c8a373; color: #18140e; font-weight: 600; white-space: nowrap; }
 .clue-apply:hover:not(:disabled) { background: #dfbc8c; color: #18140e; }
 .clue-text-button:disabled, .clue-apply:disabled { opacity: .4; cursor: default; }
+.clue-editor-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 12px; }
+/* Secondary actions keep their padding and quiet treatment in every state. */
+.clue-editor-footer > .clue-text-button { padding: 6px 10px; border-color: transparent; background: transparent; color: #b4a58f; }
+.clue-editor-footer > .clue-text-button:hover:not(:disabled) { border-color: transparent; background: #ffffff08; color: #e2c49b; }
+.clue-editor-footer > .clue-clear { margin-left: auto; color: #a49e94; }
+.clue-editor-footer > span { color: #a49e94; font-size: 12px; }
 .clue-current-reference { padding-top: 9px; }
 .clue-aspect-editor { display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #302b24; }
 .clue-aspect-editor > label { color: #d8d0c4; font-size: 12px; }
@@ -969,13 +971,13 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   .search-hero { padding-top: 28px; }
   .search-bar-shell.is-home .search-text-entry { min-height: 56px; padding-left: 15px; }
   .search-bar-shell.is-home .movie-search-input { font-size: 1rem; }
-  .clues-panel { padding-inline: 8px; }
+  .clues-panel { padding: 10px; }
   .clue-chip { padding-inline: 2px; font-size: .75rem; }
   .clue-visual { display: none; }
   .clues-toolbar { column-gap: 8px; }
   /* The right group may wrap to its own line here; a divider would dangle. */
   .clues-tools { padding-left: 0; border-left: 0; }
-  .clue-editor { padding: 12px 4px; }
+  .clue-editor { padding: 12px 4px 4px; }
   .clue-reference-results .result-grid { --row-h: 76px; }
   .clue-reference-results { max-height: 42dvh; }
 }
