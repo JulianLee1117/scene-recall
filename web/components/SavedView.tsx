@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import BookmarkIcon from "./BookmarkIcon";
 import ArrangeMenu from "./ArrangeMenu";
 import BoardCanvas, { type SceneActions } from "./BoardCanvas";
-import { arrangeBoard, hasUserOrder } from "@/lib/boardOrder";
+import { arrangeBoard, hasUserOrder, type Arrangement } from "@/lib/boardOrder";
+import { useSceneLooks } from "@/hooks/useSceneLooks";
 import { BOARD_SCALE, DEFAULT_BOARD, loadBoardPrefs, saveBoardPrefs, type BoardPrefs } from "@/lib/boardPrefs";
 import type { BookmarkRecord } from "@/types/api";
 import chrome from "./pageChrome.module.css";
@@ -32,9 +33,18 @@ export default function SavedView({
   onRemoveBookmark,
 }: SavedViewProps) {
   const [prefs, setPrefs] = useState<BoardPrefs>(DEFAULT_BOARD);
+  // Shuffle's deal: a fresh one each visit and each time Shuffle is chosen.
+  const [deal, setDeal] = useState(0);
   useEffect(() => {
-    setPrefs(loadBoardPrefs());
+    const loaded = loadBoardPrefs();
+    setPrefs(loaded);
+    if (loaded.arrangement === "shuffle") setDeal(newDeal());
   }, []);
+  const arrange = (arrangement: Arrangement) => {
+    if (arrangement === "shuffle") setDeal(newDeal());
+    changePrefs({ arrangement });
+  };
+  const { lookOf } = useSceneLooks(bookmarks, prefs.arrangement === "colour");
   const changePrefs = (change: Partial<BoardPrefs>) =>
     setPrefs((current) => {
       const next = { ...current, ...change };
@@ -47,7 +57,10 @@ export default function SavedView({
     () => ({ pendingUnitIds, onShotClick, onUseInSearch, disabledUseFacets, onToggleBookmark, onRemoveBookmark }),
     [pendingUnitIds, onShotClick, onUseInSearch, disabledUseFacets, onToggleBookmark, onRemoveBookmark],
   );
-  const items = useMemo(() => arrangeBoard(bookmarks, prefs.arrangement), [bookmarks, prefs.arrangement]);
+  const items = useMemo(
+    () => arrangeBoard(bookmarks, prefs.arrangement, { lookOf, seed: deal }),
+    [bookmarks, prefs.arrangement, lookOf, deal],
+  );
 
   // Heard, not seen: the move is visible on the board.
   const [spoken, setSpoken] = useState("");
@@ -80,7 +93,7 @@ export default function SavedView({
             <ArrangeMenu
               value={prefs.arrangement}
               placed={hasUserOrder(bookmarks)}
-              onChange={(arrangement) => changePrefs({ arrangement })}
+              onChange={arrange}
             />
             <div className={styles.size}>
               <SizeGlyph large={false} />
@@ -127,6 +140,8 @@ export default function SavedView({
     </section>
   );
 }
+
+const newDeal = () => Math.floor(Math.random() * 2 ** 32);
 
 /** The slider's ends: a small frame and a larger one. */
 function SizeGlyph({ large }: { large: boolean }) {

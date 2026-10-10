@@ -10,7 +10,8 @@ import styles from "./arrangeMenu.module.css";
 
 /**
  * How the Saved board is ordered. Your order is the board's own and the only
- * one stored; Newest and By film are views over it that never move a scene.
+ * one stored; the other views never move a scene. Choosing Shuffle again
+ * deals again.
  */
 export default function ArrangeMenu({ value, placed, onChange }: {
   value: Arrangement;
@@ -30,7 +31,9 @@ export default function ArrangeMenu({ value, placed, onChange }: {
     if (open) panelRef.current?.focus({ preventScroll: true });
   }, [open]);
   const current = ARRANGEMENTS.find((option) => option.value === value) ?? ARRANGEMENTS[0];
-  const hint = value !== "yours" ? "Drag scenes in Your order." : placed ? null : "Drag a scene to place it.";
+  const hint = value === "shuffle"
+    ? "Choose Shuffle again for a new deal."
+    : value !== "yours" ? "Drag scenes in Your order." : placed ? null : "Drag a scene to place it.";
 
   return (
     <div className="toolbar-menu-root" ref={rootRef}>

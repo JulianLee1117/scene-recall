@@ -200,9 +200,12 @@ unavailable bookmark rather than silently rebinding or deleting user state.
 The Saved board has one durable order of its own, a nullable position on each
 bookmark: unplaced saves list first, newest first, then the user's order.
 `POST /bookmarks/order` sets it from a list of ids, or clears it when empty.
-Newest and By film are views in the browser that never write; a view changes
-the sequence of the one board, never its shape. Tile size and the chosen view
-stay in the browser.
+Newest, By colour, By era and Shuffle are views in the browser that never
+write; a view changes the sequence of the one board, never its shape. By
+colour reads each scene's look (hue, colourfulness, lightness) from its
+thumbnail in the browser and remembers it in local storage by unit id; By era
+reads the film year from the title or id. Tile size and the chosen view stay
+in the browser.
 
 The shared display-moment resolver governs visual playback and Save (ADR-0118).
 It respects a Saved timestamp first, then the frame actually displayed. A frame
