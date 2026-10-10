@@ -189,5 +189,4 @@
   }
 }
 
-.editor.editor { max-width: none; padding-top: 0; padding-inline: 20px; }
-.workspaceHeader { margin-inline: -20px; margin-bottom: 20px; }
+.editor.editor { max-width: none; padding-top: 20px; padding-inline: 20px; }

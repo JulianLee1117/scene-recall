@@ -9,6 +9,12 @@
   /* Text fields on focus: a warmer border and a faint halo, never an outline. */
   --field-border-focus: #6e5a3f;
   --field-ring: 0 0 0 3px #d4a96a12;
+  /* Page chrome: the quieter warm palette of Films, Saved, Info and the Lab. */
+  --page-accent: #d6b681;
+  --page-text: #c3c0b9;
+  --page-muted: #9a978f;
+  --page-line: #262520;
+  --page-surface: #11110e;
 }
 
 html,
@@ -862,9 +868,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 /* Optional refinements share one compact surface beneath the search. */
 .match-rail { position: relative; width: 100%; max-width: 880px; margin-top: 18px; }
-.app-lab-link { display: flex; margin-left: auto; padding: 13px 14px; align-items: center; gap: 7px; color: #b8a68d; font-size: .82rem; text-decoration: none; }
-.app-lab-link span { color: #73706b; font-size: .65rem; }
-.app-lab-link:hover { color: #ead5b5; }
 /* One compact row centered under the bar. Its contents change only when the
    first search starts (examples give way to ordering and Details), together
    with the bar's glide, so the row never shifts while you work. */
@@ -975,8 +978,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   .clue-editor { padding: 12px 4px; }
   .clue-reference-results .result-grid { --row-h: 76px; }
   .clue-reference-results { max-height: 42dvh; }
-  .app-lab-link { padding-right: 0; }
-  .app-lab-link span { display: none; }
 }
 
 @media (max-width: 380px) {

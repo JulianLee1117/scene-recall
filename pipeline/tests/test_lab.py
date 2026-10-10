@@ -31,6 +31,25 @@ def db(config):
     return db
 
 
+def test_project_listing_summarizes_without_documents(store):
+    document = {
+        "track": {"id": "t", "name": "Song.wav", "duration": 30},
+        "clips": [{"id": f"c{i}", "film_id": "f", "unit_id": unit, "source_start": 0, "source_end": 1}
+                  for i, unit in enumerate(["u1", "gen-1", "u1", "u2", "u3", "u4", "u5"])],
+    }
+    reel = store.create_project("Reel", "music-sketch", document)
+    store.create_project("Empty", "music-sketch")
+    listed = store.list_projects()
+    assert [item["name"] for item in listed] == ["Empty", "Reel"]
+    assert all("document" not in item for item in listed)
+    summary = listed[1]
+    assert (summary["id"], summary["revision"], summary["active_job_count"]) == (reel["id"], 1, 0)
+    assert (summary["track_name"], summary["clip_count"]) == ("Song.wav", 7)
+    assert summary["sheet_unit_ids"] == ["u1", "u2", "u3", "u4"], "distinct real shots only, four at most"
+    assert (listed[0]["track_name"], listed[0]["clip_count"], listed[0]["sheet_unit_ids"]) == (None, 0, [])
+    assert store.get_project(reel["id"])["document"]["clips"][1]["unit_id"] == "gen-1", "the document is intact"
+
+
 def test_revisions_restore_and_stale_write_preserve_user_choices(store):
     project = store.create_project("My reel", "music-sketch")
     modified = {**project["document"], "brief": "Melancholy becoming hopeful"}

@@ -30,6 +30,25 @@ class ActiveProjectJobs(ValueError):
     pass
 
 
+SHEET_UNITS = 4
+
+
+def _summarize(project):
+    """The directory card's facts in place of the document: the song, how many
+    clips, and the first distinct real shots for a contact sheet."""
+    document = project.pop("document")
+    clips = document.get("clips") or []
+    units = []
+    for clip in clips:
+        unit_id = clip.get("unit_id")
+        if unit_id and not unit_id.startswith("gen-") and unit_id not in units:
+            units.append(unit_id)
+            if len(units) == SHEET_UNITS:
+                break
+    return {**project, "track_name": (document.get("track") or {}).get("name"),
+            "clip_count": len(clips), "sheet_unit_ids": units}
+
+
 class LabStore:
     def __init__(self, state_dir: Path, assets_dir: Path | None = None):
         self.root = Path(state_dir) / "lab"
@@ -110,8 +129,10 @@ class LabStore:
             return self._project(con.execute("SELECT * FROM projects WHERE id=?", (identity,)).fetchone())
 
     def list_projects(self):
+        """Summaries for the Labs directory. A document holds a whole timeline and its
+        analysis, which the directory never shows; `get_project` serves it."""
         with self.connection() as con:
-            return [self._project(row) for row in con.execute("""
+            return [_summarize(self._project(row)) for row in con.execute("""
                 SELECT projects.*, (
                     SELECT COUNT(*) FROM jobs
                     WHERE project_id=projects.id AND status IN ('queued','running')

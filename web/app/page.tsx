@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import AppBar, { type AppTab } from "@/components/AppBar";
 import {
   useState,
   useCallback,
@@ -110,14 +111,7 @@ async function searchError(response: Response): Promise<string> {
   return `Search failed (${response.status})`;
 }
 
-type Tab = "search" | "saved" | "library" | "info";
-
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: "search", label: "Search" },
-  { id: "saved", label: "Saved" },
-  { id: "library", label: "Films" },
-  { id: "info", label: "Info" },
-];
+type Tab = Exclude<AppTab, "lab">;
 
 function focusFacetBrowse(facet: RecipeMatchFacet) {
   window.requestAnimationFrame(() => {
@@ -129,6 +123,14 @@ function focusFacetBrowse(facet: RecipeMatchFacet) {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("search");
+  // A link from the Lab lands on its view (/?tab=saved); the address then
+  // returns to plain /, so the tabs behave as always from there.
+  useLayoutEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab !== "saved" && tab !== "films" && tab !== "info") return;
+    setActiveTab(tab);
+    window.history.replaceState(null, "", "/");
+  }, []);
   // The search stays as you left it while another tab is open; these keep
   // your place in its results for the way back.
   const searchScrollRef = useRef(0);
@@ -932,6 +934,22 @@ export default function Home() {
           ? "Finishing transcription…"
           : speech.error;
 
+  const selectTab = (tab: AppTab) => {
+    if (tab === "lab") { speech.cancel(); return; }
+    if (tab === "search") {
+      // From another tab, Search returns to your search; on Search
+      // itself it goes home, like the wordmark.
+      if (activeTab === "search") { resetSearchHome(); return; }
+      restoreScrollRef.current = searchScrollRef.current;
+      setActiveTab("search");
+      return;
+    }
+    if (activeTab === "search") searchScrollRef.current = window.scrollY ?? 0;
+    speech.cancel();
+    facetSourceSearch.close();
+    setActiveTab(tab);
+  };
+
   return (
     <main
       onDragOver={(event) => {
@@ -982,74 +1000,10 @@ export default function Home() {
         color: "#ededed",
       }}
     >
-      {/* Tab bar */}
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-          background: "#0a0a0a",
-          borderBottom: "1px solid #1a1a1a",
-          display: "flex",
-          alignItems: "stretch",
-          padding: "0 20px",
-        }}
-      >
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            aria-current={activeTab === tab.id ? "page" : undefined}
-            onClick={() => {
-              if (tab.id === "search") {
-                // From another tab, Search returns to your search; on Search
-                // itself it goes home, like the wordmark.
-                if (activeTab === "search") {
-                  resetSearchHome();
-                  return;
-                }
-                restoreScrollRef.current = searchScrollRef.current;
-                setActiveTab("search");
-                return;
-              }
-              if (activeTab === "search") searchScrollRef.current = window.scrollY ?? 0;
-              speech.cancel();
-              facetSourceSearch.close();
-              setActiveTab(tab.id);
-            }}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom:
-                activeTab === tab.id
-                  ? "2px solid #d4a96a"
-                  : "2px solid transparent",
-              color: activeTab === tab.id ? "#ededed" : "#555",
-              cursor: "pointer",
-              fontSize: "0.82rem",
-              fontWeight: activeTab === tab.id ? 500 : 400,
-              letterSpacing: "0.04em",
-              marginBottom: "-1px",
-              padding: "13px 14px",
-              textTransform: "capitalize",
-              transition: "color 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              if (activeTab !== tab.id) e.currentTarget.style.color = "#888";
-            }}
-            onMouseLeave={(e) => {
-              if (activeTab !== tab.id) e.currentTarget.style.color = "#555";
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-        <a href="/lab" className="app-lab-link" onClick={() => speech.cancel()}>
-          Lab <span>Experiments</span>
-        </a>
-      </div>
+      <AppBar active={activeTab} onSelect={selectTab} />
 
       {/* Library view */}
-      {activeTab === "library" && <LibraryView />}
+      {activeTab === "films" && <LibraryView />}
       {activeTab === "info" && <InfoView />}
 
       {/* Saved view */}

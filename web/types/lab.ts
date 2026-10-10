@@ -272,6 +272,14 @@ export interface LabProject {
   created_at: string | number;
   updated_at: string | number;
 }
+/** A project as the Labs directory lists it: its facts, never its document. */
+export interface LabProjectSummary extends Omit<LabProject, "document"> {
+  active_job_count: number;
+  track_name: string | null;
+  clip_count: number;
+  /** The first distinct real shots, for a contact sheet. */
+  sheet_unit_ids: string[];
+}
 export interface LabJob {
   worker_role?: "editor" | "ingest";
   id: string;

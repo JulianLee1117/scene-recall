@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { labRequest, mediaUrl, seconds } from "@/lib/lab";
 import type { WorkerStatus } from "@/types/lab";
 import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/LabWorkspaceHeader";
@@ -148,19 +148,20 @@ export default function AlgModsWorkspace() {
     </label>;
   }
 
-  if (loading) return <main className={styles.workspace}><LabWorkspaceHeader title="Alg Mods" /><p className={styles.status} role="status">Loading Alg Mods…</p></main>;
-  if (stale) return <main className={styles.workspace}><LabWorkspaceHeader title="Alg Mods" />
+  // The app's chrome, then this lab's own container.
+  const frame = (body: ReactNode) => <main><LabWorkspaceHeader title="Alg Mods" /><div className={styles.workspace}>{body}</div></main>;
+  if (loading) return frame(<p className={styles.status} role="status">Loading Alg Mods…</p>);
+  if (stale) return frame(
     <LabEmptyState title="The API is running an older Alg Mods" description="This page expects the treatment catalog, but the API still serves the previous contract. Restart the API and the Lab workers, then try again.">
       <button type="button" onClick={() => setRetry((value) => value + 1)}>Try again</button>
       <small>scripts\restart-scene-recall.ps1 -WaitForJobs</small>
-    </LabEmptyState></main>;
-  if (!catalog) return <main className={styles.workspace}><LabWorkspaceHeader title="Alg Mods" />
+    </LabEmptyState>);
+  if (!catalog) return frame(
     <LabEmptyState title="Alg Mods is unavailable" description={error || "The treatment catalog could not be loaded. Check that the API is running."}>
       <button type="button" onClick={() => setRetry((value) => value + 1)}>Try again</button>
-    </LabEmptyState></main>;
+    </LabEmptyState>);
 
-  return <main className={styles.workspace}>
-    <LabWorkspaceHeader title="Alg Mods" />
+  return frame(<>
     <div className={styles.intro}>
       <div><span className={styles.eyebrow}>SCENES × EFFECTS</span><h2>Try every effect on every scene</h2>
         <p>Scenes down, effects across. A cell is the latest render of that pair; open it to play, tune and render variants.</p></div>
@@ -250,5 +251,5 @@ export default function AlgModsWorkspace() {
     </div>}
     {!scene && scenes.length > 0 && <p className={styles.hint}>Open a cell to play it or render it.</p>}
     {picker && <SourceBrowser filmIds={[]} replacing={false} onClose={() => setPicker(false)} onSelect={(result) => { addScene(sourceFromResult(result)); setPicker(false); }} />}
-  </main>;
+  </>);
 }

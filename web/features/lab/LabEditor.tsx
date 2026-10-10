@@ -160,14 +160,15 @@ export default function LabEditor() {
     </details>
   );
   return (
-    <main className={`${styles.editor} ${flow.editor}`}>
-      <LabWorkspaceHeader title={label} className={flow.workspaceHeader} project={project ? { ...state, project, activeJob: !!activeJob } : undefined} tools={<>
+    <main>
+      <LabWorkspaceHeader title={label} project={project ? { ...state, project, activeJob: !!activeJob } : undefined} tools={<>
         <button disabled={!state.canUndo || working} onClick={state.undo}>Undo</button>
         {!state.isDraft && <button disabled={working} onClick={() => void loadRevisions()}>History</button>}
       </>} trailingTools={project && <>
         <button disabled={working || clips.length !== 2} onClick={() => { setShowOutput(false); void state.startJob("render"); }}>Export</button>
         {renderUrl && !dirty && state.render?.base_revision === project.revision && <a className={styles.secondary} href={mediaUrl(`${renderUrl}?download=true`)} download>Download MP4 <DirectionIcon name="arrow-down" /></a>}
       </>} />
+      <div className={`${styles.editor} ${flow.editor}`}>
       {!project || !document ? (
         <section className={flow.stepBody} aria-label="Opening Match Cuts">
           <h1>Match Cuts</h1>
@@ -302,6 +303,7 @@ export default function LabEditor() {
           )}
         </>
       )}
+      </div>
     </main>
   );
 }

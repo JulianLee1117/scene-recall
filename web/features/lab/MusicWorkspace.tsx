@@ -549,21 +549,21 @@ export default function MusicWorkspace() {
 
   if (!document || !state.project)
     return (
-      <main className={styles.workspace}>
-        <LabWorkspaceHeader title={EXPERIMENT_NAME} className={styles.workspaceHeader} />
-        <section className={styles.welcome}>
+      <main className={styles.lab}>
+        <LabWorkspaceHeader title={EXPERIMENT_NAME} />
+        <div className={styles.workspace}><section className={styles.welcome}>
           {state.error ? <>
             <p role="alert">{state.error}</p>
             <button className={styles.primary} disabled={state.busy}
               onClick={() => void (new URLSearchParams(window.location.search).has("project") ? state.reload() : state.create("Untitled music edit"))}>Try again</button>
           </> : <p role="status">Opening your workspace…</p>}
-        </section>
+        </section></div>
       </main>
     );
 
   return (
-    <main className={styles.workspace}>
-      <LabWorkspaceHeader title={EXPERIMENT_NAME} className={styles.workspaceHeader} project={{ ...state, project: state.project, activeJob: !!state.activeJob }} tools={<>
+    <main className={styles.lab}>
+      <LabWorkspaceHeader title={EXPERIMENT_NAME} project={{ ...state, project: state.project, activeJob: !!state.activeJob }} tools={<>
         <button disabled={working || !state.canUndo} onClick={state.undo} title="Undo edit (Ctrl / ⌘ Z)">
           <EditorIcon name="undo" /> Undo
         </button>
@@ -587,6 +587,7 @@ export default function MusicWorkspace() {
           disabled={working || !slots.length || empty > 0}
           onClick={() => { requestedExport.current = true; void state.startJob("render", { mode: "export" }); }}>Export video</button>
       </>} />
+      <div className={styles.workspace}>
       <div className={styles.viewTabs} role="tablist" aria-label="Music video workspace"
         onKeyDown={(event) => {
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -886,6 +887,7 @@ export default function MusicWorkspace() {
             ? undefined : applyReviewedSource}
         />
       )}
+      </div>
     </main>
   );
 }

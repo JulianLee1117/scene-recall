@@ -258,8 +258,9 @@ export default function TransitionWorkspace() {
     catch (reason) { if (alive.current) setError(reason instanceof Error ? reason.message : "Could not cancel the render."); }
   }
 
-  return <main className={styles.workspace}>
+  return <main>
     <LabWorkspaceHeader title="Transitions" />
+    <div className={styles.workspace}>
     <p className={programStyles.intro}>Choose two clips on the timeline. Shape their handoff in the monitor.</p>
     <div className={styles.modeSwitch} role="tablist" aria-label="Transition workflow" onKeyDown={(event) => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -387,5 +388,6 @@ export default function TransitionWorkspace() {
       </div>
     </>}
     {picker && <SourceBrowser filmIds={[]} replacing={false} onClose={() => setPicker(null)} onSelect={(result) => { const next = sourceFromResult(result); changeSource(picker, next); setFilmDurations((current) => ({ ...current, [picker]: undefined })); setMonitorSide(picker); setSourceInspection({ side: picker, film: next.film_id, time: next.source_start, token: ++inspectionToken.current }); setPicker(null); }} />}
+    </div>
   </main>;
 }

@@ -259,13 +259,13 @@ configuration files, inspect per-film readiness, load models or start jobs.
 The explanations stay available when the API is offline. Guide content lives
 in `web/features/info/guide.ts`, separate from its UI and the processing code.
 
-For music and editing experiments, use the **Lab** link beside search or open
-[/lab](http://localhost:3000/lab), a directory of available experiments and
-recent projects. Every workspace uses **Labs** to return to this directory.
-Opening a new editor starts an unsaved draft; leaving without changes creates no
-project and shows no prompt. **Save** keeps actual edits. Returning to Labs with
-unsaved changes offers Save/Discard/Cancel; a clean exit can leave a durable job
-running. **Project → Delete** confirms the named saved project and removes its
+One bar tops every page: **Search**, **Saved**, **Films**, **Info** and **Lab**.
+**Lab** opens [/lab](http://localhost:3000/lab), a directory of experiments and
+saved edits; each experiment keeps the bar, with **Labs** beside its title to
+return to the directory. Opening a new editor starts an unsaved draft; leaving
+without changes creates no project and shows no prompt. **Save** keeps actual
+edits. Leaving with unsaved changes, by **Labs** or the bar, offers
+Save/Discard/Cancel; a clean exit can leave a durable job running. **Project → Delete** confirms the named saved project and removes its
 saved versions, job history, generated previews/exports, private request receipts
 and job thumbnails, while keeping original music and films. Cancel active work
 before deleting its project. If a file is locked, deletion succeeds with cleanup

@@ -30,6 +30,7 @@ const viewPrefs = {};
 vm.runInNewContext(compile("../lib/viewPrefs.ts"), { exports: viewPrefs, window: {} });
 const compiled = compile("page.tsx");
 const compiledMovieInput = compile("../components/MovieSearchInput.tsx");
+const compiledAppBar = compile("../components/AppBar.tsx");
 const result = (id, main = false) => ({ unit_id: id, film_id: "film", caption: "A scene", matches: [{ clause_id: "composition", facet: "composition" }, ...(main ? [{ clause_id: "main", facet: "all" }] : [])] });
 const response = (results, hasMore = false) => ({ results, has_more: hasMore, next_limit: hasMore ? 96 : null, source_evidence: [] });
 
@@ -123,7 +124,7 @@ test("Escape dismisses a movie suggestion without editing the query or selecting
   } finally { app.dispose(); }
 });
 
-function harness() {
+function harness({ search = "", replaceState = () => {} } = {}) {
   const hooks = [], requests = [];
   const timers = new Map();
   let nextTimerId = 0;
@@ -163,12 +164,15 @@ function harness() {
   const referenceSearch = { facet: null, query: "", results: [], close() {} };
   const exports = {};
   const movieInputExports = {};
+  const appBarExports = {};
   const jsx = (type, props) => typeof type === "function" ? type(props) : ({ type, props });
   const context = {
     exports, process: { env: {} }, AbortController, FormData, URLSearchParams, Element: class Element {},
     URL: { createObjectURL: () => "blob:reference", revokeObjectURL() {} },
     fetch(url, init) { return new Promise((resolve) => requests.push({ url, init, resolve })); },
     window: {
+      location: { search },
+      history: { replaceState: (_state, _title, url) => replaceState(url) },
       scrollY: 0,
       scrollTo({ top }) { this.scrollY = top; },
       clearTimeout(id) { timers.delete(id); },
@@ -199,11 +203,15 @@ function harness() {
       if (name === "@/hooks/useBookmarks") return { useBookmarks: () => bookmarks };
       if (name === "@/hooks/useSpeechRecognition") return { useSpeechRecognition: () => speech };
       if (name === "@/hooks/useFacetSourceSearch") return { useFacetSourceSearch: () => referenceSearch };
+      if (name === "next/link") return { default: "Link" };
+      if (name === "@/components/AppBar") return appBarExports;
+      if (name.endsWith(".module.css")) return { default: new Proxy({}, { get: (_, key) => key }) };
       if (name.startsWith("@/components/")) return { default: name.slice("@/components/".length) };
       throw new Error(`Unexpected module: ${name}`);
     },
   };
   vm.runInNewContext(compiledMovieInput, { ...context, exports: movieInputExports });
+  vm.runInNewContext(compiledAppBar, { ...context, exports: appBarExports });
   vm.runInNewContext(compiled, context);
   function render() {
     if (disposed) return;
@@ -754,5 +762,18 @@ test("another tab leaves the search as it was: Search returns to it, and Search 
     assert.equal(app.requests.length, searches, "returning runs no search");
     tab("Search").props.onClick(); await app.flush();
     assert.equal(input().value, "", "Search on Search goes home");
+  } finally { app.dispose(); }
+});
+
+test("a Lab link to a view lands on that view and leaves the address at /", async () => {
+  const replaced = [];
+  const app = harness({ search: "?tab=saved", replaceState: (url) => replaced.push(url) });
+  try {
+    await app.flush();
+    assert.ok(app.find((node) => node.type === "SavedView"));
+    assert.equal(app.find((node) => node.type === "button" && text(node) === "Saved").props["aria-current"], "page");
+    assert.deepEqual(replaced, ["/"]);
+    assert.equal(app.find((node) => node.type === "Link" && text(node) === "Lab").props.href, "/lab");
+    assert.equal(app.requests.length, 0);
   } finally { app.dispose(); }
 });

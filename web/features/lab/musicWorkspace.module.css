@@ -1,6 +1,20 @@
+/* The lab's palette, over its tools in the app's header and the workspace alike. */
+.lab {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  color-scheme: dark;
+  --editor-bg: #111214;
+  --editor-surface: #17181a;
+  --editor-raised: #202226;
+  --editor-line: #2b2d31;
+  --editor-muted: #92969e;
+  --editor-text: #e7e8ea;
+}
 .workspace {
   --workbench-height: clamp(270px, calc(100dvh - 506px), 560px);
   --preview-height: calc(var(--workbench-height) - 110px);
+  flex: 1;
   width: 100%;
   max-width: none;
   min-width: 0;
@@ -8,17 +22,9 @@
   margin: 0 auto;
   --workspace-gutter: 16px;
   padding: 0 var(--workspace-gutter) 12px;
-  min-height: 100dvh;
   background: var(--editor-bg);
   color: var(--editor-text);
-  color-scheme: dark;
   font-size: 13px;
-  --editor-bg: #111214;
-  --editor-surface: #17181a;
-  --editor-raised: #202226;
-  --editor-line: #2b2d31;
-  --editor-muted: #92969e;
-  --editor-text: #e7e8ea;
 }
 .workspace button,
 .workspace input,
@@ -77,13 +83,13 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
-.workspace .exportButton {
+.exportButton {
   border-color: var(--editor-line);
   background: var(--editor-raised);
   color: var(--editor-text);
   margin-left: 7px;
 }
-.workspace a.exportButton {
+a.exportButton {
   display: inline-block;
   padding: 6px 9px;
   line-height: 1.3;
@@ -91,11 +97,11 @@
   border-radius: 4px;
   text-decoration: none;
 }
-.workspace a.exportButton:hover:not([aria-disabled]) {
+a.exportButton:hover:not([aria-disabled]) {
   border-color: #484b52;
   background: #292c31;
 }
-.workspace a.exportButton[aria-disabled] {
+a.exportButton[aria-disabled] {
   opacity: 0.4;
   pointer-events: none;
 }
@@ -1291,7 +1297,6 @@
   }
 }
 
-.workspaceHeader { margin-inline: calc(-1 * var(--workspace-gutter)); }
 .viewTabs { display: flex; gap: 22px; align-items: stretch; height: 42px; border-bottom: 1px solid var(--editor-line); }
 .workspace .viewTabs button { padding: 0 2px; border: 0; border-radius: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--editor-muted); font-size: 12px; }
 .workspace .viewTabs button[aria-selected="true"] { color: var(--editor-text); border-bottom-color: var(--accent); }

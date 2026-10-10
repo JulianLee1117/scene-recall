@@ -1,6 +1,6 @@
-.page { --line: #292b30; --panel: #151618; --text: #e2e3e6; --soft: #a3a8b3; --faint: #7d828d; min-height: 100dvh; color: var(--text); background: #111214; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; }
+.lab { display: flex; flex-direction: column; min-height: 100dvh; }
+.page { --line: #292b30; --panel: #151618; --text: #e2e3e6; --soft: #a3a8b3; --faint: #7d828d; flex: 1; color: var(--text); background: #111214; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; }
 .page *, .dialog * { box-sizing: border-box; }
-.header { flex-shrink: 0; }
 .notice, .error { margin: 12px 24px 0; padding: 9px 12px; border-radius: 4px; font-size: 12px; }
 .notice { background: #1d2230; border: 1px solid #323b52; color: #c3cbe0; }
 .notice code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; color: #e3e8f5; }

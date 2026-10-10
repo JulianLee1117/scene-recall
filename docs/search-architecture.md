@@ -28,7 +28,7 @@ records.
 | Regions (masking spec shared by treatments; subject by video matte, box, near/far by depth) | Alg Mods Lab | `pipeline/lab/regions.py`, `pipeline/lab/matte.py`, `pipeline/lab/depth.py` | 0110 |
 | Grafts (landmark-aligned pieces of other shots, as plans) | Alg Mods Lab | `pipeline/lab/grafts.py`, `pipeline/algmods/composite.py` | 0110 (landmarks from 0099) |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
-| Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067 |
+| Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067, 0115 |
 
 Frozen: kept runnable, with no new investment. Their decision records hold the
 detail.
@@ -397,18 +397,27 @@ Deletion refuses links and paths outside the configured roots. A failure leaves
 the index withdrawal in place with a `files_pending` receipt, and rerunning
 finishes an already withdrawn film. Without the flag, files are untouched.
 
-The Lab is a registry-driven experiment directory with a separate recent-project
-list. The explicit registry owns each entry `route`, saved-edit `project_route`
-and entry `persistence` (`project` or `session`). AI Music Video uses
+One `AppBar` (Search, Saved, Films, Info, Lab) tops every route. On the home
+page the four views switch in place; elsewhere they are links, and
+`/?tab=saved|films|info` lands on that view (ADR-0115). The Lab is a
+registry-driven experiment directory, a page-chrome page like Films, listing
+saved edits as summaries: `GET /lab/projects` carries `track_name`,
+`clip_count`, `sheet_unit_ids` and `active_job_count`, never a document. The
+explicit registry owns each entry `route`, saved-edit `project_route` and
+entry `persistence` (`project` or `session`). AI Music Video uses
 `/lab/music-sketch`; Match Cuts enters the projectless `/match` session, while
 existing edits retain `/lab/visual-rhymes` and the `visual-rhymes` identifier.
 Transitions enters the projectless `/lab/transitions` workspace (ADR-0070).
 Alg Mods enters the projectless `/lab/alg-mods` session (ADR-0110).
-All workspace states use `LabWorkspaceHeader` with one Labs return control,
-including loading, empty and error states. Project editors compose
-`ProjectActions` and `useLabProject`; sessions do not acquire project controls.
-There is no duplicate Exit or Scene Search destination. Reusable conventions
-for future experiments are in [Lab workspaces](lab-workspaces.md) (ADR-0051).
+Every lab screen, including loading, empty and error states, starts with
+`LabWorkspaceHeader`: the app bar, then the Labs return and the experiment's
+title; project editors add the project's name, save state and
+`ProjectActions`, sessions add nothing. The header is the app's, rendered
+before any container of the experiment's; everything below it is the
+experiment's own. Every way out of a project editor, the app bar's places
+included, passes the one unsaved-edits guard (`useProjectExit`). Reusable
+conventions for future experiments are in [Lab workspaces](lab-workspaces.md)
+(ADR-0051, ADR-0115).
 Music uses one project workspace with **AI direction** and **Edit** views
 (ADR-0064). The first holds global/passage instructions and generation preferences;
 the second holds synchronized sequence preview, selected-shot inspector and a

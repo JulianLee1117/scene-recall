@@ -126,11 +126,12 @@ export type ProjectExitState = {
 
 export function useProjectExit(state?: ProjectExitState) {
   const router = useRouter();
-  const [exitOpen, setExitOpen] = useState(false);
+  // Where a workspace with unsaved edits is leaving for, while it asks.
+  const [leaving, setLeaving] = useState<string | null>(null);
   const [savingExit, setSavingExit] = useState(false);
   const returnFocus = useRef<HTMLElement | null>(null);
   const working = !!state && (state.busy || state.activeJob);
-  const exit = () => router.push("/lab");
+  const exit = () => router.push(leaving ?? "/lab");
   const saveAndExit = async () => {
     if (!state || savingExit || working) return;
     setSavingExit(true);
@@ -141,18 +142,19 @@ export function useProjectExit(state?: ProjectExitState) {
     }
   };
   return {
-    onExit: (event?: { currentTarget: HTMLElement }) => {
+    /** Leave for `destination` (Labs by default), after Save/Discard/Cancel when there are unsaved edits. */
+    onExit: (destination = "/lab", event?: { currentTarget: HTMLElement }) => {
       if (state?.busy) return;
-      if (state?.dirty) { returnFocus.current = event?.currentTarget ?? null; setExitOpen(true); }
-      else exit();
+      if (state?.dirty) { returnFocus.current = event?.currentTarget ?? null; setLeaving(destination); }
+      else router.push(destination);
     },
-    dialog: exitOpen && state ? (
-      <ProjectDialog title="Save before leaving?" busy={savingExit} returnFocus={returnFocus.current} onClose={() => setExitOpen(false)}>
+    dialog: leaving !== null && state ? (
+      <ProjectDialog title="Save before leaving?" busy={savingExit} returnFocus={returnFocus.current} onClose={() => setLeaving(null)}>
         <p>“{state.name}” has unsaved changes.</p>
         {state.activeJob && <p className={styles.detail}>Your job will continue in the background. Wait for it to finish to save, or discard your unsaved changes and exit.</p>}
         {state.error && <p className={styles.error} role="alert">{state.error}</p>}
         <div className={styles.dialogActions}>
-          <button type="button" disabled={savingExit} onClick={() => setExitOpen(false)}>Cancel</button>
+          <button type="button" disabled={savingExit} onClick={() => setLeaving(null)}>Cancel</button>
           <button type="button" disabled={savingExit} onClick={exit}>Discard and exit</button>
           <button type="button" className={styles.save} autoFocus disabled={working || savingExit} onClick={() => void saveAndExit()}>
             <EditorIcon name="save" /> {savingExit ? "Saving…" : "Save and exit"}

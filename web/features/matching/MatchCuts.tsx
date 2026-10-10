@@ -158,8 +158,9 @@ export default function MatchCuts() {
   const reference = response && response.reference.unit_id === unitId ? response.reference : null;
   const referenceCrop = reference?.crop ?? outgoingCrop ?? null;
 
-  return <main className={styles.page}>
-    <LabWorkspaceHeader title="Match Cuts" className={styles.header} />
+  return <main className={styles.lab}>
+    <LabWorkspaceHeader title="Match Cuts" />
+    <div className={styles.page}>
     {status && !status.ready && <p className={styles.notice}>The match index is not built yet. Run <code>python -m pipeline.evidence moments</code>, then <code>python -m pipeline.matching.moments index</code>.</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
     {!unitId ? <LabEmptyState title="Find match cuts" description="Pick any instant of any shot. Every instant across the library is compared by subject, pose, light and motion, and the best cut lands on the matching frame.">
@@ -245,6 +246,7 @@ export default function MatchCuts() {
       <SequencePlayer output={settings.output} segments={chain.map((link, index): Segment => ({ key: `${link.unit_id}:${index}`, filmId: link.film_id,
         start: link.start, end: link.end, crop: link.crop, aspect: link.aspect, contentBox: link.content_box, label: link.film_title }))} />
     </Dialog>}
+    </div>
   </main>;
 }
 

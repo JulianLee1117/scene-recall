@@ -1,9 +1,5 @@
+/* The page tokens (--page-*) live on :root in globals.css. */
 .page {
-  --page-accent: #d6b681;
-  --page-text: #c3c0b9;
-  --page-muted: #9a978f;
-  --page-line: #262520;
-  --page-surface: #11110e;
   width: min(1080px, 100%);
   margin: 0 auto;
   padding: 64px 32px 72px;

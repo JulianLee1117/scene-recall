@@ -24,19 +24,23 @@ This is a small application registry, not a plugin framework.
 
 ## Use one workspace header
 
-Use [LabWorkspaceHeader](../web/features/lab/LabWorkspaceHeader.tsx) for the
-experiment title and the single **Labs** return control. Render it in loading,
-empty, unavailable and error states as well as the working screen. Keep the
-return control keyboard accessible and visible at narrow widths.
+Render [LabWorkspaceHeader](../web/features/lab/LabWorkspaceHeader.tsx) first
+in `<main>`, before any container of your own, in loading, empty, unavailable
+and error states as well as the working screen. It is the app's chrome: the
+app bar shared with the home page, then the **Labs** return and the
+experiment's title, in the page tokens. Everything below it is yours: your own
+width, background, palette and tools, however the experiment turns out. Do not
+re-frame the header (it takes no class), and do not add an Exit, brand or
+Scene Search control of your own; the bar already leads everywhere.
 For initial entry, use the shared `LabEmptyState` export from `LabWorkspaceHeader`
 to keep the title, explanation and first action consistent between experiments.
 
 Project editors pass their state to the header, which composes
 [ProjectActions](../web/features/lab/ProjectActions.tsx) and its shared exit
-guard. Keep project naming, save status, Save and the saved project's menu in
-this shared area. A session supplies only its title. Do not add a second Exit
-button, clickable brand destination or Scene Search back link to a workspace.
-The Lab directory remains the common entry and return destination.
+guard; every way out, the app bar's places included, then asks about unsaved
+edits. Keep project naming, save status, Save and the saved project's menu in
+this shared area. A session supplies only its title, and may pass `tools` for
+a few header actions.
 
 ## Create projects only when there is work to keep
 

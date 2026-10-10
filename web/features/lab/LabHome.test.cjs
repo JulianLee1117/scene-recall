@@ -14,7 +14,7 @@ test("entering experiments and resuming saved projects follow registry routes wi
     { id: "music-sketch", name: "AI Music Video", description: "Make an edit", route: "/lab/music-sketch", project_route: "/lab/music-sketch" },
     { id: "future", name: "Future", description: "Try it", route: "/custom-entry", project_route: "/custom-editor" },
   ];
-  const projects = experiments.map((experiment, index) => ({ id: `saved-${index}`, experiment_id: experiment.id, name: `Edit ${index}`, updated_at: 100 + index }));
+  const projects = experiments.map((experiment, index) => ({ id: `saved-${index}`, experiment_id: experiment.id, name: `Edit ${index}`, revision: 1, updated_at: 100 + index, active_job_count: 0, track_name: null, clip_count: 0, sheet_unit_ids: [] }));
   const hooks = [], calls = [], exported = {}; let cursor = 0, effect;
   vm.runInNewContext(compiled, { exports: exported, AbortController, Date, Promise, URLSearchParams, window: { location: { search: "" } }, require(name) {
     if (name === "react") return {
@@ -39,7 +39,7 @@ const text = (node) => node == null || typeof node === "boolean" ? "" : typeof n
 async function deletionHarness({ storageFailure = null, cleanupPending = false, deleteFailure = false, search = "" } = {}) {
   const hooks = [], calls = [], exported = {}, removedKeys = [];
   let cursor = 0, effect, tree;
-  const projects = ["first", "second"].map((id) => ({ id, name: `Edit ${id}`, experiment_id: "music-sketch", revision: 3, updated_at: 100 }));
+  const projects = ["first", "second"].map((id) => ({ id, name: `Edit ${id}`, experiment_id: "music-sketch", revision: 3, updated_at: 100, active_job_count: 0, track_name: null, clip_count: 0, sheet_unit_ids: [] }));
   const storage = { removeItem(key) { removedKeys.push(key); if (storageFailure === "remove") throw new Error("Storage denied"); } };
   const window = { location: { search }, get localStorage() { if (storageFailure === "access") throw new Error("Storage denied"); return storage; } };
   vm.runInNewContext(compiled, { exports: exported, AbortController, Date, Promise, URLSearchParams, window, require(name) {
@@ -112,7 +112,7 @@ test("frozen experiments stay openable but are listed last and labeled Frozen", 
 test("every saved edit is listed with its song and clip count, and the filter narrows them", async () => {
   const projects = Array.from({ length: 10 }, (_, i) => ({
     id: `p${i}`, name: i === 3 ? "Dracula night" : `Edit ${i}`, experiment_id: "music-sketch", revision: 1, updated_at: 100 + i,
-    document: { track: { id: "t", name: i === 5 ? "Halloween Song" : "Song", duration: 30 }, clips: [{ id: "c", film_id: "f", unit_id: `u${i}`, title: "", source_start: 0, source_end: 1, locked: false }] },
+    active_job_count: 0, track_name: i === 5 ? "Halloween Song" : "Song", clip_count: 1, sheet_unit_ids: [`u${i}`],
   }));
   const experiments = [{ id: "music-sketch", name: "AI Music Video", description: "Make an edit", route: "/lab/music-sketch" }];
   const hooks = [], exported = {}; let cursor = 0, effect;
@@ -136,4 +136,23 @@ test("every saved edit is listed with its song and clip count, and the filter na
   nodes(tree).find((node) => node.type === "input").props.onChange({ target: { value: "halloween" } });
   tree = render();
   assert.deepEqual(edits().map((node) => node.props.href), ["/lab/music-sketch?project=p5"], "the filter matches song names too");
+});
+
+test("experiments show as soon as they arrive, before the saved edits", async () => {
+  const experiments = [{ id: "music-sketch", name: "AI Music Video", description: "Make an edit", route: "/lab/music-sketch" }];
+  const hooks = [], exported = {}; let cursor = 0, effect;
+  vm.runInNewContext(compiled, { exports: exported, AbortController, Date, Promise, URLSearchParams, window: { location: { search: "" } }, require(name) {
+    if (name === "react") return {
+      useState(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (value) => hooks[index] = value]; },
+      useEffect(callback) { effect ??= callback; },
+    };
+    if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
+    if (name === "@/lib/lab") return { experimentName: (_, fallback) => fallback, labRequest: (route) => route === "/projects" ? new Promise(() => {}) : Promise.resolve({ experiments }) };
+    return { default: name };
+  } });
+  exported.default(); effect(); for (let i = 0; i < 5; i++) await Promise.resolve(); cursor = 0;
+  const tree = exported.default();
+  assert.equal(nodes(tree).find((node) => node.props?.["aria-label"] === "Open AI Music Video").props.href, "/lab/music-sketch");
+  assert.match(text(nodes(tree).find((node) => node.props?.role === "status")), /Loading edits/);
+  assert.equal(nodes(tree).find((node) => node.type === "@/components/AppBar").props.active, "lab");
 });
