@@ -8,11 +8,6 @@ import ChoiceRow from "./ChoiceRow";
 import DirectionIcon from "./DirectionIcon";
 import styles from "./viewMenu.module.css";
 
-const DETAIL_OPTIONS = [
-  { value: "hidden", label: "Hidden" },
-  { value: "shown", label: "Shown" },
-] as const;
-
 /**
  * How results are shown: their order, their size and whether each card
  * explains its match. None of it changes what is searched.
@@ -48,7 +43,7 @@ export default function ViewMenu({
         aria-expanded={open}
         aria-controls={panelId}
         aria-haspopup="dialog"
-        title="Order, size and details of the results"
+        title="Result order, size and debug mode"
         onClick={() => onOpenChange(!open)}
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -78,13 +73,37 @@ export default function ViewMenu({
               defaultValue={DEFAULT_VIEW.size}
               onChange={(size) => onChange({ size })}
             />
-            <ChoiceRow
-              label="Details"
-              options={DETAIL_OPTIONS}
-              value={view.details ? "shown" : "hidden"}
-              defaultValue={DEFAULT_VIEW.details ? "shown" : "hidden"}
-              onChange={(details) => onChange({ details: details === "shown" })}
-            />
+            <div className={styles.debugSection}>
+              <button
+                type="button"
+                className={styles.debugButton}
+                aria-label="Debug mode"
+                aria-pressed={view.details}
+                aria-describedby={`${panelId}-debug-hint`}
+                onClick={() => onChange({ details: !view.details })}
+              >
+                <svg className={styles.projector} width="36" height="32" viewBox="0 0 36 32" fill="none" shapeRendering="crispEdges" aria-hidden="true">
+                  <path d="M5 2h6v2h2v6h-2v2H5v-2H3V4h2Zm13 0h6v2h2v6h-2v2h-6v-2h-2V4h2Z" fill="#84999a" />
+                  <path d="M7 5h2v4H7Zm13 0h2v4h-2Z" fill="#182326" />
+                  <path d="M5 13h21v13H5Z" fill="#53696b" />
+                  <path d="M5 13h21v3H5Z" fill="#a8beb6" />
+                  <path d="M8 19h8v4H8Z" fill="#25383b" />
+                  <path d="M19 18h4v5h-4Z" fill="#e9bb75" />
+                  <path d="M26 17h3v-2h4v10h-4v-2h-3Z" fill="#c6d9ce" />
+                  <path className={styles.lens} d="M33 17h2v6h-2Z" fill="#ecab66" />
+                  <path d="M13 26h5v3h5v2H8v-2h5Z" fill="#84999a" />
+                </svg>
+                <span className={styles.debugCopy}>
+                  <span className={styles.debugTitle} key={String(view.details)} data-label="DEBUG MODE" aria-hidden="true">DEBUG MODE</span>
+                  <span id={`${panelId}-debug-hint`} className={styles.debugHint}>Match scores &amp; descriptions</span>
+                </span>
+                <span className={styles.debugState} aria-hidden="true">{view.details ? "ON" : "OFF"}</span>
+                <span className={styles.debugFx} key={`fx-${view.details}`} aria-hidden="true">
+                  <span className={styles.fireball} />
+                  <span className={styles.impact} />
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       )}

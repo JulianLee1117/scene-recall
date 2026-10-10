@@ -19,3 +19,133 @@
   color: #a49e94;
   font-size: 12px;
 }
+
+/* A small game-HUD easter egg. Only the decorative layer moves; the
+   setting and its label stay readable throughout the single burst. */
+.debugSection {
+  flex-shrink: 0;
+  padding-top: 14px;
+  border-top: 1px solid #292621;
+}
+
+.debugButton {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: 100%;
+  min-height: 62px;
+  padding: 10px;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid #354345;
+  border-radius: 5px;
+  background: linear-gradient(110deg, #1a2728, #121919 72%);
+  color: #deeee5;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+
+.debugButton:hover { border-color: #688781; }
+.debugButton:focus-visible { outline: 2px solid #a7d7c9; outline-offset: 3px; }
+.debugButton[aria-pressed="true"] {
+  border-color: #b68c52;
+  background: linear-gradient(110deg, #2c2920, #171a18 72%);
+}
+
+.projector { flex: 0 0 36px; }
+.debugCopy { display: grid; min-width: 0; gap: 6px; }
+.debugTitle {
+  position: relative;
+  width: fit-content;
+  color: #e1eee5;
+  font: 700 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 1.2px;
+  white-space: nowrap;
+}
+
+.debugTitle::before, .debugTitle::after {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  content: attr(data-label);
+}
+.debugTitle::before { color: #70e1d0; clip-path: inset(0 0 55%); }
+.debugTitle::after { color: #ed88a3; clip-path: inset(45% 0 0); }
+.debugHint { color: #94a8a1; font-family: inherit; font-size: 10px; line-height: 1.35; }
+.debugState {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: flex-start;
+  padding-top: 2px;
+  color: #849991;
+  font: 9px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .5px;
+}
+.debugButton[aria-pressed="true"] .debugState { color: #ffd494; }
+.debugButton[aria-pressed="true"] .lens { fill: #fff0bd; }
+.debugFx { position: absolute; z-index: 2; inset: 0 16px 0 44px; pointer-events: none; }
+.fireball {
+  position: absolute;
+  top: calc(50% + 1px);
+  left: 0;
+  width: 100%;
+  height: 6px;
+  opacity: 0;
+}
+.fireball::before {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  content: "";
+  background: #fff2be;
+  box-shadow: -4px 0 #ffd477, -8px 0 #f7994e, -12px 2px #ed7046, -16px 2px #9c4938, 0 -3px #ffc06c, 0 3px #ffc06c, 3px 0 #ffc06c;
+}
+.impact {
+  position: absolute;
+  top: calc(50% + 2px);
+  right: 0;
+  width: 4px;
+  height: 4px;
+  opacity: 0;
+  background: #ffe6a6;
+  box-shadow: -8px -7px #ffbb74, -4px 9px #f7994e, 5px -11px #70daca, 8px 5px #ed88a3;
+}
+
+.debugButton:is(:hover, :focus-visible, [aria-pressed="true"]) .fireball {
+  animation: fireball-flight .7s steps(14, end) both;
+}
+.debugButton:is(:hover, :focus-visible, [aria-pressed="true"]) .impact {
+  animation: pixel-impact .3s .58s steps(4, end) both;
+}
+.debugButton:is(:hover, :focus-visible, [aria-pressed="true"]) .debugTitle::before {
+  animation: title-glitch .28s .24s steps(2, end) both;
+}
+.debugButton:is(:hover, :focus-visible, [aria-pressed="true"]) .debugTitle::after {
+  animation: title-glitch .28s .29s steps(2, end) reverse both;
+}
+
+@keyframes fireball-flight {
+  0% { opacity: 0; transform: translateX(0); }
+  8% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(calc(100% - 6px)); }
+}
+@keyframes pixel-impact {
+  0% { opacity: 0; transform: scale(.5); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.8); }
+}
+@keyframes title-glitch {
+  0%, 100% { opacity: 0; transform: translateX(0); }
+  25% { opacity: .9; transform: translateX(2px); }
+  50% { opacity: .6; transform: translateX(-2px); }
+  75% { opacity: .8; transform: translateX(1px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .debugButton { transition: none; }
+  .debugButton .debugFx, .debugTitle::before, .debugTitle::after { display: none; }
+}
