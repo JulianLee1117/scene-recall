@@ -29,7 +29,10 @@ export function useVision(unitId: string | null, time: number | null, enabled: b
   return cache.get(key) ?? (loaded?.key === key ? loaded.vision : null);
 }
 
-/** The layers drawn over a frame, at the frame's own placement (so crops and formats line up). */
+/**
+ * The layers drawn over a frame, at the frame's own placement (so crops and
+ * formats line up). Shapes scale with the picture; labels stay a readable size.
+ */
 export function VisionOverlay({ vision, visible, place, tone = "in" }: {
   vision: MomentVision;
   visible: ReadonlySet<string>;
@@ -39,8 +42,9 @@ export function VisionOverlay({ vision, visible, place, tone = "in" }: {
 }) {
   const arrow = useId();
   const { width, height, shapes } = useMemo(() => visionShapes(vision, visible), [vision, visible]);
-  return <svg className={styles.vision} data-tone={tone} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true"
+  return <div className={styles.vision} data-tone={tone} aria-hidden="true"
     style={{ left: `${place.left}%`, top: `${place.top}%`, width: `${place.width}%`, height: `${place.height}%` }}>
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
     <defs>
       <marker id={arrow} viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
         <path d="M0 0 6 3 0 6z" fill="currentColor" />
@@ -53,7 +57,7 @@ export function VisionOverlay({ vision, visible, place, tone = "in" }: {
         case "box":
           return <rect key={index} className={styles.visionBox} x={shape.x} y={shape.y} width={shape.w} height={shape.h} stroke={shape.tint} />;
         case "label":
-          return <text key={index} className={styles.visionLabel} x={shape.x + 0.6} y={shape.y - 1} fill={shape.tint}>{shape.text}</text>;
+          return null;
         case "line":
           return <line key={index} className={styles.visionLine} data-layer={shape.layer} x1={shape.x1} y1={shape.y1} x2={shape.x2} y2={shape.y2}
             strokeOpacity={shape.strength === undefined ? undefined : 0.35 + 0.55 * Math.min(1, shape.strength)}
@@ -62,7 +66,12 @@ export function VisionOverlay({ vision, visible, place, tone = "in" }: {
           return <circle key={index} className={shape.ring ? styles.visionRing : styles.visionDot} cx={shape.x} cy={shape.y} r={shape.r} />;
       }
     })}
-  </svg>;
+    </svg>
+    {shapes.map((shape, index) => shape.kind === "label" &&
+      <span key={index} className={styles.visionLabel} style={{ left: `${shape.x / width * 100}%`, top: `${shape.y / height * 100}%`, color: shape.tint }}>
+        {shape.text}
+      </span>)}
+  </div>;
 }
 
 /** The Vision switch, its layer chips and where the layers came from. */

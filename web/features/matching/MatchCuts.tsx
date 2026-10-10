@@ -284,7 +284,8 @@ function Audition({ match, shot, time, referenceCrop, output, vision, onClose, o
         <button className={styles.secondary} onClick={() => nudge(FRAME_SECONDS)} title="One frame later">+1f</button>
         <button className={styles.secondary} onClick={() => nudge(0.25)} title="A quarter second later">+¼s</button>
       </div>
-      <div className={styles.reasons}>{match.reasons.map((reason) => <span key={reason.code}>{reason.label}</span>)}</div>
+      {/* With Vision's bars showing, the plain reasons would repeat them. */}
+      {!(vision.on && view === "overlay") && <div className={styles.reasons}>{match.reasons.map((reason) => <span key={reason.code}>{reason.label}</span>)}</div>}
       <div className={styles.auditionActions}>
         <button className={styles.secondary} onClick={() => onOpen(match, start)}>Match from this shot</button>
         <button className={styles.primary} onClick={() => onChain(match, start)}>Add to chain &amp; continue</button>
