@@ -1624,8 +1624,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 /* Rows show whole; only the final row of all results keeps natural widths. */
-.result-grid.is-end::after,
-.saved-grid:not(.is-rows)::after {
+.result-grid.is-end::after {
   content: "";
   flex: 1000 1 0;
 }
@@ -2282,27 +2281,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   color: #666;
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
-}
-
-.saved-grid {
-  padding-top: 0;
-}
-
-.saved-empty {
-  display: flex;
-  margin: 0;
-  padding: 32px 20px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 12px;
-  color: #555;
-  text-align: center;
-}
-
-.saved-empty p {
-  margin: 0;
-  font-size: 0.82rem;
 }
 
 .saved-error {

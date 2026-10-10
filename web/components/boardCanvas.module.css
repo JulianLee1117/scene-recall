@@ -1,0 +1,61 @@
+/* The board is one canvas. Each scene is placed by a transform from one
+   layout, so it glides wherever it goes next; the lifted scene alone moves
+   without easing, under the pointer, and leaves a slot behind. */
+.canvas { position: relative; margin-bottom: 16px; }
+
+.tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  touch-action: pan-y pinch-zoom;
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.groupTitle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  color: var(--page-text);
+  font-size: 13px;
+  font-weight: 550;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.groupTitle span { color: var(--page-muted); font-size: 12px; font-weight: 400; }
+
+.slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: 2px;
+  background: #14130f;
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.reordering { cursor: grabbing; user-select: none; }
+.reordering :global(.result-card) { pointer-events: none; }
+
+/* Lifted: a little closer to the hand, nothing else on it. */
+.lifted { z-index: 3; opacity: 0.88; box-shadow: 0 18px 40px #000000aa; transition: none; }
+.lifted :global(.result-card) { transform: scale(1.03); }
+.lifted :global(.result-card-overlay),
+.lifted :global(.result-card-actions),
+.lifted :global(.result-card-marks) { visibility: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile, .groupTitle, .slot { transition: none; }
+  .lifted { box-shadow: none; }
+  .lifted :global(.result-card) { transform: none; }
+}

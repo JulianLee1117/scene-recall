@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -17,13 +18,18 @@ const EDGE = 72;
 const EDGE_STEP = 14;
 const CLICK_SUPPRESS_MS = 300;
 
+/** The attribute a tile carries so one set of handlers serves every tile. */
+export const BOARD_INDEX_ATTRIBUTE = "data-board-index";
+
 /**
  * The gesture that lifts a tile and carries it: a mouse or pen lifts after a
  * short drag, a finger holds for a moment first so a swipe still scrolls,
  * Escape puts it back, and the page scrolls when the pointer nears an edge.
  * Where the tile goes is the board's business: it hears the lift with the
  * pointer, every move, and the drop. Alt with the left or right arrow moves a
- * tile one place for keyboards.
+ * tile one place for keyboards. The handlers are one stable object for every
+ * tile, which reads its index from the tile's attribute, so tiles can be
+ * memoized and a drag re-renders only the tiles that move.
  */
 export function useBoardReorder({ enabled, isHandle, onLift, onDrag, onDrop, onCancel, onKeyMove }: {
   enabled: boolean;
@@ -97,81 +103,80 @@ export function useBoardReorder({ enabled, isHandle, onLift, onDrag, onDrop, onC
     latest.current.onLift(current.index, x, y);
   }, [preventScroll]);
 
-  const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const current = gesture.current;
-    if (!current || current.pointer !== event.pointerId) return;
-    if (!current.active) {
-      const moved = Math.hypot(event.clientX - current.x, event.clientY - current.y);
-      if (current.type === "touch") {
-        // A finger that moves before the hold is scrolling, not lifting.
-        if (moved > TOUCH_SLOP) clear();
-        return;
-      }
-      if (moved < MOUSE_SLOP) return;
-      lift(event.clientX, event.clientY);
-    }
-    event.preventDefault();
-    latest.current.onDrag(event.clientX, event.clientY);
-    if (event.clientY < EDGE) window.scrollBy(0, -EDGE_STEP);
-    else if (event.clientY > window.innerHeight - EDGE) window.scrollBy(0, EDGE_STEP);
-  };
-
-  const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
-    const current = gesture.current;
-    if (!current || current.pointer !== event.pointerId) return;
-    if (current.active) {
-      event.preventDefault();
-      suppressUntil.current = performance.now() + CLICK_SUPPRESS_MS;
-      latest.current.onDrop();
-    }
-    clear();
-  };
-
-  const onPointerCancel = (event: ReactPointerEvent<HTMLElement>) => {
-    const current = gesture.current;
-    if (current?.pointer !== event.pointerId) return;
-    if (current.active) latest.current.onCancel();
-    clear();
-  };
-
-  const onClickCapture = (event: ReactMouseEvent<HTMLElement>) => {
-    if (performance.now() < suppressUntil.current) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  };
-
-  const tileProps = (index: number) => ({
-    onPointerDown(event: ReactPointerEvent<HTMLElement>) {
-      if (!enabled || gesture.current || event.button !== 0 || !event.isPrimary) return;
-      if (isHandle && !isHandle(event.target as Element)) return;
-      const element = event.currentTarget;
-      const { clientX, clientY } = event;
-      gesture.current = {
-        pointer: event.pointerId,
-        type: event.pointerType,
-        index,
-        x: clientX,
-        y: clientY,
-        active: false,
-        hold: event.pointerType === "touch" ? window.setTimeout(() => lift(clientX, clientY), TOUCH_HOLD_MS) : null,
-        element,
-      };
-      element.setPointerCapture(event.pointerId);
-    },
-    onPointerMove,
-    onPointerUp,
-    onPointerCancel,
-    onLostPointerCapture: onPointerCancel,
-    onClickCapture,
-    onKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
-      if (!enabled || !event.altKey) return;
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+  const tileProps = useMemo(() => {
+    const indexOf = (element: HTMLElement) => Number(element.getAttribute(BOARD_INDEX_ATTRIBUTE));
+    const cancel = (event: ReactPointerEvent<HTMLElement>) => {
+      const current = gesture.current;
+      if (current?.pointer !== event.pointerId) return;
+      if (current.active) latest.current.onCancel();
+      clear();
+    };
+    return {
+      onPointerDown(event: ReactPointerEvent<HTMLElement>) {
+        if (!enabled || gesture.current || event.button !== 0 || !event.isPrimary) return;
+        if (isHandle && !isHandle(event.target as Element)) return;
+        const element = event.currentTarget;
+        const index = indexOf(element);
+        if (!Number.isInteger(index)) return;
+        const { clientX, clientY } = event;
+        gesture.current = {
+          pointer: event.pointerId,
+          type: event.pointerType,
+          index,
+          x: clientX,
+          y: clientY,
+          active: false,
+          hold: event.pointerType === "touch" ? window.setTimeout(() => lift(clientX, clientY), TOUCH_HOLD_MS) : null,
+          element,
+        };
+        element.setPointerCapture(event.pointerId);
+      },
+      onPointerMove(event: ReactPointerEvent<HTMLElement>) {
+        const current = gesture.current;
+        if (!current || current.pointer !== event.pointerId) return;
+        if (!current.active) {
+          const moved = Math.hypot(event.clientX - current.x, event.clientY - current.y);
+          if (current.type === "touch") {
+            // A finger that moves before the hold is scrolling, not lifting.
+            if (moved > TOUCH_SLOP) clear();
+            return;
+          }
+          if (moved < MOUSE_SLOP) return;
+          lift(event.clientX, event.clientY);
+        }
+        event.preventDefault();
+        latest.current.onDrag(event.clientX, event.clientY);
+        if (event.clientY < EDGE) window.scrollBy(0, -EDGE_STEP);
+        else if (event.clientY > window.innerHeight - EDGE) window.scrollBy(0, EDGE_STEP);
+      },
+      onPointerUp(event: ReactPointerEvent<HTMLElement>) {
+        const current = gesture.current;
+        if (!current || current.pointer !== event.pointerId) return;
+        if (current.active) {
+          event.preventDefault();
+          suppressUntil.current = performance.now() + CLICK_SUPPRESS_MS;
+          latest.current.onDrop();
+        }
+        clear();
+      },
+      onPointerCancel: cancel,
+      onLostPointerCapture: cancel,
+      onClickCapture(event: ReactMouseEvent<HTMLElement>) {
+        if (performance.now() < suppressUntil.current) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      },
+      onKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+        if (!enabled || !event.altKey) return;
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        const index = indexOf(event.currentTarget);
+        if (!Number.isInteger(index)) return;
         event.preventDefault();
         latest.current.onKeyMove(index, event.key === "ArrowLeft" ? -1 : 1);
-      }
-    },
-  });
+      },
+    };
+  }, [enabled, isHandle, lift, clear]);
 
   return { lifted, tileProps };
 }
