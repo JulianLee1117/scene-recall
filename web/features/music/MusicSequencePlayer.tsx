@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
-import { experimentName, mediaUrl, seconds } from "@/lib/lab";
+import { mediaUrl, seconds } from "@/lib/lab";
+import { EXPERIMENT_NAME } from "./experiment";
 import { isPlaybackSpace } from "@/lib/playbackShortcut";
 import { directionOf } from "./musicEdit";
 import { slotAt } from "./sequencePosition";
 import { musicVolume } from "./dialogueAudio";
 import { createDialoguePool } from "./dialogueTransport";
 import { releaseDialogueAudio } from "./dialogueGain";
-import EditorIcon from "./EditorIcon";
+import EditorIcon from "@/features/lab/EditorIcon";
 import type { LabClip, LabDocument, MusicSlot } from "@/types/lab";
 import styles from "./sequencePlayer.module.css";
 
@@ -653,7 +654,7 @@ export default function MusicSequencePlayer({
               title="This preview plays the cuts. Export the video to see the edit's render effects.">Effects show in an export</span>)}
           {slot
             ? `${slots.indexOf(slot) + 1} / ${slots.length}`
-            : experimentName("music-sketch")}
+            : EXPERIMENT_NAME}
         </span>
       </div>
       <div className={styles.monitor}>

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import AppBar from "@/components/AppBar";
 import chrome from "@/components/pageChrome.module.css";
-import { experimentName, labRequest, mediaUrl } from "@/lib/lab";
+import { labRequest, mediaUrl } from "@/lib/lab";
 import type { LabExperiment, LabProjectDeletion, LabProjectSummary } from "@/types/lab";
 import { DeleteProjectButton } from "./ProjectActions";
 import styles from "./labHome.module.css";
@@ -57,9 +57,7 @@ export default function LabHome() {
       (result) => {
         if (controller.signal.aborted) return;
         const frozen = (experiment: LabExperiment) => (experiment.status === "frozen" ? 1 : 0);
-        setExperiments(result.experiments
-          .map((experiment) => ({ ...experiment, name: experimentName(experiment.id, experiment.name) }))
-          .sort((a, b) => frozen(a) - frozen(b)));
+        setExperiments([...result.experiments].sort((a, b) => frozen(a) - frozen(b)));
       },
       (reason) => { if (!controller.signal.aborted) setExperimentError(reason?.message || "Could not load experiments."); },
     );
@@ -167,7 +165,7 @@ export default function LabHome() {
                     <strong>{project.name}</strong>
                     {song && <span className={styles.projectSong} title={song}>{song}</span>}
                     <span className={styles.projectMeta}>
-                      {project.experiment_id !== EDITOR_EXPERIMENT && <span>{experimentName(project.experiment_id, experiment?.name)}</span>}
+                      {project.experiment_id !== EDITOR_EXPERIMENT && <span>{experiment?.name ?? project.experiment_id}</span>}
                       {project.clip_count > 0 && <span>{project.clip_count} clip{project.clip_count === 1 ? "" : "s"}</span>}
                       <time dateTime={updated.toISOString()}>
                         {updated.toLocaleDateString(undefined, { month: "short", day: "numeric" })}

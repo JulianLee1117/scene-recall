@@ -405,8 +405,9 @@ saved edits as summaries: `GET /lab/projects` carries `track_name`,
 `clip_count`, `sheet_unit_ids` and `active_job_count`, never a document. The
 explicit registry owns each entry `route`, saved-edit `project_route` and
 entry `persistence` (`project` or `session`). AI Music Video uses
-`/lab/music-sketch`; Match Cuts enters the projectless `/match` session, while
-existing edits retain `/lab/visual-rhymes` and the `visual-rhymes` identifier.
+`/lab/music-sketch`; Match Cuts enters the projectless `/match` session, which
+is also its `project_route`, under the `visual-rhymes` identifier it has always
+had (its frozen editor is gone, ADR-0116).
 Transitions enters the projectless `/lab/transitions` workspace (ADR-0070).
 Alg Mods enters the projectless `/lab/alg-mods` session (ADR-0110).
 Every lab screen, including loading, empty and error states, starts with
@@ -428,10 +429,13 @@ section. Cancelling an uploaded replacement restores the opening revision
 and pre-picker Undo history. Whole generation remains explicit; filling gaps or
 replacing a chosen shot preserves the existing timeline.
 Match Cuts is one screen: an outgoing cut point, a results grid of incoming
-instants and an in-browser audition (ADR-0099). Experiment screens remain isolated under
-`web/features/lab` and call shared Python project, source, job and render
-services under `pipeline/lab`; no generic plugin system or second search engine
-is required.
+instants and an in-browser audition (ADR-0099). Each experiment's screens live
+in their own folder under `web/features/` (`music`, `matching`, `transitions`,
+`algmods`); `web/features/lab` holds only the shared kit: the directory, the
+workspace header, the project lifecycle, the source browser and job status
+(ADR-0116). All call shared Python project, source, job and render services
+under `pipeline/lab`; no generic plugin system or second search engine is
+required.
 
 ### Durable projects and jobs
 
@@ -2627,8 +2631,8 @@ compared in output coordinates.
   an ordinary-search option wait for played-cut evidence (ADR-0099).
 
 The former scene-based search (ADR-0040/0046/0048) no longer backs `/match`.
-Saved Match Cuts projects at `/lab/visual-rhymes` keep a frozen editor. It runs
-on a prepared 200-shot cohort with SAM 2.1 subject tracks, RAFT camera motion
-and bounded refinement windows (ADR-0027, ADR-0038). Its code in
-`pipeline/matching/` outside `moments/` is to be removed in a later cleanup.
+The frozen prepared-cohort editor (ADR-0027, ADR-0038) is no longer served
+(ADR-0116). Its Python code in `pipeline/matching/` outside `moments/`, the
+match job endpoints and the project hook's handling of them remain until their
+own cleanup.
 

@@ -4,10 +4,10 @@ import { useId } from "react";
 import MovieScopeFilter from "@/components/MovieScopeFilter";
 import { seconds } from "@/lib/lab";
 import type { LabDocument, PlannerSettings, SongContext, SongLyric } from "@/types/lab";
-import { appendDirectionExample, changeEditorDirection, effectiveEditorDirection, MAX_DIRECTION_LENGTH } from "./editorDirection";
+import { appendDirectionExample, changeEditorDirection, effectiveEditorDirection, MAX_DIRECTION_LENGTH } from "@/features/lab/editorDirection";
 import MusicDirectionRanges from "./MusicDirectionRanges";
 import DirectionTimeInput from "./DirectionTimeInput";
-import EditorIcon from "./EditorIcon";
+import EditorIcon from "@/features/lab/EditorIcon";
 import styles from "./musicDirection.module.css";
 
 interface Props {

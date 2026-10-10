@@ -617,10 +617,8 @@ model/GPU throughput are the practical scaling limits. Pagination/retention can 
 added when measured need arises. Multiuser hosting would also need user isolation,
 shared object storage and a leased job queue; those are not implemented.
 
-Match Cuts (the existing `/lab/visual-rhymes` route) provides A→B audition
-with precise trims, fixed reference
-instants or bounded windows, region marking, and whole-picture cropping. It
-also offers the bounded Match Cuts experiment described below. The separate
+The earlier Match Cuts editor at `/lab/visual-rhymes` is retired (ADR-0116);
+`/match` is the one entry. The separate
 [shadow evaluation workflow](docs/experiments/visual-rhymes.md) measures whether
 better instants and resizing help before admitting new retrieval machinery.
 An [offline DINOv3 challenger](docs/experiments/dense-geometry.md) can compare
@@ -1733,10 +1731,10 @@ Limits:
 - Conceptual rhymes, such as 2001's bone into satellite, are not found by
   geometry.
 
-## Saved Match Cuts projects (frozen)
+## Prepared-cohort Match Cuts (frozen)
 
-Older Match Cuts projects open the frozen prepared-cohort editor at
-`/lab/visual-rhymes` (ADR-0027, ADR-0038). Its preparation commands live in
-`pipeline/matching/prepare.py` and `pipeline/matching/prepare_subjects.py`. New
-work uses `/match` (above).
+The prepared-cohort editor (ADR-0027, ADR-0038) is no longer served; saved
+Match Cuts projects open `/match` (ADR-0116). Its preparation commands still
+live in `pipeline/matching/prepare.py` and `pipeline/matching/prepare_subjects.py`
+until that code is removed.
 

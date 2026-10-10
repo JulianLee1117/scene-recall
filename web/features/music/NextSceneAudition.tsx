@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { seconds } from "@/lib/lab";
 import type { LabJob, NextSceneAdjustment } from "@/types/lab";
-import EditorIcon from "./EditorIcon";
+import EditorIcon from "@/features/lab/EditorIcon";
 import type { NextSceneAuditionSelection } from "./NextScenePanel";
 import NextScenePairPlayer from "./NextScenePairPlayer";
 import SourceSceneEditor from "./SourceSceneEditor";

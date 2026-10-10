@@ -3,7 +3,7 @@
 import type { SyntheticEvent } from "react";
 import { mediaUrl, seconds } from "@/lib/lab";
 import type { LabClip, MusicAlternative, MusicMatchEvidence } from "@/types/lab";
-import EditorIcon from "./EditorIcon";
+import EditorIcon from "@/features/lab/EditorIcon";
 import { sameSceneCrop } from "./nextScene";
 import { useLabSceneDrag } from "./useLabSceneDrag";
 import styles from "./musicSceneChoices.module.css";

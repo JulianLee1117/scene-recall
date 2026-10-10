@@ -88,7 +88,7 @@ The accepted boundary or behavior.
 | [0024](0024-source-backed-lab-and-music-sketch.md) | Accepted | Add durable Lab projects and bounded audio-to-source edit planning |
 | [0025](0025-durable-standalone-job-worker.md) | Accepted | Execute durable ingestion and Lab jobs in a standalone local worker |
 | [0026](0026-region-aware-visual-rhymes-research.md) | Frozen | Evaluate within-shot instants and whole-picture region alignment in shadow |
-| [0027](0027-bounded-lab-match-finder.md) | Frozen (saved Match Cuts projects) | Admit bounded image and movement matching in Visual Rhymes before production promotion |
+| [0027](0027-bounded-lab-match-finder.md) | Frozen; web editor removed by 0116 | Admit bounded image and movement matching in Visual Rhymes before production promotion |
 | [0028](0028-explicit-music-audio-provider-and-progress.md) | Accepted | Select the music audio provider explicitly, persist progress and apply passage-relative fade-in |
 | [0029](0029-authoritative-music-timeline-and-gap-filling.md) | Accepted | Make music cuts authoritative and fill or replace explicit slots with whole-sequence context |
 | [0030](0030-song-specific-moments-and-clip-directions.md) | Accepted | Plan song-specific moments, keep directions per clip, and make timing regeneration explicit |
@@ -177,3 +177,4 @@ The accepted boundary or behavior.
 | [0113](0113-film-filters-narrow-search-scope.md) | Accepted; extended by 0114 | Film filters (era, genre family, director, movie) narrow a search by resolving to the existing film scope; one Filter control with chips and counted options replaces the All movies picker |
 | [0114](0114-shot-filters-inside-retrieval.md) | Accepted | Shot filters (dialogue, size, people, camera, color, time, place) derived in memory from stored evidence; a request-bound scope masks every resident channel before top-k and is checked on every database path; a Shots group in the Filter menu |
 | [0115](0115-app-chrome-over-lab-screens.md) | Accepted | The home page's bar over every Lab screen and the Lab directory as a page-chrome page; a lab renders the shared header first and owns everything below it; every exit from a project editor passes the one unsaved-edits guard; the project listing carries summaries, not documents |
+| [0116](0116-lab-folders-by-experiment.md) | Accepted | Each experiment's screens in their own folder under `web/features/`, with `web/features/lab` as the shared kit only; the frozen rhymes editor at `/lab/visual-rhymes` removed, `/match` the one Match Cuts address; experiment names from the registry alone |

@@ -10,7 +10,7 @@ const compiled = ts.transpileModule(fs.readFileSync(path.join(__dirname, "LabHom
 }).outputText;
 test("entering experiments and resuming saved projects follow registry routes without creating projects", async () => {
   const experiments = [
-    { id: "visual-rhymes", name: "Match Cuts", description: "Find a cut", route: "/match", project_route: "/lab/visual-rhymes" },
+    { id: "visual-rhymes", name: "Match Cuts", description: "Find a cut", route: "/match", project_route: "/match" },
     { id: "music-sketch", name: "AI Music Video", description: "Make an edit", route: "/lab/music-sketch", project_route: "/lab/music-sketch" },
     { id: "future", name: "Future", description: "Try it", route: "/custom-entry", project_route: "/custom-editor" },
   ];
@@ -22,7 +22,7 @@ test("entering experiments and resuming saved projects follow registry routes wi
       useEffect(callback) { effect ??= callback; },
     };
     if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
-    if (name === "@/lib/lab") return { experimentName: (_, fallback) => fallback, labRequest: async (route, options) => { calls.push({ route, options }); return route === "/projects" ? { projects } : { experiments }; } };
+    if (name === "@/lib/lab") return { labRequest: async (route, options) => { calls.push({ route, options }); return route === "/projects" ? { projects } : { experiments }; } };
     return { default: name };
   } });
   exported.default(); effect(); for (let i = 0; i < 5; i++) await Promise.resolve(); cursor = 0;
@@ -49,7 +49,7 @@ async function deletionHarness({ storageFailure = null, cleanupPending = false, 
     };
     if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
     if (name === "./ProjectActions") return { DeleteProjectButton: "DeleteProjectButton" };
-    if (name === "@/lib/lab") return { experimentName: () => "AI Music Video", labRequest: async (route, options) => {
+    if (name === "@/lib/lab") return { labRequest: async (route, options) => {
       calls.push({ route, options });
       if (options?.method === "DELETE") {
         if (deleteFailure) throw new Error("Project changed; reload before deleting");
@@ -99,7 +99,7 @@ test("frozen experiments stay openable but are listed last and labeled Frozen", 
       useEffect(callback) { effect ??= callback; },
     };
     if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
-    if (name === "@/lib/lab") return { experimentName: (_, fallback) => fallback, labRequest: async (route) => route === "/projects" ? { projects: [] } : { experiments } };
+    if (name === "@/lib/lab") return { labRequest: async (route) => route === "/projects" ? { projects: [] } : { experiments } };
     return { default: name };
   } });
   exported.default(); effect(); for (let i = 0; i < 5; i++) await Promise.resolve(); cursor = 0;
@@ -122,7 +122,7 @@ test("every saved edit is listed with its song and clip count, and the filter na
       useEffect(callback) { effect ??= callback; },
     };
     if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
-    if (name === "@/lib/lab") return { experimentName: (_, fallback) => fallback, mediaUrl: (path) => path, labRequest: async (route) => route === "/projects" ? { projects } : { experiments } };
+    if (name === "@/lib/lab") return { mediaUrl: (path) => path, labRequest: async (route) => route === "/projects" ? { projects } : { experiments } };
     return { default: name };
   } });
   const render = () => { cursor = 0; return exported.default(); };
@@ -147,7 +147,7 @@ test("experiments show as soon as they arrive, before the saved edits", async ()
       useEffect(callback) { effect ??= callback; },
     };
     if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
-    if (name === "@/lib/lab") return { experimentName: (_, fallback) => fallback, labRequest: (route) => route === "/projects" ? new Promise(() => {}) : Promise.resolve({ experiments }) };
+    if (name === "@/lib/lab") return { labRequest: (route) => route === "/projects" ? new Promise(() => {}) : Promise.resolve({ experiments }) };
     return { default: name };
   } });
   exported.default(); effect(); for (let i = 0; i < 5; i++) await Promise.resolve(); cursor = 0;

@@ -12,8 +12,8 @@ import {
 import { mediaUrl, seconds } from "@/lib/lab";
 import type { LabDocument, MusicPlan, MusicSearchFacet } from "@/types/lab";
 import { directionOf } from "./musicEdit";
-import EditorIcon from "./EditorIcon";
-import EditorPopover from "./EditorPopover";
+import EditorIcon from "@/features/lab/EditorIcon";
+import EditorPopover from "@/features/lab/EditorPopover";
 import MusicalCues from "./MusicalCues";
 import { musicCues } from "./musicCues";
 import { waveformPath } from "./audioWaveform";

@@ -14,7 +14,7 @@ import { MAX_MUSIC_PASSAGE_SECONDS } from "@/lib/labLimits";
 import { isPlaybackSpace } from "@/lib/playbackShortcut";
 import type { LabDocument } from "@/types/lab";
 import { useAudioWaveform } from "./useAudioWaveform";
-import EditorIcon from "./EditorIcon";
+import EditorIcon from "@/features/lab/EditorIcon";
 import styles from "./songPassagePicker.module.css";
 
 type Range = { start: number; end: number };

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { LAB_API, seconds } from "@/lib/lab";
 import type { SearchRecipeResponse, SearchResult } from "@/types/api";
-import styles from "./lab.module.css";
+import styles from "./sourceBrowser.module.css";
 
 type Props = {
   filmIds: string[];

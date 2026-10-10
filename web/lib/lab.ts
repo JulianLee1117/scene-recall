@@ -4,16 +4,6 @@ import type { SearchResult } from "@/types/api";
 export const LAB_API = process.env.NEXT_PUBLIC_API_URL ?? "";
 export const mediaUrl = (path: string) => `${LAB_API}${path}`;
 
-export function experimentName(id: string, fallback?: string): string {
-  switch (id) {
-    case "music-sketch": return "AI Music Video";
-    case "visual-rhymes": return "Match Cuts";
-    case "transitions": return "Transitions";
-    case "alg-mods": return "Alg Mods";
-    default: return fallback || id.replaceAll("-", " ");
-  }
-}
-
 export class LabError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }

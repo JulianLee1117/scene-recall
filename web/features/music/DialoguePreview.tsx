@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LabDialogueClip } from "@/types/lab";
 import { createDialogueTransport } from "./dialogueTransport";
 import { releaseDialogueAudio } from "./dialogueGain";
-import EditorIcon from "./EditorIcon";
+import EditorIcon from "@/features/lab/EditorIcon";
 import styles from "./dialogue.module.css";
 
 /** Audition just the source voice, with the sequence paused. */

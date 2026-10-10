@@ -76,13 +76,13 @@ function harness({ document: overrides, search = "?project=project", ...stateOve
     require(name) {
       if (name === "react") return react;
       if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
-      if (name === "./useLabProject") return { useLabProject: () => state };
+      if (name === "@/features/lab/useLabProject") return { useLabProject: () => state };
       if (name === "./useAudioWaveform") return { useAudioWaveform: () => ({ peaks: [], status: "" }) };
       if (name === "./musicEdit") return musicEdit;
       if (name === "./dialogueAudio") return dialogue;
       if (name === "@/lib/labLimits") return limits;
       if (name === "./nextScene") return { nextScenePair: () => ({ problem: null }), nextSceneResult: () => null };
-      if (name === "@/lib/lab") return { experimentName: () => "AI Music Video", seconds: (value) => value.toFixed(2), mediaUrl: (value) => value, labRequest: async () => ({ facets: [] }) };
+      if (name === "@/lib/lab") return { seconds: (value) => value.toFixed(2), mediaUrl: (value) => value, labRequest: async () => ({ facets: [] }) };
       if (name.endsWith(".css")) return { default: new Proxy({}, { get: (_, key) => key }) };
       return { default: name };
     },
@@ -99,9 +99,9 @@ function harness({ document: overrides, search = "?project=project", ...stateOve
     dialogue() { return nodes(tree).find((node) => node.type === "./DialogueEditor")?.props; },
     scenes() { return nodes(tree).find((node) => node.type === "./SceneLibraryPanel")?.props; },
     alerts() { return nodes(tree).filter((node) => node.type === "div" && node.props?.role === "alert").map(text); },
-    progress() { return nodes(tree).find((node) => node.type === "./JobStatus")?.props; },
+    progress() { return nodes(tree).find((node) => node.type === "@/features/lab/JobStatus")?.props; },
     picker() { return nodes(tree).find((node) => node.type === "./SongPassagePicker")?.props; },
-    header() { return nodes(tree).find((node) => node.type === "./LabWorkspaceHeader")?.props; },
+    header() { return nodes(tree).find((node) => node.type === "@/features/lab/LabWorkspaceHeader")?.props; },
   };
 }
 

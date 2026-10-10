@@ -6,7 +6,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { LAB_API, experimentName, labRequest, mediaUrl, seconds } from "@/lib/lab";
+import { LAB_API, labRequest, mediaUrl, seconds } from "@/lib/lab";
+import { EXPERIMENT_ID, EXPERIMENT_NAME } from "./experiment";
 import { MAX_DIRECTION_BATCH_SHOTS, MAX_LAB_SAVED_CLIPS, MAX_MUSIC_TIMELINE_SLOTS } from "@/lib/labLimits";
 import type {
   LabClip,
@@ -16,7 +17,7 @@ import type {
   NextSceneAdjustment,
   NextSceneOptions,
 } from "@/types/lab";
-import { useLabProject } from "./useLabProject";
+import { useLabProject } from "@/features/lab/useLabProject";
 import { useAudioWaveform } from "./useAudioWaveform";
 import {
   clearSlot,
@@ -41,23 +42,22 @@ import SourceWindowReview from "./SourceWindowReview";
 import MusicDirectionPanel from "./MusicDirectionPanel";
 import MusicSearchDetails from "./MusicSearchDetails";
 import MusicAnalysisDetails from "./MusicAnalysisDetails";
-import JobStatus from "./JobStatus";
+import JobStatus from "@/features/lab/JobStatus";
 import SceneLibraryPanel from "./SceneLibraryPanel";
-import LabWorkspaceHeader, { LabEmptyState } from "./LabWorkspaceHeader";
-import EditorIcon from "./EditorIcon";
+import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/LabWorkspaceHeader";
+import EditorIcon from "@/features/lab/EditorIcon";
 import DirectionIcon from "@/components/DirectionIcon";
-import EditorPopover from "./EditorPopover";
+import EditorPopover from "@/features/lab/EditorPopover";
 import { fitDraggedScene } from "./sceneLibrary";
 import NextScenePanel, { type NextSceneAuditionSelection } from "./NextScenePanel";
 import NextSceneAudition from "./NextSceneAudition";
 import { nextScenePair, nextSceneResult, sameSceneCrop } from "./nextScene";
 import styles from "./musicWorkspace.module.css";
 
-const EXPERIMENT_NAME = experimentName("music-sketch");
 type WorkspaceView = "ai" | "edit";
 
 export default function MusicWorkspace() {
-  const state = useLabProject("music-sketch");
+  const state = useLabProject(EXPERIMENT_ID);
   const document = state.document;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedDialogueId, setSelectedDialogueId] = useState<string | null>(null);

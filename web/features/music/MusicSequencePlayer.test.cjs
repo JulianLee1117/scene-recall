@@ -100,7 +100,7 @@ async function setup({ roundSourceTimes = false, sourceStart = 50, dialogueClips
       if (name === "./dialogueTransport") return dialogueTransport;
       if (name === "./dialogueGain") return dialogueGain;
       if (name === "./musicEdit") return { directionOf: () => ({ query: "" }) };
-      if (name === "@/lib/lab") return { mediaUrl: (value) => value, seconds: (value) => value.toFixed(2), experimentName: () => "AI Music Video" };
+      if (name === "@/lib/lab") return { mediaUrl: (value) => value, seconds: (value) => value.toFixed(2) };
       return { default: new Proxy({}, { get: (_, key) => key }) };
     },
   });

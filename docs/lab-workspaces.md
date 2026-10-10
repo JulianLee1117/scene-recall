@@ -16,7 +16,7 @@ Add an explicit entry to [the registry](../pipeline/lab/registry.py):
   or `session` for an experiment that does not create edit projects.
 
 AI Music Video uses `/lab/music-sketch` for both routes. Match Cuts opens
-`/match`; existing Match Cuts edits still use `/lab/visual-rhymes`. Transitions
+`/match` for both, under its original `visual-rhymes` identifier. Transitions
 uses `/lab/transitions` with session persistence and no saved-edit lifecycle. Recent
 projects must use `project_route`, even when the experiment's entry is a session.
 Do not special-case these paths independently in cards and recent-project lists.

@@ -72,12 +72,12 @@ def test_opening_drafts_preserves_existing_project_and_job_ledger(client, store)
     assert store.get_project(saved["id"]) == saved
 
 
-def test_registry_separates_entry_routes_from_saved_project_routes(client):
+def test_registry_owns_entry_and_saved_project_routes(client):
     experiments = {row["id"]: row for row in client.get("/lab/experiments").json()["experiments"]}
     assert experiments["music-sketch"]["route"] == experiments["music-sketch"]["project_route"] == "/lab/music-sketch"
     assert experiments["music-sketch"]["persistence"] == "project"
-    assert experiments["visual-rhymes"]["route"] == "/match"
-    assert experiments["visual-rhymes"]["project_route"] == "/lab/visual-rhymes"
+    # Match Cuts keeps its original identifier; its frozen editor is gone (ADR-0116).
+    assert experiments["visual-rhymes"]["route"] == experiments["visual-rhymes"]["project_route"] == "/match"
     assert experiments["visual-rhymes"]["persistence"] == "session"
 
 

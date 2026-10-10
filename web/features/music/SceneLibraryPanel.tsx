@@ -2,8 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { LabClip, MusicDirection, MusicMatchEvidence, MusicSlot } from "@/types/lab";
-import EditorIcon from "./EditorIcon";
-import EditorPopover from "./EditorPopover";
+import EditorIcon from "@/features/lab/EditorIcon";
+import EditorPopover from "@/features/lab/EditorPopover";
 import MusicSceneChoices from "./MusicSceneChoices";
 import ShotExplanation, { type ShotNeighbor } from "./ShotExplanation";
 import styles from "./sceneLibraryPanel.module.css";

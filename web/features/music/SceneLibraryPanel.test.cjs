@@ -98,7 +98,7 @@ test("a failed replacement keeps its existing clip and separate search error", (
 test("Why this shot keeps recorded context behind an anchored panel and respects locked direction controls", () => {
   const previous = { slot: { id: "before", start: 0, end: 1 }, clip: source };
   const app = setup({ previous, currentClip: { ...source, locked: true } });
-  const popover = app.find((node) => node.type === "./EditorPopover" && node.props.label === "Why this shot");
+  const popover = app.find((node) => node.type === "@/features/lab/EditorPopover" && node.props.label === "Why this shot");
   assert.ok(popover);
   assert.equal(app.find((node) => node.type === "./ShotExplanation"), undefined, "details are not inserted into the main page");
   const panel = popover.props.children(() => {});
