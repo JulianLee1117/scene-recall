@@ -2,7 +2,7 @@
 
 import { seconds } from "@/lib/lab";
 import type { MusicCue } from "./musicCues";
-import EditorPopover from "@/features/lab/EditorPopover";
+import EditorPopover from "@/features/lab/kit/EditorPopover";
 import styles from "./musicalCues.module.css";
 
 export default function MusicalCues({ cues, start, end, selectedId, onSelect, onClose }: {

@@ -5,7 +5,7 @@ const vm = require("node:vm");
 const { test } = require("node:test");
 const ts = require("typescript");
 const limits = {};
-vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, "../../lib/labLimits.ts"), "utf8"), {
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, "../../../lib/labLimits.ts"), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText, { exports: limits });
 const helpers = {};

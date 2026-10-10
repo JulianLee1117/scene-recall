@@ -6,8 +6,8 @@ import { isPlaybackSpace } from "@/lib/playbackShortcut";
 import type { EditorDirectionRange, LabDocument } from "@/types/lab";
 import { useAudioWaveform } from "./useAudioWaveform";
 import { waveformPath } from "./audioWaveform";
-import { availableDirectionRange, changeEditorDirection, directionRangeBounds, effectiveEditorDirection, fitDirectionRange, MAX_DIRECTION_RANGES, MIN_DIRECTION_RANGE, updateDirectionRange } from "@/features/lab/editorDirection";
-import EditorIcon from "@/features/lab/EditorIcon";
+import { availableDirectionRange, changeEditorDirection, directionRangeBounds, effectiveEditorDirection, fitDirectionRange, MAX_DIRECTION_RANGES, MIN_DIRECTION_RANGE, updateDirectionRange } from "@/features/lab/kit/editorDirection";
+import EditorIcon from "@/features/lab/kit/EditorIcon";
 import DirectionTimeInput from "./DirectionTimeInput";
 import styles from "./musicDirection.module.css";
 

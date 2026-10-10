@@ -17,7 +17,7 @@ import type {
   NextSceneAdjustment,
   NextSceneOptions,
 } from "@/types/lab";
-import { useLabProject } from "@/features/lab/useLabProject";
+import { useLabProject } from "@/features/lab/kit/useLabProject";
 import { useAudioWaveform } from "./useAudioWaveform";
 import {
   clearSlot,
@@ -42,12 +42,12 @@ import SourceWindowReview from "./SourceWindowReview";
 import MusicDirectionPanel from "./MusicDirectionPanel";
 import MusicSearchDetails from "./MusicSearchDetails";
 import MusicAnalysisDetails from "./MusicAnalysisDetails";
-import JobStatus from "@/features/lab/JobStatus";
+import JobStatus from "@/features/lab/kit/JobStatus";
 import SceneLibraryPanel from "./SceneLibraryPanel";
-import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/LabWorkspaceHeader";
-import EditorIcon from "@/features/lab/EditorIcon";
+import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/kit/LabWorkspaceHeader";
+import EditorIcon from "@/features/lab/kit/EditorIcon";
 import DirectionIcon from "@/components/DirectionIcon";
-import EditorPopover from "@/features/lab/EditorPopover";
+import EditorPopover from "@/features/lab/kit/EditorPopover";
 import { fitDraggedScene } from "./sceneLibrary";
 import NextScenePanel, { type NextSceneAuditionSelection } from "./NextScenePanel";
 import NextSceneAudition from "./NextSceneAudition";

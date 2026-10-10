@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { labRequest, mediaUrl } from "@/lib/lab";
-import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/LabWorkspaceHeader";
-import SourceBrowser from "@/features/lab/SourceBrowser";
+import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/kit/LabWorkspaceHeader";
+import SourceBrowser from "@/features/lab/kit/SourceBrowser";
 import { DEFAULT_RETIME, restoredRetime, speedTitle, cutSpeedTitle, fileSize, renderFileSummary, qualityTitle, activeRender, matchingSourceEndpoints, mergeRenderHistory, recipeTitle, restoredRecipe, samePair, sourceFromResult, sourcePayload, timingSweep, validatePair, variantTiming, workingChanges,
   type TransitionRetime, type SourceSelection, type TransitionCatalog, type TransitionJob, type TransitionRecipe, type TransitionRequest } from "./transitions";
 import styles from "./transitions.module.css";

@@ -189,7 +189,7 @@ async function workspaceHarness({ renders = [], failure = null, postFailureAt = 
       if (name === "./SpeedControls") return { default: function SpeedControls() {} };
       if (name === "./RecipeControls") return { default: function RecipeControls() {} };
       if (name === "./useNotebook") return { default: function useNotebook() { const [notebook, setNotebook] = react.useState({ schema_version: 1, variants: {}, recipes: [] }); return { notebook, setNotebook, error: "" }; } };
-      if (name === "@/features/lab/LabWorkspaceHeader") return { default: "LabWorkspaceHeader", LabEmptyState: "LabEmptyState" };
+      if (name === "@/features/lab/kit/LabWorkspaceHeader") return { default: "LabWorkspaceHeader", LabEmptyState: "LabEmptyState" };
       if (name === "@/lib/lab") return { mediaUrl: (value) => value, seconds: (value) => String(value), labRequest: async (route, options) => {
         requests.push({ route, options });
         if (failure) throw new Error(failure);

@@ -8,7 +8,7 @@ const compile = (file) => ts.transpileModule(fs.readFileSync(path.join(__dirname
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
 const helpers = {};
-vm.runInNewContext(compile("../lab/editorDirection.ts"), { exports: helpers });
+vm.runInNewContext(compile("../kit/editorDirection.ts"), { exports: helpers });
 const nodes = (node) => node == null || typeof node !== "object" ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
 const text = (node) => node == null || typeof node === "boolean" ? "" : typeof node !== "object" ? String(node) : Array.isArray(node) ? node.map(text).join("") : text(node.props?.children);
 
@@ -19,7 +19,7 @@ function harness(overrides = {}) {
     if (name === "react") return { useId: () => "direction" };
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "@/lib/lab") return { seconds: (value) => value.toFixed(2) };
-    if (name === "@/features/lab/editorDirection") return helpers;
+    if (name === "@/features/lab/kit/editorDirection") return helpers;
     if (name.endsWith(".css")) return { default: new Proxy({}, { get: (_, key) => key }) };
     return { default: name };
   } });

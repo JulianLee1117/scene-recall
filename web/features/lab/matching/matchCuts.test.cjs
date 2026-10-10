@@ -9,9 +9,9 @@ const compile = (file) => ts.transpileModule(fs.readFileSync(path.join(__dirname
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const lib = {};
-vm.runInNewContext(compile("../../lib/matchCuts.ts"), { exports: lib, process: { env: {} }, URLSearchParams });
+vm.runInNewContext(compile("../../../lib/matchCuts.ts"), { exports: lib, process: { env: {} }, URLSearchParams });
 const vision = {};
-vm.runInNewContext(compile("../../lib/matchVision.ts"), { exports: vision });
+vm.runInNewContext(compile("../../../lib/matchVision.ts"), { exports: vision });
 const close = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-6, `${message}: ${actual} != ${expected}`);
 
 test("a whole picture of the output's shape fills the box", () => {

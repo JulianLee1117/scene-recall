@@ -24,7 +24,7 @@ This is a small application registry, not a plugin framework.
 
 ## Use one workspace header
 
-Render [LabWorkspaceHeader](../web/features/lab/LabWorkspaceHeader.tsx) first
+Render [LabWorkspaceHeader](../web/features/lab/kit/LabWorkspaceHeader.tsx) first
 in `<main>`, before any container of your own, in loading, empty, unavailable
 and error states as well as the working screen. It is the app's chrome: the
 app bar shared with the home page, then the **Labs** return and the
@@ -36,7 +36,7 @@ For initial entry, use the shared `LabEmptyState` export from `LabWorkspaceHeade
 to keep the title, explanation and first action consistent between experiments.
 
 Project editors pass their state to the header, which composes
-[ProjectActions](../web/features/lab/ProjectActions.tsx) and its shared exit
+[ProjectActions](../web/features/lab/kit/ProjectActions.tsx) and its shared exit
 guard; every way out, the app bar's places included, then asks about unsaved
 edits. Keep project naming, save status, Save and the saved project's menu in
 this shared area. A session supplies only its title, and may pass `tools` for
@@ -44,7 +44,7 @@ a few header actions.
 
 ## Create projects only when there is work to keep
 
-Project editors use [useLabProject](../web/features/lab/useLabProject.ts):
+Project editors use [useLabProject](../web/features/lab/kit/useLabProject.ts):
 
 1. Opening without a saved project fetches
    `GET /lab/experiments/{experiment_id}/draft`. Its canonical document has

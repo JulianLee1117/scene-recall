@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } fr
 import { mediaUrl, seconds } from "@/lib/lab";
 import { isPlaybackSpace } from "@/lib/playbackShortcut";
 import type { Crop } from "@/types/lab";
-import EditorIcon from "@/features/lab/EditorIcon";
+import EditorIcon from "@/features/lab/kit/EditorIcon";
 import { nextSceneCropGeometry, nextSceneCropZoom, nextScenePanCrop, nextSceneZoomCrop } from "./nextScene";
 import player from "./sequencePlayer.module.css";
 import styles from "./nextSceneAudition.module.css";

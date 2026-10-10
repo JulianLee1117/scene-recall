@@ -8,7 +8,7 @@ const compile = (file) => ts.transpileModule(fs.readFileSync(path.join(__dirname
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
 const limits = {};
-vm.runInNewContext(compile("../../lib/labLimits.ts"), { exports: limits });
+vm.runInNewContext(compile("../../../lib/labLimits.ts"), { exports: limits });
 const text = (node) => node == null || typeof node === "boolean" ? "" : typeof node !== "object" ? String(node) : Array.isArray(node) ? node.map(text).join("") : text(node.props?.children);
 const nodes = (node) => node == null || typeof node !== "object" ? [] : Array.isArray(node) ? node.flatMap(nodes) : [node, ...nodes(node.props?.children)];
 function harness(duration, passage = { start: 0, end: 30 }) {

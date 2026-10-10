@@ -1,7 +1,7 @@
 import type { LabDocument } from "@/types/lab";
 import { seconds } from "@/lib/lab";
 import { songMeaning } from "./songMeaning";
-import EditorIcon from "@/features/lab/EditorIcon";
+import EditorIcon from "@/features/lab/kit/EditorIcon";
 import styles from "./musicWorkspace.module.css";
 
 export default function MusicAnalysisDetails({ document, working, onAnalyze }: {

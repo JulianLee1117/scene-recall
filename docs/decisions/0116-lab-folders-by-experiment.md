@@ -20,11 +20,12 @@ experiment names beside the registry's.
 
 ## Decision
 
-- Each experiment's screens live in their own folder under `web/features/`:
-  `music`, `matching`, `transitions`, `algmods`. `web/features/lab` holds only
-  the kit: the directory, the workspace header, the project lifecycle
-  (`useLabProject`, `ProjectActions`, editor direction), the source browser,
-  job status with its details, and the icon and popover pieces.
+- The Lab is one folder, `web/features/lab`: its directory at the root, the
+  shared kit in `kit/` (the workspace header, the project lifecycle with
+  `useLabProject`, `ProjectActions` and editor direction, the source browser,
+  job status with its details, and the icon and popover pieces), and one
+  folder per experiment beside it: `music`, `matching`, `transitions`,
+  `algmods`. An experiment imports the kit and nothing else of the Lab.
 - The web editor at `/lab/visual-rhymes` is removed with its components, its
   types and its tests. The `visual-rhymes` registry entry stays as Match Cuts'
   identity, with `/match` as both its entry and its `project_route`. The
@@ -36,7 +37,7 @@ experiment names beside the registry's.
 
 ## Consequences
 
-- A new experiment is one registry line, one route file and one folder, and
-  the kit's role is visible from its folder.
+- A new experiment is one registry line, one route file and one folder under
+  the Lab, and the kit's role is visible from its folder.
 - One address for Match Cuts. A typed `/lab/visual-rhymes` is a 404.
 - Music's behaviour is unchanged; its files moved.

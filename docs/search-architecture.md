@@ -24,10 +24,10 @@ records.
 | Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103, 0104, 0105 |
 | Render effects (feature-locked overlays, hard crops, panels, masks, screens) | Effects | `pipeline/lab/effects.py`, `pipeline/lab/screens.py`, `pipeline/lab/media.py` | 0106, 0107, 0108, 0099 |
 | Generated sources (AI clips placed as shots) | Generated sources | `pipeline/lab/generated.py` | 0109 |
-| Alg Mods (treatments on one film window; tile bank) | Alg Mods Lab | `pipeline/algmods/`, `web/features/algmods/` | 0110 (0070 pattern) |
+| Alg Mods (treatments on one film window; tile bank) | Alg Mods Lab | `pipeline/algmods/`, `web/features/lab/algmods/` | 0110 (0070 pattern) |
 | Regions (masking spec shared by treatments; subject by video matte, box, near/far by depth) | Alg Mods Lab | `pipeline/lab/regions.py`, `pipeline/lab/matte.py`, `pipeline/lab/depth.py` | 0110 |
 | Grafts (landmark-aligned pieces of other shots, as plans) | Alg Mods Lab | `pipeline/lab/grafts.py`, `pipeline/algmods/composite.py` | 0110 (landmarks from 0099) |
-| Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/matching/` | 0099 (0008 gates ordinary search) |
+| Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/lab/matching/` | 0099 (0008 gates ordinary search) |
 | Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067, 0115, 0117 |
 
 Frozen: kept runnable, with no new investment. Their decision records hold the
@@ -457,10 +457,11 @@ section. Cancelling an uploaded replacement restores the opening revision
 and pre-picker Undo history. Whole generation remains explicit; filling gaps or
 replacing a chosen shot preserves the existing timeline.
 Match Cuts is one screen: an outgoing cut point, a results grid of incoming
-instants and an in-browser audition (ADR-0099). Each experiment's screens live
-in their own folder under `web/features/` (`music`, `matching`, `transitions`,
-`algmods`); `web/features/lab` holds only the shared kit: the directory, the
-workspace header, the project lifecycle, the source browser and job status
+instants and an in-browser audition (ADR-0099). The Lab is one folder,
+`web/features/lab`: its directory at the root, the shared kit in `kit/` (the
+workspace header, the project lifecycle, the source browser and job status),
+and one folder per experiment beside it (`music`, `matching`, `transitions`,
+`algmods`); an experiment imports the kit and nothing else of the Lab
 (ADR-0116). All call shared Python project, source, job and render services
 under `pipeline/lab`; no generic plugin system or second search engine is
 required.
@@ -1690,7 +1691,7 @@ Jobs freeze:
 Outputs are verified and reused only for identical requests, and earlier
 profiles stay available for comparison. Profile history, limits and acceptance
 notes are in ADR-0070 to ADR-0076, `pipeline/transitions/` and
-`web/features/transitions/`.
+`web/features/lab/transitions/`.
 
 ### Ingestion
 

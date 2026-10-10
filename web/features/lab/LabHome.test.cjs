@@ -48,7 +48,7 @@ async function deletionHarness({ storageFailure = null, cleanupPending = false, 
       useEffect(callback) { effect ??= callback; },
     };
     if (name === "react/jsx-runtime") return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
-    if (name === "./ProjectActions") return { DeleteProjectButton: "DeleteProjectButton" };
+    if (name === "./kit/ProjectActions") return { DeleteProjectButton: "DeleteProjectButton" };
     if (name === "@/lib/lab") return { labRequest: async (route, options) => {
       calls.push({ route, options });
       if (options?.method === "DELETE") {

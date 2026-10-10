@@ -5,7 +5,7 @@ import { mediaUrl, seconds } from "@/lib/lab";
 import type {
   LabJob, NextSceneCandidate, NextSceneOptions, NextSceneScope,
 } from "@/types/lab";
-import EditorIcon from "@/features/lab/EditorIcon";
+import EditorIcon from "@/features/lab/kit/EditorIcon";
 import { nextScenePair, nextScenePreview, nextSceneResult } from "./nextScene";
 import styles from "./nextScene.module.css";
 

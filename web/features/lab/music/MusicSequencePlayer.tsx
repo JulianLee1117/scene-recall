@@ -9,7 +9,7 @@ import { slotAt } from "./sequencePosition";
 import { musicVolume } from "./dialogueAudio";
 import { createDialoguePool } from "./dialogueTransport";
 import { releaseDialogueAudio } from "./dialogueGain";
-import EditorIcon from "@/features/lab/EditorIcon";
+import EditorIcon from "@/features/lab/kit/EditorIcon";
 import type { LabClip, LabDocument, MusicSlot } from "@/types/lab";
 import styles from "./sequencePlayer.module.css";
 

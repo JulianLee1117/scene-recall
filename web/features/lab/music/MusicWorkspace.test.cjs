@@ -10,7 +10,7 @@ const compile = (name) => ts.transpileModule(fs.readFileSync(path.join(__dirname
 }).outputText;
 const compiled = compile("MusicWorkspace.tsx");
 const limits = {};
-vm.runInNewContext(compile("../../lib/labLimits.ts"), { exports: limits });
+vm.runInNewContext(compile("../../../lib/labLimits.ts"), { exports: limits });
 const musicEdit = {};
 const dialogue = {};
 vm.runInNewContext(compile("dialogueAudio.ts"), { exports: dialogue });
@@ -76,7 +76,7 @@ function harness({ document: overrides, search = "?project=project", ...stateOve
     require(name) {
       if (name === "react") return react;
       if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
-      if (name === "@/features/lab/useLabProject") return { useLabProject: () => state };
+      if (name === "@/features/lab/kit/useLabProject") return { useLabProject: () => state };
       if (name === "./useAudioWaveform") return { useAudioWaveform: () => ({ peaks: [], status: "" }) };
       if (name === "./musicEdit") return musicEdit;
       if (name === "./dialogueAudio") return dialogue;
@@ -99,9 +99,9 @@ function harness({ document: overrides, search = "?project=project", ...stateOve
     dialogue() { return nodes(tree).find((node) => node.type === "./DialogueEditor")?.props; },
     scenes() { return nodes(tree).find((node) => node.type === "./SceneLibraryPanel")?.props; },
     alerts() { return nodes(tree).filter((node) => node.type === "div" && node.props?.role === "alert").map(text); },
-    progress() { return nodes(tree).find((node) => node.type === "@/features/lab/JobStatus")?.props; },
+    progress() { return nodes(tree).find((node) => node.type === "@/features/lab/kit/JobStatus")?.props; },
     picker() { return nodes(tree).find((node) => node.type === "./SongPassagePicker")?.props; },
-    header() { return nodes(tree).find((node) => node.type === "@/features/lab/LabWorkspaceHeader")?.props; },
+    header() { return nodes(tree).find((node) => node.type === "@/features/lab/kit/LabWorkspaceHeader")?.props; },
   };
 }
 

@@ -9,8 +9,8 @@ import {
   settingsFrom, type ChainLink, type MatchFocus, type MatchSettings, type MomentMatch, type MomentSearchResponse,
   type MomentShot, type OutputFormat,
 } from "@/lib/matchCuts";
-import LabWorkspaceHeader, { LabEmptyState } from "../lab/LabWorkspaceHeader";
-import SourceBrowser from "../lab/SourceBrowser";
+import LabWorkspaceHeader, { LabEmptyState } from "../kit/LabWorkspaceHeader";
+import SourceBrowser from "../kit/SourceBrowser";
 import { FramedImage } from "./Framed";
 import MatchIcon from "./MatchIcon";
 import SequencePlayer, { type Segment } from "./SequencePlayer";

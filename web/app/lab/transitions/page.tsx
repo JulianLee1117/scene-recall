@@ -1,3 +1,3 @@
-import TransitionWorkspace from "@/features/transitions/TransitionWorkspace";
+import TransitionWorkspace from "@/features/lab/transitions/TransitionWorkspace";
 
 export default function Page() { return <TransitionWorkspace />; }

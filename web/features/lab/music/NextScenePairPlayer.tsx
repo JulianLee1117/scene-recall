@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { mediaUrl, seconds } from "@/lib/lab";
 import { isPlaybackSpace } from "@/lib/playbackShortcut";
-import EditorIcon from "@/features/lab/EditorIcon";
+import EditorIcon from "@/features/lab/kit/EditorIcon";
 import type { NextSceneAuditionSelection } from "./NextScenePanel";
 import playerStyles from "./sequencePlayer.module.css";
 import styles from "./nextSceneAudition.module.css";

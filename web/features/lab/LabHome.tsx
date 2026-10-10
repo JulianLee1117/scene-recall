@@ -6,7 +6,7 @@ import AppBar from "@/components/AppBar";
 import chrome from "@/components/pageChrome.module.css";
 import { labRequest, mediaUrl } from "@/lib/lab";
 import type { LabExperiment, LabProjectDeletion, LabProjectSummary } from "@/types/lab";
-import { DeleteProjectButton } from "./ProjectActions";
+import { DeleteProjectButton } from "./kit/ProjectActions";
 import styles from "./labHome.module.css";
 
 const cleanupNotice = "Project deleted. Some generated files are still awaiting cleanup. Your original music and films are kept.";

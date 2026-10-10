@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { labRequest, mediaUrl, seconds } from "@/lib/lab";
 import type { WorkerStatus } from "@/types/lab";
-import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/LabWorkspaceHeader";
-import SourceBrowser from "@/features/lab/SourceBrowser";
+import LabWorkspaceHeader, { LabEmptyState } from "@/features/lab/kit/LabWorkspaceHeader";
+import SourceBrowser from "@/features/lab/kit/SourceBrowser";
 import { activeRender, baseline, getPath, round, sameRequest, sceneKey, setPath, sourceFromResult, sourcePayload, specFor, treatmentSummary, validateWindow,
   type Catalog, type Control, type ParamValue, type RenderJob, type RenderRequest, type SourceSelection, type Treatment, type TreatmentKind } from "./algmods";
 import styles from "./algmods.module.css";
