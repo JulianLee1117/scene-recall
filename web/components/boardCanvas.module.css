@@ -15,22 +15,6 @@
     height 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.groupTitle {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin: 0;
-  color: var(--page-text);
-  font-size: 13px;
-  font-weight: 550;
-  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.groupTitle span { color: var(--page-muted); font-size: 12px; font-weight: 400; }
-
 .slot {
   position: absolute;
   top: 0;
@@ -55,7 +39,7 @@
 .lifted :global(.result-card-marks) { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile, .groupTitle, .slot { transition: none; }
+  .tile, .slot { transition: none; }
   .lifted { box-shadow: none; }
   .lifted :global(.result-card) { transform: none; }
 }

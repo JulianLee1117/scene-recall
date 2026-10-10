@@ -4,8 +4,8 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref }
 import ShotCard from "./ShotCard";
 import { useFrameAspects } from "@/hooks/useFrameAspects";
 import { BOARD_INDEX_ATTRIBUTE, useBoardReorder } from "@/hooks/useBoardReorder";
-import { layoutBoard, placeAt, type BoardBlock } from "@/lib/boardLayout";
-import { moveItem, type BoardGroup } from "@/lib/boardOrder";
+import { layoutBoard, placeAt, type BoardTile } from "@/lib/boardLayout";
+import { moveItem } from "@/lib/boardOrder";
 import { cssAspect, rowHeightFor } from "@/lib/justifiedRows";
 import { displayTitle, filmLabel, formatTime } from "@/lib/format";
 import type { BookmarkRecord, RecipeMatchFacet, SearchResult } from "@/types/api";
@@ -100,12 +100,13 @@ const Tile = memo(function Tile({
 /**
  * The board as one canvas. Every scene is one element placed by a transform
  * from one layout, so it glides wherever it goes next: out of the way of a
- * lifted scene, into its new place on a drop, or into its film's group when
- * the arrangement changes. Tiles keep a stable element order, since moving
- * a lifted tile's element would drop the pointer capture.
+ * lifted scene, into its new place on a drop, or to its place in another
+ * arrangement. Tiles keep a stable element order, since moving a lifted
+ * tile's element would drop the pointer capture.
  */
-export default function BoardCanvas({ groups, scale, canReorder, onReorder, actions }: {
-  groups: BoardGroup[];
+export default function BoardCanvas({ items, scale, canReorder, onReorder, actions }: {
+  /** The scenes in the sequence the board shows them. */
+  items: BookmarkRecord[];
   /** Multiplies the medium row height. */
   scale: number;
   canReorder: boolean;
@@ -136,19 +137,13 @@ export default function BoardCanvas({ groups, scale, canReorder, onReorder, acti
   }, [scale]);
 
   const { aspectOf, learnAspect } = useFrameAspects();
-  const items = useMemo(() => groups.flatMap((group) => group.items), [groups]);
   const byId = useMemo(() => new Map(items.map((bookmark) => [bookmark.bookmark_id, bookmark])), [items]);
   // While a scene is lifted, the sequence it is being carried through.
   const [tentative, setTentative] = useState<string[] | null>(null);
-  const tileBlock = (bookmark: BookmarkRecord): BoardBlock =>
-    ({ kind: "tile", id: bookmark.bookmark_id, aspect: cssAspect(aspectOf(sceneOf(bookmark))) });
-  const blocks: BoardBlock[] = tentative
-    ? tentative.map((id) => tileBlock(byId.get(id) as BookmarkRecord))
-    : groups.flatMap((group) => [
-      ...(group.title ? [{ kind: "heading", key: group.key } as BoardBlock] : []),
-      ...group.items.map(tileBlock),
-    ]);
-  const layout = frame ? layoutBoard(blocks, frame.width, frame.rowHeight) : null;
+  const shown = tentative ? tentative.flatMap((id) => byId.get(id) ?? []) : items;
+  const tileOf = (bookmark: BookmarkRecord): BoardTile =>
+    ({ id: bookmark.bookmark_id, aspect: cssAspect(aspectOf(sceneOf(bookmark))) });
+  const layout = frame ? layoutBoard(shown.map(tileOf), frame.width, frame.rowHeight) : null;
 
   // The lifted scene follows the pointer by its own transform, set without a render.
   const grab = useRef<{ id: string; dx: number; dy: number; x: number; y: number } | null>(null);
@@ -232,12 +227,6 @@ export default function BoardCanvas({ groups, scale, canReorder, onReorder, acti
       className={`${styles.canvas}${liftedId ? ` ${styles.reordering}` : ""}`}
       style={{ height: layout?.height ?? 0 }}
     >
-      {layout && !tentative && groups.map((group) => group.title && (
-        <h2 key={group.key} className={styles.groupTitle} style={{ transform: `translateY(${layout.headings.get(group.key) ?? 0}px)` }}>
-          {group.title}
-          <span>{group.items.length}</span>
-        </h2>
-      ))}
       {layout && items.map((bookmark, index) => {
         const place = layout.tiles.get(bookmark.bookmark_id);
         if (!place) return null;

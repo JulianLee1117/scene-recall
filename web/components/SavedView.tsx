@@ -47,6 +47,7 @@ export default function SavedView({
     () => ({ pendingUnitIds, onShotClick, onUseInSearch, disabledUseFacets, onToggleBookmark, onRemoveBookmark }),
     [pendingUnitIds, onShotClick, onUseInSearch, disabledUseFacets, onToggleBookmark, onRemoveBookmark],
   );
+  const items = useMemo(() => arrangeBoard(bookmarks, prefs.arrangement), [bookmarks, prefs.arrangement]);
 
   // Heard, not seen: the move is visible on the board.
   const [spoken, setSpoken] = useState("");
@@ -116,7 +117,7 @@ export default function SavedView({
         </div>
       ) : (
         <BoardCanvas
-          groups={arrangeBoard(bookmarks, prefs.arrangement)}
+          items={items}
           scale={prefs.scale}
           canReorder={prefs.arrangement === "yours" && bookmarks.length > 1}
           onReorder={reorder}

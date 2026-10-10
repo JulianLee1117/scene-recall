@@ -1,14 +1,14 @@
 import { layoutRows } from "./justifiedRows";
 
 /**
- * The Saved board laid out in explicit positions: justified rows of tiles,
- * with a heading before each film group. Every tile is placed by its id, so
- * a tile keeps its element and glides when the order or the arrangement
- * changes.
+ * The Saved board laid out in explicit positions: justified rows of tiles.
+ * Every tile is placed by its id, so a tile keeps its element and glides
+ * when the order changes.
  */
-export type BoardBlock =
-  | { kind: "tile"; id: string; aspect: number }
-  | { kind: "heading"; key: string };
+export interface BoardTile {
+  id: string;
+  aspect: number;
+}
 
 export interface TilePlace {
   x: number;
@@ -20,54 +20,30 @@ export interface TilePlace {
 export interface BoardLayout {
   height: number;
   tiles: Map<string, TilePlace>;
-  /** Each heading's top, by group key. */
-  headings: Map<string, number>;
 }
 
 export const BOARD_GAP = 2;
-/** A heading's line plus the room below it. */
-export const HEADING_HEIGHT = 30;
-/** The room above a heading that follows other rows. */
-export const GROUP_GAP = 26;
 
 const round = (value: number) => Math.round(value * 100) / 100;
 
-export function layoutBoard(blocks: BoardBlock[], width: number, rowHeight: number, gap = BOARD_GAP): BoardLayout {
+export function layoutBoard(items: BoardTile[], width: number, rowHeight: number, gap = BOARD_GAP): BoardLayout {
   const tiles = new Map<string, TilePlace>();
-  const headings = new Map<string, number>();
+  if (!items.length) return { height: 0, tiles };
+  const rows = layoutRows(items.map((tile) => tile.aspect), width, rowHeight, gap);
   let y = 0;
-  let index = 0;
-  while (index < blocks.length) {
-    const block = blocks[index];
-    if (block.kind === "heading") {
-      if (y > 0) y += GROUP_GAP;
-      headings.set(block.key, y);
-      y += HEADING_HEIGHT;
-      index += 1;
-      continue;
+  let start = 0;
+  rows.sizes.forEach((size, row) => {
+    const height = rows.heights[row];
+    let x = 0;
+    for (const tile of items.slice(start, start + size)) {
+      const tileWidth = tile.aspect * height;
+      tiles.set(tile.id, { x: round(x), y: round(y), width: round(tileWidth), height: round(height) });
+      x += tileWidth + gap;
     }
-    const run: Array<{ id: string; aspect: number }> = [];
-    while (index < blocks.length && blocks[index].kind === "tile") {
-      const tile = blocks[index] as { id: string; aspect: number };
-      run.push(tile);
-      index += 1;
-    }
-    const rows = layoutRows(run.map((tile) => tile.aspect), width, rowHeight, gap);
-    let start = 0;
-    rows.sizes.forEach((size, row) => {
-      const height = rows.heights[row];
-      let x = 0;
-      for (const tile of run.slice(start, start + size)) {
-        const tileWidth = tile.aspect * height;
-        tiles.set(tile.id, { x: round(x), y: round(y), width: round(tileWidth), height: round(height) });
-        x += tileWidth + gap;
-      }
-      start += size;
-      y += height + gap;
-    });
-    y -= gap;
-  }
-  return { height: round(Math.max(0, y)), tiles, headings };
+    start += size;
+    y += height + gap;
+  });
+  return { height: round(Math.max(0, y - gap)), tiles };
 }
 
 /**

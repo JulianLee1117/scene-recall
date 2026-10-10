@@ -32,25 +32,18 @@ test("moveItem places an item at an insertion index and leaves a no-op list unto
   assert.deepEqual(list, ["a", "b", "c", "d"], "the list itself is never changed");
 });
 
-test("Your order shows the board as it is; Newest and By film are views that reorder nothing", () => {
+test("Your order shows the board as it is; Newest and By film are sequences that move nothing", () => {
   const bookmarks = [
     record("late", { savedDay: 3, start: 40 }),
     record("early", { savedDay: 1, start: 10, film: "heat", title: "Heat" }),
     record("mid", { savedDay: 2, start: 5 }),
+    record("other", { savedDay: 4, start: 1, film: "heat-remake", title: "Heat" }),
   ];
-  const yours = board.arrangeBoard(bookmarks, "yours");
-  assert.equal(yours.length, 1); assert.equal(yours[0].title, null);
-  assert.equal(yours[0].items, bookmarks, "the board's own order is the list, untouched");
-
-  const newest = board.arrangeBoard(bookmarks, "newest");
-  assert.deepEqual(ids(newest[0].items), ["late", "mid", "early"]);
-
-  const byFilm = board.arrangeBoard(bookmarks, "film");
-  assert.deepEqual(plain(byFilm).map((group) => [group.title, ids(group.items)]), [
-    [format.displayTitle("Heat"), ["early"]],
-    [format.displayTitle("Moonlight"), ["mid", "late"]],
-  ], "films by name, each film's scenes in story order");
-  assert.deepEqual(ids(bookmarks), ["late", "early", "mid"], "views never change the board");
+  assert.equal(board.arrangeBoard(bookmarks, "yours"), bookmarks, "the board's own order is the list, untouched");
+  assert.deepEqual(ids(board.arrangeBoard(bookmarks, "newest")), ["other", "late", "mid", "early"]);
+  assert.deepEqual(ids(board.arrangeBoard(bookmarks, "film")), ["early", "other", "mid", "late"],
+    "one board still: films by name, each film's scenes together in story order");
+  assert.deepEqual(ids(bookmarks), ["late", "early", "mid", "other"], "views never change the board");
 });
 
 test("hasUserOrder reads whether anything has been placed", () => {

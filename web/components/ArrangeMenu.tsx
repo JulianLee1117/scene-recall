@@ -9,8 +9,8 @@ import DirectionIcon from "./DirectionIcon";
 import styles from "./arrangeMenu.module.css";
 
 /**
- * How the Saved board is laid out. Your order is the board's own and the only
- * one stored; Newest and By film are views over it and never move a scene.
+ * How the Saved board is ordered. Your order is the board's own and the only
+ * one stored; Newest and By film are views over it that never move a scene.
  */
 export default function ArrangeMenu({ value, placed, onChange }: {
   value: Arrangement;

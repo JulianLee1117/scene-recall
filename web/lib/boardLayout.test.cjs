@@ -13,27 +13,16 @@ vm.runInNewContext(compile("justifiedRows.ts"), { exports: rows });
 const board = {};
 vm.runInNewContext(compile("boardLayout.ts"), { exports: board, Map, require(name) { if (name === "./justifiedRows") return rows; throw new Error(name); } });
 
-const tile = (id, aspect = 2) => ({ kind: "tile", id, aspect });
+const tile = (id, aspect = 2) => ({ id, aspect });
 const place = (layout, id) => JSON.parse(JSON.stringify(layout.tiles.get(id)));
 
-test("tiles fill justified rows, a short last row keeps the target height, and headings take their room", () => {
+test("tiles fill justified rows and a short last row keeps the target height", () => {
   // Width 402 with a 2px gap: two 2:1 tiles make a row 100 tall.
   const layout = board.layoutBoard([tile("a"), tile("b"), tile("c")], 402, 100);
   assert.deepEqual(place(layout, "a"), { x: 0, y: 0, width: 200, height: 100 });
   assert.deepEqual(place(layout, "b"), { x: 202, y: 0, width: 200, height: 100 });
   assert.deepEqual(place(layout, "c"), { x: 0, y: 102, width: 200, height: 100 }, "alone on the last row, at the target height");
   assert.equal(layout.height, 202);
-
-  const grouped = board.layoutBoard([
-    { kind: "heading", key: "heat" }, tile("a"), tile("b"),
-    { kind: "heading", key: "moon" }, tile("c"),
-  ], 402, 100);
-  assert.equal(grouped.headings.get("heat"), 0, "the first heading sits at the top");
-  assert.equal(place(grouped, "a").y, board.HEADING_HEIGHT);
-  const second = board.HEADING_HEIGHT + 100 + board.GROUP_GAP;
-  assert.equal(grouped.headings.get("moon"), second, "a later group leaves room above its heading");
-  assert.equal(place(grouped, "c").y, second + board.HEADING_HEIGHT);
-  assert.equal(grouped.height, second + board.HEADING_HEIGHT + 100);
   assert.equal(board.layoutBoard([], 402, 100).height, 0);
 });
 

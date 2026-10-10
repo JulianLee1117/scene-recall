@@ -2,9 +2,10 @@ import type { BookmarkRecord } from "@/types/api";
 import { displayTitle, filmLabel } from "./format";
 
 /**
- * How the Saved board is laid out. "yours" is the board's own order and the
+ * How the Saved board is ordered. "yours" is the board's own order and the
  * only one that is stored; the others are views over it and never move a
- * thing until one is kept as your order.
+ * thing. Whatever the arrangement, the board stays one board: a view changes
+ * the sequence of the scenes, never the shape of the page.
  */
 export type Arrangement = "yours" | "newest" | "film";
 
@@ -14,38 +15,30 @@ export const ARRANGEMENTS: ReadonlyArray<{ value: Arrangement; label: string }> 
   { value: "film", label: "By film" },
 ];
 
-export interface BoardGroup {
-  key: string;
-  /** A heading when the arrangement groups; none for the plain board. */
-  title: string | null;
-  items: BookmarkRecord[];
-}
-
 const savedAt = (bookmark: BookmarkRecord) => Date.parse(bookmark.created_at) || 0;
 const momentOf = (bookmark: BookmarkRecord) => bookmark.scene?.t_start ?? bookmark.evidence_timestamp;
 const filmTitleOf = (bookmark: BookmarkRecord) => displayTitle(bookmark.film_title || filmLabel(bookmark.film_id));
 
-/** The board as the arrangement shows it. The list itself is never changed. */
-export function arrangeBoard(bookmarks: BookmarkRecord[], arrangement: Arrangement): BoardGroup[] {
+/** The board's scenes in the arrangement's sequence. The list itself is never changed. */
+export function arrangeBoard(bookmarks: BookmarkRecord[], arrangement: Arrangement): BookmarkRecord[] {
   if (arrangement === "newest") {
-    const items = [...bookmarks].sort(
+    return [...bookmarks].sort(
       (a, b) => savedAt(b) - savedAt(a) || a.bookmark_id.localeCompare(b.bookmark_id),
     );
-    return [{ key: "newest", title: null, items }];
   }
   if (arrangement === "film") {
-    const groups = new Map<string, BoardGroup>();
-    for (const bookmark of bookmarks) {
-      const group = groups.get(bookmark.film_id) ?? { key: bookmark.film_id, title: filmTitleOf(bookmark), items: [] };
-      group.items.push(bookmark);
-      groups.set(bookmark.film_id, group);
-    }
-    // A film's scenes in story order; films by name.
-    return [...groups.values()]
-      .map((group) => ({ ...group, items: [...group.items].sort((a, b) => momentOf(a) - momentOf(b)) }))
-      .sort((a, b) => (a.title ?? "").localeCompare(b.title ?? ""));
+    // Films by name, each film's scenes together in story order.
+    const titles = new Map(bookmarks.map((bookmark) => [bookmark.film_id, filmTitleOf(bookmark)]));
+    const title = (bookmark: BookmarkRecord) => titles.get(bookmark.film_id) ?? "";
+    return [...bookmarks].sort(
+      (a, b) =>
+        title(a).localeCompare(title(b)) ||
+        a.film_id.localeCompare(b.film_id) ||
+        momentOf(a) - momentOf(b) ||
+        a.bookmark_id.localeCompare(b.bookmark_id),
+    );
   }
-  return [{ key: "board", title: null, items: bookmarks }];
+  return bookmarks;
 }
 
 /** Whether a scene has been placed by hand yet. */
