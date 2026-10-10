@@ -175,16 +175,17 @@ export default function ShotCard({
           )}
 
           <span className="result-card-overlay" style={{ opacity: hovered ? 1 : 0 }}>
+            {/* The film first; beneath it, quieter, the line that says why it is here. */}
+            <span className="result-overlay-title">
+              <span className="result-film">{filmTitle}</span>
+              <span className="result-time">{formatTime(evidenceTime)}</span>
+            </span>
             {evidence && (
               <span className="result-overlay-evidence">
                 <span className="result-overlay-kind">{evidence.kind}</span>{" "}
                 {evidence.text}
               </span>
             )}
-            <span className="result-overlay-title">
-              <span className="result-film">{filmTitle}</span>
-              <span className="result-time">{formatTime(evidenceTime)}</span>
-            </span>
           </span>
         </span>
 
