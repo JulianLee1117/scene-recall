@@ -383,7 +383,12 @@ Can overlap with Phase 3 once the pilot evidence exists.
    - per-film Highlights and Hidden gems browsing.
 8. Speed: resident vectors (GPU or RAM) for exact search; target under 500 ms.
 9. Once the evidence exists, simplify the category composer: one box with
-   auto-detected quote/character/film and optional chips.
+   auto-detected quote/character/film and optional chips. A scene used in a
+   search becomes one reference with match toggles (story, look, framing,
+   mood, dialogue) rather than a card per category, and Related becomes a
+   one-click "More like this" whose default is chosen by comparing top results
+   on 10-15 references. The owner rarely uses Related because it asks for a
+   category first (2026-10-09).
 10. Log plays, saves, placements and replacements for the later taste model.
 
 Supersedes ADR-0004's restriction on priors and re-ranking; the ordering problem
@@ -431,6 +436,13 @@ Wish and Starjunk stay as regression passages. Supersedes LLM numeric cut timing
   foreground/background composition.
 - Sound-event search, trailer matching, and folding Match Cuts into the
   optimizer.
+- Picture v2: re-describe each shot from its hero frame at full image detail.
+  The Picture text now comes from up to three stills at low detail without
+  film context. Most of it is accurate, but dark, blurred or fine detail reads
+  as blur (a shot of tape wrapped across a lens became "indistinct vertical
+  forms and scattered lights"). Make it a versioned derivation that new films
+  get first, and backfill the library only if a comparison on visual-detail
+  queries improves.
 
 ## Frozen (keep code and data; no new investment)
 
