@@ -203,6 +203,20 @@ def test_calibration_maps_chance_to_zero_and_the_rare_top_to_one():
 # ---------------------------------------------------------------------------
 
 
+def test_build_identity_follows_the_evidence_not_only_the_profiles(tmp_path):
+    film = {"film_id": "f" * 64, "moments_profile": "match-v1-a", "measure_profile": "measure-v3-b",
+            "evidence": ["sha-one", "2026-10-10T00:00:00+00:00", "2026-10-09T00:00:00+00:00"]}
+    same = moment_index.build_identity([film])
+    assert same == moment_index.build_identity([dict(film)]) and len(same) == 16
+    redescribed = {**film, "evidence": ["sha-two", *film["evidence"][1:]]}
+    assert moment_index.build_identity([redescribed]) != same
+    remeasured = {**film, "evidence": [film["evidence"][0], "2026-10-11T00:00:00+00:00", film["evidence"][2]]}
+    assert moment_index.build_identity([remeasured]) != same
+    assert moment_index.published(tmp_path) is None
+    (tmp_path / "manifest.json").write_text('{"id": "%s"}' % same, encoding="utf-8")
+    assert moment_index.published(tmp_path) == same
+
+
 def test_camera_at_averages_reliable_pairs_around_each_time():
     flow = [[0.0, 0.1, 0.0, 0, 0, 0, 1], [1 / 6, 0.3, 0.0, 0, 0, 0, 1], [2 / 6, 9.9, 9.9, 0, 0, 0, 0]]
     camera = moment_index.camera_at(np.array([0.1, 5.0]), flow)

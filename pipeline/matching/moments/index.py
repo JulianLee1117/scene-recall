@@ -271,7 +271,8 @@ def _load_film(assets: Path, db: Any, film: Any, progress: Callable[[str], None]
     velocity = subject_velocity(times, owner, boxes, classes)
     cuts = {index: (shots.get(unit["unit_id"]) or {}).get("cuts") or [] for index, unit in enumerate(units)}
     from pipeline.evidence import hero
-    shown = ((store.serving_artifact(assets, film.film_id, hero.PRODUCER) or {}).get("data") or {}).get("shots") or {}
+    hero_document = store.serving_artifact(assets, film.film_id, hero.PRODUCER) or {}
+    shown = (hero_document.get("data") or {}).get("shots") or {}
     pictures = {index: (shown.get(unit["unit_id"]) or {}).get("pictures") for index, unit in enumerate(units)}
     ok = usable(times, owner, arrays["gray"], arrays["described"].astype(bool), cuts,
                 {index: spans for index, spans in pictures.items() if spans})
@@ -279,12 +280,36 @@ def _load_film(assets: Path, db: Any, film: Any, progress: Callable[[str], None]
     arrays["_moments"] = _film_moments(arrays, aspect)
     film_row = {"film_id": film.film_id, "title": film.title, "aspect": aspect, "content_box": content,
                 "moments_profile": document["profile_id"], "measure_profile": (measured or {}).get("profile_id"),
+                "evidence": [document["data"].get("arrays_sha256"), (measured or {}).get("created_at"),
+                             hero_document.get("created_at")],
                 "count": int(len(times)), "instances": int(len(arrays["inst_moment"])),
                 "poses": int(len(arrays.get("pose_moment", ()))),
                 "subjects": (document["data"].get("subjects") or {}).get("backend", "coco"),
                 "units": [unit["unit_id"] for unit in units],
                 "unit_bounds": [[float(unit["t_start"]), float(unit["t_end"])] for unit in units]}
     return film_row, arrays
+
+
+def build_identity(films: list[dict[str, Any]]) -> str:
+    """What a build is made of: every film's moments and measurement profiles and the evidence
+    artifacts themselves (the moments arrays' digest, the measurement and hero artifacts' creation
+    times). A re-described film changes the identity, so the build lands in a new directory and
+    a serving API (which maps the current one) picks it up on its next request; Windows refuses
+    to delete mapped files, so the live directory is never rewritten in place."""
+    rows = [[f["film_id"], f["moments_profile"], f["measure_profile"], list(f.get("evidence") or [])] for f in films]
+    return store.digest({"contract": CONTRACT, "films": rows})[:16]
+
+
+def published(final: Path) -> str | None:
+    """The identity a finished build directory claims, else ``None``."""
+    try:
+        return json.loads((final / "manifest.json").read_text(encoding="utf-8")).get("id")
+    except (OSError, ValueError):
+        return None
+
+
+def total_rows(films: list[dict[str, Any]]) -> int:
+    return int(sum(film["count"] for film in films))
 
 
 def _coarse_rows(arrays: dict[str, Any]) -> np.ndarray:
@@ -322,10 +347,13 @@ def build(config: Any, db: Any, *, progress: Callable[[str], None] = print) -> P
     del samples
 
     scene_of = _scenes(db)
-    identity = store.digest({"contract": CONTRACT, "films": [[f["film_id"], f["moments_profile"], f["measure_profile"]]
-                                                               for f in films]})[:16]
+    identity = build_identity(films)
     directory = root(config)
     final = directory / identity
+    if published(final) == identity:
+        progress(f"[moments-index] {len(films)} films, {total_rows(films)} moments: unchanged, {identity} stays published")
+        (directory / "current.json").write_text(json.dumps({"id": identity}), encoding="utf-8")
+        return final
     temporary = directory / f".build-{uuid4().hex[:8]}"
     temporary.mkdir(parents=True, exist_ok=True)
     try:
@@ -397,7 +425,7 @@ def build(config: Any, db: Any, *, progress: Callable[[str], None] = print) -> P
                     "moments": total, "instances": total_instances, "coarse": int(sum(len(rows) for rows in coarse_index)),
                     "parts": PARTS, "fps": 4.0,
                     "films": [{key: film[key] for key in ("film_id", "title", "aspect", "content_box", "moments_profile",
-                                                          "measure_profile", "count")} for film in films],
+                                                          "measure_profile", "evidence", "count")} for film in films],
                     "units": units_table, "elapsed_s": round(time.perf_counter() - started, 1)}
         (temporary / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         if final.exists():
