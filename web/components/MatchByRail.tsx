@@ -520,6 +520,7 @@ export default function MatchByRail({
           className="clues-refine-toggle"
           aria-expanded={panelOpen}
           aria-controls={`${panelId}-panel`}
+          title="Add a detail or drag a scene onto a category"
           onClick={() => {
             if (panelOpen) closeEditor();
             else setRefineOpen(true);
@@ -619,7 +620,7 @@ export default function MatchByRail({
               key={facet}
               data-facet={facet}
 
-              className={`match-tile clue-card${active ? " is-active" : ""}${openFacet === facet ? " is-open" : ""}${dragOver === facet ? " is-drag-over" : ""}${dragActive && !canDrop ? " is-disabled" : ""}`}
+              className={`match-tile clue-card${active ? " is-active" : " is-empty"}${openFacet === facet ? " is-open" : ""}${dragOver === facet ? " is-drag-over" : ""}${dragActive && !canDrop ? " is-disabled" : ""}`}
 
               onDragOver={(event) => {
                 if (!accepts(facet, event.dataTransfer)) return;
@@ -691,8 +692,14 @@ export default function MatchByRail({
             ? `Release to remove ${dragOrigin ? FACET_LABELS[dragOrigin] : "this reference"}`
             : "Drop on another category to move it, or outside this panel to remove it."}
         </p>
+      ) : dragActive ? (
+        <p className="clues-panel-hint clues-drag-hint" aria-hidden="true">
+          {dragOver
+            ? `${matchDraftHasClause(drafts[dragOver]) || image?.facet === dragOver ? "Drop to replace" : "Drop to match"} ${FACET_LABELS[dragOver]}`
+            : dragKind === "image" ? "Drop an image onto Look or Framing." : "Drop a scene onto the aspect you want to match."}
+        </p>
       ) : !openFacet && (
-        <p className="clues-panel-hint">Describe a detail, or drag a scene onto a category. Drag a reference out to remove it.</p>
+        <p className="clues-panel-hint">Drag a scene onto a category, or click one to add a detail.</p>
       )}
 
       {openFacet && (

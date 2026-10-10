@@ -781,12 +781,14 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .movie-keyword-confirmed { border-radius: 3px; background: #bc884f24; box-shadow: 0 0 0 2px #bc884f10; text-decoration-color: #d6a05c; }
 .movie-caret-measure { position: absolute; left: 0; top: 0; width: max-content; white-space: pre; visibility: hidden; pointer-events: none; }
 .search-main-input::selection { color: #fff; background: #725635; }
-.movie-autocomplete { position: absolute; z-index: 80; box-sizing: border-box; width: min(304px, calc(100vw - 32px)); padding: 5px; border: 1px solid #564532; border-radius: 11px; background: linear-gradient(155deg, #26221c, #191817 65%); box-shadow: 0 14px 40px #0009, 0 2px 8px #0006, inset 0 1px 0 #f7d7a80b; font-size: .8rem; line-height: 1.4; }
+.movie-autocomplete { position: absolute; z-index: 80; box-sizing: border-box; display: flex; width: min(304px, calc(100vw - 32px)); flex-direction: column; overflow: hidden; padding: 5px; border: 1px solid #2c2822; border-radius: 10px; background: #121110; box-shadow: 0 18px 44px rgba(0, 0, 0, .55); font-size: .8rem; line-height: 1.4; }
+.movie-autocomplete > [role="listbox"] { position: relative; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
+.movie-autocomplete-heading, .movie-autocomplete-footer, .movie-autocomplete-empty { flex-shrink: 0; }
 .movie-autocomplete-heading { display: flex; align-items: center; gap: 7px; padding: 7px 8px 9px; color: #dbc6a8; font-size: .7rem; }
 .movie-mention-symbol { color: #efbd7a; font-size: 1rem; line-height: 1; text-shadow: 0 0 12px #d4a15a50; }
 .movie-autocomplete-heading > span:last-child { margin-left: auto; color: #948573; font-size: .63rem; }
 .movie-autocomplete-option { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 43px; padding: 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #dcd6cd; cursor: pointer; text-align: left; }
-.movie-autocomplete-option[aria-selected="true"] { border-color: #82653f60; background: linear-gradient(100deg, #be8c4729, #99704410); color: #ffdcab; }
+.movie-autocomplete-option[aria-selected="true"] { border-color: #40382d; background: #c8a3731a; color: #f0dcc0; }
 .movie-option-icon { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 5px; background: #9f805018; color: #cfa875; }
 .movie-option-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .movie-option-year { color: #a19482; font-size: .69rem; }
@@ -873,16 +875,17 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clues-refine-count { display: inline-grid; min-width: 17px; height: 17px; place-items: center; border-radius: 50%; background: #c8a37323; color: #e2c49b; font-size: .64rem; }
 .clues-refine-chevron { color: #857c6f; transition: transform .15s ease; }
 .clues-refine-toggle[aria-expanded="true"] .clues-refine-chevron { transform: rotate(180deg); }
-.clues-panel { box-sizing: border-box; position: absolute; z-index: 35; top: calc(100% + 8px); left: 50%; width: min(100%, 580px); padding: 5px 12px 0; transform: translateX(-50%); border: 1px solid #373129; border-radius: 10px; background: #141312; box-shadow: 0 14px 45px #0008; }
+.clues-panel { box-sizing: border-box; position: absolute; z-index: 35; top: calc(100% + 6px); left: 50%; width: min(100%, 580px); padding: 8px 12px 0; transform: translateX(-50%); border: 1px solid #2c2822; border-radius: 10px; background: #121110; box-shadow: 0 18px 44px rgba(0, 0, 0, .55); }
 .clues-panel[hidden] { display: none; }
 .clues-panel.has-reference-results { width: min(100%, 640px); }
-.clues-panel-hint { margin: 0; padding: 15px 6px 18px; color: #978b7a; font-size: .75rem; line-height: 1.5; text-align: center; }
-.clues-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); min-height: 46px; align-items: stretch; gap: 2px; border-bottom: 1px solid #302b25; }
-.clue-card { display: flex; min-width: 0; align-items: center; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: #a49e94; }
-.clue-card.is-active { border-bottom-color: #766044; color: #e2c49b; }
-.clue-card.is-open { border-bottom-color: #d4a96a; color: #f0dfc6; }
+.clues-panel-hint { margin: 0; padding: 16px 6px; color: #a49e94; font-size: 12px; line-height: 1.5; text-align: center; }
+.clues-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); min-height: 46px; align-items: stretch; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid #302b25; }
+.clue-card { display: flex; min-width: 0; align-items: center; border: 1px solid #302b24; border-radius: 6px; background: transparent; color: #a49e94; }
+.clue-card.is-empty { border-style: dashed; }
+.clue-card.is-active { border-color: #4c4030; box-shadow: inset 0 -2px #766044; color: #e2c49b; }
+.clue-card.is-open { border-color: #655036; box-shadow: inset 0 -2px #d4a96a; color: #f0dfc6; }
 .clue-card.is-disabled { opacity: .35; }
-.clue-card.is-drag-over { border-color: #f0c58a; background: #c99d601c; }
+.clue-card.is-drag-over { border-color: #f0c58a; border-style: solid; background: #c99d6030; box-shadow: inset 0 0 0 1px #f0c58a; color: #f4dfbf; }
 .clue-chip { display: flex; justify-content: center; width: 100%; min-width: 0; min-height: 44px; padding: 8px 4px; align-items: center; gap: 6px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: .78rem; white-space: nowrap; cursor: pointer; }
 .clue-chip:hover { background: #ffffff08; color: #eee4d5; }
 .clue-chip[draggable="true"], .clue-summary[draggable="true"] { cursor: grab; user-select: none; touch-action: none; }
@@ -905,15 +908,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clues-tools { display: flex; min-width: 0; align-items: center; padding-left: 10px; border-left: 1px solid #302b24; }
 .clues-tools > * { animation: clues-tools-in .24s ease-out; }
 @keyframes clues-tools-in { from { opacity: 0; } }
-.clue-editor-close { display: grid; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #8f8980; cursor: pointer; font-size: 1rem; }
+.clue-editor-close { display: grid; flex: 0 0 32px; width: 32px; height: 32px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #a49e94; cursor: pointer; font-size: 1rem; }
 .clue-editor-close:hover { color: #fff; background: #ffffff0c; }
-.clues-framing-note { margin: 8px auto 0; max-width: 620px; color: #857d70; font-size: .7rem; line-height: 1.6; text-align: center; }
+.clues-framing-note { margin: 8px auto 0; max-width: 620px; color: #a49e94; font-size: 12px; line-height: 1.6; text-align: center; }
 .clues-framing-note button { padding: 0; border: 0; background: transparent; color: #c9ac85; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
-.clue-editor { box-sizing: border-box; max-height: min(480px, calc(100dvh - 310px)); overflow: auto; padding: 15px 2px; }
+.clue-editor { box-sizing: border-box; max-height: min(480px, calc(100dvh - 310px)); overflow: auto; padding: 16px 4px; }
 .search-hero.is-home .clue-editor { max-height: max(200px, min(520px, calc(100dvh - var(--home-top) - 290px))); }
 .clue-editor-heading, .clue-reference-picker > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.clue-editor-heading strong, .clue-reference-picker > header strong { color: #cbbda7; font-size: .78rem; font-weight: 500; line-height: 22px; }
-.clue-editor-heading p, .clue-reference-picker > header p { margin: 3px 0 0; color: #928779; font-size: .7rem; line-height: 1.5; }
+.clue-editor-heading strong, .clue-reference-picker > header strong { color: #d8d0c4; font-size: 12px; font-weight: 500; line-height: 32px; }
+.clue-editor-heading p, .clue-reference-picker > header p { margin: 3px 0 0; color: #a49e94; font-size: 12px; line-height: 1.5; }
 .clue-text-editor, .clue-reference-search { display: flex; gap: 8px; margin-top: 9px; }
 .clue-input, .clue-reference-search > input { box-sizing: border-box; flex: 1; width: 100%; min-width: 0; height: 38px; padding: 8px 11px; border: 1px solid #36312a; border-radius: 7px; background: #10100f; color: #e8dfd0; font: inherit; font-size: .8rem; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
 .clue-input:focus, .clue-reference-search > input:focus { border-color: var(--field-border-focus); box-shadow: var(--field-ring); }
@@ -922,16 +925,16 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-editor-footer > .clue-text-button { padding: 2px 0; border-color: transparent; background: transparent; color: #a3937d; }
 .clue-editor-footer > .clue-text-button:hover { background: transparent; border-color: transparent; color: #e2c49b; }
 .clue-editor-footer > .clue-clear { margin-left: auto; color: #857e74; }
-.clue-editor-footer > span { color: #766e63; font-size: .65rem; }
-.clue-text-button, .clue-apply { width: fit-content; padding: 6px 9px; border: 1px solid #443a2d; border-radius: 5px; background: #211c15; color: #d2b78f; cursor: pointer; font: inherit; font-size: .72rem; line-height: 1.4; }
+.clue-editor-footer > span { color: #a49e94; font-size: 12px; }
+.clue-text-button, .clue-apply { width: fit-content; min-height: 32px; padding: 6px 9px; border: 1px solid #443a2d; border-radius: 6px; background: #211c15; color: #d2b78f; cursor: pointer; font: inherit; font-size: 12px; line-height: 1.4; }
 .clue-text-button:hover:not(:disabled), .clue-apply:hover:not(:disabled) { border-color: #94744d; background: #2b2218; }
 .clue-apply { padding-inline: 14px; background: #c8a373; border-color: #c8a373; color: #18140e; font-weight: 600; white-space: nowrap; }
 .clue-apply:hover:not(:disabled) { background: #dfbc8c; color: #18140e; }
 .clue-text-button:disabled, .clue-apply:disabled { opacity: .4; cursor: default; }
 .clue-current-reference { padding-top: 9px; }
 .clue-aspect-editor { display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #302b24; }
-.clue-aspect-editor > label { color: #cbbda7; font-size: .72rem; }
-.clue-aspect-editor > p { margin: 0; color: #928779; font-size: .7rem; line-height: 1.5; }
+.clue-aspect-editor > label { color: #d8d0c4; font-size: 12px; }
+.clue-aspect-editor > p { margin: 0; color: #a49e94; font-size: 12px; line-height: 1.5; }
 .clue-aspect-actions { display: flex; gap: 8px; align-items: center; }
 .clue-source { display: flex; min-width: 0; align-items: center; gap: 10px; cursor: grab; user-select: none; touch-action: none; }
 .clue-source img { flex: 0 0 80px; width: 80px; height: 48px; border-radius: 3px; object-fit: contain; background: #050505; pointer-events: none; }
@@ -954,9 +957,9 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .clue-reference-results .result-grid { --row-h: 96px; padding-inline: 0; }
 .clue-reference-results .result-toolbar { padding: 2px 0 10px; }
 .clue-reference-results .result-count { font-size: .68rem; }
-.clue-reference-status, .clue-reference-error { margin: 0; padding: 0 0 3px; color: #b9aa95; font-size: .72rem; }
+.clue-reference-status, .clue-reference-error { margin: 0; padding: 0 0 3px; color: #a49e94; font-size: 12px; }
 .clue-reference-error { color: #efa89a; }
-.search-clues button:focus-visible { outline: 2px solid #c8a373; outline-offset: 3px; }
+.search-clues button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .search-no-overlap { box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 12px 12px 8px; padding: 8px 0; border-bottom: 1px solid #302b25; }
 .search-no-overlap p { flex: 1 1 420px; min-width: 0; margin: 0; color: #9d9180; font-size: .74rem; line-height: 1.5; overflow-wrap: anywhere; }
 .search-no-overlap > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -970,7 +973,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   .clues-toolbar { column-gap: 8px; }
   /* The right group may wrap to its own line here; a divider would dangle. */
   .clues-tools { padding-left: 0; border-left: 0; }
-  .clue-editor { padding: 12px 3px; }
+  .clue-editor { padding: 12px 4px; }
   .clue-reference-results .result-grid { --row-h: 76px; }
   .clue-reference-results { max-height: 42dvh; }
   .app-lab-link { padding-right: 0; }
@@ -1429,7 +1432,7 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
    containment), so opening one of its sections never resizes the menu. */
 .toolbar-menu.has-shots { width: 580px; }
 .toolbar-menu-panes { display: grid; min-height: 0; flex: 0 1 auto; grid-template-rows: minmax(0, 1fr); }
-.toolbar-menu.has-shots .toolbar-menu-panes { grid-template-columns: 250px minmax(0, 1fr); }
+.toolbar-menu.has-shots .toolbar-menu-panes { grid-template-columns: 210px minmax(0, 1fr); }
 .toolbar-menu-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
 .toolbar-menu.has-shots .toolbar-menu-pane:first-child { contain: size; }
 .toolbar-menu.has-shots .toolbar-menu-pane:first-child > .toolbar-menu-list { flex: 1 1 auto; }
@@ -1437,23 +1440,22 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-pane.is-shots { border-left: 1px solid #23201c; }
 .toolbar-menu-list.is-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
 /* Filter overview groups: Movies drill in, Shots toggle in place. */
-.toolbar-menu-heading { margin: 8px 10px 3px; color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-.toolbar-menu-heading:first-child { margin-top: 2px; }
-.toolbar-menu-row, .toolbar-menu-option { display: flex; width: 100%; min-height: 30px; padding: 5px 10px; align-items: center; gap: 10px; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .78rem; text-align: left; cursor: pointer; }
+.toolbar-menu-heading { margin: 8px 10px 6px; color: #a49e94; font-size: 12px; font-weight: 500; }
+.toolbar-menu-row, .toolbar-menu-option { display: flex; width: 100%; min-height: 36px; padding: 6px 10px; align-items: center; gap: 10px; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .toolbar-menu-row:hover, .toolbar-menu-option:hover:not(:disabled) { background: #ffffff0a; }
 /* A Movies row: its label, with the chosen values (or Any) beneath. */
 .toolbar-menu-row { min-height: 46px; }
 .toolbar-menu-row-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
-.toolbar-menu-value { overflow: hidden; color: #6f6a62; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-menu-value { overflow: hidden; color: #8f887d; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar-menu-value.is-set { color: #e2c49b; }
 .toolbar-menu-check { flex: 0 0 auto; color: var(--accent); }
 .toolbar-menu-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.toolbar-menu-tally { flex: 0 0 auto; color: #6f6a62; font-size: .68rem; font-variant-numeric: tabular-nums; }
+.toolbar-menu-tally { flex: 0 0 auto; color: #8f887d; font-size: 11px; font-variant-numeric: tabular-nums; }
 .toolbar-menu-option[aria-pressed="true"] { color: #f0dcc0; }
 /* A value row: a click chooses it; its ⊘ (shown on hover) excludes it instead. */
 .toolbar-menu-choice { position: relative; }
-.toolbar-menu-choice .toolbar-menu-label { margin-right: 22px; }
-.toolbar-menu-exclude { position: absolute; top: 50%; right: 34px; display: grid; width: 22px; height: 22px; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #857c6f; cursor: pointer; opacity: 0; transform: translateY(-50%); transition: opacity .12s ease, color .12s ease, background .12s ease; }
+.toolbar-menu-choice .toolbar-menu-label { margin-right: 32px; }
+.toolbar-menu-exclude { position: absolute; top: 50%; right: 30px; display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #857c6f; cursor: pointer; opacity: 0; transform: translateY(-50%); transition: opacity .12s ease, color .12s ease, background .12s ease; }
 .toolbar-menu-choice:hover .toolbar-menu-exclude:not(:disabled), .toolbar-menu-exclude:focus-visible { opacity: 1; }
 .toolbar-menu-exclude:hover { background: #ffffff0d; color: #e2c49b; }
 .toolbar-menu-exclude:disabled { cursor: default; }
@@ -1462,33 +1464,30 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-option:disabled { color: #4d4943; cursor: default; }
 .toolbar-menu-option:disabled .toolbar-menu-tally { color: #3d3a35; }
 .toolbar-menu-head { display: flex; padding: 0 8px 0 4px; align-items: center; justify-content: space-between; }
-.toolbar-menu-back { display: inline-flex; min-height: 30px; padding: 5px 6px 5px 2px; align-items: center; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: #e8dece; font: inherit; font-size: .78rem; font-weight: 600; cursor: pointer; }
+.toolbar-menu-back { display: inline-flex; min-height: 36px; padding: 6px 6px 6px 2px; align-items: center; gap: 4px; border: 0; border-radius: 6px; background: transparent; color: #e8dece; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
 .toolbar-menu-back svg { color: #857c6f; }
 .toolbar-menu-back:hover svg { color: #e2c49b; }
-.toolbar-menu-link { padding: 4px 6px; border: 0; border-radius: 4px; background: transparent; color: #a99a84; font: inherit; font-size: .7rem; cursor: pointer; }
+.toolbar-menu-link { min-height: 32px; padding: 6px; border: 0; border-radius: 4px; background: transparent; color: #a49e94; font: inherit; font-size: 12px; cursor: pointer; }
 .toolbar-menu-link:hover { color: #e8dece; }
-.toolbar-menu-find { display: flex; height: 30px; margin: 2px 8px 6px; padding: 0 9px; align-items: center; gap: 7px; border: 1px solid #2a2622; border-radius: 7px; background: #0b0b0b; color: #6f6a62; transition: border-color .15s ease, box-shadow .15s ease; }
+.toolbar-menu-find { display: flex; flex-shrink: 0; height: 36px; margin: 4px 8px 8px; padding: 0 9px; align-items: center; gap: 7px; border: 1px solid #2a2622; border-radius: 7px; background: #0b0b0b; color: #8f887d; transition: border-color .15s ease, box-shadow .15s ease; }
 .toolbar-menu-find:focus-within { border-color: var(--field-border-focus); box-shadow: var(--field-ring); color: #a99a84; }
-.toolbar-menu-find input { min-width: 0; flex: 1; border: 0; background: transparent; color: #e6e1d8; font: inherit; font-size: .74rem; outline: none; }
+.toolbar-menu-find input { min-width: 0; flex: 1; border: 0; background: transparent; color: #e6e1d8; font: inherit; font-size: 12px; outline: none; }
 .toolbar-menu-find input::placeholder { color: #5f5a52; }
 .toolbar-menu-find input::-webkit-search-cancel-button { display: none; }
-.toolbar-menu-empty { margin: 8px; color: #6f6a62; font-size: .72rem; }
-.toolbar-menu-foot { display: flex; padding: 8px 12px; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #23201c; }
-.toolbar-menu-foot > span { margin-right: auto; color: #857d70; font-size: .68rem; font-variant-numeric: tabular-nums; }
-.toolbar-menu-apply { min-height: 26px; padding: 4px 13px; border: 1px solid #3a342c; border-radius: 6px; background: transparent; color: #cfc6b8; font: inherit; font-size: .72rem; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+.toolbar-menu-empty { margin: 8px; color: #a49e94; font-size: 12px; }
+.toolbar-menu-foot { display: flex; flex-shrink: 0; padding: 8px 12px; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #23201c; }
+.toolbar-menu-foot > span { margin-right: auto; color: #a49e94; font-size: 12px; font-variant-numeric: tabular-nums; }
+.toolbar-menu-apply { min-height: 32px; padding: 6px 13px; border: 1px solid #3a342c; border-radius: 6px; background: transparent; color: #cfc6b8; font: inherit; font-size: 12px; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
 .toolbar-menu-apply:hover { border-color: #5a4c38; color: #f0e6d6; }
 .toolbar-menu-apply.is-primary { border-color: var(--accent); background: var(--accent); color: #17120b; font-weight: 600; }
 .toolbar-menu-apply.is-primary:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
-/* A setting: its label in a fixed column, its control filling the rest, so
-   every control in both menus shares one left and right edge. */
-/* A setting: its label in a fixed column, then its choices from one shared
-   left edge, so every setting in both menus lines up. */
-.toolbar-menu-setting { display: grid; min-height: 32px; padding: 2px 10px; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 8px; color: #d8d0c4; font-size: .78rem; }
+/* Shot labels share a compact column; View stacks each label above its choices. */
+.toolbar-menu-setting { display: grid; min-height: 40px; padding: 2px 10px; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 8px; color: #d8d0c4; font-size: 12px; }
 /* Choices sit on a faint track that spans the row. The choice shows on a
    quiet thumb; one that differs from the default turns gold, like a set
    movie filter. */
 .toolbar-menu-choices { display: flex; min-width: 0; padding: 2px; gap: 2px; border-radius: 7px; background: #ffffff08; }
-.toolbar-menu-choices button { min-width: 0; min-height: 24px; flex: 1 1 auto; padding: 0 8px; overflow: hidden; border: 0; border-radius: 5px; background: transparent; color: #8f887d; font: inherit; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: background .15s ease, color .15s ease; }
+.toolbar-menu-choices button { min-width: 0; min-height: 32px; flex: 1 1 auto; padding: 6px 8px; overflow: hidden; border: 0; border-radius: 5px; background: transparent; color: #8f887d; font: inherit; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: background .15s ease, color .15s ease; }
 .toolbar-menu-choices button:hover { color: #e8dece; }
 .toolbar-menu-choices button[aria-checked="true"] { background: #ffffff14; box-shadow: 0 1px 2px #00000059; color: #e6ded1; }
 .toolbar-menu-choices button.is-set { background: #c8a3732e; color: #e2c49b; }
@@ -1497,12 +1496,12 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 .toolbar-menu-pane.is-shots .toolbar-menu-choices button:first-child { flex: 0 0 44px; }
 .toolbar-menu-switch { position: relative; width: 26px; height: 15px; flex: 0 0 26px; border-radius: 999px; background: #2a2723; transition: background .15s ease; }
 .toolbar-menu-switch::after { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #8f887d; content: ""; transition: transform .15s ease, background .15s ease; }
-.toolbar-menu-toggle { display: flex; width: 100%; min-height: 32px; padding: 2px 10px; align-items: center; justify-content: space-between; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: .78rem; text-align: left; cursor: pointer; }
+.toolbar-menu-toggle { display: flex; width: 100%; min-height: 36px; padding: 6px 10px; align-items: center; justify-content: space-between; border: 0; border-radius: 6px; background: transparent; color: #d8d0c4; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .toolbar-menu-toggle:hover { background: #ffffff0a; }
 .toolbar-menu-toggle[aria-checked="true"] .toolbar-menu-switch { background: #b88a4766; }
 .toolbar-menu-toggle[aria-checked="true"] .toolbar-menu-switch::after { background: #f0dcc0; transform: translateX(11px); }
 .toolbar-menu-row:focus-visible, .toolbar-menu-option:focus-visible, .toolbar-menu-toggle:focus-visible { outline: none; background: #ffffff0e; box-shadow: inset 0 0 0 1px var(--field-border-focus); }
-.toolbar-menu-back:focus-visible, .toolbar-menu-link:focus-visible, .toolbar-menu-choices button:focus-visible, .toolbar-menu-apply:focus-visible { outline: 1px solid var(--field-border-focus); outline-offset: 1px; }
+.toolbar-menu-back:focus-visible, .toolbar-menu-link:focus-visible, .toolbar-menu-choices button:focus-visible, .toolbar-menu-apply:focus-visible, .toolbar-menu-exclude:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Active settings join the refinements row: one chip each, every value visible. */
 .active-chip { display: inline-flex; min-width: 0; max-width: min(100%, 320px); align-items: stretch; border: 1px solid #403528; border-radius: 5px; background: #bb94590c; color: #d6c2a3; font-size: .72rem; transition: border-color .15s ease, background .15s ease; }
 .active-chip:hover { border-color: #7b6240; background: #bb945916; }
@@ -1523,10 +1522,21 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   .toolbar-menu.has-shots .toolbar-menu-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: max-content; overflow-y: auto; scrollbar-color: #36312a transparent; scrollbar-width: thin; }
   .toolbar-menu.has-shots .toolbar-menu-pane:first-child { contain: none; }
   .toolbar-menu-pane.is-shots { border-left: 0; }
+  .toolbar-menu-pane.is-shots .toolbar-menu-setting { grid-template-columns: minmax(0, 1fr); gap: 6px; padding-block: 6px; }
   .toolbar-menu-panes .toolbar-menu-list.is-scroll { overflow: visible; }
   .toolbar-menu.is-section .toolbar-menu-pane.is-shots { display: none; }
   .toolbar-menu.is-section .toolbar-menu-panes { grid-template-rows: minmax(0, 1fr); overflow: hidden; }
   .toolbar-menu.is-section .toolbar-menu-list.is-scroll { overflow-y: auto; }
+}
+@media (max-width: 600px), (pointer: coarse) {
+  .toolbar-menu-trigger, .clues-refine-toggle, .toolbar-menu-option, .toolbar-menu-back, .toolbar-menu-link, .toolbar-menu-apply, .toolbar-menu-toggle, .toolbar-menu-choices button, .clue-text-button, .clue-apply, .clues-removed button, .search-clues.is-drag-floating .clue-chip { min-height: 44px; }
+  .clue-editor-close { flex-basis: 44px; width: 44px; height: 44px; }
+  .toolbar-menu-exclude { width: 44px; height: 44px; }
+  .toolbar-menu-choice .toolbar-menu-label { margin-right: 44px; }
+  .toolbar-menu-find, .clue-input, .clue-reference-search > input { height: 44px; }
+}
+@media (max-width: 600px) {
+  .toolbar-menu-find input, .clue-input, .clue-reference-search > input { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .toolbar-menu { animation: none; }
@@ -1912,11 +1922,10 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   display: grid;
   padding: 3px;
   gap: 2px;
-  border: 1px solid #383128;
-  border-radius: 7px;
-  background: rgba(10, 10, 10, 0.96);
-  box-shadow: 0 9px 26px rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(8px);
+  border: 1px solid #2c2822;
+  border-radius: 10px;
+  background: #121110;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
 }
 
 .use-in-search-card .use-in-search-menu {
@@ -1947,8 +1956,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 
 .use-in-search-menu > button:not(:disabled):hover,
 .use-in-search-menu > button:focus-visible {
-  background: #242019;
-  color: #e1c69e;
+  background: #ffffff0a;
+  color: #f0dcc0;
 }
 
 .use-in-search-context-menu {

@@ -25,6 +25,7 @@ export default function MovieSearchInput(props: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const pendingCaretRef = useRef<{ value: string; position: number } | null>(null);
   const pendingRevealRef = useRef(false);
   const [focused, setFocused] = useState(false);
@@ -34,7 +35,7 @@ export default function MovieSearchInput(props: Props) {
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [completionCancelled, setCompletionCancelled] = useState(false);
   const [choice, setChoice] = useState<{ key: string; filmId: string } | null>(null);
-  const [position, setPosition] = useState<{ left: number; top: number; width: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const caret = selection.value === value ? selection.start : value.length;
   const collapsed = selection.value !== value || selection.start === selection.end;
   const key = `${value}\u0000${caret}`;
@@ -162,11 +163,21 @@ export default function MovieSearchInput(props: Props) {
       const width = Math.min(304, viewportWidth - 32);
       const caretX = rect.left + Math.max(0, Math.min(rect.width, measure.offsetWidth - input.scrollLeft));
       const x = Math.max(16, Math.min(caretX, viewportWidth - width - 16));
-      const height = popoverRef.current?.offsetHeight ?? 120;
+      const popover = popoverRef.current, list = listRef.current;
+      // Include the part of the list hidden by a previous height cap, so
+      // resize/scroll updates keep choosing the same side consistently.
+      const height = (popover?.offsetHeight ?? 120) + (list ? Math.max(0, list.scrollHeight - list.clientHeight) : 0);
       const below = bar.bottom + 8;
-      const top = below + height > window.innerHeight - 12 && bar.top > height + 20 ? bar.top - height - 8 : below;
-      const next = { left: x - rect.left, top: top - rect.top, width };
-      setPosition((old) => old?.left === next.left && old?.top === next.top && old?.width === next.width ? old : next);
+      const viewport = window.visualViewport;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight);
+      const roomBelow = Math.max(0, viewportBottom - below - 12);
+      const roomAbove = Math.max(0, bar.top - viewportTop - 20);
+      const opensBelow = height <= roomBelow || roomBelow >= roomAbove;
+      const maxHeight = opensBelow ? roomBelow : roomAbove;
+      const top = opensBelow ? below : bar.top - Math.min(height, maxHeight) - 8;
+      const next = { left: x - rect.left, top: top - rect.top, width, maxHeight };
+      setPosition((old) => old?.left === next.left && old?.top === next.top && old?.width === next.width && old?.maxHeight === next.maxHeight ? old : next);
       setScrollLeft(input.scrollLeft);
     };
     update();
@@ -175,14 +186,27 @@ export default function MovieSearchInput(props: Props) {
     if (popoverRef.current) observer.observe(popoverRef.current);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
     input.addEventListener("scroll", update);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
       input.removeEventListener("scroll", update);
     };
   }, [open, value, caret, inputRef, suggestions.length]);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const selected = list?.querySelector<HTMLElement>("[aria-selected='true']");
+    if (!list || !selected) return;
+    const top = selected.offsetTop, bottom = top + selected.offsetHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+  }, [open, activeIndex, suggestions, position]);
 
   const painted = [];
   let paintedEnd = 0;
@@ -248,11 +272,11 @@ export default function MovieSearchInput(props: Props) {
       {confirmed.length > 0 && <span id={`${id}-scope`} className="sr-only">Movie filters: {[...new Set(confirmed.map((item) => item.text.slice(1)))].join(", ")}. Backspace after or Delete before a movie removes its filter. Editing its title makes it ordinary text.</span>}
       {open && (
         <div className="movie-autocomplete" ref={popoverRef}
-          style={{ left: position?.left ?? 0, top: position?.top ?? "100%", width: position?.width, visibility: position ? "visible" : "hidden" }}
+          style={{ left: position?.left ?? 0, top: position?.top ?? "100%", width: position?.width, maxHeight: position?.maxHeight, visibility: position ? "visible" : "hidden" }}
           onPointerDown={(event) => event.preventDefault()}>
           <div className="movie-autocomplete-heading"><span className="movie-mention-symbol" aria-hidden="true">@</span><span>Movies</span><span>Filter your search</span></div>
           {suggestions.length ? (
-            <div id={`${id}-list`} role="listbox" aria-label="Movies">
+            <div ref={listRef} id={`${id}-list`} role="listbox" aria-label="Movies">
               {suggestions.map((suggestion, index) => {
                 const title = suggestion.title.replace(/\s+[([]\d{4}[)\]]$/, "");
                 const year = suggestion.title.match(/\s+[([](\d{4})[)\]]$/)?.[1];

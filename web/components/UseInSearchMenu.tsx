@@ -31,20 +31,22 @@ export default function UseInSearchMenu({
   const menuId = useId();
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) { setPosition(null); return; }
     const positionMenu = () => {
       const trigger = triggerRef.current?.getBoundingClientRect();
-      if (!trigger) return;
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
       const width = Math.min(290, window.innerWidth - 24);
-      const height = Math.min(370, window.innerHeight - 24);
+      const height = menu.scrollHeight + menu.offsetHeight - menu.clientHeight;
       const below = trigger.bottom + 6;
-      const top = below + height <= window.innerHeight - 12
-        ? below
-        : Math.max(12, trigger.top - height - 6);
+      const roomBelow = Math.max(0, window.innerHeight - below - 12);
+      const roomAbove = Math.max(0, trigger.top - 18);
+      const opensBelow = height <= roomBelow || roomBelow >= roomAbove;
+      const maxHeight = opensBelow ? roomBelow : roomAbove;
       setPosition({
-        top,
+        top: opensBelow ? below : trigger.top - Math.min(height, maxHeight) - 6,
         left: Math.max(12, Math.min(trigger.right - width, window.innerWidth - width - 12)),
-        maxHeight: window.innerHeight - top - 12,
+        maxHeight,
       });
     };
     positionMenu();
@@ -162,12 +164,12 @@ export default function UseInSearchMenu({
         <span>Related</span>
       </button>
 
-      {open && position && createPortal(
+      {open && createPortal(
         <div
           ref={menuRef}
           id={menuId}
           className="use-in-search-menu use-in-search-context-menu"
-          style={position}
+          style={{ ...position, visibility: position ? "visible" : "hidden" }}
           role="menu"
           aria-label="Find related scenes by"
           onBlur={(event) => {

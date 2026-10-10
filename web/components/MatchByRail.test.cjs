@@ -117,6 +117,7 @@ function setup(overrides = {}) {
     find: (predicate) => nodes(tree).find(predicate),
     button: (label) => nodes(tree).find((node) => node.type === "button" && text(node).trim() === label),
     hit(facet) { hit = this.tile(facet).element; },
+    dispatch(value) { document.dispatchEvent(value); render(); },
     setLayout(next) { layout = next; },
     resize() { [...(windowListeners.get("resize") ?? [])].forEach((listener) => listener()); render(); },
     get resizeListenerCount() { return windowListeners.get("resize")?.size ?? 0; },
@@ -393,6 +394,26 @@ test("opening Refine hides idle suggestions and incoming scene drags reveal all 
     summary.props.onPointerMove(event({ ...pointer, clientX: 120, clientY: 10 })); app.render();
     assert.equal(app.find((node) => node.props?.className?.split(" ").includes("clues-panel")).props.hidden, false);
     assert.ok(app.tile("composition"));
+  } finally { app.cleanup(); }
+});
+
+test("an incoming scene drag distinguishes matching an empty category from replacing an occupied one", () => {
+  const draft = source("scene");
+  const app = setup({ drafts: { mood: { kind: "text", facet: "mood", text: "wistful" } } });
+  const drag = (phase) => app.dispatch({ type: "scene-recall:scene-pointer", detail: { phase, draft, x: 400, y: 120 } });
+  const hint = () => text(app.find((node) => node.props?.className?.includes("clues-drag-hint")));
+  try {
+    drag("start");
+    assert.equal(app.find((node) => node.props?.className?.split(" ").includes("clues-panel")).props.hidden, false);
+    assert.match(hint(), /Drop a scene onto the aspect you want to match/);
+    app.hit("look"); drag("move");
+    assert.equal(hint(), "Drop to match Look");
+    app.hit("mood"); drag("move");
+    assert.equal(hint(), "Drop to replace Mood");
+    assert.deepEqual(app.calls, [], "hovering describes the destination without changing the recipe");
+    drag("drop");
+    assert.deepEqual(app.calls, [["source", "mood", draft, undefined]]);
+    assert.equal(hint(), "", "drop feedback clears after the source is applied");
   } finally { app.cleanup(); }
 });
 

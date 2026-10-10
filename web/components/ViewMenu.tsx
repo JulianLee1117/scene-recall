@@ -6,6 +6,7 @@ import { useDismiss } from "@/hooks/useDismiss";
 import { useMenuFit } from "@/hooks/useMenuFit";
 import ChoiceRow from "./ChoiceRow";
 import DirectionIcon from "./DirectionIcon";
+import styles from "./viewMenu.module.css";
 
 /**
  * How results are shown: their order, their size and whether each card
@@ -56,8 +57,8 @@ export default function ViewMenu({
       </button>
 
       {open && (
-        <div ref={panelRef} id={panelId} className="toolbar-menu" role="dialog" aria-label="View options" tabIndex={-1}>
-          <div className="toolbar-menu-list">
+        <div ref={panelRef} id={panelId} className={`toolbar-menu ${styles.panel}`} role="dialog" aria-label="View options" tabIndex={-1}>
+          <div className={`toolbar-menu-list is-scroll ${styles.content}`}>
             <ChoiceRow
               label="Order"
               options={ORDER_OPTIONS}
@@ -72,16 +73,18 @@ export default function ViewMenu({
               defaultValue={DEFAULT_VIEW.size}
               onChange={(size) => onChange({ size })}
             />
-            <button
-              type="button"
-              className="toolbar-menu-toggle"
-              role="switch"
-              aria-checked={view.details}
-              onClick={() => onChange({ details: !view.details })}
-            >
-              <span>Details</span>
-              <span className="toolbar-menu-switch" aria-hidden="true" />
-            </button>
+            <div className={styles.details}>
+              <button
+                type="button"
+                className="toolbar-menu-toggle"
+                role="switch"
+                aria-checked={view.details}
+                onClick={() => onChange({ details: !view.details })}
+              >
+                <span className="toolbar-menu-switch" aria-hidden="true" />
+                <span>Details</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

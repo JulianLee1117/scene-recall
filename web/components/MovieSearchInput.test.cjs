@@ -29,6 +29,19 @@ function setup(initial = "", overrides = {}, geometry = null) {
     clientWidth: geometry?.width ?? 0,
     get scrollWidth() { return Math.max(this.clientWidth, this.value.length); },
     setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
+    addEventListener() {}, removeEventListener() {},
+  };
+  let popoverStyle = {};
+  const popover = { get offsetHeight() { return Math.min(geometry?.menuHeight ?? 240, popoverStyle.maxHeight ?? Infinity); } };
+  const list = {
+    scrollTop: 0,
+    get scrollHeight() { return (geometry?.menuHeight ?? 240) - 68; },
+    get clientHeight() { return Math.max(0, popover.offsetHeight - 68); },
+    querySelector() {
+      const options = nodes(output).filter((node) => node.props?.role === "option");
+      const index = options.findIndex((node) => node.props["aria-selected"]);
+      return index < 0 ? null : { offsetTop: index * 43, offsetHeight: 43 };
+    },
   };
   const schedule = () => { if (!scheduled && !disposed) { scheduled = true; queueMicrotask(render); } };
   const props = {
@@ -71,9 +84,19 @@ function setup(initial = "", overrides = {}, geometry = null) {
   const exports = {};
   const jsx = (type, props) => {
     if (geometry && props.className === "movie-caret-measure") props.ref.current = { offsetWidth: props.children.length };
+    if (geometry?.rect && props.className === "movie-search-input") props.ref.current = {
+      getBoundingClientRect: () => geometry.rect,
+      closest: () => ({ getBoundingClientRect: () => geometry.rect }),
+    };
+    if (geometry?.rect && props.className === "movie-autocomplete") { popoverStyle = props.style; props.ref.current = popover; }
+    if (geometry?.rect && props.role === "listbox") props.ref.current = list;
     return { type, props };
   };
-  vm.runInNewContext(compiled, { exports, ResizeObserver: class {
+  vm.runInNewContext(compiled, { exports,
+    document: { documentElement: { clientWidth: geometry?.viewportWidth ?? 800 } },
+    window: { innerHeight: geometry?.viewportHeight ?? 600, addEventListener() {}, removeEventListener() {},
+      visualViewport: geometry?.visualHeight ? { height: geometry.visualHeight, offsetTop: geometry.visualTop ?? 0, addEventListener() {}, removeEventListener() {} } : undefined },
+    ResizeObserver: class {
     constructor(callback) { this.callback = callback; }
     observe() { observers.add(this.callback); }
     disconnect() { observers.delete(this.callback); }
@@ -95,7 +118,7 @@ function setup(initial = "", overrides = {}, geometry = null) {
   const flush = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
   render();
   return {
-    accepted, forwarded, input, find, flush, props,
+    accepted, forwarded, input, find, flush, props, list,
     options: () => nodes(output).filter((node) => node.props?.role === "option"),
     async focus() { input().onFocus(); await flush(); },
     async type(value, caret = value.length) {
@@ -120,6 +143,39 @@ function setup(initial = "", overrides = {}, geometry = null) {
     dispose() { disposed = true; hooks.forEach((hook) => hook?.cleanup?.()); },
   };
 }
+
+test("short viewports keep movie choices and keyboard selection inside a scrolling list", async () => {
+  const app = setup("@Before", { films: [
+    ...films, film("midnight", "Before Midnight (2013)"), film("sunset", "Before Sunset (2004)"),
+  ] }, { width: 200, viewportHeight: 300, menuHeight: 240, rect: { left: 100, top: 140, bottom: 174, width: 200 } });
+  try {
+    await app.focus();
+    const menu = app.find((node) => node.props?.className === "movie-autocomplete");
+    assert.equal(menu.props.style.maxHeight, 120);
+    assert.equal(menu.props.style.top + 140, 12, "menu opens above when that side has more room");
+    await app.key("ArrowUp");
+    assert.equal(app.list.scrollTop, 120, "the last keyboard choice is scrolled fully into view");
+    assert.ok(app.find((node) => node.props?.className === "movie-autocomplete-footer"));
+    await app.key("Enter");
+    assert.equal(app.accepted.length, 1);
+  } finally { app.dispose(); }
+});
+
+test("movie completion uses the visible viewport when a mobile keyboard reduces available space", async () => {
+  const app = setup("@Before", {}, {
+    width: 200, viewportHeight: 600, visualHeight: 280, menuHeight: 240,
+    rect: { left: 30, top: 80, bottom: 114, width: 200 },
+  });
+  try {
+    await app.focus();
+    const menu = app.find((node) => node.props?.className === "movie-autocomplete");
+    assert.equal(menu.props.style.top + 80, 122);
+    assert.equal(menu.props.style.maxHeight, 146, "height ends 12px before the keyboard instead of the layout viewport");
+    await app.resize(180);
+    assert.equal(app.find((node) => node.props?.className === "movie-autocomplete").props.style.maxHeight, 146,
+      "measuring an already clipped list does not change its chosen placement");
+  } finally { app.dispose(); }
+});
 
 test("ordinary complete titles offer options without stealing Enter or Tab", async () => {
   const app = setup("Before Sunrise couple looking away");
