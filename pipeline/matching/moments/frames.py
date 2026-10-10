@@ -14,6 +14,8 @@ from pathlib import Path
 import threading
 from typing import Any
 
+from pipeline.source_frames import decode
+
 WIDTHS = (320, 640, 1280)
 _POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="match-frames")
 _LOCKS: dict[str, threading.Lock] = {}
@@ -24,31 +26,6 @@ def cache_path(config: Any, film_id: str, time_value: float, width: int) -> Path
     key = f"{film_id}:{time_value:.3f}:{width}"
     name = hashlib.sha256(key.encode()).hexdigest()[:24]
     return Path(config.paths.assets_dir) / "matching" / "frames" / film_id[:16] / f"{name}.jpg"
-
-
-def decode(path: Path, time_value: float):
-    """The first decoded frame at or after ``time_value`` (film seconds), as a display-aspect PIL image."""
-    import av
-    from PIL import Image
-    with av.open(str(path)) as container:
-        stream = container.streams.video[0]
-        stream.thread_type = "AUTO"
-        origin = container.start_time / av.time_base if container.start_time is not None else 0.0
-        sar = float(stream.sample_aspect_ratio or 1)
-        container.seek(max(0, int((time_value - 1.0 + origin) / stream.time_base)), stream=stream, backward=True)
-        chosen = None
-        for frame in container.decode(stream):
-            if frame.pts is None:
-                continue
-            chosen = frame
-            if float(frame.pts * stream.time_base) - origin + 1e-3 >= time_value:
-                break
-        if chosen is None:
-            raise ValueError("No frame at this time")
-        image = chosen.to_image().convert("RGB")
-    if abs(sar - 1) > 1e-3:
-        image = image.resize((max(2, round(image.width * sar)), image.height), Image.Resampling.BICUBIC)
-    return image
 
 
 def frame(config: Any, db: Any, film_id: str, time_value: float, width: int, content_box: list[float] | None) -> Path:

@@ -204,7 +204,7 @@ export interface SearchResult {
   focus_end?: number;
   /** The dramatic scene this shot belongs to. */
   scene?: SceneContext;
-  /** Other matching shots of the same scene, folded into this card. */
+  /** Other matching shots from this scene or same-film lookalikes, folded into this card. */
   scene_alternatives?: SceneAlternative[];
   /** Subtitle line matched by a quote-like query, with exact times. */
   matched_line?: MatchedLine;
@@ -221,7 +221,8 @@ export interface SceneContext {
   shot_count?: number;
 }
 
-export interface SceneAlternative {
+/** A folded match retains its own source moment, words and scene context. */
+export interface SceneAlternative extends Partial<Omit<SearchResult, "scene_alternatives">> {
   unit_id: string;
   t_start: number;
   t_end: number;

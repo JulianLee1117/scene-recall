@@ -243,14 +243,13 @@ export interface MatchedWordsEvidence {
   score?: number;
 }
 
-// Same ordered-overlap threshold as pipeline/search/quotes.py. This gates only
-// ordinary-search quote presentation; it never changes retrieval or ranking.
+// Legacy results lack clause-owned presentation evidence, so retain the
+// conservative quote fallback used before recipes selected their own snippet.
 const STRONG_QUOTE_SCORE = 0.8;
 
-function wordsEvidence(evidence: SearchTextMatchEvidence, requireStrongQuote: boolean): MatchedWordsEvidence | null {
+function wordsEvidence(evidence: SearchTextMatchEvidence): MatchedWordsEvidence | null {
   const text = evidence.text.trim();
   if (!text || (evidence.view !== "dialogue" && evidence.view !== "ocr")) return null;
-  if (requireStrongQuote && evidence.source === "quote" && !(typeof evidence.score === "number" && evidence.score >= STRONG_QUOTE_SCORE)) return null;
   const selected: MatchedWordsEvidence = { kind: evidence.view === "dialogue" ? "Spoken" : "On screen", text };
   if (evidence.source) selected.source = evidence.source;
   if (typeof evidence.score === "number" && Number.isFinite(evidence.score)) selected.score = evidence.score;
@@ -262,25 +261,26 @@ function wordsEvidence(evidence: SearchTextMatchEvidence, requireStrongQuote: bo
 /**
  * Prefer explicit Words, then the main query's selected dialogue or on-screen
  * evidence. Other categories and their ranks cannot replace the description.
- * Recipe evidence is clause-owned: never borrow a fused top-level line.
+ * Recipe evidence is clause-owned and selected by the backend: never borrow a
+ * fused top-level line or apply a second score gate to its chosen excerpt.
  */
 export function matchedWordsEvidence(shot: SearchResult): MatchedWordsEvidence | null {
   const matches = shot.matches ?? [];
   for (const facet of ["words", "all"] as const) {
     for (const match of matches) {
       if (match.facet !== facet || match.evidence?.type !== "text") continue;
-      const selected = wordsEvidence(match.evidence, facet === "all");
+      const selected = wordsEvidence(match.evidence);
       if (selected) return selected;
     }
   }
   if (matches.length > 0) return null;
   // Compatibility for standalone search results without recipe provenance.
   if (shot.matched_line && shot.matched_line.score >= STRONG_QUOTE_SCORE) {
-    const selected = wordsEvidence({ type: "text", view: "dialogue", source: "quote", ...shot.matched_line }, true);
+    const selected = wordsEvidence({ type: "text", view: "dialogue", source: "quote", ...shot.matched_line });
     if (selected) return selected;
   }
   return shot.matched_text && shot.matched_text_view
-    ? wordsEvidence({ type: "text", view: shot.matched_text_view, text: shot.matched_text, source: "semantic" }, false)
+    ? wordsEvidence({ type: "text", view: shot.matched_text_view, text: shot.matched_text, source: "semantic" })
     : null;
 }
 

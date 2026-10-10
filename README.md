@@ -330,9 +330,12 @@ what happens in the shot (or the Picture description when no Shot description
 exists), without a category label. Useful matched words instead appear as one
 excerpt labelled **Spoken** or **On screen**: an explicit **Words** match takes
 priority, followed by the main search's strong quote or selected dialogue/OCR
-evidence. Weak quote overlap alone does not replace the description. A timed
-excerpt opens playback on that passage; the indexed frame remains the source
-for saving and visual references. The full retrieval breakdown stays in details.
+evidence. A partial quote also appears when spoken words are the only retrieval
+support. A timed excerpt opens playback on that passage; other results open on
+the displayed picture. Save preserves that picture's moment; visual references
+retain their indexed frame. **Matching shots** lists the selected alternatives
+chronologically, with the best result selected initially; some are similar shots
+elsewhere in the film. The full retrieval breakdown stays in details.
 **Show details** (under **View**) shows each result's Picture text and how each
 retrieval channel ranked it. Every card in a search lists the same rows in a fixed order: Visual (image-text
 embedding), Semantic (text embedding, with the view it matched such as Shot or
@@ -1639,10 +1642,13 @@ After choosing a winning profile, `search-features retire-profile --profile ID
 --apply` reclaims an explicitly selected inactive challenger under the same idle
 guards. It refuses the configured profile and profiles with pending preparation.
 
-Hover a result and use its bookmark action to save that source moment. Saved
+Hover a result and use its bookmark action to save the displayed source moment. Saved
 scenes persist in `paths.state_dir` independently of search-index repair or a
-compatible reingest; the same action is available in the player, and
+compatible reingest; their thumbnails come from the saved timestamp, even if a
+shot's chosen hero changes. The same action is available in the player, and
 unavailable scenes remain listed until explicitly removed.
+Saved hover uses the same Shot description as Search, with Picture as a
+fallback; query-specific matched words are not stored with the bookmark.
 
 ## Optional retrieval comparison
 

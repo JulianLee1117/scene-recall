@@ -251,6 +251,68 @@ def test_fusion_keeps_main_and_words_text_with_their_own_quote_times(main_score:
     assert words["matched_line"]["text"] == "Words query line."
 
 
+@pytest.mark.parametrize("lexical_rank,quote_rank", [(247, 25), (1, 400), (400, 1)])
+def test_main_evidence_explains_partial_quote_when_only_spoken_words_retrieved_it(
+    lexical_rank: int, quote_rank: int,
+) -> None:
+    # Jaws, "i am going to": all four words occur in this longer line, with
+    # "not" between them. The length discount makes it a partial .7143 match,
+    # but dialogue is the only source that retrieved the shot.
+    line = {
+        "text": "And I am not going to stand here and see that thing cut open",
+        "t_start": 2155.822, "t_end": 2159.534, "score": 0.7143,
+    }
+    result = {
+        **_result("jaws"),
+        "matched_line": line,
+        "debug": {"channels": {
+            "lex": {"rank": lexical_rank, "fields": ["dialogue"]},
+            "quote": {"rank": quote_rank, "score": 0.7143},
+            "rerank": {"verdict": 0.2812},
+        }},
+    }
+    fused = _fuse_rankings([
+        _ClauseRanking(SearchClause("main", "text", "all", text="i am going to"), [result], "i am going to"),
+    ], set())
+
+    assert fused[0]["matches"][0]["evidence"] == {
+        "type": "text", "view": "dialogue", "source": "quote", **line,
+    }
+
+
+@pytest.mark.parametrize("other_channel", [
+    {"img": {"rank": 500}},
+    {"txt": {"rank": 500}},
+    {"lex": {"rank": 500, "fields": ["caption", "dialogue"]}},
+    {"lex": {"rank": 500}},
+])
+def test_partial_quote_does_not_replace_other_or_unknown_retrieval_support(other_channel: dict) -> None:
+    result = {
+        **_result("match"),
+        "matched_line": {"text": "I think you are going to live.", "score": 0.6},
+        "debug": {"channels": {"quote": {"rank": 1}, **other_channel}},
+    }
+    fused = _fuse_rankings([
+        _ClauseRanking(SearchClause("main", "text", "all", text="i am going to"), [result], "i am going to"),
+    ], set())
+
+    assert "evidence" not in fused[0]["matches"][0]
+
+
+@pytest.mark.parametrize("score,expected", [(0.5, True), (0.49, False)])
+def test_quote_only_result_preserves_retrieval_minimum_for_partial_evidence(score: float, expected: bool) -> None:
+    result = {
+        **_result("match"),
+        "matched_line": {"text": "I think you are going to live.", "score": score},
+        "debug": {"channels": {"quote": {"rank": 40}}},
+    }
+    fused = _fuse_rankings([
+        _ClauseRanking(SearchClause("main", "text", "all", text="i am going to"), [result], "i am going to"),
+    ], set())
+
+    assert ("evidence" in fused[0]["matches"][0]) is expected
+
+
 def test_mood_text_clause_searches_only_the_narrow_mood_view(
     config: Config,
 ) -> None:

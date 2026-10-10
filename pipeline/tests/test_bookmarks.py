@@ -312,6 +312,8 @@ def test_bookmark_api_remaps_timestamp_and_preserves_unavailable_anchor(
             assert first.json()["availability"] == "indexed"
             assert first.json()["scene"]["unit_id"] == "film-a_0001"
             assert first.json()["scene"]["matched_frame_index"] == 0
+            assert first.json()["scene"]["matched_frame_timestamp"] == 15.25
+            assert first.json()["scene"]["thumbnail_url"] == first.json()["scene"]["keyframe_url"]
             assert first.json()["created_at"].endswith("+00:00")
 
             db.open_table("units").delete("film_id = 'film-a'")
@@ -337,3 +339,144 @@ def test_bookmark_api_remaps_timestamp_and_preserves_unavailable_anchor(
             )
             assert removed.status_code == 204
             assert client.get("/bookmarks").json() == {"bookmarks": []}
+
+
+def test_saved_hero_and_indexed_reference_keep_separate_source_moments(config) -> None:
+    """Moonlight: the hero is floating, the indexed frame is later swimming."""
+    from fastapi.testclient import TestClient
+    from pipeline.api import main
+
+    db = open_db(config)
+    create_tables(db)
+    db.open_table("films").add([{
+        "film_id": "film-a", "title": "Film A", "path": str(config.paths.films_dir / "Film A.mkv"),
+        "duration": 1200.0, "fps": 24.0,
+    }])
+    db.open_table("units").add([_unit_row("film-a_0001", start=1102.393, end=1119.201)])
+    db.open_table("frames").add([_frame_row("film-a_0001", timestamp=1114.999)])
+    db.create_table("shot_evidence", data=[{
+        "unit_id": "film-a_0001", "film_id": "film-a", "hero_path": "film-a/evidence/hero/v2/film-a_0001.webp",
+        "hero_time": 1105.0, "action": "Chiron floats while Juan supports his back.",
+        "focus_start": 1102.393, "focus_end": 1106.595,
+    }])
+
+    with (
+        patch.object(main, "load_config", return_value=config),
+        patch.object(main, "open_db", return_value=db),
+        patch.object(main, "ensure_search_indexes"),
+        TestClient(main.app) as client,
+    ):
+        saved = client.put("/bookmarks/film-a_0001", json={"evidence_timestamp": 1105.0}).json()
+        scene = saved["scene"]
+        assert scene["evidence_timestamp"] == 1105.0
+        assert scene["matched_frame_timestamp"] == 1114.999
+        assert scene["keyframe_index"] == 0
+        assert scene["hero_url"] == "/media/hero/film-a_0001?t=1105.000"
+        assert scene["thumbnail_url"] == "/media/frame/film-a?t=1105.000"
+        assert scene["action"] == "Chiron floats while Juan supports his back."
+        assert scene["focus_end"] == 1106.595
+
+        # Replacing derived evidence cannot move the durable source moment.
+        db.open_table("shot_evidence").update(values={"hero_time": 1110.0})
+        refreshed = client.get("/bookmarks").json()["bookmarks"][0]
+        assert refreshed["evidence_timestamp"] == 1105.0
+        assert refreshed["scene"]["thumbnail_url"] == "/media/frame/film-a?t=1105.000"
+        assert refreshed["scene"]["matched_frame_timestamp"] == 1114.999
+
+        # Freely browsed moments use their exact timestamp rather than the
+        # current hero or the closest indexed frame, even with a stale hint.
+        browsed = client.put("/bookmarks/film-a_0001", json={
+            "evidence_timestamp": 1108.25, "frame_index": 0,
+        }).json()["scene"]
+        assert browsed["thumbnail_url"] == "/media/frame/film-a?t=1108.250"
+        assert browsed["evidence_timestamp"] == 1108.25
+        assert browsed["matched_frame_timestamp"] == 1114.999
+
+
+def test_saved_list_batches_presentation_evidence_from_one_snapshot() -> None:
+    from pipeline.api import main
+    from pipeline.search import priors
+
+    snapshot = object()
+    bookmarks = [Bookmark(
+        bookmark_id=f"saved-{i}", film_id="film-a", source_unit_id=f"film-a_{i}",
+        evidence_timestamp_ms=i * 10_000 + 5_000, frame_index=None,
+        film_title_snapshot="Film A", created_at_ms=i + 1,
+    ) for i in range(3)]
+    units = {bookmark.source_unit_id: _unit_row(bookmark.source_unit_id, start=i * 10, end=i * 10 + 10)
+             for i, bookmark in enumerate(bookmarks)}
+    evidence = {unit_id: {"scene_id": f"scene-{i}", "action": f"Action {i}"}
+                for i, unit_id in enumerate(units)}
+    scenes = {f"scene-{i}": {"scene_id": f"scene-{i}", "title": f"Scene {i}"} for i in range(3)}
+
+    with (
+        patch.object(main, "_resolve_bookmark_units", return_value={b.bookmark_id: units[b.source_unit_id] for b in bookmarks}),
+        patch.object(main, "_film_titles_for_version", return_value={"film-a": "Film A"}),
+        patch.object(main, "_bookmark_rows", return_value=[]),
+        patch.object(priors, "load_evidence", return_value=evidence) as load_evidence,
+        patch.object(priors, "load_scenes", return_value=scenes) as load_scenes,
+    ):
+        results = main._bookmark_responses(object(), bookmarks, snapshot)
+
+    load_evidence.assert_called_once_with(snapshot, list(units))
+    load_scenes.assert_called_once_with(snapshot, [f"scene-{i}" for i in range(3)])
+    assert [result["scene"]["action"] for result in results] == [f"Action {i}" for i in range(3)]
+    assert [result["scene"]["scene"]["title"] for result in results] == [f"Scene {i}" for i in range(3)]
+
+
+def test_large_saved_collection_uses_chunked_metadata_reads_not_per_bookmark_scans() -> None:
+    import re
+    from types import SimpleNamespace
+    from pipeline.api import main
+
+    bookmarks = [Bookmark(
+        bookmark_id=f"saved-{i}", film_id="film-a", source_unit_id=f"film-a_{i}",
+        evidence_timestamp_ms=i * 10_000 + 5_000, frame_index=1,
+        film_title_snapshot="Film A", created_at_ms=i + 1,
+    ) for i in range(1001)]
+    units = [{"unit_id": b.source_unit_id, "film_id": "film-a", "shot_id": b.source_unit_id,
+              "t_start": i * 10, "t_end": i * 10 + 10, "is_representative": True,
+              "caption": "A shot", "keyframe_paths": '["first.webp", "second.webp"]'}
+             for i, b in enumerate(bookmarks)]
+    frames = [{"unit_id": b.source_unit_id, "frame_index": frame_index, "timestamp": i * 10 + offset}
+              for i, b in enumerate(bookmarks) for frame_index, offset in ((0, 1), (1, 5))]
+    calls = []
+
+    class Table:
+        def __init__(self, name):
+            self.name = name
+
+        def search(self):
+            return self
+
+        def where(self, expression):
+            self.ids = re.findall(r"'([^']*)'", expression)
+            self.column = expression.split(" IN ")[0]
+            return self
+
+        def select(self, columns):
+            self.columns = columns
+            return self
+
+        def limit(self, value):
+            assert value is None  # limit applies after the complete predicate
+            return self
+
+        def to_list(self):
+            calls.append((self.name, self.column, len(self.ids), self.columns))
+            rows = units if self.name == "units" else frames
+            wanted = set(self.ids)
+            return [{key: row.get(key) for key in self.columns} for row in rows if row[self.column] in wanted]
+
+    db = SimpleNamespace(list_tables=lambda: SimpleNamespace(tables=["units", "frames"]), open_table=Table)
+    with patch.object(main, "_film_titles_for_version", return_value={"film-a": "Film A"}):
+        results = main._bookmark_responses(object(), bookmarks, db)
+
+    assert len(results) == 1001
+    assert [(name, column, size) for name, column, size, _ in calls] == [
+        ("units", "unit_id", 400), ("units", "unit_id", 400), ("units", "unit_id", 201),
+        ("frames", "unit_id", 400), ("frames", "unit_id", 400), ("frames", "unit_id", 201),
+    ]
+    assert all("img_vec" not in columns and "visual_vec" not in columns for _, _, _, columns in calls)
+    assert all(result["scene"]["matched_frame_timestamp"] == result["evidence_timestamp"] for result in results)
+    assert all(result["scene"]["keyframe_index"] == 1 for result in results)

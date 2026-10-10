@@ -105,11 +105,23 @@ test("ordinary search exposes its strong quote and keeps text, time and score to
   const shot = { action: "He looks in the mirror.", matches: [{ clause_id: "main", facet: "all", rank: 5, evidence }] };
   assert.deepEqual(plain(lib.hoverEvidence(shot)), { kind: "Spoken", text: "“You talking to me?”" });
   assert.deepEqual(plain(lib.matchedWordsEvidence(shot)), { kind: "Spoken", text: "You talking to me?", source: "quote", score: 0.8, t_start: 42.5, t_end: 46 });
-  for (const score of [undefined, 0.79, NaN]) {
-    const weak = { ...shot, matches: [{ ...shot.matches[0], evidence: { ...evidence, score } }] };
-    assert.deepEqual(plain(lib.hoverEvidence(weak)), { text: "He looks in the mirror." });
-    assert.equal(lib.matchedWordsEvidence(weak), null);
-  }
+});
+
+test("ordinary search keeps a backend-selected partial quote when spoken words explain the result", () => {
+  const evidence = {
+    type: "text", view: "dialogue", source: "quote", score: 0.7143,
+    text: "And I am not going to stand here and see that thing cut open",
+    t_start: 2155.822, t_end: 2159.534,
+  };
+  const shot = {
+    action: "Mayor Vaughn refuses an autopsy.",
+    matches: [{ clause_id: "main", facet: "all", rank: 18, evidence }],
+  };
+  assert.deepEqual(plain(lib.hoverEvidence(shot)), { kind: "Spoken", text: `“${evidence.text}”` });
+  assert.deepEqual(plain(lib.matchedWordsEvidence(shot)), {
+    kind: "Spoken", text: evidence.text, source: "quote", score: 0.7143,
+    t_start: 2155.822, t_end: 2159.534,
+  }, "hover and playback retain the selected passage without consulting debug ranks");
 });
 
 test("ordinary search exposes selected semantic dialogue or on-screen text without a Words filter", () => {

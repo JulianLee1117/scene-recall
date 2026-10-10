@@ -11,6 +11,7 @@ PUT /bookmarks/{unit_id}            Save one indexed scene
 DELETE /bookmarks/{bookmark_id}     Remove one saved scene
 GET /unit/{unit_id}                 Full unit record from the LanceDB units table
 GET /media/keyframe/{shot_id}/{n}   Serve a WebP keyframe image
+GET /media/frame/{film_id}?t=...    Serve a saved source-moment thumbnail
 GET /media/preview/{shot_id}        Serve a WebM preview clip
 GET /video/{film_id}                Stream source video with HTTP range support
 GET /video/{film_id}/playback       Resolve the scene player's prepared media URL
@@ -505,121 +506,94 @@ def _unit_contains_timestamp(unit: dict[str, Any], timestamp: float) -> bool:
     return start <= timestamp < end
 
 
-def _resolve_bookmark_unit(db: Any, bookmark: Bookmark) -> dict[str, Any] | None:
-    """Resolve a bookmark against the current unit generation.
+def _bookmark_rows(
+    db: Any, table_name: str, column: str, values: Sequence[str], columns: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Read a narrow, batched metadata projection without residual scan limits."""
+    if not values or table_name not in table_names(db):
+        return []
+    ids = list(dict.fromkeys(values))
+    table = db.open_table(table_name)
+    rows = []
+    for start in range(0, len(ids), 400):
+        quoted = ", ".join("'" + value.replace("'", "''") + "'" for value in ids[start:start + 400])
+        rows.extend(table.search().where(f"{column} IN ({quoted})").select(list(columns)).limit(None).to_list())
+    return rows
 
-    The derived unit identifier is only a fast path.  If shot boundaries were
-    regenerated, the immutable film identity and saved source timestamp select
-    the current containing unit without mutating the durable anchor.
-    """
-    exact = _bookmark_unit_by_id(db, bookmark.source_unit_id)
-    if (
-        exact is not None
-        and str(exact.get("film_id") or "") == bookmark.film_id
-        and _unit_contains_timestamp(exact, bookmark.evidence_timestamp)
-    ):
-        return exact
 
-    if "units" not in table_names(db):
-        return None
-    rows = (
-        db.open_table("units")
-        .search()
-        .where(col("film_id") == lit(bookmark.film_id))
-        .select(_BOOKMARK_UNIT_FIELDS)
-        .limit(None)
-        .to_list()
-    )
-    containing = [
-        dict(row)
-        for row in rows
-        if row.get("is_representative") is not False
-        and _unit_contains_timestamp(row, bookmark.evidence_timestamp)
-    ]
+def _bookmark_unit_from_film(bookmark: Bookmark, rows: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    """Resolve changed boundaries within the same film, without changing its anchor."""
+    representative = [row for row in rows if row.get("is_representative") is not False]
+    containing = [row for row in representative if _unit_contains_timestamp(row, bookmark.evidence_timestamp)]
+
     def preference(unit: dict[str, Any]) -> tuple[float, float, str]:
-        start = float(unit["t_start"])
-        end = float(unit["t_end"])
-        return (
-            end - start,
-            abs(((start + end) / 2.0) - bookmark.evidence_timestamp),
-            str(unit.get("unit_id") or ""),
-        )
+        start, end = float(unit["t_start"]), float(unit["t_end"])
+        return end - start, abs((start + end) / 2.0 - bookmark.evidence_timestamp), str(unit.get("unit_id") or "")
 
     if containing:
         return min(containing, key=preference)
-
-    # Half-open ranges make a shared boundary belong only to the following
-    # unit.  A film's absolute final boundary has no following unit, so retain
-    # that one exact terminal anchor as a deterministic fallback.
-    representative = [
-        dict(row)
-        for row in rows
-        if row.get("is_representative") is not False
-    ]
     if not representative:
         return None
+    # Half-open ranges put a shared boundary in the following unit. Only a
+    # film's absolute final endpoint falls back to the last containing shot.
     final_end = max(float(row["t_end"]) for row in representative)
     if abs(bookmark.evidence_timestamp - final_end) > 1e-6:
         return None
-    ending = [
-        row
-        for row in representative
-        if abs(float(row["t_end"]) - final_end) <= 1e-6
-    ]
+    ending = [row for row in representative if abs(float(row["t_end"]) - final_end) <= 1e-6]
     return min(ending, key=preference) if ending else None
 
 
-def _bookmark_frame_index(
-    db: Any,
-    bookmark: Bookmark,
-    unit: dict[str, Any],
-) -> int:
-    """Select the original current frame or the frame nearest the anchor."""
-    unit_id = str(unit.get("unit_id") or "")
-    if "frames" in table_names(db):
-        rows = (
-            db.open_table("frames")
-            .search()
-            .where(col("unit_id") == lit(unit_id))
-            .select(["frame_index", "timestamp"])
-            .limit(None)
-            .to_list()
-        )
-        frames = [
-            row
-            for row in rows
-            if row.get("frame_index") is not None
-        ]
-        if unit_id == bookmark.source_unit_id and frames:
-            if bookmark.frame_index is not None:
-                for frame in frames:
-                    if int(frame["frame_index"]) == bookmark.frame_index:
-                        return bookmark.frame_index
-        timestamped = [
-            frame
-            for frame in frames
-            if frame.get("timestamp") is not None
-        ]
-        if timestamped:
-            nearest = min(
-                timestamped,
-                key=lambda frame: abs(
-                    float(frame["timestamp"]) - bookmark.evidence_timestamp
-                ),
-            )
-            return int(nearest["frame_index"])
-        if frames:
-            ordered_frames = sorted(
-                frames,
-                key=lambda frame: int(frame["frame_index"]),
-            )
-            return int(ordered_frames[len(ordered_frames) // 2]["frame_index"])
+def _resolve_bookmark_units(db: Any, bookmarks: Sequence[Bookmark]) -> dict[str, dict[str, Any] | None]:
+    """Resolve all current units together, batching stale anchors by film."""
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for row in _bookmark_rows(db, "units", "unit_id", [b.source_unit_id for b in bookmarks], _BOOKMARK_UNIT_FIELDS):
+        by_id.setdefault(str(row["unit_id"]), []).append(row)
+    resolved: dict[str, dict[str, Any] | None] = {}
+    stale = []
+    for bookmark in bookmarks:
+        exact_rows = by_id.get(bookmark.source_unit_id, [])
+        exact = exact_rows[0] if len(exact_rows) == 1 else None
+        if (exact is not None and exact.get("is_representative") is not False
+                and str(exact.get("film_id") or "") == bookmark.film_id
+                and _unit_contains_timestamp(exact, bookmark.evidence_timestamp)):
+            resolved[bookmark.bookmark_id] = exact
+        else:
+            stale.append(bookmark)
+    by_film: dict[str, list[dict[str, Any]]] = {}
+    for row in _bookmark_rows(db, "units", "film_id", [b.film_id for b in stale], _BOOKMARK_UNIT_FIELDS):
+        by_film.setdefault(str(row["film_id"]), []).append(row)
+    for bookmark in stale:
+        resolved[bookmark.bookmark_id] = _bookmark_unit_from_film(bookmark, by_film.get(bookmark.film_id, []))
+    return resolved
 
+
+def _resolve_bookmark_unit(db: Any, bookmark: Bookmark) -> dict[str, Any] | None:
+    return _resolve_bookmark_units(db, [bookmark])[bookmark.bookmark_id]
+
+
+def _bookmark_frame(
+    bookmark: Bookmark, unit: dict[str, Any], rows: Sequence[dict[str, Any]],
+) -> tuple[int, float | None]:
+    """Select an indexed locator and its real time from the same metadata read."""
+    unit_id = str(unit.get("unit_id") or "")
+    frames = [row for row in rows if row.get("frame_index") is not None]
+    selected = None
+    if unit_id == bookmark.source_unit_id and bookmark.frame_index is not None:
+        selected = next((frame for frame in frames if int(frame["frame_index"]) == bookmark.frame_index), None)
+    if selected is None:
+        timestamped = [frame for frame in frames if frame.get("timestamp") is not None]
+        if timestamped:
+            selected = min(timestamped, key=lambda frame: abs(float(frame["timestamp"]) - bookmark.evidence_timestamp))
+        elif frames:
+            selected = sorted(frames, key=lambda frame: int(frame["frame_index"]))[len(frames) // 2]
+    if selected is not None:
+        timestamp = selected.get("timestamp")
+        return int(selected["frame_index"]), float(timestamp) if timestamp is not None else None
     try:
         paths = json.loads(str(unit.get("keyframe_paths") or "[]"))
     except json.JSONDecodeError:
         paths = []
-    return len(paths) // 2 if isinstance(paths, list) and paths else 0
+    return (len(paths) // 2 if isinstance(paths, list) and paths else 0), None
 
 
 def _bookmark_frame_timestamp(
@@ -630,16 +604,10 @@ def _bookmark_frame_timestamp(
     """Validate a frame locator and return its timestamp when indexed."""
     unit_id = str(unit.get("unit_id") or "")
     if "frames" in table_names(db):
-        from pipeline.index.reads import filtered_rows
-        rows = filtered_rows(
-            db.open_table("frames"),
-            where=(
-                (col("unit_id") == lit(unit_id))
-                & (col("frame_index") == lit(frame_index))
-            ),
-            columns=["timestamp"],
-            limit=2,
-        )
+        # An additional frame_index residual makes Lance scan the full frame
+        # table. Fetch this unit's tiny frame set and validate in Python.
+        rows = [row for row in _bookmark_rows(db, "frames", "unit_id", [unit_id], ["frame_index", "timestamp"])
+                if row.get("frame_index") == frame_index]
         if len(rows) != 1:
             raise HTTPException(status_code=422, detail="Frame is not indexed")
         timestamp = rows[0].get("timestamp")
@@ -654,16 +622,44 @@ def _bookmark_frame_timestamp(
     return None
 
 
-def _bookmark_response(request: Request, bookmark: Bookmark) -> dict[str, Any]:
-    """Hydrate a durable bookmark from the current derived index generation."""
-    db = request.app.state.db
+def _bookmark_responses(request: Request, bookmarks: Sequence[Bookmark], db: Any) -> list[dict[str, Any]]:
+    """Batch presentation evidence from the request's pinned library snapshot."""
+    from pipeline.search import priors
+
+    units = _resolve_bookmark_units(db, bookmarks)
+    unit_ids = [str(unit["unit_id"]) for unit in units.values() if unit is not None]
+    frames: dict[str, list[dict[str, Any]]] = {}
+    for frame in _bookmark_rows(db, "frames", "unit_id", unit_ids, ["unit_id", "frame_index", "timestamp"]):
+        frames.setdefault(str(frame["unit_id"]), []).append(frame)
+    evidence = priors.load_evidence(db, unit_ids)
+    scenes = priors.load_scenes(db, [row.get("scene_id") for row in evidence.values()])
     titles = _film_titles_for_version(request, db)
+    results = []
+    for bookmark in bookmarks:
+        unit = units[bookmark.bookmark_id]
+        shot_evidence = evidence.get(str(unit["unit_id"])) if unit is not None else None
+        context = scenes.get(shot_evidence.get("scene_id")) if shot_evidence else None
+        unit_frames = frames.get(str(unit["unit_id"]), []) if unit is not None else []
+        results.append(_bookmark_response(bookmark, unit, unit_frames, shot_evidence, context, titles))
+    return results
+
+
+def _bookmark_response(
+    bookmark: Bookmark,
+    unit: dict[str, Any] | None,
+    frames: Sequence[dict[str, Any]],
+    evidence: dict[str, Any] | None,
+    scene_context: dict[str, Any] | None,
+    titles: dict[str, str],
+) -> dict[str, Any]:
+    """Hydrate one durable anchor using its resolved unit and batched evidence."""
+    from pipeline.search import priors
+
     title = titles.get(bookmark.film_id, bookmark.film_title_snapshot)
     created_at = datetime.fromtimestamp(
         bookmark.created_at_ms / 1000.0,
         tz=timezone.utc,
     ).isoformat()
-    unit = _resolve_bookmark_unit(db, bookmark)
     if unit is None:
         return {
             "bookmark_id": bookmark.bookmark_id,
@@ -681,8 +677,34 @@ def _bookmark_response(request: Request, bookmark: Bookmark) -> dict[str, Any]:
 
     unit_id = str(unit["unit_id"])
     shot_id = str(unit.get("shot_id") or unit_id)
-    frame_index = _bookmark_frame_index(db, bookmark, unit)
+    frame_index, frame_timestamp = _bookmark_frame(bookmark, unit, frames)
     keyframe_url = f"/media/keyframe/{shot_id}/{frame_index}"
+    scene = {
+        "unit_id": unit_id,
+        "film_id": bookmark.film_id,
+        "film_title": title,
+        "t_start": float(unit["t_start"]),
+        "t_end": float(unit["t_end"]),
+        "caption": str(unit.get("caption") or ""),
+        "keyframe_url": keyframe_url,
+        "keyframe_index": frame_index,
+        "preview_url": f"/media/preview/{shot_id}",
+        "evidence_timestamp": bookmark.evidence_timestamp,
+        "matched_frame_url": keyframe_url,
+        "matched_frame_index": frame_index,
+    }
+    # An indexed frame is a search-reference locator, not a claim that the
+    # saved moment was sampled there. Keep the two clocks independent.
+    if frame_timestamp is not None:
+        scene["matched_frame_timestamp"] = frame_timestamp
+    priors.decorate(scene, evidence, scene_context)
+    if frame_timestamp is not None and abs(frame_timestamp - bookmark.evidence_timestamp) <= 0.0005:
+        scene["thumbnail_url"] = keyframe_url
+    else:
+        # A hero, a line, or a freely browsed instant refers to immutable
+        # source time. Even a currently matching hero can be re-picked between
+        # this response and its image request, so never use that mutable URL.
+        scene["thumbnail_url"] = f"/media/frame/{bookmark.film_id}?t={bookmark.evidence_timestamp:.3f}"
     return {
         "bookmark_id": bookmark.bookmark_id,
         "film_id": bookmark.film_id,
@@ -692,21 +714,7 @@ def _bookmark_response(request: Request, bookmark: Bookmark) -> dict[str, Any]:
         "frame_index": bookmark.frame_index,
         "created_at": created_at,
         "availability": "indexed",
-        "scene": {
-            "unit_id": unit_id,
-            "film_id": bookmark.film_id,
-            "film_title": title,
-            "t_start": float(unit["t_start"]),
-            "t_end": float(unit["t_end"]),
-            "caption": str(unit.get("caption") or ""),
-            "keyframe_url": keyframe_url,
-            "keyframe_index": frame_index,
-            "preview_url": f"/media/preview/{shot_id}",
-            "evidence_timestamp": bookmark.evidence_timestamp,
-            "matched_frame_url": keyframe_url,
-            "matched_frame_index": frame_index,
-            "matched_frame_timestamp": bookmark.evidence_timestamp,
-        },
+        "scene": scene,
     }
 
 
@@ -1392,13 +1400,11 @@ async def image_search_endpoint(
 @app.get("/bookmarks")
 def bookmarks_endpoint(request: Request) -> dict[str, list[dict[str, Any]]]:
     """List durable saved moments hydrated from the current index."""
+    from pipeline.index.snapshot import acquire_search_snapshot
+
     bookmarks: BookmarkStore = request.app.state.bookmarks
-    return {
-        "bookmarks": [
-            _bookmark_response(request, bookmark)
-            for bookmark in bookmarks.list_all()
-        ]
-    }
+    snapshot = acquire_search_snapshot(request.app.state.config, request.app.state.db)
+    return {"bookmarks": _bookmark_responses(request, bookmarks.list_all(), snapshot)}
 
 
 @app.put("/bookmarks/{unit_id}")
@@ -1408,7 +1414,9 @@ def save_bookmark_endpoint(
     unit_id: str = ApiPath(min_length=1, max_length=256),
 ) -> dict[str, Any]:
     """Idempotently save one current unit and its exact source moment."""
-    db = request.app.state.db
+    from pipeline.index.snapshot import acquire_search_snapshot
+
+    db = acquire_search_snapshot(request.app.state.config, request.app.state.db)
     unit = _bookmark_unit_by_id(db, unit_id)
     if unit is None:
         raise HTTPException(status_code=404, detail=f"Unit {unit_id!r} not found")
@@ -1445,7 +1453,7 @@ def save_bookmark_endpoint(
         film_title_snapshot=titles.get(film_id, film_id),
     )
     _log_interaction(request, "save", film_id=film_id, unit_id=unit_id, t=evidence_timestamp)
-    return _bookmark_response(request, bookmark)
+    return _bookmark_responses(request, [bookmark], db)[0]
 
 
 @app.delete("/bookmarks/{bookmark_id}", status_code=204)
@@ -1613,7 +1621,7 @@ def preview_endpoint(shot_id: str, request: Request) -> FileResponse:
     return FileResponse(str(path), media_type="video/webm")
 
 
-def _video_source(film_id: str, request: Request) -> Path:
+def _video_source_record(film_id: str, request: Request) -> dict[str, Any]:
     """Resolve an indexed source, including films outside the library folder."""
     from pipeline.lab.generated import find, is_generated
 
@@ -1628,7 +1636,33 @@ def _video_source(film_id: str, request: Request) -> Path:
     path = Path(rows[0]["path"])
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"Video file not found: {path.name}")
-    return path
+    return rows[0]
+
+
+def _video_source(film_id: str, request: Request) -> Path:
+    return Path(_video_source_record(film_id, request)["path"])
+
+
+@app.get("/media/frame/{film_id}")
+def source_frame_endpoint(
+    request: Request,
+    film_id: str = ApiPath(pattern=r"^[A-Za-z0-9_-]{1,128}$"),
+    t: float = Query(ge=0),
+) -> Response:
+    """A display still at a saved source moment, independent of shot and match indexes."""
+    from pipeline.source_frames import thumbnail
+
+    if not math.isfinite(t):
+        raise HTTPException(422, "Choose a finite time")
+    source = _video_source_record(film_id, request)
+    duration = float(source.get("duration") or 0)
+    if not math.isfinite(duration) or not 0 <= t <= duration:
+        raise HTTPException(422, "Time is outside this film")
+    try:
+        content = thumbnail(Path(source["path"]), t)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(404, "No source frame at this time") from exc
+    return Response(content, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 
 def _prepared_video(source: Path, film_id: str, request: Request) -> Path | None:

@@ -19,7 +19,7 @@ from PIL import Image, UnidentifiedImageError
 
 from pipeline.config import Config
 from pipeline.search.request import bind_unit_scope, search_execution
-from pipeline.search.quotes import STRONG_SCORE
+from pipeline.search.quotes import MIN_SCORE, STRONG_SCORE
 from pipeline.search.shot_facets import unit_scope, validate_shot_filters
 from pipeline.index.text_features import build_mood_view_text
 from pipeline.search.retrieve import (
@@ -638,6 +638,26 @@ def _run_clause(
     raise ValueError(f"facet {clause.facet!r} does not accept a source")
 
 
+def _has_only_spoken_matches(result: dict[str, Any]) -> bool:
+    """Whether this result was retrieved solely from spoken-word evidence.
+
+    A partial quote still explains a result found only through dialogue. Never
+    choose it by comparing unrelated channel ranks, or replace visual/semantic
+    evidence with incidental overlap.
+    """
+    debug = result.get("debug")
+    channels = debug.get("channels") if isinstance(debug, dict) else None
+    if not isinstance(channels, dict) or not isinstance(channels.get("quote"), dict):
+        return False
+    if "img" in channels or "txt" in channels or result.get("matched_text"):
+        return False
+    if "lex" not in channels:
+        return True
+    lexical = channels["lex"]
+    fields = lexical.get("fields") if isinstance(lexical, dict) else None
+    return isinstance(fields, list) and fields == ["dialogue"]
+
+
 def _match_evidence(
     clause: SearchClause,
     rank: int,
@@ -666,14 +686,21 @@ def _match_evidence(
         return match
     # Keep the selected words and their provenance together before fusion can
     # choose another clause for the result's top-level display fields. Ordinary
-    # search needs a strong quote; weaker overlap keeps its semantic evidence.
+    # search prefers a strong quote. A partial quote also explains a result
+    # retrieved solely from dialogue; incidental overlap never replaces other
+    # visual/semantic evidence.
     matched_line = result.get("matched_line")
     if clause.facet in {"all", "words"} and isinstance(matched_line, dict):
         line_text = matched_line.get("text")
         line_score = matched_line.get("score")
         strong_quote = isinstance(line_score, (int, float)) and line_score >= STRONG_SCORE
+        only_spoken_quote = (
+            isinstance(line_score, (int, float))
+            and line_score >= MIN_SCORE
+            and _has_only_spoken_matches(result)
+        )
         if isinstance(line_text, str) and line_text.strip() and (
-            clause.facet == "words" or strong_quote
+            clause.facet == "words" or strong_quote or only_spoken_quote
         ):
             line_evidence: dict[str, Any] = {
                 "type": "text",

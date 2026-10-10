@@ -7,6 +7,7 @@ import type {
   SearchResult,
 } from "@/types/api";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
+import { bookmarkAnchor } from "@/lib/resultMoment";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -24,37 +25,6 @@ function unitIdsFor(bookmark: BookmarkRecord): string[] {
   const ids = [bookmark.source_unit_id];
   if (bookmark.scene?.unit_id) ids.push(bookmark.scene.unit_id);
   return ids;
-}
-
-function bookmarkTimestamp(shot: SearchResult): number {
-  if (typeof shot.matched_frame_timestamp === "number") {
-    return shot.matched_frame_timestamp;
-  }
-
-  const matchedFrameTimestamp = shot.matches?.find(
-    (match) =>
-      match.evidence?.type === "frame" &&
-      typeof match.evidence.timestamp === "number",
-  )?.evidence;
-  if (
-    matchedFrameTimestamp?.type === "frame" &&
-    typeof matchedFrameTimestamp.timestamp === "number"
-  ) {
-    return matchedFrameTimestamp.timestamp;
-  }
-
-  if (typeof shot.evidence_timestamp === "number") {
-    return shot.evidence_timestamp;
-  }
-  return shot.t_start + (shot.t_end - shot.t_start) / 2;
-}
-
-function bookmarkFrameIndex(shot: SearchResult): number | null {
-  if (Number.isInteger(shot.keyframe_index)) return shot.keyframe_index;
-  if (Number.isInteger(shot.matched_frame_index)) {
-    return shot.matched_frame_index ?? null;
-  }
-  return null;
 }
 
 export function useBookmarks() {
@@ -168,8 +138,7 @@ export function useBookmarks() {
         return;
       }
 
-      const evidenceTimestamp = bookmarkTimestamp(shot);
-      const frameIndex = bookmarkFrameIndex(shot);
+      const { evidence_timestamp: evidenceTimestamp, frame_index: frameIndex } = bookmarkAnchor(shot);
       const temporaryId = `pending:${shot.unit_id}`;
       const temporary: BookmarkRecord = {
         bookmark_id: temporaryId,

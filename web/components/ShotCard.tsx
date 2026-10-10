@@ -11,6 +11,7 @@ import { hoverEvidence, matchedWordsEvidence, type MatchColumn } from "@/lib/mat
 import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { displayTitle, formatTime, filmLabel } from "@/lib/format";
+import { displayMoment, hoverPreviewUrl } from "@/lib/resultMoment";
 
 interface ShotCardProps {
   shot: SearchResult;
@@ -52,15 +53,18 @@ export default function ShotCard({
 }: ShotCardProps) {
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [playingPreview, setPlayingPreview] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const suppressClickRef = useRef(false);
   const detailsId = useId();
   const displayedRank = shot.rank ?? position;
   const evidenceTime =
-    matchedWordsEvidence(shot)?.t_start ?? shot.matched_frame_timestamp ?? shot.focus_start ?? shot.t_start;
+    matchedWordsEvidence(shot)?.t_start ?? displayMoment(shot);
   const filmTitle = displayTitle(shot.film_title ?? filmLabel(shot.film_id));
   const sceneMore = shot.scene_alternatives?.length ?? 0;
   const evidence = hoverEvidence(shot);
+  const previewUrl = hoverPreviewUrl(shot);
+  const showPreview = hovered && previewUrl !== null && playingPreview === previewUrl;
   const sourceAvailable = Number.isInteger(shot.keyframe_index);
   // Scenes are modular: drag one onto a search category, or use its Related menu.
   const canDragSource = Boolean(
@@ -70,11 +74,14 @@ export default function ShotCard({
 
   const handleMouseEnter = useCallback(() => {
     setHovered(true);
-    videoRef.current?.play().catch(() => {});
-  }, []);
+    videoRef.current?.play().catch(() => {
+      setPlayingPreview((current) => current === previewUrl ? null : current);
+    });
+  }, [previewUrl]);
 
   const handleMouseLeave = useCallback(() => {
     setHovered(false);
+    setPlayingPreview(null);
     if (videoRef.current) {
       videoRef.current.pause();
       videoRef.current.currentTime = 0;
@@ -124,7 +131,7 @@ export default function ShotCard({
         onClick={handleClick}
         onFocus={handleMouseEnter}
         onBlur={handleMouseLeave}
-        aria-label={`Result ${displayedRank}: ${filmTitle} at ${formatTime(evidenceTime)}. ${shot.caption}`}
+        aria-label={`Result ${displayedRank}: ${filmTitle} at ${formatTime(evidenceTime)}. ${evidence?.text ?? shot.caption}`}
         aria-describedby={showDetails ? detailsId : undefined}
       >
         <span className="result-card-media">
@@ -135,20 +142,26 @@ export default function ShotCard({
             loading="lazy"
             draggable={false}
             onLoad={(event) => onFrameLoad?.(shot, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
-            style={{ opacity: hovered ? 0 : 1 }}
+            style={{ opacity: showPreview ? 0 : 1 }}
           />
 
-          <video
+          {previewUrl && <video
+            key={previewUrl}
             ref={videoRef}
-            src={`${API_URL}${shot.preview_url}`}
+            src={`${API_URL}${previewUrl}`}
             muted
             loop
             playsInline
             preload="none"
             aria-hidden="true"
             draggable={false}
-            style={{ opacity: hovered ? 1 : 0 }}
-          />
+            onPlaying={() => setPlayingPreview(previewUrl)}
+            onLoadStart={() => setPlayingPreview(null)}
+            onPause={() => setPlayingPreview(null)}
+            onWaiting={() => setPlayingPreview(null)}
+            onError={() => setPlayingPreview(null)}
+            style={{ opacity: showPreview ? 1 : 0 }}
+          />}
 
           {(showRank || (shot.badges?.length ?? 0) > 0) && (
             <span className="result-card-marks">
@@ -168,7 +181,7 @@ export default function ShotCard({
           {sceneMore > 0 && (
             <span
               className="scene-more"
-              title={`${sceneMore} more matching shot${sceneMore === 1 ? "" : "s"} from this scene`}
+              title={`${sceneMore} more matching shot${sceneMore === 1 ? "" : "s"}`}
             >
               +{sceneMore}
             </span>

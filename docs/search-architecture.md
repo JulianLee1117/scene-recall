@@ -18,7 +18,7 @@ records.
 | Evidence: per-film artifacts, compiled tables | Evidence v2 | `pipeline/evidence/` | 0001, 0093, 0095, 0098, 0099 |
 | Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080, 0102 |
 | Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, 0112, 0113, 0114, with 0002-0021 and 0082-0087 where not superseded |
-| Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py` | 0006 |
+| Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py`, `pipeline/source_frames.py` | 0006, 0118 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
 | Editor harness v2 (default) | Editor harness v2 | `pipeline/lab/harness/` | 0096, 0098, 0099, 0103, 0104, 0105 |
@@ -28,7 +28,7 @@ records.
 | Regions (masking spec shared by treatments; subject by video matte, box, near/far by depth) | Alg Mods Lab | `pipeline/lab/regions.py`, `pipeline/lab/matte.py`, `pipeline/lab/depth.py` | 0110 |
 | Grafts (landmark-aligned pieces of other shots, as plans) | Alg Mods Lab | `pipeline/lab/grafts.py`, `pipeline/algmods/composite.py` | 0110 (landmarks from 0099) |
 | Match Cuts | Moment-level Match Cuts | `pipeline/evidence/moments.py`, `pipeline/matching/moments/`, `web/features/lab/matching/` | 0099 (0008 gates ordinary search) |
-| Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067, 0115, 0117 |
+| Web app | Search and Lab application boundary | `web/` (read `web/AGENTS.md`) | 0051, 0067, 0115, 0117, 0118 |
 
 Frozen: kept runnable, with no new investment. Their decision records hold the
 detail.
@@ -198,6 +198,23 @@ the absolute final boundary of a film deterministically falls back to its last
 unit. Missing or temporarily unavailable source/index data leaves an explicit
 unavailable bookmark rather than silently rebinding or deleting user state.
 
+The shared display-moment resolver governs visual playback and Save (ADR-0118).
+It respects a Saved timestamp first, then the frame actually displayed. A frame
+index is only a hint when its real timestamp agrees with that moment. Hydration
+keeps the durable timestamp distinct from the indexed frame's actual timestamp.
+If no indexed still matches, `GET /media/frame/{film_id}?t=...` reads a still
+from the original source. It validates film duration and finite timestamps,
+uses a 128-entry source-fingerprint memory cache and limits thumbnail decoding
+to two CPU jobs with bounded codec threads. It writes no derived artifacts.
+Saved hover uses a preview only when its current focus span contains the saved
+moment and lasts at least one second (shorter spans can retain a wider ingest
+preview); otherwise it preserves the still. Existing saves are never retimed.
+Saved-list hydration batches projected unit, frame, evidence and scene reads
+from one pinned snapshot; it does not fetch embeddings or scan once per bookmark.
+It includes current shot action and characters, so Saved hover shares Search's
+action-first, caption-fallback description. Query-specific matched words are
+not durable bookmark state.
+
 The interaction (taste) log, `state_dir/interactions.sqlite3`, records only
 searches, plays and saves made in the web app. The app marks its requests with
 `X-Scene-Recall-Client: app`; unmarked API calls from scripts and agents are
@@ -334,19 +351,25 @@ or deeper retrieval when available. Returned scenes and paging remain visible;
 the browser never converts partial agreement into an empty result stream.
 This presentation does not change backend ranking, facet
 semantics, mandatory visual gates, movie scope or progressive result windows.
-The source player distinguishes a retrieved keyframe from its live playhead;
-moving playback does not silently change the indexed bookmark or search anchor.
+The source player distinguishes the displayed result moment, indexed search
+reference and live playhead. Browsing selects a source timestamp for an explicit
+Save without changing the indexed search reference.
 
 Result hover (ADR-0117) shows gold film title and timestamp, then one snippet.
 The explicit Words clause's own dialogue/OCR evidence takes priority, followed
 by the main query's strong quote (ordered overlap >= 0.8) or selected semantic
-dialogue/OCR evidence. These excerpts are labelled Spoken or On screen; otherwise
+dialogue/OCR evidence. A partial admitted quote (overlap >= 0.5) also appears
+when only spoken-word retrieval supports the result: no visual or semantic
+channel, no selected semantic text, and lexical support absent or dialogue-only.
+These excerpts are labelled Spoken or On screen; otherwise
 the shot's `action`, falling back to `caption`, appears without a label. Channel
 ranks and unrelated clauses do not choose the snippet. Recipe text evidence
 preserves its own source, quote score and source timing before fusion; the
 browser never borrows another clause's top-level text or timestamp. The selected
-timed passage controls the hover time and initial playback, while source/save
-actions retain the indexed frame anchor. Retrieval and ranking are unchanged.
+timed passage controls the hover time and initial playback. Visual playback and
+Save use the displayed picture's moment; visual search references retain their
+indexed identity. The browser trusts clause-owned evidence selected by the
+backend rather than repeating its quote gate. Retrieval and ranking are unchanged.
 
 Shot details load `GET /library/shot/{unit_id}/dialogue` on demand. It reads the
 canonical published shot and compiled `dialogue_lines` from one pinned snapshot,
@@ -356,8 +379,9 @@ chronologically, with an explicit truncation flag. Missing film-level dialogue
 coverage is unavailable, not proof of silence. There is no inference or backfill
 on this path. The Dialogue row shows a few lines around the matched passage,
 expands longer content and plays source timestamps. On-screen match text stays
-separate. These facts remain attached to the retrieved result while playback
-advances; empty/unavailable dialogue is omitted and failed reads can be retried.
+separate. Facts remain attached to the explicitly selected match while playback
+advances; choosing another matching shot updates its facts and dialogue.
+Empty/unavailable dialogue is omitted and failed reads can be retried.
 The detailed retrieval breakdown remains available separately.
 
 ADR-0062 adds an optional source-preserving browser audio representation for
@@ -2104,7 +2128,10 @@ dropped from search, highlights and film browsing unless the query asks for
 logos (ADR-0112).
 Visual deduplication then folds a near-identical shot of the same film (a reverse angle, a
 recurring set-up) into the card it resembles, among its other matching shots, and drops
-near-identical shots of other films (ADR-0101).
+near-identical shots of other films (ADR-0101). The relevance-selected alternatives
+retain their own frame, focus, text and scene metadata. The player presents them
+chronologically as **Matching shots**, leaving the original best result selected
+(ADR-0118). This changes browsing order, not the selected pool or eight-shot cap.
 
 Priors apply after relevance (`pipeline.search.priors`): a shot's relevance
 score is multiplied by a bounded factor from its fame (library-scaled) and craft
@@ -2136,7 +2163,8 @@ dissolve), scene context and the matched subtitle line with exact times. The
 hover preview is the ingest clip around the shot's midpoint unless that strays
 outside the focus span; then `/media/preview` serves the evidence clip around
 the peak, and `preview_url` carries the span as its cache key. The player opens
-at the matched line or frame, else at the focus span.
+at the selected timed passage (with a one-second lead-in), else at the displayed
+hero/indexed frame or Saved timestamp without a lead-in across picture boundaries.
 
 Text views, frames and unit metadata are searched from resident copies of the
 request's pinned snapshot (`pipeline.search.resident`): float16 matrices (GPU

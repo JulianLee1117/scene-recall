@@ -16,6 +16,12 @@ const reasons = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, "../lib/matchReasons.ts"), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, { exports: reasons, require: () => ({ formatTime: (value) => `${value}s` }) });
+const moments = {}, shotLists = {};
+for (const [file, exports] of [["resultMoment.ts", moments], ["sceneShots.ts", shotLists]]) {
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, "../lib", file), "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { exports, require: () => moments });
+}
 
 function harness({ shot = film(), apiUrl = "http://api.invalid" } = {}) {
   const hooks = [], requests = [], listeners = new Map(), elements = new Map(), bookmarks = [];
@@ -66,6 +72,8 @@ function harness({ shot = film(), apiUrl = "http://api.invalid" } = {}) {
       if (name === "@/lib/format") return { filmLabel: String, displayTitle: String, formatTime: (value) => `${value}s` };
       if (name === "@/lib/searchRecipe") return { FACET_LABELS: {} };
       if (name === "@/lib/matchReasons") return reasons;
+      if (name === "@/lib/resultMoment") return moments;
+      if (name === "@/lib/sceneShots") return shotLists;
       return { default: name };
     },
   });
@@ -117,7 +125,7 @@ test("compatible playback URL loads only after metadata and retains evidence see
     assert.equal(video.props.controls, true);
     assert.notEqual(video.props.muted, true);
     video.props.onCanPlay();
-    assert.equal(video.props.ref.current.currentTime, 22);
+    assert.equal(video.props.ref.current.currentTime, 23);
     assert.equal(video.props.ref.current.plays, 1);
     video.props.ref.current.currentTime = 27;
     video.props.onCanPlay();
@@ -154,13 +162,36 @@ test("main-query spoken evidence controls opening and dialogue playback while th
   } finally { app.dispose(); }
 });
 
+test("a hero result opens and saves its displayed moment, while earlier alternatives stay navigable", async () => {
+  const result = { ...film(), t_start: 1102.393, t_end: 1119.201, matched_frame_timestamp: 1114.999,
+    keyframe_index: 2, keyframe_url: "/frame/2", hero_url: "/hero", thumbnail_url: "/hero", hero_time: 1105,
+    focus_start: 1102.393, focus_end: 1106.595, scene: { title: "Swimming lesson" },
+    scene_alternatives: [{ unit_id: "earlier", t_start: 1080, t_end: 1090, keyframe_index: 1, keyframe_url: "/earlier",
+      thumbnail_url: "/hero/earlier", hero_time: 1085, scene: { title: "Before the lesson" } }] };
+  const app = harness({ shot: result });
+  try {
+    await app.resolve(0, { url: "/video/film-a" });
+    app.video().props.onCanPlay();
+    assert.equal(app.video().props.ref.current.currentTime, 1105, "no preroll into a different picture");
+    const strip = () => nodes(app.find((node) => node.props?.className === "modal-scene-alternatives")).filter((node) => node.type === "button");
+    assert.deepEqual(strip().map(text), ["1085s", "1105s"]);
+    assert.deepEqual(strip().map((node) => node.props["aria-pressed"]), [false, true], "chronology does not replace the initially selected best match");
+    app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
+    assert.equal(moments.bookmarkAnchor(app.bookmarks[0]).evidence_timestamp, 1105);
+    strip()[0].props.onClick(); await app.flush();
+    assert.match(text(app.find((node) => node.props?.className === "modal-now")), /Before the lesson/);
+    app.button("Back to result · 1105s").props.onClick();
+    assert.equal(app.video().props.ref.current.currentTime, 1105);
+  } finally { app.dispose(); }
+});
+
 test("same-film scene or evidence changes remount the player while reusing playback metadata", async () => {
   const app = harness({ shot: { ...film(), matched_frame_timestamp: undefined } });
   try {
     await app.resolve(0, { url: "/video/film-a" });
     assert.equal(app.video().props.src, "http://api.invalid/video/film-a");
     app.video().props.onCanPlay();
-    assert.equal(app.video().props.ref.current.currentTime, 19);
+    assert.equal(app.video().props.ref.current.currentTime, 20);
     const firstPlayer = app.video().props.ref.current;
     const firstKey = app.video().key;
     await app.updateShot(film("film-a", 40));
@@ -171,7 +202,7 @@ test("same-film scene or evidence changes remount the player while reusing playb
     assert.equal(nextVideo.props.src, "http://api.invalid/video/film-a");
     // A remounted player loads normally; do not synthesize canplay on the old player.
     nextVideo.props.onCanPlay();
-    assert.equal(nextVideo.props.ref.current.currentTime, 39);
+    assert.equal(nextVideo.props.ref.current.currentTime, 40);
     const secondPlayer = nextVideo.props.ref.current;
     const secondKey = nextVideo.key;
     await app.updateShot({ ...film("film-a", 40), unit_id: "film-a_0002" });
@@ -191,7 +222,7 @@ test("changing films aborts old metadata and ignores a late response", async () 
     await app.resolve(0, { url: "/video/film-a" });
     assert.equal(app.video().props.src, "http://api.invalid/video/film-b?representation=bbbbbbbbbbbbbbbbbbbbbbbb");
     app.video().props.onCanPlay();
-    assert.equal(app.video().props.ref.current.currentTime, 79);
+    assert.equal(app.video().props.ref.current.currentTime, 80);
     await app.updateShot(film("film-c", 4));
     assert.equal(app.video(), undefined, "the old film is hidden while the next URL resolves");
   } finally { app.dispose(); }
@@ -251,7 +282,7 @@ test("media errors retry URL resolution and restore the original evidence seek",
     app.button("Retry playback").props.onClick(); await app.flush();
     await app.resolve(1, { url: "/video/film-a?representation=aaaaaaaaaaaaaaaaaaaaaaaa" });
     app.video().props.onCanPlay();
-    assert.equal(app.video().props.ref.current.currentTime, 22);
+    assert.equal(app.video().props.ref.current.currentTime, 23);
   } finally { app.dispose(); }
 });
 
@@ -278,10 +309,10 @@ test("one action bar offers Save, Related, Match cuts at the playhead and Copy t
   } finally { app.dispose(); }
 });
 
-test("picking another shot of the scene makes Save and Match cuts act on it", async () => {
+test("picking another matching shot updates its facts and actions without following automatic playback", async () => {
   const shot = { ...film(), keyframe_index: 1, scene: { title: "Planetarium" },
     scene_alternatives: [
-      { unit_id: "film-a_0004", t_start: 40, t_end: 44, keyframe_url: "/k/4", keyframe_index: 1, thumbnail_url: "/h/4", hero_time: 42.5 },
+      { unit_id: "film-a_0004", t_start: 40, t_end: 44, keyframe_url: "/k/4", keyframe_index: 1, thumbnail_url: "/h/4", hero_time: 42.5, scene: { title: "Another scene" }, caption: "A different picture", action: "He leaves", debug: { final_score: 1, channels: { txt: { rank: 2, score: .8, distance: .2 } } }, matches: [{ clause_id: "main", facet: "all", rank: 2, evidence: { type: "text", view: "dialogue", text: "Goodbye" } }] },
       { unit_id: "film-a_0006", t_start: 50, t_end: 70, keyframe_url: "/k/6", keyframe_index: 1 },
     ] };
   const app = harness({ shot });
@@ -295,25 +326,33 @@ test("picking another shot of the scene makes Save and Match cuts act on it", as
     await app.flush();
     assert.equal(app.video().props.ref.current.currentTime, 42.5, "it opens on the frame its thumbnail shows");
     assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [false, true, false]);
-    assert.equal(caption(), "A scene", "the result's details stay put");
+    assert.equal(caption(), "A different picture", "an explicit pick owns the visible facts");
+    assert.equal(app.find((node) => node.type === "./ShotDialogue").props.shot.unit_id, "film-a_0004");
+    assert.equal(app.find((node) => node.type === "./MatchBreakdown").props.shot.unit_id, "film-a_0004");
+    assert.match(text(app.find((node) => node.props?.className === "modal-facts")), /Another scene.*He leaves/);
+    assert.equal(strip()[1].props.title, "Pick the shot at 42.5s");
     assert.match(text(app.find((node) => node.props?.className === "modal-time")), /40s – 44s/);
     assert.equal(app.find((node) => node.type === "a" && text(node) === "Match cuts").props.href, "/match?unit_id=film-a_0004&time=42.500");
     app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
     assert.equal(app.bookmarks[0].unit_id, "film-a_0004");
-    assert.equal(app.bookmarks[0].evidence_timestamp, 42.5, "it saves the frame its thumbnail showed");
-    assert.equal(app.bookmarks[0].scene.title, "Planetarium");
+    assert.equal(moments.bookmarkAnchor(app.bookmarks[0]).evidence_timestamp, 42.5, "it saves the frame its thumbnail showed");
+    assert.equal(app.bookmarks[0].scene.title, "Another scene");
+    app.video().props.onTimeUpdate({ currentTarget: { currentTime: 51 } }); await app.flush();
+    assert.equal(caption(), "A different picture", "automatic playback does not replace the selected facts");
+    assert.equal(app.find((node) => node.type === "./ShotDialogue").props.shot.unit_id, "film-a_0004");
 
-    // Without a chosen best frame a shot's moment is its middle: label, seek and save agree.
+    // Without a timestamped frame the shot boundary is the same fallback everywhere.
     strip()[2].props.onClick();
     await app.flush();
-    assert.match(text(strip()[2]), /60s/);
-    assert.equal(app.video().props.ref.current.currentTime, 60);
+    assert.match(text(strip()[2]), /50s/);
+    assert.equal(app.video().props.ref.current.currentTime, 50);
     app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
-    assert.equal(app.bookmarks[1].evidence_timestamp, 60);
+    assert.equal(moments.bookmarkAnchor(app.bookmarks[1]).evidence_timestamp, 50);
 
     app.button("Back to result · 23s").props.onClick();
     await app.flush();
     assert.deepEqual(strip().map((button) => button.props["aria-pressed"]), [true, false, false]);
+    assert.equal(caption(), "A scene", "Back to result restores its facts");
   } finally { app.dispose(); }
 });
 
@@ -336,7 +375,8 @@ test("browsing beyond the scene retargets the actions to the shot on screen, wit
     assert.equal(matchCuts(), "/match?unit_id=film-a_0040&time=95.000");
     app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
     assert.equal(app.bookmarks[0].unit_id, "film-a_0040");
-    assert.equal(app.bookmarks[0].matched_frame_timestamp, 95, "a browsed shot saves the frame on screen");
+    assert.equal(app.bookmarks[0].evidence_timestamp, 95, "a browsed shot saves the moment on screen");
+    assert.equal(app.bookmarks[0].matched_frame_timestamp, 23, "browsing does not relabel the indexed frame");
 
     // Playing on inside that shot asks the library nothing more.
     app.video().props.onTimeUpdate({ currentTarget: { currentTime: 97 } }); await app.flush();

@@ -2154,9 +2154,20 @@ def search(
         else eligible[:result_limit]
     )
 
+    # Deduplication can fold a shot from another scene before evidence is
+    # loaded. Keep each selected alternative's own context and shown moment.
+    displayed_candidates = [
+        item for candidate in ranked_candidates
+        for item in [candidate, *candidate.get("scene_alternatives", [])]
+    ]
+    missing_evidence = [_candidate_unit_id(alternative) for candidate in ranked_candidates
+                        for alternative in candidate.get("scene_alternatives", [])
+                        if _candidate_unit_id(alternative) not in evidence]
+    if missing_evidence and not _defer_result_preferences:
+        evidence.update(_priors.load_evidence(db, missing_evidence))
     scenes = _priors.load_scenes(
         db,
-        ((evidence.get(_candidate_unit_id(candidate)) or {}).get("scene_id") for candidate in ranked_candidates),
+        ((evidence.get(_candidate_unit_id(candidate)) or {}).get("scene_id") for candidate in displayed_candidates),
     ) if evidence else {}
     selected: list[dict[str, Any]] = []
     for candidate in ranked_candidates:
@@ -2208,7 +2219,8 @@ def search(
             _priors.decorate(result, shot_evidence, scenes.get(shot_evidence.get("scene_id") or ""))
         if candidate.get("scene_alternatives"):
             result["scene_alternatives"] = [
-                _scene_alternative(alternative, evidence.get(_candidate_unit_id(alternative)))
+                _scene_alternative(alternative, evidence.get(_candidate_unit_id(alternative)),
+                                   scenes.get((evidence.get(_candidate_unit_id(alternative)) or {}).get("scene_id")))
                 for alternative in candidate["scene_alternatives"]
             ]
         selected.append(result)
@@ -2320,25 +2332,42 @@ def _attach_scene_alternative(representative: dict[str, Any], other: dict[str, A
             alternatives.append(item)
 
 
-def _scene_alternative(candidate: dict[str, Any], shot_evidence: dict[str, Any] | None) -> dict[str, Any]:
-    """Compact card for another matching shot of the same scene."""
+def _scene_alternative(candidate: dict[str, Any], shot_evidence: dict[str, Any] | None,
+                       scene: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Another matching shot, retaining its own source evidence and scene."""
     row = candidate["row"]
     unit_id = str(row["unit_id"])
-    return _show_alternative_hero({
+    matched_frame = row.get("_matched_frame")
+    frame_index = matched_frame.get("frame_index") if isinstance(matched_frame, dict) else None
+    try:
+        keyframe_index = int(frame_index)
+    except (TypeError, ValueError):
+        keyframe_index = _keyframe_index(row)
+    alternative = {
         "unit_id": unit_id, "t_start": row["t_start"], "t_end": row["t_end"],
-        "keyframe_url": f"/media/keyframe/{row.get('shot_id') or unit_id}/{_keyframe_index(row)}",
-        "keyframe_index": _keyframe_index(row), "preview_url": f"/media/preview/{row.get('shot_id') or unit_id}",
-    }, shot_evidence)
+        "caption": row.get("caption") or "",
+        "keyframe_url": f"/media/keyframe/{row.get('shot_id') or unit_id}/{keyframe_index}",
+        "keyframe_index": keyframe_index, "preview_url": f"/media/preview/{row.get('shot_id') or unit_id}",
+    }
+    if isinstance(matched_frame, dict):
+        alternative.update(matched_frame_url=alternative["keyframe_url"], matched_frame_index=keyframe_index,
+                           matched_frame_timestamp=matched_frame.get("timestamp"))
+    if isinstance(row.get("_matched_text"), dict):
+        alternative.update(matched_text_view=row["_matched_text"].get("view"),
+                           matched_text=row["_matched_text"].get("text"))
+    if isinstance(row.get("_matched_line"), dict):
+        alternative["matched_line"] = row["_matched_line"]
+    if candidate.get("channels"):
+        alternative["debug"] = {"final_score": float(candidate.get("final_score") or 0.0),
+                                "channels": candidate["channels"]}
+    return _show_alternative_hero(alternative, shot_evidence, scene)
 
 
-def _show_alternative_hero(alternative: dict[str, Any], shot_evidence: dict[str, Any] | None) -> dict[str, Any]:
-    """Show an alternative by its best frame when it has one, with that frame's moment for saving."""
-    if shot_evidence and shot_evidence.get("hero_path"):
-        alternative["thumbnail_url"] = _priors.hero_url(alternative["unit_id"], shot_evidence)
-        if shot_evidence.get("hero_time") is not None:
-            alternative["hero_time"] = float(shot_evidence["hero_time"])
-    else:
-        alternative["thumbnail_url"] = alternative.get("keyframe_url")
+def _show_alternative_hero(alternative: dict[str, Any], shot_evidence: dict[str, Any] | None,
+                           scene: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Decorate alternatives by the same shown-frame and context rules as cards."""
+    _priors.decorate(alternative, shot_evidence, scene)
+    alternative.setdefault("thumbnail_url", alternative.get("keyframe_url"))
     return alternative
 
 
@@ -2748,8 +2777,8 @@ def _result_unit_id(result: dict[str, Any]) -> str:
 def _attach_result_alternative(representative: dict[str, Any], other: dict[str, Any]) -> None:
     alternatives = representative.setdefault("scene_alternatives", [])
     if len(alternatives) < _priors.MAX_SCENE_ALTERNATIVES:
-        alternatives.append({key: other[key] for key in ("unit_id", "t_start", "t_end", "keyframe_url", "keyframe_index",
-                                                         "preview_url") if key in other})
+        alternatives.append({key: value for key, value in other.items()
+                             if key not in {"film_id", "film_title", "rank", "scene_alternatives"}})
 
 
 def _decorate_results(results: list[dict[str, Any]], db: lancedb.DBConnection,
@@ -2757,13 +2786,16 @@ def _decorate_results(results: list[dict[str, Any]], db: lancedb.DBConnection,
     """Hero frames, badges, story and scene context for final results."""
     if not evidence:
         return results
-    scenes = _priors.load_scenes(db, ((evidence.get(_result_unit_id(r)) or {}).get("scene_id") for r in results))
+    displayed = [item for result in results for item in [result, *result.get("scene_alternatives", [])]]
+    scenes = _priors.load_scenes(db, ((evidence.get(_result_unit_id(r)) or {}).get("scene_id") for r in displayed))
     for result in results:
         shot_evidence = evidence.get(_result_unit_id(result))
         if shot_evidence:
             _priors.decorate(result, shot_evidence, scenes.get(shot_evidence.get("scene_id") or ""))
         for alternative in result.get("scene_alternatives") or []:
-            _show_alternative_hero(alternative, evidence.get(_result_unit_id(alternative)))
+            alternative_evidence = evidence.get(_result_unit_id(alternative))
+            _show_alternative_hero(alternative, alternative_evidence,
+                                   scenes.get((alternative_evidence or {}).get("scene_id")))
     return results
 
 

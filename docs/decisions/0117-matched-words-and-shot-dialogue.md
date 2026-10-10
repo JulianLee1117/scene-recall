@@ -1,6 +1,6 @@
 # ADR-0117: Matched words on hover and source dialogue in shot details
 
-- Status: Accepted
+- Status: Accepted; evidence display and saved anchors amended by ADR-0118
 - Date: 2026-10-09
 - Extends: ADR-0094 (source-backed search presentation)
 

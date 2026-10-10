@@ -1743,12 +1743,26 @@ def test_search_folds_a_near_identical_shot_of_the_same_film_into_its_card(
         lexical_rows=[first, again, distinct],
     )
 
-    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()):
+    # The later lookalike is folded before scene evidence is read. It still
+    # needs its own display moment and scene once the card reaches the player.
+    evidence = {"again": {"scene_id": "later-scene", "hero_path": "again.webp", "hero_time": 902.5,
+                           "focus_start": 901.0, "focus_end": 904.0, "action": "The river returns."}}
+    later_scene = {"scene_id": "later-scene", "title": "A later visit", "summary": "Back at the river."}
+    with patch("pipeline.search.retrieve.embed_text", return_value=_fake_vec()), \
+         patch("pipeline.search.priors.load_evidence",
+               side_effect=lambda _db, ids: {key: evidence[key] for key in ids if key in evidence}), \
+         patch("pipeline.search.priors.load_scenes", return_value={"later-scene": later_scene}):
         results = search("river", db, config)
 
     cards = {result["unit_id"]: result for result in results}
     assert "again" not in cards                                   # no repeated image in the grid
     assert [alternative["unit_id"] for alternative in cards["first"]["scene_alternatives"]] == ["again"]
+    alternative = cards["first"]["scene_alternatives"][0]
+    assert alternative["hero_time"] == 902.5
+    assert alternative["focus_start"] == 901.0
+    assert alternative["action"] == "The river returns."
+    assert alternative["scene"]["id"] == "later-scene"
+    assert alternative["caption"] == "The river at dusk again"
 
 
 def test_scene_alternative_carries_the_moment_its_thumbnail_shows() -> None:
@@ -1760,6 +1774,51 @@ def test_scene_alternative_carries_the_moment_its_thumbnail_shows() -> None:
     assert "hero_time" not in plain and plain["keyframe_index"] == 1
     hero = _scene_alternative({"row": row}, {"hero_path": "film/hero.jpg", "hero_time": 12.5})
     assert hero["hero_time"] == 12.5
+
+
+def test_scene_alternative_retains_its_own_matched_frame_and_dialogue() -> None:
+    from pipeline.search.retrieve import _scene_alternative
+
+    line = {"text": "Keep swimming.", "t_start": 61.0, "t_end": 63.0, "score": 1.0}
+    row = {"unit_id": "other", "t_start": 10.0, "t_end": 80.0, "caption": "A swimmer.",
+           "keyframe_paths": '["a.jpg", "b.jpg", "c.jpg"]',
+           "_matched_frame": {"frame_index": 2, "timestamp": 61.5}, "_matched_line": line}
+    evidence = {"hero_path": "hero.webp", "hero_time": 40.0, "action": "She swims.",
+                "focus_start": 35.0, "focus_end": 45.0}
+    candidate = {"row": row, "channels": {"img": {"rank": 1}, "txt": {"rank": 4}}}
+    alternative = _scene_alternative(candidate, evidence)
+    assert alternative["keyframe_index"] == 2
+    assert alternative["thumbnail_url"] == "/media/keyframe/other/2"
+    assert alternative["matched_frame_timestamp"] == 61.5
+    assert alternative["matched_line"] == line
+    assert alternative["action"] == "She swims."
+
+
+def test_recipe_alternatives_keep_their_own_evidence_and_scene_when_decorated() -> None:
+    from pipeline.search.retrieve import _attach_result_alternative, _decorate_results
+
+    representative = {"unit_id": "first", "scene": {"id": "first-scene"}}
+    line = {"text": "Hello.", "t_start": 40.0, "t_end": 42.0, "score": 1.0}
+    other = {"unit_id": "other", "film_id": "film", "t_start": 40.0, "t_end": 50.0,
+             "caption": "At work.", "keyframe_url": "/media/keyframe/other/1", "keyframe_index": 1,
+             "matched_line": line, "matches": [{"clause_id": "main", "facet": "all", "rank": 4}]}
+    evidence = {"other": {"scene_id": "other-scene", "hero_path": "other.webp", "hero_time": 44.0}}
+    _attach_result_alternative(representative, other)
+    requested_scenes = []
+
+    def scenes(_db, scene_ids):
+        requested_scenes.extend(scene_ids)
+        return {"other-scene": {"scene_id": "other-scene", "title": "At work", "summary": "A phone call."}}
+
+    with patch("pipeline.search.priors.load_scenes", side_effect=scenes):
+        _decorate_results([representative], MagicMock(), evidence)
+    alternative = representative["scene_alternatives"][0]
+    assert "other-scene" in requested_scenes
+    assert alternative["scene"]["id"] == "other-scene"
+    assert alternative["matched_line"] == line
+    assert alternative["matches"] == other["matches"]
+    assert alternative["caption"] == "At work."
+    assert alternative["hero_time"] == 44.0
 
 
 def test_search_keeps_temporally_adjacent_visually_distinct_results(
