@@ -312,9 +312,12 @@ reference out of the Refine area to remove it (with **Undo**). Drag a
 search result onto a category to add it to the current search, or use its
 **Related** menu to start a new search from that scene (movie scope and preset
 stay). Saved cards keep playback, bookmarks and Related without dragging or a
-drag badge. The player distinguishes its retrieved frame from the current
-playback time; its action bar saves the scene, finds related scenes, opens
-**Match cuts** at the playhead in a new tab and copies the film and time.
+drag badge. The player's action bar saves, finds related scenes, opens **Match
+cuts** at the playhead in a new tab and copies the film and time, acting on the
+shot on screen: play or scrub elsewhere in the film and the line above the
+actions names that shot, with **Back to result** to return. Its details describe
+the result, labelled **Scene** (the story), **Shot** (what happens, and who) and
+**Picture** (what the frame shows).
 **Show details** (under **View**) shows each result's description and how each
 retrieval channel ranked it. Every card in a search lists the same rows in a fixed order: Visual (image-text
 embedding), Semantic (text embedding, with the view it matched such as Story or

@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import json
+import math
 import mimetypes
 import os
 import re
@@ -117,7 +118,7 @@ from pipeline.search.retrieve import (
     search as _search,
     search_by_image as _search_by_image,
 )
-from pipeline.search.browse import browse_highlights as _browse_highlights, browse_scenes as _browse_scenes
+from pipeline.search.browse import browse_highlights as _browse_highlights, browse_scenes as _browse_scenes, shot_at as _shot_at
 from pipeline.search.film_facets import film_facets as _film_facets
 from pipeline.search.shot_facets import shot_facet_vocabulary as _shot_facet_vocabulary, validate_shot_filters
 from pipeline.search.recipe import (
@@ -1807,6 +1808,21 @@ def library_scenes_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _search_response(_with_film_titles(request, results), config, result_limit)
+
+
+@app.get("/library/shot")
+def library_shot_endpoint(
+    request: Request,
+    film_id: Annotated[str, Query(min_length=1, max_length=128)],
+    t: Annotated[float, Query(ge=0)],
+) -> dict[str, Any]:
+    """The shot on screen at *t* in a film, as a result the player can save or search from."""
+    if not math.isfinite(t):
+        raise HTTPException(status_code=422, detail="Choose a finite time")
+    result = _shot_at(request.app.state.db, request.app.state.config, film_id=film_id, time_value=t)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No shot of this film at that time")
+    return _with_film_titles(request, [result])[0]
 
 
 @app.get("/search/shot-facets")

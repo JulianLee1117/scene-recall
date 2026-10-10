@@ -84,23 +84,48 @@ export default function VideoModal({
   );
   const [pickedUnitId, setPickedUnitId] = useState(shot.unit_id);
   const current = sceneShots.find((item) => item.unit_id === pickedUnitId) ?? shot;
-  const isRetrieved = current.unit_id === shot.unit_id;
+  // Beyond this scene's shots, the shot on screen comes from the library, so
+  // browsing the film retargets the actions to what you are watching.
+  const [onScreen, setOnScreen] = useState<SearchResult | null>(null);
+  // The result also owns its matched moment, which can sit on its shot's edge.
+  const playing = (item: SearchResult | null | undefined): item is SearchResult =>
+    Boolean(item && ((playheadTime >= item.t_start && playheadTime < item.t_end)
+      || (item === shot && Math.abs(playheadTime - evidenceTime) < 0.5)));
+  const sceneTarget = playing(current) ? current : sceneShots.find(playing);
+  const browsed = !sceneTarget && playing(onScreen) ? onScreen : null;
+  // What Save, Related and Match cuts act on: the shot on screen, else the picked one.
+  const target = sceneTarget ?? browsed ?? current;
+  const onResult = target.unit_id === shot.unit_id;
   const momentOf = (item: SearchResult) => (item === shot ? evidenceTime : item.evidence_timestamp ?? item.t_start);
-  const currentMoment = momentOf(current);
-  const bookmarked = bookmarkedUnitIds.has(current.unit_id);
-  // Match cuts start from what is on screen while it is still the current shot.
-  const matchTime = playheadTime >= current.t_start && playheadTime <= current.t_end ? playheadTime : currentMoment;
-  const matchCutsHref = `/match?unit_id=${encodeURIComponent(current.unit_id)}&time=${matchTime.toFixed(3)}`;
+  // A scene shot keeps the moment its picture shows; a browsed one, the frame on screen.
+  const savedMoment = target === browsed ? playheadTime : momentOf(target);
+  const bookmarked = bookmarkedUnitIds.has(target.unit_id);
+  const matchTime = playing(target) ? playheadTime : momentOf(target);
+  const matchCutsHref = `/match?unit_id=${encodeURIComponent(target.unit_id)}&time=${matchTime.toFixed(3)}`;
+  const nowShowing = onResult ? "" : [target.scene?.title, target.action].filter(Boolean).join(" — ");
   const pickShot = (item: SearchResult) => {
     setPickedUnitId(item.unit_id);
+    setPlayheadTime(momentOf(item));
     if (videoRef.current) videoRef.current.currentTime = momentOf(item);
   };
+  // Ask which shot is on screen only beyond this scene, and only until one answers.
+  const lookup = sceneTarget || browsed || !currentPlayback?.url ? null : Math.round(playheadTime * 10) / 10;
+  useEffect(() => {
+    if (lookup === null) return;
+    const controller = new AbortController();
+    void fetch(`${apiUrl}/library/shot?film_id=${encodeURIComponent(shot.film_id)}&t=${lookup}`, { signal: controller.signal, cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((found: SearchResult | null) => { if (found && !controller.signal.aborted) setOnScreen(found); })
+      .catch(() => { /* no shot at that time, or superseded */ });
+    return () => controller.abort();
+  }, [apiUrl, shot.film_id, lookup]);
 
   useEffect(() => {
     hasSeenCanPlay.current = false;
     setPlayheadTime(evidenceTime);
     setTimestampCopied(false);
     setPickedUnitId(shot.unit_id);
+    setOnScreen(null);
   }, [shot, evidenceTime]);
 
   useEffect(() => {
@@ -225,9 +250,9 @@ export default function VideoModal({
         <div className="modal-header">
           <span id={titleId} className="modal-title">{filmTitle}</span>
           <span className="modal-time">
-            {isRetrieved && typeof shot.matched_frame_timestamp === "number"
+            {onResult && typeof shot.matched_frame_timestamp === "number"
               ? `${formatTime(evidenceTime)} match`
-              : `${formatTime(current.t_start)} – ${formatTime(current.t_end)}`}
+              : `${formatTime(target.t_start)} – ${formatTime(target.t_end)}`}
           </span>
           <div className="modal-header-actions">
             <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Close">×</button>
@@ -252,10 +277,14 @@ export default function VideoModal({
         /> : <p className="modal-evidence" role="status">Loading player…</p>}
 
         <div className="modal-toolbar">
+          {/* What is on screen, which the actions below act on, and the way back to the result. */}
           <div className="modal-anchor-context">
-            <span>Playing <strong>{formatTime(playheadTime)}</strong></span>
+            <span className="modal-now">
+              Playing <strong>{formatTime(playheadTime)}</strong>
+              {nowShowing && <span className="modal-now-line"> · {nowShowing}</span>}
+            </span>
             <button type="button" onClick={() => pickShot(shot)}>
-              Return to retrieved moment · {formatTime(evidenceTime)}
+              Back to result · {formatTime(evidenceTime)}
             </button>
           </div>
           <div className="modal-actions">
@@ -263,11 +292,11 @@ export default function VideoModal({
               <button
                 type="button"
                 className={bookmarked ? "is-active" : undefined}
-                disabled={bookmarkDisabled || pendingBookmarkUnitIds.has(current.unit_id)}
-                onClick={() => onToggleBookmark(current)}
+                disabled={bookmarkDisabled || pendingBookmarkUnitIds.has(target.unit_id)}
+                onClick={() => onToggleBookmark(target === browsed ? { ...target, matched_frame_timestamp: savedMoment } : target)}
                 aria-label={bookmarked ? "Remove this shot from Saved" : "Save this shot"}
                 aria-pressed={bookmarked}
-                title={bookmarked ? "Remove from Saved" : `Save this shot at ${formatTime(currentMoment)}`}
+                title={bookmarked ? "Remove from Saved" : `Save this shot at ${formatTime(savedMoment)}`}
               >
                 <BookmarkIcon filled={bookmarked} size={14} />
                 {bookmarked ? "Saved" : "Save"}
@@ -277,18 +306,18 @@ export default function VideoModal({
               <button
                 type="button"
                 className="modal-source-picker-use"
-                disabled={!Number.isInteger(current.keyframe_index)}
-                onClick={() => onUseInSearch(current, sourceReferenceFacet)}
+                disabled={!Number.isInteger(target.keyframe_index)}
+                onClick={() => onUseInSearch(target, sourceReferenceFacet)}
               >
                 <FacetIcon facet={sourceReferenceFacet} size={15} />
                 Use for {FACET_LABELS[sourceReferenceFacet]}
               </button>
             ) : onUseInSearch ? (
               <UseInSearchMenu
-                shot={current}
+                shot={target}
                 onUse={onUseInSearch}
                 variant="modal"
-                disabled={!Number.isInteger(current.keyframe_index)}
+                disabled={!Number.isInteger(target.keyframe_index)}
                 disabledFacets={disabledUseFacets}
               />
             ) : null}
@@ -308,24 +337,47 @@ export default function VideoModal({
         </div>
 
         <div className="modal-evidence">
-          {/* The result's details stay put while another shot of the scene is picked. */}
-          {(shot.scene?.title || (shot.badges?.length ?? 0) > 0) && (
-            <div className="modal-story-header">
-              {shot.scene?.title && <strong>{shot.scene.title}</strong>}
-              {shot.badges?.map((badge) => (
-                <span key={badge} className={`result-badge result-badge-${badge}`}>{BADGE_LABELS[badge]}</span>
-              ))}
-            </div>
-          )}
-          {shot.scene?.summary && <p className="modal-scene-summary">{shot.scene.summary}</p>}
-          {shot.action && (
-            <p className="modal-story-action">
-              {shot.action}
-              {(shot.characters?.length ?? 0) > 0 && <span> — {shot.characters?.join(", ")}</span>}
-            </p>
-          )}
-          {shot.famous_line && <p className="modal-famous-line">“{shot.famous_line}”</p>}
-          {shot.caption && <p className="modal-caption">{shot.caption}</p>}
+          {/* The result's details stay put while the film plays on. Each kind of
+              text is labelled: the scene's story, what happens in this shot,
+              and what the picture shows. */}
+          <dl className="modal-facts">
+            {(shot.scene?.title || shot.scene?.summary || (shot.badges?.length ?? 0) > 0) && (
+              <div>
+                <dt>Scene</dt>
+                <dd>
+                  {(shot.scene?.title || (shot.badges?.length ?? 0) > 0) && (
+                    <div className="modal-story-header">
+                      {shot.scene?.title && <strong>{shot.scene.title}</strong>}
+                      {shot.badges?.map((badge) => (
+                        <span key={badge} className={`result-badge result-badge-${badge}`}>{BADGE_LABELS[badge]}</span>
+                      ))}
+                    </div>
+                  )}
+                  {shot.scene?.summary && <p className="modal-scene-summary">{shot.scene.summary}</p>}
+                </dd>
+              </div>
+            )}
+            {(shot.action || shot.famous_line) && (
+              <div>
+                <dt>Shot</dt>
+                <dd>
+                  {shot.action && (
+                    <p className="modal-story-action">
+                      {shot.action}
+                      {(shot.characters?.length ?? 0) > 0 && <span> — {shot.characters?.join(", ")}</span>}
+                    </p>
+                  )}
+                  {shot.famous_line && <p className="modal-famous-line">“{shot.famous_line}”</p>}
+                </dd>
+              </div>
+            )}
+            {shot.caption && (
+              <div>
+                <dt>Picture</dt>
+                <dd><p className="modal-caption">{shot.caption}</p></dd>
+              </div>
+            )}
+          </dl>
           {hasBreakdown && (
             <section className="modal-reasons" aria-label="Why this scene ranked here">
               <h3>Why it&apos;s here</h3>
@@ -340,7 +392,7 @@ export default function VideoModal({
                   <button
                     key={item.unit_id}
                     type="button"
-                    aria-pressed={item.unit_id === current.unit_id}
+                    aria-pressed={item.unit_id === target.unit_id}
                     title={`Pick the shot at ${formatTime(item.t_start)}`}
                     onClick={() => pickShot(item)}
                   >

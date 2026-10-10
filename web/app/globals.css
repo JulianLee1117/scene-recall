@@ -2550,10 +2550,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   text-transform: uppercase;
 }
 
-.modal-evidence > .modal-caption {
-  color: #a8a8a8;
-}
-
 .modal-anchor-context {
   display: flex;
   flex-wrap: wrap;
@@ -2566,6 +2562,8 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 .modal-anchor-context strong { color: #e0cfb6; font-weight: 500; }
+.modal-now { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal-now-line { color: #8f887d; }
 .modal-anchor-context button {
   padding: 3px 0;
   border: 0;
@@ -2667,6 +2665,21 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
 }
 
 /* Result modal: story and scene evidence (search v2) */
+/* The result's details, each kind of text labelled and set apart: the
+   scene's story, what happens in the shot (the brightest line), and what the
+   picture shows (the quietest). */
+.modal-facts { display: grid; gap: 12px; margin: 0; }
+.modal-facts > div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.modal-facts dt { color: #857d70; font-size: .6rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.modal-facts dd { display: grid; gap: 4px; margin: 0; }
+.modal-facts p { font-style: normal; }
+.modal-facts .modal-scene-summary { color: #b5ada0; }
+.modal-facts .modal-story-action { color: #e6ded1; }
+.modal-facts .modal-caption { color: #9a948a; }
+@media (max-width: 600px) {
+  .modal-facts > div { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+}
+
 .modal-story-header {
   display: flex;
   margin-bottom: 4px;

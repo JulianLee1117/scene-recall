@@ -179,3 +179,22 @@ def test_api_cap_and_publication_busy_are_normal_search_envelopes(client, db, co
     monkeypatch.setattr(browse, "acquire_search_snapshot", Mock(side_effect=SearchLibraryUnavailable("publishing")))
     response = client.get("/library/scenes", params={"film_id": "film", "limit": 2})
     assert response.status_code == 503 and response.headers["Retry-After"] == "1"
+
+
+def test_shot_at_finds_the_shot_on_screen_as_a_result(db, config):
+    add_film(db, count=4)
+    shot = browse.shot_at(db, config, film_id="film", time_value=25.0)
+    assert shot["unit_id"] == "film-0002" and shot["t_start"] == 20.0 and shot["t_end"] == 30.0
+    assert shot["keyframe_url"].startswith("/media/keyframe/film-0002/")
+    assert browse.shot_at(db, config, film_id="film", time_value=20.0)["unit_id"] == "film-0002", "a shot owns its first instant"
+    assert browse.shot_at(db, config, film_id="film", time_value=40.0) is None, "past the last shot"
+    assert browse.shot_at(db, config, film_id="other", time_value=5.0) is None
+
+
+def test_api_shot_at_a_time(client, db):
+    add_film(db, count=3)
+    found = client.get("/library/shot", params={"film_id": "film", "t": 12.5})
+    assert found.status_code == 200
+    assert found.json()["unit_id"] == "film-0001" and found.json()["film_title"] == "Title film"
+    assert client.get("/library/shot", params={"film_id": "film", "t": 99}).status_code == 404
+    assert client.get("/library/shot", params={"film_id": "film", "t": -1}).status_code == 422

@@ -7,6 +7,7 @@ chunk and its verified frame choices are retained in memory.
 """
 from __future__ import annotations
 
+import bisect
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import closing
 import heapq
@@ -187,6 +188,51 @@ def browse_scenes(
         # This is source order, not a semantic relevance estimate.
         result["debug"] = {"mode": "browse", "final_score": 0.0, "channels": {}}
     return results
+
+
+# A film's shots in time order, per units version, so following playback is a lookup.
+_FILM_SHOTS: dict[tuple[str, int], tuple[list[float], list[dict[str, Any]]]] = {}
+_FILM_SHOTS_KEPT = 8
+
+
+def _film_shots(units: Any, film_id: str) -> tuple[list[float], list[dict[str, Any]]]:
+    key = (film_id, int(units.version))
+    if key not in _FILM_SHOTS:
+        where = (col("film_id") == lit(film_id)) & (col("is_representative") == lit(True))
+        with closing(iter_filtered_rows(units, where=where, columns=_UNIT_COLUMNS)) as rows:
+            shots = sorted((unit for row in rows if (unit := _eligible_unit(row)) is not None), key=_key)
+        while len(_FILM_SHOTS) >= _FILM_SHOTS_KEPT:
+            _FILM_SHOTS.pop(next(iter(_FILM_SHOTS)))
+        _FILM_SHOTS[key] = ([shot["t_start"] for shot in shots], shots)
+    return _FILM_SHOTS[key]
+
+
+def shot_at(db: Any, config: Config, *, film_id: str, time_value: float) -> dict[str, Any] | None:
+    """The shot of *film_id* on screen at *time_value*, as a result the player can act on.
+
+    It is decorated like a search result (scene, story, best frame), so Save,
+    Use in search and Match cuts take it as they take any result. None when no
+    published shot covers that time.
+    """
+    from pipeline.search import priors
+    from pipeline.search.retrieve import _decorate_results
+
+    snapshot = db if getattr(db, "is_index_snapshot", False) is True else acquire_search_snapshot(config, db)
+    if not {"units", "frames"}.issubset(table_names(snapshot)):
+        return None
+    starts, shots = _film_shots(snapshot.open_table("units"), film_id)
+    position = bisect.bisect_right(starts, time_value) - 1
+    if position < 0 or not shots[position]["t_start"] <= time_value < shots[position]["t_end"]:
+        return None
+    unit = shots[position]
+    frames = _frames_for_units(snapshot.open_table("frames"), film_id, [unit])
+    if unit["unit_id"] not in frames:
+        return None
+    [result] = _clause_results_from_rows([{**unit, "_matched_frame": frames[unit["unit_id"]]}],
+                                         channel="browse", mode="browse", result_limit=1)
+    result["debug"] = {"mode": "browse", "final_score": 0.0, "channels": {}}
+    [result] = _decorate_results([result], snapshot, priors.load_evidence(snapshot, [unit["unit_id"]]))
+    return result
 
 
 def browse_highlights(
