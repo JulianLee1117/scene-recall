@@ -150,14 +150,12 @@ def test_api_rejects_unknown_shot_filters() -> None:
         SearchRecipeRequest(clauses=[clause], shot_filters={"lens": ["wide"]})
 
 
-def test_people_fall_back_to_named_characters_when_the_detector_saw_nobody() -> None:
-    # Drawn and stop-motion characters are invisible to the COCO detector; the understanding
-    # pass still names them. A live-action shot with a detected person keeps the detector's count.
-    units = [_unit("anime", framing="medium"), _unit("empty", framing="wide"), _unit("live", framing="medium")]
-    evidence = {
-        "anime": {"people": 0.0, "characters": json.dumps(["Chihiro Ogino", "Haku"])},
-        "empty": {"people": 0.0, "characters": json.dumps([])},
-        "live": {"people": 1.0, "characters": json.dumps(["Mia", "Sebastian", "Keith"])},
-    }
+def test_people_come_from_the_annotation_count_and_the_detector_only_without_it() -> None:
+    # The COCO detector is blind to drawn and stop-motion characters; the annotation's
+    # clearly-visible count reads them and agrees with the detector on live action, so it
+    # leads for every film. The detector only speaks when the annotation is missing.
+    units = [_unit("anime", framing="medium", people_count=2), _unit("crowd", framing="wide", people_count=20),
+             _unit("empty", framing="wide", people_count=0), _unit("unannotated", framing="medium")]
+    evidence = {"anime": {"people": 0.0}, "crowd": {"people": 1.0}, "empty": {"people": 0.0}, "unannotated": {"people": 1.0}}
     index = _build_index(units, evidence)
-    assert _values(index, "people") == ["two", "none", "one"]
+    assert _values(index, "people") == ["two", "group", "none", "one"]

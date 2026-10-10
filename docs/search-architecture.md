@@ -279,9 +279,10 @@ changes rerun after the same short pause.
 Shot filters (ADR-0114) narrow by what is in the shot: dialogue, size,
 people, camera, color, time and place. `pipeline/search/shot_facets.py`
 derives one value per representative shot from `units` annotations and
-`shot_evidence` measurements (none when missing or unreliable; people fall back
-to the understanding pass's named characters when the COCO detector saw nobody,
-which is most shots of drawn or stop-motion characters), in memory per
+`shot_evidence` measurements (none when missing or unreliable; people come
+from the annotation's clearly-visible count, which reads drawn and stop-motion
+characters the COCO detector cannot and agrees with it on live action, the
+detector's count only when the annotation is missing), in memory per
 table version; `GET /search/shot-facets` lists them. A recipe's
 `shot_filters` bind a `UnitScope` to its search execution: resident channels
 mask rows before top-k, database paths drop out-of-scope rows in

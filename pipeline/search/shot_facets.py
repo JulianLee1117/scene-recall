@@ -72,20 +72,18 @@ def _place(unit: Row, _evidence: Row, _spoken: bool) -> str | None:
     return {"interior": "interior", "exterior": "exterior"}.get(str(unit.get("setting") or ""))
 
 
-def _people(_unit: Row, evidence: Row, _spoken: bool) -> str | None:
-    """People in the shot: the detector's count, or, when it saw nobody, the characters the
-    understanding pass named. The detector is COCO-trained and blind to drawn, stop-motion or
-    non-human characters (Spirited Away: nobody in 86% of shots with named characters)."""
-    value = evidence.get("people")
-    if value is None or value < 0.5:
-        try:
-            named = json.loads(evidence.get("characters") or "[]")
-        except (TypeError, ValueError):
-            named = []
-        if isinstance(named, list) and named:
-            value = float(len(named))
+def _people(unit: Row, evidence: Row, _spoken: bool) -> str | None:
+    """People in the shot: the annotation's clearly-visible count first, the detector's count when
+    the annotation is missing. The annotation reads drawn, stop-motion and non-human characters
+    that the COCO detector cannot (Spirited Away: the detector saw nobody in 87% of shots, the
+    annotation counts people in 82%) and agrees with the detector on live action four shots in
+    five, so one source gives every film the same meaning."""
+    value = unit.get("people_count")
+    if value is None:
+        value = evidence.get("people")
     if value is None:
         return None
+    value = float(value)
     return "none" if value < 0.5 else "one" if value < 1.5 else "two" if value < 2.5 else "group"
 
 
@@ -108,8 +106,8 @@ SHOT_FACETS: tuple[ShotFacet, ...] = (
 )
 _BY_KEY = {facet.key: facet for facet in SHOT_FACETS}
 
-_UNIT_COLUMNS = ["unit_id", "film_id", "framing", "setting", "time_of_day", "dialogue"]
-_EVIDENCE_COLUMNS = ["unit_id", "colorfulness", "camera", "camera_reliability", "people", "characters"]
+_UNIT_COLUMNS = ["unit_id", "film_id", "framing", "setting", "time_of_day", "dialogue", "people_count"]
+_EVIDENCE_COLUMNS = ["unit_id", "colorfulness", "camera", "camera_reliability", "people"]
 
 
 def validate_shot_filters(filters: Mapping[str, Sequence[str]]) -> dict[str, tuple[str, ...]]:
