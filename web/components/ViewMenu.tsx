@@ -8,6 +8,11 @@ import ChoiceRow from "./ChoiceRow";
 import DirectionIcon from "./DirectionIcon";
 import styles from "./viewMenu.module.css";
 
+const DETAIL_OPTIONS = [
+  { value: "hidden", label: "Hidden" },
+  { value: "shown", label: "Shown" },
+] as const;
+
 /**
  * How results are shown: their order, their size and whether each card
  * explains its match. None of it changes what is searched.
@@ -73,18 +78,13 @@ export default function ViewMenu({
               defaultValue={DEFAULT_VIEW.size}
               onChange={(size) => onChange({ size })}
             />
-            <div className={styles.details}>
-              <button
-                type="button"
-                className="toolbar-menu-toggle"
-                role="switch"
-                aria-checked={view.details}
-                onClick={() => onChange({ details: !view.details })}
-              >
-                <span className="toolbar-menu-switch" aria-hidden="true" />
-                <span>Details</span>
-              </button>
-            </div>
+            <ChoiceRow
+              label="Details"
+              options={DETAIL_OPTIONS}
+              value={view.details ? "shown" : "hidden"}
+              defaultValue={DEFAULT_VIEW.details ? "shown" : "hidden"}
+              onChange={(details) => onChange({ details: details === "shown" })}
+            />
           </div>
         </div>
       )}

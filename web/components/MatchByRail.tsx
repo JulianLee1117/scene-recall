@@ -620,7 +620,7 @@ export default function MatchByRail({
               key={facet}
               data-facet={facet}
 
-              className={`match-tile clue-card${active ? " is-active" : " is-empty"}${openFacet === facet ? " is-open" : ""}${dragOver === facet ? " is-drag-over" : ""}${dragActive && !canDrop ? " is-disabled" : ""}`}
+              className={`match-tile clue-card${active ? " is-active" : ""}${openFacet === facet ? " is-open" : ""}${dragOver === facet ? " is-drag-over" : ""}${dragActive && !canDrop ? " is-disabled" : ""}`}
 
               onDragOver={(event) => {
                 if (!accepts(facet, event.dataTransfer)) return;
