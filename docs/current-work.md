@@ -371,7 +371,15 @@ Can overlap with Phase 3 once the pilot evidence exists.
    query names a film or character explicitly.
 4. Framing v2: match the measured subject layout (count, positions, sizes,
    screen direction), optionally with camera motion, plus visual similarity.
-   This replaces the 6x6 embedding grids.
+   This replaces the 6x6 embedding grids. The match-cut moments index
+   (ADR-0099) already measures subject place and size, silhouettes, poses,
+   light and lines at 4 fps for every shot and updates itself after ingest,
+   so Framing should run on it. That needs ADR-0008's comparison on 10-15
+   owner-reviewed references, plus a query-time moments pass for uploaded
+   images. It retires the 6x6 grids, both grid caches, the frozen compact
+   composition challenger and the framing pilot. The caches can go sooner:
+   on 2026-10-10 a Framing search took 3-4 s with or without cache hits, since
+   the partial cache holds 10% of frames and the complete one is never read.
 5. Priors step with calibrated famous/gems mixing and the three presets.
 6. Optional visual re-rank of the top ~50 behind a toggle, kept only if it wins
    on the eval set. Options: Qwen3-VL-Reranker locally, or GPT-5.6/Gemini with
