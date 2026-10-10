@@ -47,7 +47,7 @@ def test_cache_inputs_leave_coco_artifacts_current_and_key_grounded_ones():
     assert subjects.cache_inputs("abc", "coco") == {"shots": "abc"}
     assert subjects.cache_inputs("abc", "grounded") == {"shots": "abc", "subjects": "grounded"}
     assert subjects.record("coco") == {"backend": "coco"}
-    assert subjects.record("grounded")["models"]["grounder"] == "grounding-dino-tiny"
+    assert subjects.record("grounded")["models"]["grounder"] == "grounding-dino-tiny (resize 640/1066)"
 
 
 def test_scoring_families_and_class_names_cover_grounded_codes():

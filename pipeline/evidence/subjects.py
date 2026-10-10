@@ -11,7 +11,7 @@ same shape whichever ran:
   creature, vehicle). Silhouettes come from the RF-DETR mask head's best-overlapping query, which
   localises drawn figures it cannot classify (box IoU 0.9 to 0.99 at class scores under 0.2);
   keypoints come from ViTPose on the person boxes (mean keypoint confidence 0.7 to 0.9 on drawn
-  humanoids). About ten times the cost of ``coco`` per frame, so it is not the default.
+  humanoids). About seven times the cost of ``coco`` per frame, so it is not the default.
 
 A film's backend follows its Wikidata form and genre families (``ingest.grounded_subjects``,
 Animation by default): drawn films get ``grounded`` everywhere, live action keeps ``coco``. The
@@ -41,7 +41,14 @@ EXTRA_CLASS_NAMES = {81: "animal", 82: "creature", 83: "vehicle"}
 
 GROUNDER = "IDEA-Research/grounding-dino-tiny"
 POSER = "usyd-community/vitpose-base-simple"
-MODEL_NAMES = {"grounder": "grounding-dino-tiny", "masks": "rf-detr-seg-small-1.11-fp16 (best-overlap query)",
+# The passes decode at 640 px wide; the grounder's stock resize (800 shortest edge, 1333 longest)
+# would upsample that to about 1333 x 750 before the backbone. Resizing to 640/1066 instead runs
+# 2.5x faster at 96% person-presence agreement with the stock resize on 240 Spirited Away frames
+# (largest-person IoU 0.89), and the disagreements are marginal on both sides: it finds a few small
+# figures the stock resize misses (a child riding the dragon, a figure on a bridge) and drops a few
+# of its low-score objects (a coal lump, a pillow, a cloud). Artifacts record the resize they used.
+GROUNDER_SIZE = {"shortest_edge": 640, "longest_edge": 1066}
+MODEL_NAMES = {"grounder": "grounding-dino-tiny (resize 640/1066)", "masks": "rf-detr-seg-small-1.11-fp16 (best-overlap query)",
                "pose": "vitpose-base-simple"}
 DETECT_THRESHOLD = 0.3
 TEXT_THRESHOLD = 0.25
@@ -117,6 +124,7 @@ class GroundedSubjects:
         if self._grounder is None:
             from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
             processor = AutoProcessor.from_pretrained(GROUNDER)
+            processor.image_processor.size = dict(GROUNDER_SIZE)
             model = AutoModelForZeroShotObjectDetection.from_pretrained(GROUNDER).to(self.device).eval()
             self._grounder = (processor, model)
         return self._grounder

@@ -30,7 +30,8 @@ drawn humanoids.
 `pipeline/evidence/subjects.py` defines two subject backends with one record:
 
 - `coco`: RF-DETR detection, segmentation and keypoints, unchanged, for live action.
-- `grounded`: Grounding DINO tiny prompted with `person . character . animal . creature .
+- `grounded`: Grounding DINO tiny, frames resized to a 640 px shortest edge (1066 longest)
+  rather than its stock 800/1333, prompted with `person . character . animal . creature .
   vehicle .`, duplicates merged across words, class codes 1 (person, character), 81 (animal),
   82 (creature) and 83 (vehicle) beside the dense COCO codes; the silhouette of RF-DETR's
   best-overlapping query (IoU at least 0.5), else none; ViTPose keypoints on person boxes.
@@ -51,8 +52,15 @@ pose model. Both wait for a concrete failure.
 - Drawn films carry subject boxes, silhouettes and keypoints in the same arrays as live films;
   editor crops, subject motion and every match-cut channel work on them. Non-human characters
   still have no pose.
-- A grounded film costs about ten times the GPU time of a live one in the measurement and
-  moments passes (tens of minutes rather than minutes per film), bounded to the configured
-  families and paid once per film.
+- A grounded film costs several times the GPU time of a live one, bounded to the configured
+  families and paid once per film. The first four (two-hour features, stock resize, GPU shared
+  with the API) measured in 17 to 25 minutes and described their moments in 34 to 103; the
+  640 resize runs the grounder 2.5 times faster at 96% person-presence agreement with the
+  stock one on a 240-frame sample, where the disagreements were marginal on both sides. Those
+  four films' artifacts record the stock resize and stay valid; `--force` re-describes them.
+- Measured on those films: a person on 84 to 90% of instants and 96 to 99% of shots (RF-DETR
+  saw one on 13 to 75% of shots), poses on 61 to 67% of instants; the leftover errors are
+  low-score boxes on objects and a full-frame box on some black frames, which the match
+  index's lit gate already excludes.
 - The `measure` extra gains Grounding DINO and ViTPose through `transformers`; both download
   on first use.
