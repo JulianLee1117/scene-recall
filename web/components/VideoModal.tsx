@@ -104,9 +104,10 @@ export default function VideoModal({
   const bookmarked = bookmarkedUnitIds.has(target.unit_id);
   const matchTime = playing(target) ? playheadTime : momentOf(target);
   const matchCutsHref = `/match?unit_id=${encodeURIComponent(target.unit_id)}&time=${matchTime.toFixed(3)}`;
-  // The line names a scene only once you leave the result's: it changes with
-  // the story, not at every cut, and the frame shows which shot you are on.
-  const nowShowing = browsed?.scene && browsed.scene.id !== shot.scene?.id ? browsed.scene.title : "";
+  // The line names the scene on screen, the result's too, so it changes with
+  // the story rather than at every cut. Away from the result's scene it shows
+  // only the time until the library has said what is playing.
+  const nowShowing = (browsed ? browsed.scene : playing(target) ? shot.scene : undefined)?.title ?? "";
   const pickShot = (item: SearchResult) => {
     setPickedUnitId(item.unit_id);
     setPlayheadTime(momentOf(item));

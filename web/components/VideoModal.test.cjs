@@ -300,14 +300,15 @@ test("browsing beyond the scene retargets the actions to the shot on screen, wit
   const matchCuts = () => app.find((node) => node.type === "a" && text(node) === "Match cuts").props.href;
   try {
     await app.resolve(0, { url: "/video/film-a" });
-    assert.equal(now(), "Playing 23s", "on the result the line just tells the time");
+    assert.equal(now(), "Playing 23s · Planetarium", "the line names the scene on screen, the result's included");
 
     app.video().props.onTimeUpdate({ currentTarget: { currentTime: 95 } }); await app.flush();
     assert.match(app.requests[1].url, /[/]library[/]shot[?]film_id=film-a&t=95$/);
+    assert.equal(now(), "Playing 95s", "until the library answers, the line names no scene");
     assert.equal(matchCuts(), "/match?unit_id=film-a_0001&time=23.000", "until the library answers, the result stays the target");
     await app.resolve(1, { ...film(), unit_id: "film-a_0040", t_start: 90, t_end: 100, keyframe_index: 0,
       scene: { id: "s-escape", title: "The Escape" }, action: "A car speeds off" });
-    assert.equal(now(), "Playing 95s · The Escape", "another scene is named; the frame shows the shot");
+    assert.equal(now(), "Playing 95s · The Escape");
     assert.equal(matchCuts(), "/match?unit_id=film-a_0040&time=95.000");
     app.find((node) => node.props?.["aria-label"] === "Save this shot").props.onClick();
     assert.equal(app.bookmarks[0].unit_id, "film-a_0040");
@@ -328,7 +329,7 @@ test("browsing beyond the scene retargets the actions to the shot on screen, wit
     app.button("Back to result · 23s").props.onClick(); await app.flush();
     assert.equal(app.video().props.ref.current.currentTime, 23);
     assert.equal(matchCuts(), "/match?unit_id=film-a_0001&time=23.000");
-    assert.equal(now(), "Playing 23s");
+    assert.equal(now(), "Playing 23s · Planetarium");
     const facts = app.find((node) => node.props?.className === "modal-facts");
     assert.deepEqual(nodes(facts).filter((node) => node.type === "dt").map(text), ["Scene", "Shot", "Picture"]);
   } finally { app.dispose(); }
