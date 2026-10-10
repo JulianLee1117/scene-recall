@@ -1,6 +1,7 @@
 /* The board is one canvas. Each scene is placed by a transform from one
    layout, so it glides wherever it goes next; the lifted scene alone moves
-   without easing, under the pointer, and leaves a slot behind. */
+   without easing, under the pointer, and leaves a slot behind. The picture
+   itself pops up off the board when lifted and settles back when dropped. */
 .canvas { position: relative; margin-bottom: 16px; }
 
 .tile {
@@ -31,15 +32,26 @@
 .reordering { cursor: grabbing; user-select: none; }
 .reordering :global(.result-card) { pointer-events: none; }
 
-/* Lifted: a little closer to the hand, nothing else on it. */
-.lifted { z-index: 3; opacity: 0.88; box-shadow: 0 18px 40px #000000aa; transition: none; }
-.lifted :global(.result-card) { transform: scale(1.03); }
+/* The picture rises with a small overshoot and lands with a small bounce. */
+.tile :global(.result-card) {
+  transition:
+    transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.22s ease;
+}
+
+/* Lifted: up off the board, opaque, under a real shadow, nothing else on it. */
+.lifted { z-index: 3; transition: none; }
+.lifted :global(.result-card) {
+  transform: scale(1.06);
+  box-shadow:
+    0 1px 2px #00000066,
+    0 10px 20px #00000080,
+    0 30px 60px #000000a6;
+}
 .lifted :global(.result-card-overlay),
 .lifted :global(.result-card-actions),
 .lifted :global(.result-card-marks) { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile, .slot { transition: none; }
-  .lifted { box-shadow: none; }
-  .lifted :global(.result-card) { transform: none; }
+  .tile, .slot, .tile :global(.result-card) { transition: none; }
 }
