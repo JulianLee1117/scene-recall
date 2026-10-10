@@ -93,9 +93,33 @@ test("vision draws any described layer in the picture's own shape, and only the 
   const [stroke] = by("lines");
   close(stroke.x1, stroke.x2, "an edge at a right angle is upright");
   assert.deepEqual(Array.from(by("light"), (shape) => shape.fill), ["rgb(0,0,0)", "rgb(255,255,255)"]);
+  assert.ok(by("light").every((shape) => shape.area) && cells.every((shape) => !shape.area), "grid cells cover an area; a silhouette does not");
+
+  // A grid finer than 16 columns is drawn in blocks: mean grey, mean colour.
+  const fine = vision.visionShapes(moment([
+    { key: "light", label: "Light", kind: "grid", columns: 32, rows: 2, values: Array.from({ length: 64 }, (_, index) => (index % 2 ? 1 : 0)) },
+    { key: "colour", label: "Colour", kind: "grid", columns: 1, rows: 1, colors: ["#ff8000"] },
+  ]), new Set(["light", "colour"]));
+  const blocks = fine.shapes.filter((shape) => shape.layer === "light");
+  assert.equal(blocks.length, 16, "32 x 2 cells draw as 16 x 1 blocks");
+  close(blocks[0].w, 200 / 16, "a block spans two columns");
+  assert.equal(blocks[0].fill, "rgb(128,128,128)");
+  assert.equal(fine.shapes.find((shape) => shape.layer === "colour").fill, "rgb(255,128,0)");
   assert.equal(by("motion")[0].arrow, true);
 
   const some = vision.visionShapes(moment(layers), new Set(["eyes"]));
   assert.deepEqual([...new Set(some.shapes.map((shape) => shape.layer))], ["eyes"]);
   assert.equal(vision.visionSource(moment([])), "seg-model · pose-model · match-v1-abc");
+});
+
+test("vision shows one reason of a cut: the one pointed at, else the strongest it can draw", () => {
+  const reasons = [
+    { code: "reframe", label: "Reframed 1.2x", strength: 0, layers: [] },
+    { code: "eyes", label: "Eye line carries over", strength: 0.8, layers: ["eyes"] },
+    { code: "light", label: "Light falls alike", strength: 0.6, layers: ["light"] },
+  ];
+  assert.equal(vision.shownReason(reasons, null).code, "eyes");
+  assert.equal(vision.shownReason(reasons, "light").code, "light");
+  assert.equal(vision.shownReason(reasons, "reframe").code, "eyes", "a reason with nothing to draw falls back");
+  assert.equal(vision.shownReason([{ code: "push", label: "Push", strength: 1 }], null), null, "an older index names no layers");
 });

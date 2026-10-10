@@ -20,7 +20,13 @@ export interface MomentShot {
   moments: { time: number; ok: boolean }[];
 }
 
-export interface MatchReason { code: string; label: string; strength: number }
+export interface MatchReason {
+  code: string;
+  label: string;
+  strength: number;
+  /** The Vision layers that show what this reason measured (none for a reframe). */
+  layers?: string[];
+}
 
 export interface MomentMatch {
   unit_id: string;

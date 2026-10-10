@@ -52,8 +52,14 @@ export function VisionOverlay({ vision, visible, place, tone = "in" }: {
     </defs>
     {shapes.map((shape, index) => {
       switch (shape.kind) {
-        case "cell":
-          return <rect key={index} data-layer={shape.layer} x={shape.x} y={shape.y} width={shape.w} height={shape.h} fill={shape.fill} fillOpacity={shape.opacity} />;
+        case "cell": {
+          // The outgoing frame's light or colour sits inset in the incoming frame's
+          // cells, so where they agree and where they differ shows at a glance.
+          const inset = tone === "out" && shape.area ? 0.3 : 0;
+          return <rect key={index} data-layer={shape.layer} data-area={shape.area || undefined}
+            x={shape.x + shape.w * inset} y={shape.y + shape.h * inset} width={shape.w * (1 - 2 * inset)} height={shape.h * (1 - 2 * inset)}
+            fill={shape.fill} fillOpacity={inset ? 1 : shape.opacity} />;
+        }
         case "box":
           return <rect key={index} className={styles.visionBox} x={shape.x} y={shape.y} width={shape.w} height={shape.h} stroke={shape.tint} />;
         case "label":
@@ -74,6 +80,33 @@ export function VisionOverlay({ vision, visible, place, tone = "in" }: {
   </div>;
 }
 
+/**
+ * Why a cut matched, drawn: one reason's layers on the incoming frame, and the
+ * outgoing frame's (dashed) where it is overlaid.
+ */
+export function CutVision({ incoming, outgoing, reason, place, over }: {
+  incoming: MomentVision | null;
+  outgoing: MomentVision | null;
+  reason: { layers?: string[] } | null;
+  place: Placement;
+  over: Placement | null;
+}) {
+  const visible = useMemo(() => new Set(reason?.layers ?? []), [reason]);
+  if (!visible.size) return null;
+  return <>
+    {incoming && <VisionOverlay vision={incoming} visible={visible} place={place} />}
+    {outgoing && over && <VisionOverlay vision={outgoing} visible={visible} place={over} tone="out" />}
+  </>;
+}
+
+/** Vision on or off: one remembered switch, shown wherever a frame can draw it. */
+export function VisionSwitch({ on, onToggle, hint }: { on: boolean; onToggle: (on: boolean) => void; hint?: string }) {
+  return <label className={styles.check}>
+    <input type="checkbox" checked={on} onChange={(event) => onToggle(event.target.checked)} />
+    <span>Vision{hint && <small>{hint}</small>}</span>
+  </label>;
+}
+
 /** The Vision switch, its layer chips and where the layers came from. */
 export function VisionControls({ on, onToggle, layers, visible, onVisibleChange, vision }: {
   on: boolean;
@@ -89,10 +122,7 @@ export function VisionControls({ on, onToggle, layers, visible, onVisibleChange,
     onVisibleChange(next);
   };
   return <div className={styles.visionControls}>
-    <label className={styles.check}>
-      <input type="checkbox" checked={on} onChange={(event) => onToggle(event.target.checked)} />
-      <span>Vision<small>What the matcher sees at this instant</small></span>
-    </label>
+    <VisionSwitch on={on} onToggle={onToggle} hint="What the matcher sees at this instant" />
     {on && <div className={styles.chips} aria-label="Vision layers">{layers.map((layer) =>
       <button key={layer.key} aria-pressed={visible.has(layer.key)} onClick={() => toggle(layer.key)}>{layer.label}</button>)}</div>}
     {on && vision && <p className={styles.visionSource} title="The models and producer version behind these layers">

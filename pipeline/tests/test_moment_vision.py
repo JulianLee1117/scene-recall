@@ -50,6 +50,14 @@ def test_layers_describe_every_kind_in_content_fractions():
     assert subject["from"] == [0.5, 0.525] and subject["to"] == [0.5 + 0.05 * vision.TRAVEL_SECONDS, 0.525]
 
 
+def test_each_reason_names_the_layers_that_show_it():
+    keys = {layer["key"] for layer in vision.layers(_moment())}
+    assert set(scoring.REWARDS) <= set(scoring.REASON_LAYERS), "every scored cue can be drawn"
+    assert all(set(layers) <= keys for layers in scoring.REASON_LAYERS.values())
+    found = scoring.reasons({"eyes": 0.8, "light": 0.6, "pose": 0.2}, {}, _moment(), _moment(), 1.3)
+    assert [(reason["code"], reason["layers"]) for reason in found] == [("eyes", ["eyes"]), ("light", ["light"]), ("reframe", [])]
+
+
 def test_a_moment_without_poses_still_describes_itself():
     layers = {layer["key"]: layer for layer in vision.layers(_moment(pose=False))}
     assert layers["pose"]["items"] == []

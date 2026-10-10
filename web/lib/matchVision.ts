@@ -30,7 +30,7 @@ export interface MomentVision {
 }
 
 export type VisionShape =
-  | { kind: "cell"; layer: string; x: number; y: number; w: number; h: number; fill: string; opacity: number }
+  | { kind: "cell"; layer: string; x: number; y: number; w: number; h: number; fill: string; opacity: number; area?: boolean }
   | { kind: "box"; layer: string; x: number; y: number; w: number; h: number; tint: string }
   | { kind: "label"; layer: string; x: number; y: number; text: string; tint: string }
   | { kind: "line"; layer: string; x1: number; y1: number; x2: number; y2: number; arrow?: boolean; strength?: number }
@@ -42,11 +42,20 @@ export const DEFAULT_VISION_LAYERS = ["objects", "pose", "eyes"];
 export const VISION_TINTS = ["#e8b060", "#78c4e6", "#96dc8c", "#e67896", "#be96f0", "#f0dc78"];
 /** Keypoint confidence at which a body part counts as shown, as the scorer reads it. */
 const SEEN = 0.35;
+/** A finer grid is drawn in blocks of cells, so each block stays big enough to read. */
+const GRID_COLUMNS = 16;
 
 const gray = (value: number) => {
   const level = Math.round(Math.max(0, Math.min(1, value)) * 255);
   return `rgb(${level},${level},${level})`;
 };
+
+/** One fill for a block of grid cells: their mean grey, or mean colour. */
+function meanFill(block: readonly (number | string)[]): string {
+  if (typeof block[0] === "number") return gray(block.reduce<number>((sum, value) => sum + Number(value), 0) / block.length);
+  const channel = (at: number) => Math.round(block.reduce<number>((sum, value) => sum + parseInt(String(value).slice(at, at + 2), 16), 0) / block.length);
+  return `rgb(${channel(1)},${channel(3)},${channel(5)})`;
+}
 
 export function visionShapes(vision: MomentVision, visible: ReadonlySet<string>): { width: number; height: number; shapes: VisionShape[] } {
   const width = vision.aspect * 100, height = 100;
@@ -56,11 +65,19 @@ export function visionShapes(vision: MomentVision, visible: ReadonlySet<string>)
     const key = layer.key;
     switch (layer.kind) {
       case "grid": {
-        const cw = width / layer.columns, ch = height / layer.rows;
-        (layer.colors ?? layer.values ?? []).forEach((value, index) => shapes.push({
-          kind: "cell", layer: key, x: (index % layer.columns) * cw, y: Math.floor(index / layer.columns) * ch, w: cw, h: ch,
-          fill: typeof value === "string" ? value : gray(value), opacity: 0.55,
-        }));
+        const values: readonly (number | string)[] = layer.colors ?? layer.values ?? [];
+        const step = Math.max(1, Math.ceil(layer.columns / GRID_COLUMNS));
+        const columns = Math.ceil(layer.columns / step), rows = Math.ceil(layer.rows / step);
+        const cw = width / columns, ch = height / rows;
+        for (let row = 0; row < rows; row += 1) {
+          for (let column = 0; column < columns; column += 1) {
+            const block: (number | string)[] = [];
+            for (let y = row * step; y < Math.min(layer.rows, (row + 1) * step); y += 1) {
+              for (let x = column * step; x < Math.min(layer.columns, (column + 1) * step); x += 1) block.push(values[y * layer.columns + x]);
+            }
+            shapes.push({ kind: "cell", layer: key, x: column * cw, y: row * ch, w: cw, h: ch, fill: meanFill(block), opacity: 0.55, area: true });
+          }
+        }
         break;
       }
       case "regions":
@@ -118,6 +135,14 @@ export function visionShapes(vision: MomentVision, visible: ReadonlySet<string>)
     }
   }
   return { width, height, shapes };
+}
+
+/** The reason Vision draws for a cut: the one pointed at, else the strongest it can draw. */
+export function shownReason<Reason extends { code: string; layers?: string[] }>(
+  reasons: readonly Reason[], pointed: string | null,
+): Reason | null {
+  const drawable = reasons.filter((reason) => reason.layers?.length);
+  return drawable.find((reason) => reason.code === pointed) ?? drawable[0] ?? null;
 }
 
 /** Where the layers came from, in a few words ("rf-detr-seg-small-1.11-fp16 · match-v1-550fb45554"). */

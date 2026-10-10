@@ -130,7 +130,13 @@
 .visionRing { fill: none; stroke: #e8b060; stroke-width: 2; vector-effect: non-scaling-stroke; }
 /* The outgoing frame's layers over the incoming one: outlines only, dashed white. */
 .vision[data-tone="out"] { color: #ffffffd9; }
-.vision[data-tone="out"] rect[data-layer], .vision[data-tone="out"] .visionLabel { display: none; }
+.vision[data-tone="out"] rect[data-layer]:not([data-area]), .vision[data-tone="out"] .visionLabel { display: none; }
+.vision[data-tone="out"] rect[data-area] { stroke: #000000b3; stroke-width: 0.6; vector-effect: non-scaling-stroke; }
+/* On a card the shapes are enough; labels would cover the picture. */
+.card .visionLabel { display: none; }
+.reasons span[data-shown] { border-color: #e8b06080; color: #f0d6a8; }
+.overlayControls { display: flex; align-items: center; gap: 18px; }
+.overlayControls .opacity { flex: 1; }
 .vision[data-tone="out"] .visionBox { stroke: #ffffffd9; stroke-dasharray: 4 3; }
 .vision[data-tone="out"] .visionLine, .vision[data-tone="out"] .visionRing { stroke: #ffffffd9; stroke-dasharray: 3 3; }
 .visionControls { display: grid; gap: 8px; }
@@ -139,4 +145,9 @@
 .reasonBars li { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr) 2.5rem; gap: 10px; align-items: center; color: var(--soft); font-size: 11px; }
 .strength { position: relative; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .strength span { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: #aab6d0; }
+.reasonName { min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.reasonName:hover, .reasonName[aria-pressed=true] { color: var(--text); }
+.reasonName:focus-visible { outline: 1px solid #e8b060; outline-offset: 2px; border-radius: 2px; }
+/* The reason being drawn takes the drawings' gold. */
+.reasonBars li[data-shown] .strength span { background: #e8b060; }
 .reasonBars data { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; text-align: right; color: var(--text); }

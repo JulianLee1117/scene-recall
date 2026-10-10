@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { seconds } from "@/lib/lab";
-import { DEFAULT_VISION_LAYERS } from "@/lib/matchVision";
+import { DEFAULT_VISION_LAYERS, shownReason } from "@/lib/matchVision";
 import {
   cropFits, defaultOut, FOCUS_LABELS, FRAME_SECONDS, LEAD_IN, LEAD_OUT, matchHref, matchRequest, nearestMoment, percent, resultTime,
   settingsFrom, type ChainLink, type MatchFocus, type MatchSettings, type MomentMatch, type MomentSearchResponse,
@@ -14,7 +14,7 @@ import SourceBrowser from "../lab/SourceBrowser";
 import { FramedImage } from "./Framed";
 import MatchIcon from "./MatchIcon";
 import SequencePlayer, { type Segment } from "./SequencePlayer";
-import { useVision, VisionControls, VisionOverlay } from "./Vision";
+import { CutVision, useVision, VisionControls, VisionOverlay, VisionSwitch } from "./Vision";
 import styles from "./matchCuts.module.css";
 
 const CHAIN_KEY = "scene-recall:match-cuts-chain";
@@ -33,6 +33,9 @@ function readVision(): VisionView {
 function writeVision(vision: VisionView) {
   try { window.localStorage.setItem(VISION_KEY, JSON.stringify({ on: vision.on, visible: [...vision.visible] })); } catch { /* not remembered */ }
 }
+/** The audition opens in the view used last (for this page). */
+let auditionView: "play" | "overlay" = "play";
+
 const FORMATS: { value: OutputFormat; label: string }[] = [
   { value: "landscape", label: "16:9" }, { value: "vertical", label: "9:16" }, { value: "square", label: "1:1" },
 ];
@@ -62,10 +65,12 @@ export default function MatchCuts() {
   const [selected, setSelected] = useState<MomentMatch | null>(null);
   const [chain, setChain] = useState<ChainLink[]>([]);
   const [playingChain, setPlayingChain] = useState(false);
-  const [hovered, setHovered] = useState<string | null>(null);
+  // The cut under the pointer and, while on one of its reasons, that reason.
+  const [hovered, setHovered] = useState<{ match: MomentMatch; reason: string | null } | null>(null);
   const [vision, setVision] = useState<VisionView>({ on: false, visible: new Set(DEFAULT_VISION_LAYERS) });
   const requestId = useRef(0);
   const referenceVision = useVision(shot?.unit_id ?? null, time, vision.on);
+  const hoveredVision = useVision(hovered?.match.unit_id ?? null, hovered?.match.time ?? null, vision.on && hovered !== null);
   const changeVision = (next: VisionView) => { setVision(next); writeVision(next); };
 
   useEffect(() => { setChain(readChain()); setVision(readVision()); }, []);
@@ -193,21 +198,30 @@ export default function MatchCuts() {
           <span className={styles.meta}>{searching ? "Searching…" : response ? `${response.searched.moments.toLocaleString()} instants in ${response.searched.films} films · ${Math.round(response.elapsed_ms.total)} ms` : ""}</span>
         </header>
         {!results.length && !searching && response && <p className={styles.empty}>No usable matches. Try another instant or loosen the settings.</p>}
-        <div className={styles.grid}>{results.map((match, index) =>
-          <article key={`${match.unit_id}:${match.time}`} className={styles.card} onMouseEnter={() => setHovered(match.unit_id)} onMouseLeave={() => setHovered(null)}>
+        <div className={styles.grid}>{results.map((match, index) => {
+          const isHovered = hovered?.match === match;
+          // With Vision on, the hovered cut draws why it matched: its strongest reason, or the one pointed at.
+          const shown = isHovered && vision.on ? shownReason(match.reasons, hovered.reason) : null;
+          return <article key={`${match.unit_id}:${match.time}`} className={styles.card}
+            onMouseEnter={() => setHovered({ match, reason: null })} onMouseLeave={() => setHovered(null)}>
             <button className={styles.cardImage} onClick={() => setSelected(match)} aria-label={`Audition cut ${index + 1}: ${match.film_title}`}>
               <FramedImage src={match.frame_url} crop={match.crop} aspect={match.aspect} output={settings.output} alt={`${match.film_title} at ${seconds(match.time)}`}
-                eager={index < 8} overlay={hovered === match.unit_id && reference ? { src: reference.frame_url, crop: reference.crop, aspect: reference.aspect } : null}>
-                <span className={styles.rank}>{index + 1}</span>
+                eager={index < 8} overlay={isHovered && reference ? { src: reference.frame_url, crop: reference.crop, aspect: reference.aspect } : null}>
+                {(place, over) => <>
+                  <span className={styles.rank}>{index + 1}</span>
+                  {shown && <CutVision incoming={hoveredVision} outgoing={referenceVision} reason={shown} place={place} over={over} />}
+                </>}
               </FramedImage>
             </button>
             <div className={styles.cardBody}>
               <div className={styles.cardTitle}><h3>{match.film_title}</h3><time>{seconds(match.time)}</time></div>
               <div className={styles.reasons}>{match.reasons.length ? match.reasons.slice(0, 3).map((reason) =>
-                <span key={reason.code} title={`Stronger than ${percent(0.9 + reason.strength / 10)} of random cuts`}>{reason.label}</span>)
+                <span key={reason.code} data-shown={shown?.code === reason.code || undefined} onMouseEnter={() => setHovered({ match, reason: reason.code })}
+                  title={`Stronger than ${percent(0.9 + reason.strength / 10)} of random cuts`}>{reason.label}</span>)
                 : <span className={styles.loose} title="Nothing clearly lines up; the closest the library has">Loose match</span>}</div>
             </div>
-          </article>)}</div>
+          </article>;
+        })}</div>
       </section>
     </div>}
     {chain.length > 0 && <footer className={styles.chain} aria-label="Match-cut chain">
@@ -225,7 +239,7 @@ export default function MatchCuts() {
     {choosing && <SourceBrowser context="match" filmIds={[]} replacing={!!unitId} onClose={() => setChoosing(false)}
       onSelect={(result) => { setChoosing(false); updateChain([]); navigate({ unit: result.unit_id, at: resultTime(result) }, false); }} />}
     {selected && shot && time !== null && reference && <Audition match={selected} shot={shot} time={time} referenceCrop={reference.crop}
-      output={settings.output} vision={vision} onClose={() => setSelected(null)} onChain={addToChain}
+      output={settings.output} vision={vision} onVision={(on) => changeVision({ ...vision, on })} onClose={() => setSelected(null)} onChain={addToChain}
       onOpen={(match, start) => { setSelected(null); updateChain([]); navigate({ unit: match.unit_id, at: start }, false); }} />}
     {playingChain && <Dialog title="Chain" onClose={() => setPlayingChain(false)}>
       <SequencePlayer output={settings.output} segments={chain.map((link, index): Segment => ({ key: `${link.unit_id}:${index}`, filmId: link.film_id,
@@ -234,21 +248,26 @@ export default function MatchCuts() {
   </main>;
 }
 
-function Audition({ match, shot, time, referenceCrop, output, vision, onClose, onChain, onOpen }: {
+function Audition({ match, shot, time, referenceCrop, output, vision, onVision, onClose, onChain, onOpen }: {
   match: MomentMatch;
   shot: MomentShot;
   time: number;
   referenceCrop: [number, number, number, number] | null;
   output: OutputFormat;
   vision: VisionView;
+  onVision: (on: boolean) => void;
   onClose: () => void;
   onChain: (match: MomentMatch, start: number) => void;
   onOpen: (match: MomentMatch, start: number) => void;
 }) {
   const [start, setStart] = useState(match.time);
-  const [view, setView] = useState<"play" | "overlay">("play");
+  const [view, setView] = useState(auditionView);
   const [opacity, setOpacity] = useState(0.5);
-  useEffect(() => { setStart(match.time); }, [match]);
+  // Vision shows one reason at a time: the strongest, until another is pointed at.
+  const [pointed, setPointed] = useState<string | null>(null);
+  useEffect(() => { setStart(match.time); setPointed(null); }, [match]);
+  const chooseView = (next: "play" | "overlay") => { auditionView = next; setView(next); };
+  const shown = shownReason(match.reasons, pointed);
   const incoming = useVision(match.unit_id, start, vision.on && view === "overlay");
   const outgoing = useVision(shot.unit_id, time, vision.on && view === "overlay");
   const nudge = (delta: number) => setStart((value) => Math.max(match.t_start, Math.min(match.t_end - 0.1, value + delta)));
@@ -260,20 +279,26 @@ function Audition({ match, shot, time, referenceCrop, output, vision, onClose, o
   ];
   return <Dialog title={`${shot.film_title} → ${match.film_title}`} onClose={onClose}>
     <div className={styles.viewTabs} role="tablist">
-      <button role="tab" aria-selected={view === "play"} onClick={() => setView("play")}>Play the cut</button>
-      <button role="tab" aria-selected={view === "overlay"} onClick={() => setView("overlay")}>Overlay</button>
+      <button role="tab" aria-selected={view === "play"} onClick={() => chooseView("play")}>Play the cut</button>
+      <button role="tab" aria-selected={view === "overlay"} onClick={() => chooseView("overlay")}>Overlay</button>
     </div>
     {view === "play" ? <SequencePlayer segments={segments} output={output} /> : <div className={styles.overlayView}>
       <FramedImage src={frameUrl(match.film_id, start, 1280)} crop={match.crop} aspect={match.aspect} output={output} alt="Incoming frame"
         overlay={{ src: frameUrl(shot.film_id, time, 1280), crop: referenceCrop, aspect: shot.aspect }} overlayOpacity={opacity} eager>
-        {(place, over) => <>
-          {incoming && <VisionOverlay vision={incoming} visible={vision.visible} place={place} />}
-          {outgoing && over && <VisionOverlay vision={outgoing} visible={vision.visible} place={over} tone="out" />}
-        </>}
+        {(place, over) => vision.on && <CutVision incoming={incoming} outgoing={outgoing} reason={shown} place={place} over={over} />}
       </FramedImage>
-      <label className={styles.opacity}>Outgoing frame <input type="range" min={0} max={1} step={0.05} value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>
+      <div className={styles.overlayControls}>
+        <label className={styles.opacity}>Outgoing frame <input type="range" min={0} max={1} step={0.05} value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} /></label>
+        <VisionSwitch on={vision.on} onToggle={onVision} />
+      </div>
+      {/* The reasons are Vision's legend: point at one, or pick it, to draw it on both frames. */}
       {vision.on && <ul className={styles.reasonBars} aria-label="Why this cut matched">{match.reasons.map((reason) =>
-        <li key={reason.code}><span>{reason.label}</span><span className={styles.strength}><span style={{ width: `${Math.round(reason.strength * 100)}%` }} /></span>
+        <li key={reason.code} data-shown={shown?.code === reason.code || undefined}>
+          {reason.layers?.length
+            ? <button type="button" className={styles.reasonName} aria-pressed={shown?.code === reason.code}
+                onMouseEnter={() => setPointed(reason.code)} onFocus={() => setPointed(reason.code)} onClick={() => setPointed(reason.code)}>{reason.label}</button>
+            : <span>{reason.label}</span>}
+          <span className={styles.strength}><span style={{ width: `${Math.round(reason.strength * 100)}%` }} /></span>
           <data value={reason.strength}>{reason.strength.toFixed(2)}</data></li>)}</ul>}
     </div>}
     <div className={styles.auditionBar}>

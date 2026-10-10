@@ -775,9 +775,18 @@ def _direction(vx: float, vy: float) -> str:
     return "down" if vy > 0 else "up"
 
 
+# The Vision layers (``vision.layers``) that show what each reason measured, so
+# the lab can draw why a cut matched without knowing the scorer.
+REASON_LAYERS = {"subject": ("objects",), "shape": ("objects",), "eyes": ("eyes",), "pose": ("pose",),
+                 "light": ("light",), "lines": ("lines",), "color": ("colour",),
+                 "motion": ("motion",), "travel": ("motion",), "push": ("motion",)}
+
+
 def reasons(calibrated: dict[str, float], parts: dict[str, float], reference: Moments, candidate: Moments,
             zoom: float) -> list[dict[str, Any]]:
-    """Short, measured reasons for one pair, strongest first (only clearly better than chance)."""
+    """Short, measured reasons for one pair, strongest first (only clearly better than chance).
+
+    Each names the Vision layers that show it (none for a reframe)."""
     out: list[dict[str, Any]] = []
     labels = {"subject": "Same place and size", "eyes": "Eye line carries over", "pose": "Same pose",
               "shape": "Matching silhouette",
@@ -801,4 +810,6 @@ def reasons(calibrated: dict[str, float], parts: dict[str, float], reference: Mo
                     "strength": parts["push"]})
     if zoom > 1.02:
         out.append({"code": "reframe", "label": f"Reframed {zoom:.2f}x", "strength": 0.0})
+    for item in out:
+        item["layers"] = list(REASON_LAYERS.get(item["code"], ()))
     return sorted(out, key=lambda item: -item["strength"])

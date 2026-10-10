@@ -2590,8 +2590,10 @@ compared in output coordinates.
 - **Vision** draws what the index stored for the nearest analysed instant
   (`GET /matching/moments/vision`): objects with silhouettes, poses, the
   scorer's eye point, lines, light, colour and motion, over the Cut from
-  frame and both frames of the audition's overlay, with the reasons as bars.
-  Layers are described by kind in content fractions and name the film's
+  frame. Each match reason names the layers that show it, so a hovered cut
+  and the audition's overlay draw one reason at a time on both frames, with
+  the reasons as bars. Layers are described by kind in content fractions and
+  name the film's
   moments profile (and, for the current producer, its models), so a new
   producer version changes the data, not the overlay.
 
