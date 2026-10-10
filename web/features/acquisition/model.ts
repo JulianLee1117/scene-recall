@@ -19,7 +19,7 @@ export function canCancel(item: Acquisition): boolean {
   return !isCancelling(item) && !["ready", "cancelled"].includes(item.status);
 }
 export function cancellationNotice(item?: Acquisition): string {
-  const kept = item?.film_path ? " Your imported film is kept in the library." : "";
+  const kept = item?.film_path ? " The imported file stays until you dismiss this; dismissing removes it unless the film is already searchable." : "";
   if (item?.status === "cancelled" && item.cancellation_cleanup === "complete") {
     return `Cancelled. Downloaded files were cleaned up.${kept}`;
   }
@@ -121,7 +121,7 @@ export function preparationProgress(progress?: string | null, log: readonly stri
 }
 
 export function acquisitionHint(item: Acquisition, job?: IngestJob): string {
-  if (isCancelling(item)) return `${item.error ? "Cleanup is pending and will retry automatically." : "Stopping managed work and cleaning up downloaded files."}${item.film_path ? " Your imported film is kept in the library." : ""}`;
+  if (isCancelling(item)) return `${item.error ? "Cleanup is pending and will retry automatically." : "Stopping managed work and cleaning up downloaded files."}${item.film_path ? " The imported file stays until you dismiss this; dismissing removes it unless the film is already searchable." : ""}`;
   switch (item.status) {
     case "queued": return "The download starts when a slot is free.";
     case "downloading": return item.message?.includes("stopped in qBittorrent") ? "Download paused. Resume it in qBittorrent."

@@ -246,8 +246,8 @@ def retry(identity: ItemId, body: RevisionRequest, request: Request):
 
 @router.post("/{identity}/dismiss")
 def dismiss(identity: ItemId, body: RevisionRequest, request: Request):
-    _call(_service(request).dismiss, identity, body.revision)
-    return {"ok": True}
+    result = _call(_service(request).dismiss, identity, body.revision) or {}
+    return {"ok": True, **result}
 
 
 @router.post("/{identity}/review")

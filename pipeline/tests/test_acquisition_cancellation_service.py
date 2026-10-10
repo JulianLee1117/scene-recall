@@ -260,3 +260,53 @@ def test_dismissing_an_acquisition_frees_its_info_hash_for_reuse(service):
     service.dismiss(item["id"], item["revision"])
     fresh = create(service)
     assert fresh["info_hash"] == item["info_hash"] and fresh["id"] != item["id"]
+
+
+def _import_on_disk(service, config, *, subtitle=True):
+    films = config.paths.films_dir
+    films.mkdir(parents=True, exist_ok=True)
+    film = films / "Film (2000).mp4"
+    film.write_bytes(b"video")
+    sidecar = films / "Film (2000).en.srt"
+    sidecar.write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+    assets = config.paths.assets_dir / "film-id"
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / "dialogue.json").write_text("{}", encoding="utf-8")
+    plan = {"destination": str(film), "subtitle": "release/sub.srt" if subtitle else None}
+    item = create(service, status="cancelled", film_path=str(film), film_id="film-id", import_plan=plan)
+    return item, film, sidecar, assets
+
+
+def test_dismiss_removes_an_import_that_never_became_searchable(service, config, monkeypatch):
+    service.config.paths.incoming_dir.mkdir(parents=True, exist_ok=True)
+    item, film, sidecar, assets = _import_on_disk(service, config)
+    monkeypatch.setattr(service, "_published", lambda film_id: False)
+    assert service.dismiss(item["id"], item["revision"]) == {"removed_import": True}
+    assert not film.exists() and not sidecar.exists() and not assets.exists()
+    assert item["id"] not in [row["id"] for row in service.store.list()]
+
+
+def test_dismiss_keeps_a_searchable_film_and_a_subtitle_it_did_not_place(service, config, monkeypatch):
+    service.config.paths.incoming_dir.mkdir(parents=True, exist_ok=True)
+    item, film, sidecar, assets = _import_on_disk(service, config, subtitle=False)
+    monkeypatch.setattr(service, "_published", lambda film_id: True)
+    assert service.dismiss(item["id"], item["revision"]) == {"removed_import": False}
+    assert film.exists() and sidecar.exists() and assets.exists()
+    other, film, sidecar, assets = _import_on_disk(service, config, subtitle=False)
+    other = service.store.patch(other["id"], film_id="other-id")
+    monkeypatch.setattr(service, "_published", lambda film_id: False)
+    assert service.dismiss(other["id"], other["revision"]) == {"removed_import": True}
+    assert not film.exists() and sidecar.exists()
+
+
+def test_dismiss_refuses_while_the_import_is_queued_for_preparation(service, config, monkeypatch):
+    from pipeline.lab.store import LabStore
+    service.config.paths.incoming_dir.mkdir(parents=True, exist_ok=True)
+    item, film, sidecar, assets = _import_on_disk(service, config)
+    lab = LabStore(config.paths.state_dir)
+    lab.root.mkdir(parents=True, exist_ok=True)
+    lab.path.touch()                                             # the lab database now exists
+    monkeypatch.setattr(LabStore, "ingest_snapshots", lambda self: [{"path": str(film), "status": "queued"}])
+    with pytest.raises(AcquisitionConflict):
+        service.dismiss(item["id"], item["revision"])
+    assert film.exists() and service.store.get(item["id"])

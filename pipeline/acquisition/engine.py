@@ -661,5 +661,5 @@ class AcquisitionRunner:
                          cancellation_cleanup="complete", cancellation_retry_at=None,
                          download_rate=0, eta_seconds=None, review=None, error=None,
                          resume_status="ingest_queued" if item.get("film_path") else "queued",
-                         message=("Cancelled; download files removed. Imported film kept in the library."
+                         message=("Cancelled; download files removed. The imported film stays until this is dismissed."
                                   if item.get("film_path") else "Cancelled; download files removed"))

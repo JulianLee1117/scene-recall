@@ -665,8 +665,10 @@ export default function LibraryView() {
                 !isPending &&
                 !isFailed &&
                 (film.status === "indexed" || job?.status === "done");
+              // A cancelled preparation is the owner's choice, not a problem to fix.
+              const isCancelled = !isIndexed && job?.status === "cancelled";
               const status = isPending ? "queued" : isFailed ? "failed" : isIndexed ? "indexed" : "ready";
-              const statusLabel = isPending ? "Adding to queue…" : isFailed ? "Needs attention" : isIndexed ? "Ready to search" : "Not prepared";
+              const statusLabel = isPending ? "Adding to queue…" : isFailed ? "Needs attention" : isIndexed ? "Ready to search" : isCancelled ? "Cancelled" : "Not prepared";
               const canIngest = status === "ready" || status === "failed";
               const actionError = ingestErrors[key];
 

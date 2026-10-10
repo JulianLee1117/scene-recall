@@ -1069,6 +1069,12 @@ retry automatically, including after restart. Ownership conflicts retain files
 and show the reason. A submitted torrent whose acceptance is still uncertain
 must first be reconciled with qBittorrent before its files can be cleared.
 
+**Dismiss** forgets a stopped acquisition. An import that never became searchable
+goes with it: the canonical film, the subtitle the import placed beside it and the
+film's partial ingest assets; a searchable film and its evidence stay. On the Films
+page a cancelled preparation reads "Cancelled" with "Make searchable", not "Needs
+attention", which is reserved for failures.
+
 **Try again** on a failed item resumes its saved stage; a CLI retry after completed
 cancellation redownloads discarded staging or reuses an already imported source.
 Failed or interrupted ingestion requires that explicit action before hosted

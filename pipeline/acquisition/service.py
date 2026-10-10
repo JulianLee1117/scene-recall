@@ -1,6 +1,10 @@
 """Shared acquisition commands. Network monitoring is owned by a separate worker."""
 from __future__ import annotations
 
+import os
+import shutil
+from pathlib import Path
+
 from pipeline.config import Config
 from pipeline.intake import canonical_film_filename
 from .cleanup import remove_cancelled_download
@@ -176,13 +180,55 @@ class AcquisitionService:
             review=None, message="Checking the reviewed selection"))
 
     def dismiss(self, identity: str, revision: int):
-        """Forget a stopped acquisition, clearing its info_hash for reuse."""
+        """Forget a stopped acquisition, clearing its info_hash for reuse.
+
+        An import that never became searchable goes with it: the canonical film, the
+        subtitle the import placed beside it and the film's partial ingest assets. A
+        searchable film, its evidence and anything another acquisition owns stay.
+        """
         item = self.store.get(identity)
         if item["revision"] != revision:
             raise AcquisitionConflict("Acquisition changed; refresh and try again")
         if item["status"] not in TERMINAL:
             raise AcquisitionConflict("Only a stopped acquisition can be dismissed")
+        removed = self._discard_unpublished_import(item)
         remove_cancelled_download(self.config.paths.incoming_dir, item,
             lambda owner: self.store.patch(identity, cancellation_owner=owner))
         current = self.store.get(identity)
         self.store.delete(identity, current["revision"])
+        return {"removed_import": removed}
+
+    def _published(self, film_id: str) -> bool:
+        from pipeline.index.writer import open_db, published_film_ids
+        return film_id in published_film_ids(open_db(self.config))
+
+    def _discard_unpublished_import(self, item: dict) -> bool:
+        """Remove the film this acquisition imported when nothing searchable came of it."""
+        film_id, path_text = item.get("film_id"), item.get("film_path")
+        if not film_id or not path_text:
+            return False
+        path = Path(path_text)
+        if path.is_symlink() or path.parent.resolve() != self.config.paths.films_dir.resolve():
+            return False
+        from pipeline.lab.store import LabStore
+        lab = LabStore(self.config.paths.state_dir)
+        active = [job for job in (lab.ingest_snapshots() if Path(lab.path).exists() else [])
+                  if os.path.normcase(str(job.get("path"))) == os.path.normcase(str(path))
+                  and job["status"] in {"queued", "running", "waiting_worker"}]
+        if active:
+            raise AcquisitionConflict("The imported film is queued for preparation; cancel that job first")
+        if self._published(film_id):
+            return False
+        removed = False
+        if path.is_file():
+            path.unlink()
+            removed = True
+        if (item.get("import_plan") or {}).get("subtitle"):
+            sidecar = path.with_name(path.stem + ".en.srt")
+            if sidecar.is_file() and not sidecar.is_symlink():
+                sidecar.unlink()
+        from pipeline.evidence.store import EVIDENCE_DIRNAME
+        assets = Path(self.config.paths.assets_dir) / film_id
+        if assets.is_dir() and not (assets / EVIDENCE_DIRNAME).exists():
+            shutil.rmtree(assets, ignore_errors=True)
+        return removed

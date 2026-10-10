@@ -334,7 +334,7 @@ export interface IngestJob {
   job_id: string;
   path: string;
   filename: string;
-  status: "queued" | "running" | "done" | "error";
+  status: "queued" | "running" | "done" | "error" | "cancelled";
   queued_at: number;
   started_at: number | null;
   finished_at: number | null;

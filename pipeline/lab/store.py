@@ -758,7 +758,7 @@ class LabStore:
         with self.connection() as con:
             jobs = [self._job(row, private=True) for row in con.execute("SELECT * FROM jobs WHERE kind='ingest' ORDER BY created_at,rowid")]
         pending = [job["id"] for job in jobs if job["status"] == "queued"]
-        return [{"job_id": job["id"], **job["snapshot"], "status": {"completed": "done", "failed": "error", "interrupted": "error", "cancelled": "error"}.get(job["status"], job["status"]),
+        return [{"job_id": job["id"], **job["snapshot"], "status": {"completed": "done", "failed": "error", "interrupted": "error"}.get(job["status"], job["status"]),
                  "queued_at": job["created_at"], "started_at": job["started_at"], "finished_at": job["finished_at"],
                  "error": job["error"], "log": job["log"], "progress": job["progress"],
                  "queue_position": pending.index(job["id"]) + 1 if job["id"] in pending else None} for job in jobs]
