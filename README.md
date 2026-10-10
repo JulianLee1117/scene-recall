@@ -315,7 +315,7 @@ stay). Saved cards keep playback, bookmarks and Related without dragging or a
 drag badge. The player's action bar saves, finds related scenes, opens **Match
 cuts** at the playhead in a new tab and copies the film and time, acting on the
 shot on screen: play or scrub elsewhere in the film and the line above the
-actions names that shot, with **Back to result** to return. Its details describe
+actions names the scene you are in, with **Back to result** to return. Its details describe
 the result, labelled **Scene** (the story), **Shot** (what happens, and who) and
 **Picture** (what the frame shows).
 **Show details** (under **View**) shows each result's description and how each

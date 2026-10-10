@@ -2503,9 +2503,15 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   border-bottom: 1px solid #1c1c1c;
 }
 
+/* The context takes the free space, so Back to result keeps its place beside
+   the actions whatever the line says. */
 .modal-toolbar .modal-anchor-context {
+  min-width: 0;
+  flex: 1 1 18rem;
+  flex-wrap: nowrap;
   margin-bottom: 0;
 }
+.modal-toolbar .modal-anchor-context button { flex: none; margin-left: auto; }
 
 .modal-actions .modal-action-link {
   display: inline-flex;

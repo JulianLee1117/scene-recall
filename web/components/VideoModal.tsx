@@ -92,7 +92,9 @@ export default function VideoModal({
     Boolean(item && ((playheadTime >= item.t_start && playheadTime < item.t_end)
       || (item === shot && Math.abs(playheadTime - evidenceTime) < 0.5)));
   const sceneTarget = playing(current) ? current : sceneShots.find(playing);
-  const browsed = !sceneTarget && playing(onScreen) ? onScreen : null;
+  // The last shot found stays the target until the next one arrives, so a cut
+  // never flashes back to the result for the moment a lookup takes.
+  const browsed = !sceneTarget && onScreen ? onScreen : null;
   // What Save, Related and Match cuts act on: the shot on screen, else the picked one.
   const target = sceneTarget ?? browsed ?? current;
   const onResult = target.unit_id === shot.unit_id;
@@ -102,14 +104,16 @@ export default function VideoModal({
   const bookmarked = bookmarkedUnitIds.has(target.unit_id);
   const matchTime = playing(target) ? playheadTime : momentOf(target);
   const matchCutsHref = `/match?unit_id=${encodeURIComponent(target.unit_id)}&time=${matchTime.toFixed(3)}`;
-  const nowShowing = onResult ? "" : [target.scene?.title, target.action].filter(Boolean).join(" — ");
+  // The line names a scene only once you leave the result's: it changes with
+  // the story, not at every cut, and the frame shows which shot you are on.
+  const nowShowing = browsed?.scene && browsed.scene.id !== shot.scene?.id ? browsed.scene.title : "";
   const pickShot = (item: SearchResult) => {
     setPickedUnitId(item.unit_id);
     setPlayheadTime(momentOf(item));
     if (videoRef.current) videoRef.current.currentTime = momentOf(item);
   };
   // Ask which shot is on screen only beyond this scene, and only until one answers.
-  const lookup = sceneTarget || browsed || !currentPlayback?.url ? null : Math.round(playheadTime * 10) / 10;
+  const lookup = sceneTarget || playing(onScreen) || !currentPlayback?.url ? null : Math.round(playheadTime * 10) / 10;
   useEffect(() => {
     if (lookup === null) return;
     const controller = new AbortController();
