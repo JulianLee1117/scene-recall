@@ -1,3 +1,9 @@
+.controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .panel {
   width: 288px;
   padding-top: 0;
@@ -20,241 +26,24 @@
   font-size: 12px;
 }
 
-/* A pocket cinema: graphite at rest, champagne and tungsten live.
-   Detail is static SVG. Only the brief click sequences do any moving. */
-.debugSection {
-  flex-shrink: 0;
-  padding-top: 14px;
-  border-top: 1px solid #292621;
-}
-
-.debugButton {
-  --cinema-shadow: #10100f;
-  --cinema-dark: #1e1e1a;
-  --cinema-frame: #34342f;
-  --cinema-body: #4b4942;
-  --cinema-metal: #706c61;
-  --cinema-edge: #9a9384;
-  --cinema-shine: #cec6b5;
-  --cinema-film: #6b625a;
-  --cinema-warm: #a08c70;
-  --cinema-hot: #cebea5;
-  --cinema-power: #786f5c;
-  position: relative;
-  isolation: isolate;
+.detailsToggle {
   display: grid;
-  width: 100%;
-  max-width: 236px;
-  min-height: 88px;
-  margin-inline: auto;
-  padding: 24px 25px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  padding: 0;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid #4a473e;
+  border: 1px solid transparent;
   border-radius: 6px;
-  background: #171715;
-  color: #e3ded2;
-  text-align: center;
+  background: transparent;
+  color: #a49e94;
   cursor: pointer;
-  transition: border-color .12s ease;
 }
 
-.debugButton:hover { border-color: #a49a86; }
-.debugButton:focus-visible { outline: 2px solid #f2e4ca; outline-offset: 3px; }
-.debugButton[aria-pressed="true"] {
-  --cinema-shadow: #1b130d;
-  --cinema-dark: #30231a;
-  --cinema-frame: #776040;
-  --cinema-body: #9a774a;
-  --cinema-metal: #bda06b;
-  --cinema-edge: #e3c690;
-  --cinema-shine: #fff0ce;
-  --cinema-film: #836c61;
-  --cinema-warm: #ffb26b;
-  --cinema-hot: #fff0bc;
-  --cinema-power: #f4d48d;
-  border-color: #dfc087;
-}
+.detailsToggle:hover { background: #ffffff06; color: #e8dece; }
+.detailsToggle[aria-pressed="true"] { border-color: #40382d; background: #b88a4710; color: #e2c49b; }
+.detailsToggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.debugFrame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.cinemaChassis { fill: #171715; }
-.debugButton[aria-pressed="true"] .cinemaChassis { fill: #261d14; }
-.debugCopy { position: relative; display: grid; min-width: 0; justify-items: center; gap: 4px; }
-.debugHero { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 18px; }
-.debugCrest { overflow: visible; transform-box: fill-box; transform-origin: center; }
-.debugTitle {
-  color: #e3ded2;
-  font: 800 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: 1.1px;
-  text-indent: 1.1px;
-  white-space: nowrap;
-}
-
-.debugButton[aria-pressed="true"] .debugTitle { color: #fff0d7; }
-.debugHint { color: #ada79b; font-family: inherit; font-size: 10px; line-height: 1.35; }
-.debugButton[aria-pressed="true"] .debugHint { color: #d2bda0; }
-.debugState {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 38px;
-  height: 18px;
-  border: 1px solid #777164;
-  border-radius: 1px;
-  background: #35312a;
-  color: #e8dfd0;
-  font: 800 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: .6px;
-}
-.stateLamp { width: 5px; height: 5px; border: 1px solid currentColor; }
-.debugButton[aria-pressed="true"] .debugState { border-color: #f99d7e; background: #b94432; color: #fff7e6; }
-.debugButton[aria-pressed="true"] .stateLamp { background: currentColor; }
-.powerTrim { opacity: .22; }
-.lampLight, .standbyBeam, .chargeTop, .chargeBottom, .impact, .shutdown, .beamLeft, .beamRight { opacity: 0; }
-.debugButton[aria-pressed="true"] .powerTrim { opacity: 1; }
-.debugButton[aria-pressed="true"] .lampLight { opacity: 1; }
-.debugButton[aria-pressed="true"] .standbyBeam { opacity: .2; }
-.reelLeft, .reelRight { transform-box: fill-box; transform-origin: center; }
-.reelRight { --reel-turn: -360deg; --reel-overshoot: -365deg; }
-.slateHinge { transform-origin: 2px 6px; }
-.beamLeft { transform-origin: 38px 52px; }
-.beamRight { transform-origin: 202px 52px; }
-.shutterLeft, .shutterRight { transform-origin: 0 0; }
-.debugButton[aria-pressed="true"] :is(.shutterLeft, .shutterRight) { transform: scaleY(0); }
-.lampLight { transform-origin: 120px 52px; }
-.impactFrame { transform-box: fill-box; transform-origin: center; }
-.shutdownRails { transform-origin: 120px 44px; }
-
-/* Clap, advance, strike the lamp, settle. The label never shakes.
-   Every child finishes before its direction's terminal event. */
-.debugButton[data-motion="on"] .slateHinge { animation: slate-snap .28s cubic-bezier(.2, .8, .3, 1) both; }
-.debugButton[data-motion="on"] .debugCrest { animation: crest-kick .34s cubic-bezier(.16, 1, .3, 1); }
-.debugButton[data-motion="on"] :is(.reelLeft, .reelRight) { animation: reel-turn .5s .04s cubic-bezier(.2, .8, .3, 1) both; }
-.debugButton[data-motion="on"] .filmStripTop { animation: perforation-advance .32s .08s steps(6, end) both; }
-.debugButton[data-motion="on"] .filmStripBottom { animation: film-advance .32s .08s steps(9, end) reverse both; }
-.debugButton[data-motion="on"] .beamLeft { animation: projector-left .43s .09s ease-out both; }
-.debugButton[data-motion="on"] .beamRight { animation: projector-right .43s .09s ease-out both; }
-.debugButton[data-motion="on"] :is(.shutterLeft, .shutterRight) { animation: shutter-open .18s .06s cubic-bezier(.16, 1, .3, 1) both; }
-.debugButton[data-motion="on"] .lampLight { animation: lamp-strike .4s .08s ease-out both; }
-.debugButton[data-motion="on"] .powerTrim { animation: trim-strike .52s ease-out both; }
-.debugButton[data-motion="on"] .standbyBeam { animation: light-settle .52s ease-out both; }
-.debugButton[data-motion="on"] :is(.chargeTop, .chargeBottom) { animation: rail-charge .24s .08s cubic-bezier(.2, .65, .3, 1) both; }
-.debugButton[data-motion="on"] .impact { animation: frame-impact .62s linear both; }
-.debugButton[data-motion="on"] .impactFrame { animation: frame-punch .28s .2s cubic-bezier(.16, 1, .3, 1) both; }
-.debugButton[data-motion="on"] .sparksTop { animation: spark-top .29s .21s steps(5, end) both; }
-.debugButton[data-motion="on"] .sparksBottom { animation: spark-bottom .29s .21s steps(5, end) both; }
-.debugButton[data-motion="on"] .debugState { animation: state-seat .28s cubic-bezier(.16, 1, .3, 1); }
-
-/* Cut. The lamp pinches out, the film coasts, and the reels brake.
-   Repeated stock and whole reel turns return to exactly the resting artwork. */
-.debugButton[data-motion="off"] .shutdown { animation: power-down .34s linear both; }
-.debugButton[data-motion="off"] .shutdownRails { animation: rails-close .26s cubic-bezier(.5, 0, .3, 1) both; }
-.debugButton[data-motion="off"] .lastFrame { animation: last-frame .31s linear both; }
-.debugButton[data-motion="off"] :is(.reelLeft, .reelRight) { animation: reel-brake .3s cubic-bezier(.1, .65, .25, 1) both; }
-.debugButton[data-motion="off"] .filmStripTop { animation: perforation-coast .24s steps(6, end) both; }
-.debugButton[data-motion="off"] .filmStripBottom { animation: film-coast .24s steps(9, end) reverse both; }
-.debugButton[data-motion="off"] .slateHinge { animation: slate-cut .24s ease-out both; }
-.debugButton[data-motion="off"] :is(.shutterLeft, .shutterRight) { animation: shutter-close .2s .02s ease-out both; }
-.debugButton[data-motion="off"] .lampLight { --cinema-hot: #fff0c7; --cinema-warm: #f9b86b; animation: lamp-out .28s ease-out both; }
-.debugButton[data-motion="off"] .standbyBeam { animation: light-out .24s ease-out both; }
-.debugButton[data-motion="off"] .beamLeft { fill: #ffe5b5; animation: projector-retract-left .25s ease-in both; }
-.debugButton[data-motion="off"] .beamRight { fill: #ffe5b5; animation: projector-retract-right .25s ease-in both; }
-.debugButton[data-motion="off"] .powerTrim { animation: trim-out .3s ease-out both; }
-.debugButton[data-motion="off"] .debugState { animation: state-cut .2s ease-out; }
-
-@keyframes rail-charge {
-  0% { opacity: 0; transform: translateX(0); }
-  10%, 82% { opacity: 1; }
-  100% { opacity: 0; transform: translateX(210px); }
-}
-@keyframes frame-impact {
-  0%, 30% { opacity: 0; }
-  36% { opacity: 1; }
-  58% { opacity: .35; }
-  100% { opacity: 0; }
-}
-@keyframes crest-kick {
-  0%, 20% { transform: translateY(0) scale(1); }
-  38% { transform: translateY(1px) scale(.92); }
-  63% { transform: translateY(-1px) scale(1.06); }
-  100% { transform: scale(1); }
-}
-@keyframes slate-snap {
-  0% { transform: rotate(0); }
-  26% { transform: rotate(-14deg); }
-  42% { transform: rotate(0); }
-  64% { transform: rotate(-5deg); }
-  100% { transform: rotate(0); }
-}
-@keyframes reel-turn { from { transform: rotate(0); } to { transform: rotate(var(--reel-turn, 360deg)); } }
-@keyframes reel-brake {
-  0% { transform: rotate(0); }
-  72% { transform: rotate(var(--reel-overshoot, 365deg)); }
-  100% { transform: rotate(var(--reel-turn, 360deg)); }
-}
-@keyframes perforation-advance { from { transform: translateX(0); } to { transform: translateX(-12px); } }
-@keyframes film-advance { from { transform: translateX(0); } to { transform: translateX(-72px); } }
-@keyframes perforation-coast { from { transform: translateX(0); } to { transform: translateX(-12px); } }
-@keyframes film-coast { from { transform: translateX(0); } to { transform: translateX(-72px); } }
-@keyframes projector-left {
-  0% { opacity: 0; transform: rotate(-12deg) scaleX(.6); }
-  28% { opacity: .9; }
-  65% { opacity: .45; }
-  100% { opacity: 0; transform: rotate(10deg) scaleX(1); }
-}
-@keyframes projector-right {
-  0% { opacity: 0; transform: rotate(12deg) scaleX(.6); }
-  28% { opacity: .9; }
-  65% { opacity: .45; }
-  100% { opacity: 0; transform: rotate(-10deg) scaleX(1); }
-}
-@keyframes frame-punch {
-  0% { transform: scale(.97); }
-  35% { transform: scale(1.02); }
-  100% { transform: scale(1); }
-}
-@keyframes shutter-open { from { transform: scaleY(1); } to { transform: scaleY(0); } }
-@keyframes shutter-close { from { transform: scaleY(0); } to { transform: scaleY(1); } }
-@keyframes lamp-strike {
-  0% { opacity: 0; transform: scaleY(.2); }
-  25% { opacity: 1; transform: scaleY(1.3); }
-  100% { opacity: 1; transform: scaleY(1); }
-}
-@keyframes lamp-out {
-  0% { opacity: 1; transform: scaleY(1); }
-  55% { opacity: .9; transform: scaleY(.15); }
-  100% { opacity: 0; transform: scaleY(0); }
-}
-@keyframes trim-strike { 0% { opacity: .2; } 40% { opacity: 1; } 60% { opacity: .55; } 100% { opacity: 1; } }
-@keyframes trim-out { from { opacity: 1; } to { opacity: .22; } }
-@keyframes light-settle { 0%, 18% { opacity: 0; } 44% { opacity: .5; } 100% { opacity: .2; } }
-@keyframes light-out { from { opacity: .2; } to { opacity: 0; } }
-@keyframes power-down { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes rails-close { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-@keyframes last-frame { 0%, 68% { opacity: 0; } 78% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes projector-retract-left {
-  from { opacity: .45; transform: scaleX(1); }
-  to { opacity: 0; transform: scaleX(0); }
-}
-@keyframes projector-retract-right {
-  from { opacity: .45; transform: scaleX(1); }
-  to { opacity: 0; transform: scaleX(0); }
-}
-@keyframes slate-cut { 0% { transform: rotate(-9deg); } 50% { transform: rotate(2deg); } 100% { transform: rotate(0); } }
-@keyframes state-seat { 0% { transform: scale(.9); } 55% { transform: scale(1.08); } 100% { transform: scale(1); } }
-@keyframes state-cut { 0% { transform: translateY(1px); } 100% { transform: translateY(0); } }
-@keyframes spark-top {
-  0% { transform: translateY(3px); }
-  100% { transform: translateY(-3px); }
-}
-@keyframes spark-bottom {
-  0% { transform: translateY(-3px); }
-  100% { transform: translateY(3px); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .debugButton { transition: none; }
-  .debugButton[data-motion] [class] { animation: none; }
-  .chargeTop, .chargeBottom, .impact, .shutdown, .beamLeft, .beamRight { display: none; }
+@media (max-width: 600px), (pointer: coarse) {
+  .detailsToggle { width: 44px; height: 44px; }
 }
