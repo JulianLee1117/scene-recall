@@ -342,20 +342,27 @@ export default function MatchByRail({
       if (detail.phase === "move") {
         setDragOver(allowed ? facet : null);
         setDragRemoving(removing);
-        document.querySelector?.(".scene-pointer-ghost")?.classList.toggle("is-removing", removing);
+        // The carried picture tucks in over a category that will take it, and warns when it would be removed.
+        const carried = document.querySelector?.(".scene-carry");
+        carried?.classList.toggle("is-over", Boolean(allowed));
+        carried?.classList.toggle("is-removing", removing);
         return;
       }
       setDragActive(false);
       setDragOver(null);
       setDragRemoving(false);
+      // Taking the scene tells the gesture, whose carried picture then collapses here.
       if (allowed) {
         setRefineOpen(false);
         setEditorFacet(null);
         setAspectTarget(null);
         if (targetFacet) onCloseReference?.();
         onSource?.(facet, detail.draft, detail.originFacet);
-      } else if (removing && detail.originFacet) removeByDrag(detail.originFacet);
-      else if (valid) onLimit?.();
+        event.preventDefault();
+      } else if (removing && detail.originFacet) {
+        removeByDrag(detail.originFacet);
+        event.preventDefault();
+      } else if (valid) onLimit?.();
     };
     document.addEventListener(SCENE_POINTER_EVENT, handlePointerScene);
     return () =>

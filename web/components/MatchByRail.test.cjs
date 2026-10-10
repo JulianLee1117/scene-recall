@@ -33,7 +33,11 @@ function setup(overrides = {}) {
     body: { append() {} }, createElement,
     addEventListener(name, fn) { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(fn); },
     removeEventListener(name, fn) { listeners.get(name)?.delete(fn); },
-    dispatchEvent(value) { [...(listeners.get(value.type) ?? [])].forEach((fn) => fn(value)); },
+    dispatchEvent(value) {
+      value.preventDefault ??= () => { value.defaultPrevented = true; };
+      [...(listeners.get(value.type) ?? [])].forEach((fn) => fn(value));
+      return !value.defaultPrevented;
+    },
     elementFromPoint: () => hit,
   };
   const react = {
@@ -73,6 +77,7 @@ function setup(overrides = {}) {
         if (name === "@/lib/matchReasons") return load("../lib/matchReasons.ts");
         if (name === "@/hooks/useScenePointerDrag") return load("../hooks/useScenePointerDrag.ts");
         if (name === "@/lib/nativeDragPreview") return load("../lib/nativeDragPreview.ts");
+        if (name === "@/lib/sceneCarry") return { liftScene: () => ({ move() {}, settle() {}, dispose() {} }) };
         if (name === "@/lib/format") return { formatTime: String };
         return { default: name };
       },

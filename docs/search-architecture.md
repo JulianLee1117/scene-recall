@@ -343,9 +343,11 @@ and obey the existing clause limit. IME composition Enter does not commit a text
 detail. When a description orders their shortlist, Framing and uploaded Look
 expose their mandatory visual-gate explanation/removal action; indexed Look
 remains a relevance preference.
-A dragged thumbnail follows the cursor, the source dims and the destination
-highlights. Releasing a reference outside the Refine area removes it through
-the same typed removal, with a short-lived undo. Search cards remain draggable
+The scene's own picture lifts off its card and follows the cursor at hand
+size, the card rises, and the destination highlights; a drop a target takes
+collapses the picture into it, any other release flies it back. Releasing a
+reference outside the Refine area removes it through the same typed removal,
+with a short-lived undo. Search cards remain draggable
 without a drag badge; Saved cards expose no dragging. Their playback, bookmark
 and Related actions remain available. The existing typed recipe remains the
 backend contract. Dragging adds a scene reference to the current recipe;

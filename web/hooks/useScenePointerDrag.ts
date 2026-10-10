@@ -7,9 +7,8 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
-import { FACET_LABELS, type MatchDraft } from "@/lib/searchRecipe";
-import { formatTime } from "@/lib/format";
-import { createSceneDragPreview, SCENE_DRAG_HOTSPOT } from "@/lib/nativeDragPreview";
+import type { MatchDraft } from "@/lib/searchRecipe";
+import { liftScene, type SceneCarry } from "@/lib/sceneCarry";
 import type { RecipeMatchFacet } from "@/types/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -23,7 +22,13 @@ export interface ScenePointerDetail {
   y: number;
 }
 
-/** One gesture owns the pointer until release. A click still opens the scene. */
+/**
+ * One gesture owns the pointer until release. A click still opens the scene.
+ * Past a short move the scene's picture lifts off its card and follows the
+ * pointer; targets hear each phase on the document. A `drop` is cancelable:
+ * a target that takes the scene prevents its default, and the carried
+ * picture collapses into it instead of flying back.
+ */
 export function useScenePointerDrag(
   draft: MatchDraft | null,
   options: {
@@ -40,29 +45,24 @@ export function useScenePointerDrag(
     draft: MatchDraft;
     originFacet?: RecipeMatchFacet;
   } | null>(null);
-  const ghost = useRef<HTMLDivElement | null>(null);
+  const carry = useRef<SceneCarry | null>(null);
   const suppressUntil = useRef(0);
-  const notify = (phase: ScenePointerDetail["phase"], x: number, y: number) => {
+  /** Tells the document; for a drop, reports whether a listener took the scene. */
+  const notify = (phase: ScenePointerDetail["phase"], x: number, y: number): boolean => {
     const current = gesture.current;
-    if (!current) return;
-    document.dispatchEvent(
-      new CustomEvent<ScenePointerDetail>(SCENE_POINTER_EVENT, {
-        detail: {
-          phase,
-          x,
-          y,
-          draft: current.draft,
-          originFacet: current.originFacet,
-        },
-      }),
-    );
+    if (!current) return false;
+    const event = new CustomEvent<ScenePointerDetail>(SCENE_POINTER_EVENT, {
+      cancelable: phase === "drop",
+      detail: { phase, x, y, draft: current.draft, originFacet: current.originFacet },
+    });
+    return !document.dispatchEvent(event);
   };
-  const clear = () => {
+  const clear = (outcome: "taken" | "returned") => {
     const current = gesture.current;
     if (!current) return;
     if (current.active) notify("end", 0, 0);
-    ghost.current?.remove();
-    ghost.current = null;
+    carry.current?.settle(outcome);
+    carry.current = null;
     gesture.current = null;
     if (current.active) options.onDragging?.(false);
     if (current.target.hasPointerCapture(current.pointer))
@@ -74,16 +74,11 @@ export function useScenePointerDrag(
       if (current?.active)
         document.dispatchEvent(
           new CustomEvent<ScenePointerDetail>(SCENE_POINTER_EVENT, {
-            detail: {
-              phase: "end",
-              x: 0,
-              y: 0,
-              draft: current.draft,
-              originFacet: current.originFacet,
-            },
+            detail: { phase: "end", x: 0, y: 0, draft: current.draft, originFacet: current.originFacet },
           }),
         );
-      ghost.current?.remove();
+      carry.current?.dispose();
+      carry.current = null;
       gesture.current = null;
       if (current?.target.hasPointerCapture(current.pointer))
         current.target.releasePointerCapture(current.pointer);
@@ -95,7 +90,7 @@ export function useScenePointerDrag(
       if (event.key !== "Escape" || !gesture.current?.active) return;
       event.preventDefault();
       suppressUntil.current = performance.now() + 250;
-      clear();
+      clear("returned");
     };
     document.addEventListener("keydown", cancel);
     return () => document.removeEventListener("keydown", cancel);
@@ -119,50 +114,39 @@ export function useScenePointerDrag(
       const current = gesture.current;
       if (!current || current.pointer !== event.pointerId) return;
       if (!current.active) {
-        if (
-          Math.hypot(event.clientX - current.x, event.clientY - current.y) < 8
-        )
-          return;
+        if (Math.hypot(event.clientX - current.x, event.clientY - current.y) < 8) return;
         current.active = true;
         options.onDragging?.(true);
         const display = current.draft.kind === "source" ? current.draft.display : undefined;
-        const element = createSceneDragPreview({
-          eyebrow: current.originFacet ? `Moving ${FACET_LABELS[current.originFacet]}` : "Scene",
-          title: display?.filmTitle || "Scene reference",
-          detail: typeof display?.timestamp === "number" ? formatTime(display.timestamp) : undefined,
+        carry.current = liftScene({
+          picture: current.target.querySelector("img"),
           imageUrl: display?.keyframeUrl ? `${API_URL}${display.keyframeUrl}` : undefined,
+          grab: { x: current.x, y: current.y },
         });
-        element.classList.add("scene-pointer-ghost");
-        document.body.append(element);
-        ghost.current = element;
         notify("start", event.clientX, event.clientY);
       }
       event.preventDefault();
-      if (ghost.current) {
-        // Keep the picked-up point attached to the cursor, including near an
-        // edge. Clipping is preferable to jumping to the cursor's other side.
-        ghost.current.style.left = `${event.clientX - SCENE_DRAG_HOTSPOT.x}px`;
-        ghost.current.style.top = `${event.clientY - SCENE_DRAG_HOTSPOT.y}px`;
-      }
+      carry.current?.move(event.clientX, event.clientY);
       notify("move", event.clientX, event.clientY);
     },
     onPointerUp(event: PointerEvent<HTMLElement>) {
       const current = gesture.current;
       if (!current || current.pointer !== event.pointerId) return;
+      let taken = false;
       if (current.active) {
         event.preventDefault();
         suppressUntil.current = performance.now() + 250;
-        notify("drop", event.clientX, event.clientY);
+        taken = notify("drop", event.clientX, event.clientY);
       }
-      clear();
+      clear(taken ? "taken" : "returned");
     },
     onPointerCancel(event: PointerEvent<HTMLElement>) {
       if (gesture.current?.pointer !== event.pointerId) return;
-      clear();
+      clear("returned");
     },
     onLostPointerCapture(event: PointerEvent<HTMLElement>) {
       if (gesture.current?.pointer !== event.pointerId) return;
-      clear();
+      clear("returned");
     },
     onClickCapture(event: MouseEvent<HTMLElement>) {
       if (performance.now() < suppressUntil.current) {
