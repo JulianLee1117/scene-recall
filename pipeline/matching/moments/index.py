@@ -33,6 +33,7 @@ from pipeline.evidence import store
 from pipeline.matching.moments import score as scoring
 
 CONTRACT = "match-moments-index-v1"
+MANIFEST_VERSION = 2               # what the manifest records per film; a bump republishes under a new id
 PARTS = {"layout": 16, "light": 12, "lines": 12, "shape": 12, "pose": 12, "color": 8, "motion": 4}
 COARSE_STEP = 2                     # coarse vectors every other grid step (0.5 s); exact scoring expands to neighbours
 CUT_GUARD_S = 0.3                   # stay this far from hidden cuts
@@ -284,7 +285,7 @@ def _load_film(assets: Path, db: Any, film: Any, progress: Callable[[str], None]
                              hero_document.get("created_at")],
                 "count": int(len(times)), "instances": int(len(arrays["inst_moment"])),
                 "poses": int(len(arrays.get("pose_moment", ()))),
-                "subjects": (document["data"].get("subjects") or {}).get("backend", "coco"),
+                "subjects": document["data"].get("subjects") or {"backend": "coco"},
                 "units": [unit["unit_id"] for unit in units],
                 "unit_bounds": [[float(unit["t_start"]), float(unit["t_end"])] for unit in units]}
     return film_row, arrays
@@ -297,7 +298,7 @@ def build_identity(films: list[dict[str, Any]]) -> str:
     a serving API (which maps the current one) picks it up on its next request; Windows refuses
     to delete mapped files, so the live directory is never rewritten in place."""
     rows = [[f["film_id"], f["moments_profile"], f["measure_profile"], list(f.get("evidence") or [])] for f in films]
-    return store.digest({"contract": CONTRACT, "films": rows})[:16]
+    return store.digest({"contract": CONTRACT, "manifest": MANIFEST_VERSION, "films": rows})[:16]
 
 
 def published(final: Path) -> str | None:
@@ -425,7 +426,7 @@ def build(config: Any, db: Any, *, progress: Callable[[str], None] = print) -> P
                     "moments": total, "instances": total_instances, "coarse": int(sum(len(rows) for rows in coarse_index)),
                     "parts": PARTS, "fps": 4.0,
                     "films": [{key: film[key] for key in ("film_id", "title", "aspect", "content_box", "moments_profile",
-                                                          "measure_profile", "evidence", "count")} for film in films],
+                                                          "measure_profile", "evidence", "subjects", "count")} for film in films],
                     "units": units_table, "elapsed_s": round(time.perf_counter() - started, 1)}
         (temporary / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         if final.exists():

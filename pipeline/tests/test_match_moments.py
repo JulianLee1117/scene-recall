@@ -217,6 +217,20 @@ def test_build_identity_follows_the_evidence_not_only_the_profiles(tmp_path):
     assert moment_index.published(tmp_path) == same
 
 
+def test_vision_names_the_models_that_described_the_film():
+    from pipeline.matching.moments import vision
+    current = producer.PRODUCER.profile_id
+    coco = {"moments_profile": current, "subjects": {"backend": "coco"}}
+    assert vision.source_models(coco) == producer.model_names()
+    grounded = {"moments_profile": current, "subjects": {"backend": "grounded", "models": {
+        "grounder": "grounding-dino-tiny (resize 640/1066)", "masks": "rf-detr-seg-small (best-overlap query)",
+        "pose": "vitpose-base-simple"}}}
+    named = vision.source_models(grounded)
+    assert named["pose"] == "vitpose-base-simple"
+    assert named["objects"].startswith("grounding-dino-tiny") and "rf-detr-seg-small" in named["objects"]
+    assert vision.source_models({"moments_profile": "match-v0-old", "subjects": {"backend": "grounded"}}) is None
+
+
 def test_camera_at_averages_reliable_pairs_around_each_time():
     flow = [[0.0, 0.1, 0.0, 0, 0, 0, 1], [1 / 6, 0.3, 0.0, 0, 0, 0, 1], [2 / 6, 9.9, 9.9, 0, 0, 0, 0]]
     camera = moment_index.camera_at(np.array([0.1, 5.0]), flow)

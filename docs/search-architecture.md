@@ -2604,7 +2604,7 @@ joined with `measure` (camera motion averaged within 0.25 s, hidden cuts) and
 measurement and hero creation times), so a re-described film publishes a new
 directory beside the one a serving API still maps, and a build whose identity
 is already published changes nothing. It is derived and rebuildable, and the
-manifest records every film's profiles and evidence.
+manifest records every film's profiles, evidence and subject backend.
 A per-film evidence refresh (after ingest) runs `moments` after `measure` and
 rebuilds the index when a moments pass ran. Readers memory-map every column,
 including the coarse matrix, so a process that never searches pays nothing.

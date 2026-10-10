@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from pipeline.evidence import moments as producer
+from pipeline.evidence import moments as producer, subjects
 from pipeline.matching.moments import score as scoring
 
 LINE_MIN = 0.12          # weaker edge cells are texture, not a line
@@ -81,6 +81,21 @@ def layers(moment: scoring.Moments) -> list[dict[str, Any]]:
     ]
 
 
+def source_models(film_row: dict[str, Any]) -> dict[str, str] | None:
+    """The models behind a film's layers, by role: known for the current producer version only.
+    A film described with the grounded subject backend (ADR-0119) names its grounder, the
+    silhouette source and its pose model instead of the COCO pair."""
+    if film_row.get("moments_profile") != producer.PRODUCER.profile_id:
+        return None
+    models = producer.model_names()
+    record = film_row.get("subjects") or {}
+    if isinstance(record, dict) and record.get("backend") == subjects.GROUNDED:
+        named = record.get("models") or {}
+        return {"objects": f"{named.get('grounder', 'grounder')}, silhouettes from {named.get('masks', models['objects'])}",
+                "pose": named.get("pose", models["pose"])}
+    return models
+
+
 def describe(index: Any, unit_id: str, time_value: float) -> dict[str, Any]:
     """The analysed instant of *unit_id* nearest *time_value*, with its layers and provenance."""
     unit = index.unit_index(unit_id)                     # KeyError when the shot is not indexed
@@ -95,8 +110,8 @@ def describe(index: Any, unit_id: str, time_value: float) -> dict[str, Any]:
     return {
         "unit_id": unit_id, "film_id": index.film_ids[film], "time": round(float(index.columns["time"][row]), 3),
         "usable": bool(index.columns["ok"][row]), "aspect": float(index.film_aspect[film]),
-        "source": {"index": index.id, "profile": profile,
-                   # Model names are known for the current producer version only.
-                   "models": producer.model_names() if profile == producer.PRODUCER.profile_id else None},
+        "source": {"index": index.id, "profile": profile, "models": source_models(film_row),
+                   "subjects": ((film_row.get("subjects") or {}).get("backend") if isinstance(film_row.get("subjects"), dict)
+                                else film_row.get("subjects")) or subjects.COCO},
         "layers": layers(index.moments(np.array([row]))),
     }
