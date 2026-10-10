@@ -20,7 +20,7 @@
   font-size: 12px;
 }
 
-/* A miniature projection booth: cool steel at rest, cyan and tungsten live.
+/* A pocket cinema: graphite at rest, champagne and tungsten live.
    Detail is static SVG. Only the brief click sequences do any moving. */
 .debugSection {
   flex-shrink: 0;
@@ -29,84 +29,86 @@
 }
 
 .debugButton {
-  --cinema-shadow: #080e18;
-  --cinema-dark: #111c2b;
-  --cinema-frame: #26384c;
-  --cinema-body: #34475c;
-  --cinema-metal: #53697e;
-  --cinema-edge: #7a91a5;
-  --cinema-shine: #b1c3d1;
-  --cinema-film: #44556c;
-  --cinema-warm: #718297;
-  --cinema-hot: #a0afbf;
-  --cinema-power: #48687a;
+  --cinema-shadow: #10100f;
+  --cinema-dark: #1e1e1a;
+  --cinema-frame: #34342f;
+  --cinema-body: #4b4942;
+  --cinema-metal: #706c61;
+  --cinema-edge: #9a9384;
+  --cinema-shine: #cec6b5;
+  --cinema-film: #6b625a;
+  --cinema-warm: #a08c70;
+  --cinema-hot: #cebea5;
+  --cinema-power: #786f5c;
   position: relative;
   isolation: isolate;
   display: grid;
   width: 100%;
-  min-height: 104px;
-  padding: 20px 26px;
+  max-width: 236px;
+  min-height: 88px;
+  margin-inline: auto;
+  padding: 24px 25px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid #45566a;
+  border: 1px solid #4a473e;
   border-radius: 6px;
-  background: #0b1420;
-  color: #d8e5ee;
+  background: #171715;
+  color: #e3ded2;
   text-align: center;
   cursor: pointer;
   transition: border-color .12s ease;
 }
 
-.debugButton:hover { border-color: #9cb8cd; }
-.debugButton:focus-visible { outline: 2px solid #edfaff; outline-offset: 3px; }
+.debugButton:hover { border-color: #a49a86; }
+.debugButton:focus-visible { outline: 2px solid #f2e4ca; outline-offset: 3px; }
 .debugButton[aria-pressed="true"] {
-  --cinema-shadow: #061722;
-  --cinema-dark: #102e3d;
-  --cinema-frame: #23758b;
-  --cinema-body: #317b91;
-  --cinema-metal: #5fb6c6;
-  --cinema-edge: #91e2ea;
-  --cinema-shine: #e0fcff;
-  --cinema-film: #487bab;
-  --cinema-warm: #f9b86b;
-  --cinema-hot: #fff0c7;
-  --cinema-power: #70e9f6;
-  border-color: #8cefff;
+  --cinema-shadow: #1b130d;
+  --cinema-dark: #30231a;
+  --cinema-frame: #776040;
+  --cinema-body: #9a774a;
+  --cinema-metal: #bda06b;
+  --cinema-edge: #e3c690;
+  --cinema-shine: #fff0ce;
+  --cinema-film: #836c61;
+  --cinema-warm: #ffb26b;
+  --cinema-hot: #fff0bc;
+  --cinema-power: #f4d48d;
+  border-color: #dfc087;
 }
 
 .debugFrame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.cinemaChassis { fill: #0b1420; }
-.debugButton[aria-pressed="true"] .cinemaChassis { fill: #0c2633; }
+.cinemaChassis { fill: #171715; }
+.debugButton[aria-pressed="true"] .cinemaChassis { fill: #261d14; }
 .debugCopy { position: relative; display: grid; min-width: 0; justify-items: center; gap: 4px; }
-.debugHero { display: flex; align-items: center; justify-content: center; gap: 9px; height: 24px; }
-.debugCrest { overflow: visible; }
+.debugHero { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 18px; }
+.debugCrest { overflow: visible; transform-box: fill-box; transform-origin: center; }
 .debugTitle {
-  color: #d9e3ee;
-  font: 800 12px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: 1.8px;
-  text-indent: 1.8px;
+  color: #e3ded2;
+  font: 800 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 1.1px;
+  text-indent: 1.1px;
   white-space: nowrap;
 }
 
-.debugButton[aria-pressed="true"] .debugTitle { color: #f2fcff; }
-.debugHint { color: #a1b1c0; font-family: inherit; font-size: 10px; line-height: 1.35; }
-.debugButton[aria-pressed="true"] .debugHint { color: #b3d7e3; }
+.debugButton[aria-pressed="true"] .debugTitle { color: #fff0d7; }
+.debugHint { color: #ada79b; font-family: inherit; font-size: 10px; line-height: 1.35; }
+.debugButton[aria-pressed="true"] .debugHint { color: #d2bda0; }
 .debugState {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  width: 46px;
-  height: 20px;
-  border: 1px solid #738799;
-  border-radius: 2px;
-  background: #263646;
-  color: #e2eaf2;
+  gap: 4px;
+  width: 38px;
+  height: 18px;
+  border: 1px solid #777164;
+  border-radius: 1px;
+  background: #35312a;
+  color: #e8dfd0;
   font: 800 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: .8px;
+  letter-spacing: .6px;
 }
 .stateLamp { width: 5px; height: 5px; border: 1px solid currentColor; }
-.debugButton[aria-pressed="true"] .debugState { border-color: #fff0c5; background: #ffd18e; color: #39210d; }
+.debugButton[aria-pressed="true"] .debugState { border-color: #f99d7e; background: #b94432; color: #fff7e6; }
 .debugButton[aria-pressed="true"] .stateLamp { background: currentColor; }
 .powerTrim { opacity: .22; }
 .lampLight, .standbyBeam, .chargeTop, .chargeBottom, .impact, .shutdown, .beamLeft, .beamRight { opacity: 0; }
@@ -115,14 +117,14 @@
 .debugButton[aria-pressed="true"] .standbyBeam { opacity: .2; }
 .reelLeft, .reelRight { transform-box: fill-box; transform-origin: center; }
 .reelRight { --reel-turn: -360deg; --reel-overshoot: -365deg; }
-.slateHinge { transform-origin: 3px 9px; }
-.beamLeft { transform-origin: 38px 60px; }
-.beamRight { transform-origin: 202px 60px; }
+.slateHinge { transform-origin: 2px 6px; }
+.beamLeft { transform-origin: 38px 52px; }
+.beamRight { transform-origin: 202px 52px; }
 .shutterLeft, .shutterRight { transform-origin: 0 0; }
 .debugButton[aria-pressed="true"] :is(.shutterLeft, .shutterRight) { transform: scaleY(0); }
-.lampLight { transform-origin: 120px 60px; }
+.lampLight { transform-origin: 120px 52px; }
 .impactFrame { transform-box: fill-box; transform-origin: center; }
-.shutdownRails { transform-origin: 120px 52px; }
+.shutdownRails { transform-origin: 120px 44px; }
 
 /* Clap, advance, strike the lamp, settle. The label never shakes.
    Every child finishes before its direction's terminal event. */
@@ -156,8 +158,8 @@
 .debugButton[data-motion="off"] :is(.shutterLeft, .shutterRight) { animation: shutter-close .2s .02s ease-out both; }
 .debugButton[data-motion="off"] .lampLight { --cinema-hot: #fff0c7; --cinema-warm: #f9b86b; animation: lamp-out .28s ease-out both; }
 .debugButton[data-motion="off"] .standbyBeam { animation: light-out .24s ease-out both; }
-.debugButton[data-motion="off"] .beamLeft { fill: #b5efff; animation: projector-retract-left .25s ease-in both; }
-.debugButton[data-motion="off"] .beamRight { fill: #b5efff; animation: projector-retract-right .25s ease-in both; }
+.debugButton[data-motion="off"] .beamLeft { fill: #ffe5b5; animation: projector-retract-left .25s ease-in both; }
+.debugButton[data-motion="off"] .beamRight { fill: #ffe5b5; animation: projector-retract-right .25s ease-in both; }
 .debugButton[data-motion="off"] .powerTrim { animation: trim-out .3s ease-out both; }
 .debugButton[data-motion="off"] .debugState { animation: state-cut .2s ease-out; }
 
