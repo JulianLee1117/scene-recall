@@ -55,7 +55,9 @@ export function readableShotDetails(text: string): string {
 
 /** Shot details and mood are "key: value; …" lists; other views are prose. */
 export function readableEvidence(view: string, text: string): string {
-  return view === "facets" || view === "mood" ? readableShotDetails(text) : text;
+  if (view === "facets" || view === "mood") return readableShotDetails(text);
+  // Scene and shot text end each part with a period, even after a title's own ? or !.
+  return text.replace(/([?!])\.(?=\s|$)/g, "$1");
 }
 
 /**
@@ -107,8 +109,6 @@ export interface MatchRow {
   detail: string;
   /** Lexical: the query words the scene's text shares, shown as tokens before the detail. */
   terms?: string[];
-  /** Short name for the hover's finders: Visual, Semantic, Look… */
-  short: string;
   /** What this finder measures, for the label's tooltip. */
   hint: string;
 }
@@ -175,7 +175,6 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
     column,
     label: COLUMN_LABELS[column],
     value: "–",
-    short: COLUMN_LABELS[column],
     hint: COLUMN_HINTS[column],
     ...found,
   });
@@ -231,26 +230,30 @@ export function matchBreakdown(shot: SearchResult, columns: MatchColumn[] = matc
   return { rows, score };
 }
 
+/** The rank within which a finder counts as having found a scene well. */
+const FOUND_WELL = 30;
+
+interface Evidence { kind: string; text: string; rank: number }
+
 /**
- * The one line a result shows on hover, named by its kind: a spoken line the
- * Quote finder found, else the text that matched best in meaning, else what
- * happens in the shot (context, when only the picture matched).
+ * The one line a result shows on hover, named by its kind. When a typed
+ * search's words found the shot well, it is the spoken line or the text that
+ * matched in meaning, whichever ranked the shot higher; otherwise it is what
+ * happens in the shot, as context (else what the picture shows). A category
+ * search has no finder ranks, so the words its clauses matched show as they are.
  */
 export function hoverEvidence(shot: SearchResult): { kind: string; text: string } | null {
-  if (shot.matched_line) return { kind: TEXT_VIEW_LABELS.dialogue, text: `“${shot.matched_line.text}”` };
-  if (shot.matched_text) {
-    const view = shot.matched_text_view ?? "";
-    const text = readableEvidence(view, shot.matched_text);
-    return { kind: TEXT_VIEW_LABELS[view] ?? "Text", text: view === "dialogue" ? `“${text}”` : text };
-  }
-  return shot.action ? { kind: TEXT_VIEW_LABELS.story, text: shot.action } : null;
-}
-
-/** What found a scene well (top 30 in that finder), for the hover label. */
-export function foundBy(shot: SearchResult, limit = 3): string[] {
-  const ranked = matchBreakdown(shot).rows
-    .filter((row) => row.matched && typeof row.rank === "number")
-    .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-  const strong = ranked.filter((row) => (row.rank ?? Infinity) <= 30);
-  return Array.from(new Set((strong.length ? strong : ranked.slice(0, 1)).map((row) => row.short))).slice(0, limit);
+  const rows = matchBreakdown(shot).rows;
+  const ranked = rows.some((row) => row.column === "txt" || row.column === "quote");
+  const rankOf = (column: MatchColumn) => rows.find((row) => row.column === column && row.matched)?.rank ?? Infinity;
+  const view = shot.matched_text_view ?? "";
+  const meaning = shot.matched_text ? readableEvidence(view, shot.matched_text) : "";
+  const words = [
+    shot.matched_line ? { kind: TEXT_VIEW_LABELS.dialogue, text: `“${shot.matched_line.text}”`, rank: rankOf("quote") } : null,
+    meaning ? { kind: TEXT_VIEW_LABELS[view] ?? "Text", text: view === "dialogue" ? `“${meaning}”` : meaning, rank: rankOf("txt") } : null,
+  ].filter((item): item is Evidence => item !== null);
+  const [best] = ranked ? words.filter((item) => item.rank <= FOUND_WELL).sort((a, b) => a.rank - b.rank) : words;
+  if (best) return { kind: best.kind, text: best.text };
+  if (shot.action) return { kind: TEXT_VIEW_LABELS.story, text: shot.action };
+  return shot.caption ? { kind: TEXT_VIEW_LABELS.caption, text: shot.caption } : null;
 }

@@ -70,22 +70,24 @@ test("the caption shown above is not repeated, and shot details and mood read as
   assert.equal(table(shot)[1][2], "Picture (above)");
   assert.equal(lib.readableEvidence("facets", "framing: close_up; time of day: dawn_dusk"), "Size: close-up · Time: dawn or dusk");
   assert.equal(lib.readableEvidence("mood", "emotion: mild; scene tone: tense, social"), "Emotion: mild · Scene tone: tense, social");
+  assert.equal(lib.readableEvidence("scene", "You Talkin' to Me?. Back home. Wait!."), "You Talkin' to Me? Back home. Wait!");
 });
 
-test("the hover label names the finders that ranked the scene in their top 30", () => {
-  const shot = typed({ img: { rank: 1, score: 0.3, distance: 0.7 }, txt: { rank: 12, score: 0.6, distance: 0.4, source: "scene", matched_text: { view: "scene", text: "x" } } });
-  assert.deepEqual(plain(lib.foundBy(shot)), ["Visual", "Semantic"], "the text's kind is named on its own line");
-});
-
-test("the hover line names its kind: a spoken line, else the text that matched in meaning, else the shot", () => {
-  assert.deepEqual({ ...lib.hoverEvidence({ matched_line: { text: "Cheers." }, matched_text: "x", matched_text_view: "caption" }) },
-    { kind: "Dialogue", text: "“Cheers.”" });
-  assert.deepEqual({ ...lib.hoverEvidence({ matched_text: "A man runs.", matched_text_view: "caption", action: "y" }) },
-    { kind: "Picture", text: "A man runs." });
-  assert.deepEqual({ ...lib.hoverEvidence({ matched_text: "Not here.", matched_text_view: "dialogue" }) },
-    { kind: "Dialogue", text: "“Not here.”" }, "dialogue matched in meaning is quoted too");
-  assert.deepEqual({ ...lib.hoverEvidence({ matched_text: "framing: close_up", matched_text_view: "facets" }) },
+test("the hover line shows the words that found a shot well, else what happens in it", () => {
+  const shot = (channels, extra) => plain(lib.hoverEvidence(typed(channels, {
+    matched_line: { text: "Cheers." }, matched_text: "A man runs.", matched_text_view: "caption", action: "He runs.", ...extra,
+  })));
+  const meaning = (rank) => ({ rank, score: 0.6, distance: 0.4, source: "caption", matched_text: { view: "caption", text: "A man runs." } });
+  const quote = (rank) => ({ rank, score: 1, distance: null });
+  assert.deepEqual(shot({ txt: meaning(12), quote: quote(2) }), { kind: "Dialogue", text: "“Cheers.”" }, "the line ranked it higher");
+  assert.deepEqual(shot({ txt: meaning(12), quote: quote(80) }), { kind: "Picture", text: "A man runs." }, "a weak line gives way");
+  assert.deepEqual(shot({ txt: meaning(50), quote: quote(80) }), { kind: "Shot", text: "He runs." }, "words that ranked it low are not evidence");
+  assert.deepEqual(shot({ img: { rank: 1, score: 0.3, distance: 0.7 } }, { action: undefined, matched_line: undefined, matched_text: undefined }),
+    { kind: "Picture", text: "A caption." }, "without a story, what the picture shows");
+  assert.deepEqual(shot({ txt: { ...meaning(5), source: "facets" } }, { matched_text: "framing: close_up", matched_text_view: "facets", matched_line: undefined }),
     { kind: "Shot details", text: "Size: close-up" });
-  assert.deepEqual({ ...lib.hoverEvidence({ action: "Jake flies." }) }, { kind: "Shot", text: "Jake flies." });
+  // A category search has no finder ranks: the words its clause matched stand as they are, dialogue quoted.
+  assert.deepEqual(plain(lib.hoverEvidence({ matches: [{ clause_id: "words", facet: "words", rank: 25 }], matched_text: "Not here.", matched_text_view: "dialogue" })),
+    { kind: "Dialogue", text: "“Not here.”" });
   assert.equal(lib.hoverEvidence({}), null);
 });

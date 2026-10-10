@@ -7,7 +7,7 @@ import BookmarkIcon from "./BookmarkIcon";
 import { FACET_LABELS, sourceDraftFromShot, writeSceneSourceDrag } from "@/lib/searchRecipe";
 import { useScenePointerDrag } from "@/hooks/useScenePointerDrag";
 import { setNativeDragPreview } from "@/lib/nativeDragPreview";
-import { foundBy, hoverEvidence, type MatchColumn } from "@/lib/matchReasons";
+import { hoverEvidence, type MatchColumn } from "@/lib/matchReasons";
 import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { displayTitle, formatTime, filmLabel } from "@/lib/format";
@@ -61,7 +61,6 @@ export default function ShotCard({
   const filmTitle = displayTitle(shot.film_title ?? filmLabel(shot.film_id));
   const sceneMore = shot.scene_alternatives?.length ?? 0;
   const evidence = hoverEvidence(shot);
-  const finders = foundBy(shot);
   const sourceAvailable = Number.isInteger(shot.keyframe_index);
   // Scenes are modular: drag one onto a search category, or use its Related menu.
   const canDragSource = Boolean(
@@ -186,11 +185,6 @@ export default function ShotCard({
               <span className="result-film">{filmTitle}</span>
               <span className="result-time">{formatTime(evidenceTime)}</span>
             </span>
-            {finders.length > 0 && (
-              <span className="result-overlay-finders" aria-label={`Found by ${finders.join(", ")}`}>
-                {finders.join(" · ")}
-              </span>
-            )}
           </span>
         </span>
 

@@ -2136,14 +2136,6 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   text-transform: uppercase;
 }
 
-.result-overlay-finders {
-  color: #c8ab7f;
-  font-size: 0.58rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 
 .result-film {
   min-width: 0;

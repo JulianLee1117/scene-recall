@@ -318,11 +318,12 @@ shot on screen: play or scrub elsewhere in the film and the line above the
 actions names the scene you are in, with **Back to result** to return. Its details describe
 the result, labelled **Scene** (the story), **Shot** (what happens, and who) and
 **Picture** (what the frame shows).
-Hovering a result shows one line of evidence named by the same words: a spoken
-line (**Dialogue**), else the text that matched best in meaning (**Picture**,
-**Shot**, **Scene**, **On-screen text**, **Mood** or **Shot details**), else
-what happens in the shot when only the picture matched; the line under the
-title names the finders.
+Hovering a result shows one line named by the same words. When your words
+found the shot well (within a finder's top 30), it is the spoken line
+(**Dialogue**) or the text that matched in meaning (**Picture**, **Shot**,
+**Scene**, **On-screen text**, **Mood** or **Shot details**), whichever ranked
+it higher; otherwise it is what happens in the shot. **Show details** lists
+every finder.
 **Show details** (under **View**) shows each result's Picture text and how each
 retrieval channel ranked it. Every card in a search lists the same rows in a fixed order: Visual (image-text
 embedding), Semantic (text embedding, with the view it matched such as Shot or
