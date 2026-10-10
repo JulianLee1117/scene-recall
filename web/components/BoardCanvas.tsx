@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from "react";
 import ShotCard from "./ShotCard";
 import { useFrameAspects } from "@/hooks/useFrameAspects";
 import { BOARD_INDEX_ATTRIBUTE, useBoardReorder } from "@/hooks/useBoardReorder";
@@ -33,7 +33,7 @@ const sceneOf = (bookmark: BookmarkRecord) =>
  * tiles whose place changes render again.
  */
 const Tile = memo(function Tile({
-  ref, bookmark, index, x, y, width, height, lifted, transform, tileProps, learnAspect, actions,
+  ref, bookmark, index, x, y, width, height, aspect, lifted, transform, tileProps, learnAspect, actions,
 }: {
   ref?: Ref<HTMLDivElement>;
   bookmark: BookmarkRecord;
@@ -42,6 +42,8 @@ const Tile = memo(function Tile({
   y: number;
   width: number;
   height: number;
+  /** The shape the tile was laid out in; the card lays its picture out in the same one. */
+  aspect: number;
   lifted: boolean;
   /** The lifted tile's own transform, under the pointer. */
   transform?: string;
@@ -56,7 +58,7 @@ const Tile = memo(function Tile({
       data-id={bookmark.bookmark_id}
       {...{ [BOARD_INDEX_ATTRIBUTE]: index }}
       className={`result-grid-item ${styles.tile}${lifted ? ` ${styles.lifted}` : ""}`}
-      style={{ width, height, transform: lifted && transform ? transform : `translate(${x}px, ${y}px)` }}
+      style={{ width, height, transform: lifted && transform ? transform : `translate(${x}px, ${y}px)`, "--ar": aspect } as CSSProperties}
       {...tileProps}
     >
       {bookmark.scene ? (
@@ -176,6 +178,10 @@ export default function BoardCanvas({ items, scale, canReorder, onReorder, actio
   };
   const dragRef = useRef(dragTo);
   dragRef.current = dragTo;
+  // The scene just set down. Its element still holds the hand-moved transform;
+  // React rewrites the place only when it differs from the last one rendered,
+  // which it does not after a drag too short to change the order.
+  const settling = useRef<string | null>(null);
 
   const { lifted, tileProps } = useBoardReorder({
     enabled: canReorder,
@@ -193,10 +199,12 @@ export default function BoardCanvas({ items, scale, canReorder, onReorder, actio
       const current = grab.current;
       const order = orderRef.current;
       grab.current = null;
+      settling.current = current?.id ?? null;
       if (current && order.some((id, index) => id !== items[index]?.bookmark_id)) onReorder(order, current.id);
       setTentative(null);
     },
     onCancel() {
+      settling.current = grab.current?.id ?? null;
       grab.current = null;
       setTentative(null);
     },
@@ -215,6 +223,14 @@ export default function BoardCanvas({ items, scale, canReorder, onReorder, actio
     window.addEventListener("scroll", follow, { passive: true });
     return () => window.removeEventListener("scroll", follow);
   }, [lifted]);
+
+  useLayoutEffect(() => {
+    if (lifted !== null || !settling.current || !layout) return;
+    const place = layout.tiles.get(settling.current);
+    const node = canvasRef.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(settling.current)}"]`);
+    settling.current = null;
+    if (place && node) node.style.transform = `translate(${place.x}px, ${place.y}px)`;
+  });
 
   const liftedId = lifted === null ? null : items[lifted]?.bookmark_id ?? null;
   const liftedPlace = liftedId && layout ? layout.tiles.get(liftedId) : undefined;
@@ -241,6 +257,7 @@ export default function BoardCanvas({ items, scale, canReorder, onReorder, actio
             y={place.y}
             width={place.width}
             height={place.height}
+            aspect={cssAspect(aspectOf(sceneOf(bookmark)))}
             lifted={isLifted}
             transform={isLifted ? floatTransform.current : undefined}
             tileProps={tileProps}
