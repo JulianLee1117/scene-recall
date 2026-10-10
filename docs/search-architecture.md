@@ -17,7 +17,7 @@ records.
 |---|---|---|---|
 | Evidence: per-film artifacts, compiled tables | Evidence v2 | `pipeline/evidence/` | 0001, 0093, 0095, 0098, 0099 |
 | Ingestion, acquisition, storage | Ingestion | `pipeline/ingest/`, `pipeline/acquisition/`, `pipeline/index/` | 0014-0016, 0023, 0025, 0047, 0049, 0052, 0056, 0057, 0059, 0069, 0079, 0080, 0102 |
-| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, 0112, 0113, 0114, with 0002-0021 and 0082-0087 where not superseded |
+| Search | Search and Lab application boundary; Text retrieval; Reference and Framing retrieval; Modular recipe retrieval; Activation and fallback | `pipeline/search/`, `pipeline/index/`, `pipeline/api/main.py` | 0094, 0097, 0101, 0111, 0112, 0113, 0114, 0120, with 0002-0021 and 0082-0087 where not superseded |
 | Saved scenes and interaction log | Durable user state | `pipeline/bookmarks.py`, `pipeline/interactions.py`, `pipeline/source_frames.py` | 0006, 0118 |
 | Lab projects, jobs, workers | Durable projects and jobs | `pipeline/lab/` (store, worker, registry) | 0024, 0025, 0051, 0055, 0059, 0068, 0100 |
 | AI Music Video v1 (`lab.harness: v1`) | AI Music Video | `pipeline/lab/` (music, planners, generation, media) | 0028-0045, 0050, 0058, 0060, 0064, 0077, 0078 |
@@ -37,9 +37,10 @@ detail.
 - Source context: 0066.
 - Targeted footage inspection: 0061.
 - Flexible-assembly comparison: 0065.
-- Framing representation pilot: 0092.
 
-Retired: Jev and intent routing (0086-0091, by 0094).
+Retired: Jev and intent routing (0086-0091, by 0094); Framing's grid caches,
+compact composition challenger and representation pilot (0009, 0082 in part,
+0092; by 0120).
 
 ## Product contract
 
@@ -90,9 +91,8 @@ result
 The product calls spatial reference matching **Framing**; the standalone API
 and recipe contract retain the `composition` name for compatibility. It is
 coarse appearance and position matching, not an exact editorial Match Cut
-mode. Framing v2 (measured subject layout, ADR-0093) will replace its 6×6
-embedding grids; until then the grids stay active and their bulk preparation
-queue stays frozen.
+mode. Its 6×6 embedding grids are encoded live for each search (ADR-0120); the
+match-cut moments index is to replace them after ADR-0008's comparison.
 
 Match cuts are deliberately separate from ordinary search:
 
@@ -564,7 +564,7 @@ startup without `--reload` also starts both roles. Explicit `--role` selects one
 
 Editor local PE/Qwen inference uses CPU with the same configured vector profiles;
 Beat This uses CPU. Search/planning jobs pin a read-only set of table versions and
-semantic/framing readiness manifests under a short publication lock. Inference
+semantic readiness manifest under a short publication lock. Inference
 and hosted calls hold no publication lock. The process retains its last complete
 snapshot during ongoing publication; a fresh process without one waits at most
 60 seconds, with progress/cancellation, before reporting incomplete readiness.
@@ -1827,7 +1827,7 @@ legacy visual baseline retains coarser checkpoint lineage under ADR-0001;
 backfill must keep its existing weights. A checkpoint upgrade requires a
 separate versioned profile even if its name and dimensions are unchanged.
 Derived profile activation continues to require exact current-generation
-coverage under ADR-0002 and ADR-0009.
+coverage under ADR-0002.
 Target publication validates the batch before mutation, writes frame changes,
 then merges only the selected unit rows. It has the same brief old-unit/new-frame
 visibility window as existing ingestion, not a cross-table atomic transaction.
@@ -2196,12 +2196,10 @@ rank survives selective hydration so Look evidence and recipe fusion do not
 overstate a deep reserve hit. Framing keeps a bounded spatial work set: it
 scores the normal 96-row spatial base plus at most 12 cross-film additions from
 the post-base pool, including eligible reserve rows. Remaining candidates stay
-semantic backfill. The query image is encoded once. ADR-0082's source-hashed
-cache reuses valid entries and encodes misses with the same float16 numerical
-contract; legacy complete caches remain supported during migration. This is the
-baseline candidate policy. The separately gated compact composition challenger
-is described under Activation and fallback. Framing represents coarse
-composition and subject position, not pose or motion.
+semantic backfill. The query image and the shortlisted candidates are encoded
+in the same request by the same loaded model; no grid is cached (ADR-0120).
+This is the baseline candidate policy. Framing represents coarse composition
+and subject position, not pose or motion.
 
 Spatially added reserve rows are fully scored, while reserve rows left in the
 semantic backfill retain only their global evidence; neither path has a
@@ -2211,19 +2209,6 @@ candidate-recall experiment, not a
 relevance-safe guarantee. Before changing its depth or claiming it improves
 visual discovery, human-grade the deep rows' original global rank, distance,
 relevance, and displaced repeats across roughly 10-15 image references.
-
-The Framing cache is an optional, independently backfillable acceleration of
-the existing scorer, not a candidate vector space or a new retrieval mode. One
-profile table stores float16 grids by stable frame identity and is scoped by
-the resolved immutable PE checkpoint revision, extraction contract, grid and
-feature dimensions, row schema, storage dtype, and relevant OpenCLIP, timm,
-Torch, Torchvision, and Pillow versions. Backfill and compatible-cache queries
-load that exact checkpoint revision rather than resolving mutable `main`
-independently. Its manifest proves exact coverage of one published `frames`
-generation, including the frame-identity digest and profile-table generation.
-The idempotent `index-framing` command derives it from retained keyframes
-without raw-film decoding or hosted inference. Search reads the source-hashed
-partial cache (ADR-0082) whenever one exists, so `index-framing` then refuses.
 
 The frontend exposes one result action for all five modular facets rather than
 a separate Framing shortcut. Choosing Framing, or dragging the same result onto
@@ -2397,67 +2382,12 @@ and any failure returns the request to the Lance path. The cross-encoder rerank
 is optional (`retrieval.rerank_shortlist: 0` disables it); an unavailable model
 leaves the fused order unchanged.
 
-ADR-0082 separates acceleration from retrieval evidence. The new
-`source-hashed-spatial-cache-v2` table validates each requested frame against
-its current source bytes, frame identity, file metadata, extraction profile
-and descriptor checksum. Valid entries are reused; only misses are inferred.
-Live and cached candidate/query grids use the identical float16 round trip.
-Cache occupancy changes neither candidate membership nor numeric scoring.
-Legacy complete caches retain ADR-0009's manifest validation during migration.
-
-Optional preparation runs as durable jobs in the existing ingest worker: one
-job per film/profile/source generation, yielding every 32 frames behind
-foreground work; storage or lock pressure pauses it and explicit retry resumes
-the cursor. It never delays canonical film readiness, and source and profile
-changes remain backfillable without re-ingesting films. New ingests no longer
-enqueue it (see below).
-
-ADR-0092 adds an explicit operator hold for currently pending optional
-preparation/fitting jobs. Drain active work first; `search-features pause`
-preserves descriptors and cursors in the existing ledger. Worker restart and
-duplicate enqueue cannot lift that hold; `search-features resume` releases only
-operator-held jobs. Ingestion no longer queues this preparation for new films:
-the framing representation pilot is frozen until measured subject layout
-(Framing v2) replaces it.
-
-Before further bulk preparation, an isolated 524-frame representation pilot
-compares current PE final features, one frozen intermediate layer and an
-accessible small spatial encoder. All arms search the same independent
-cross-film candidate pool, without an appearance shortlist. Model/checkpoint,
-code, source, preprocessing and output hashes stay distinct; no pilot artifact
-is published into serving indexes. Its 90-minute compute and 2 GiB artifact
-caps, 32-frame checkpoints and existing ingest lock bound local work. The
-pilot provides screening evidence only; unjudged results cannot promote a
-model or bypass the existing coverage and human-review gates.
-
-The experimental compact composition route uses a frozen uncentered projection
-of existing PE cells, with separate 32/64-dimensional profiles and at most
-65,536 film-balanced sampled cells. Matrix and sample checksums are immutable
-profile identity. Corresponding screen positions survive projection and vector
-normalization. Exact composition retrieval searches all eligible retained
-frames independently of appearance. The two rankings each contribute half of
-96 detailed frames; RRF fills overlaps and at most twelve absent films receive
-additional candidates. Best frame per unit is selected after spatial scoring;
-65% global / 35% spatial weights initially remain. This is a Framing challenger,
-not a pose, temporal action or narrative context representation.
-
-Complete source coverage is mandatory for composition retrieval. A partial,
-stale or corrupt profile explicitly falls back to baseline Framing for the
-whole request. Selection requires a human review receipt and an explicit
-`retrieval.composition_profile`; the default is null and null provides rollback.
-Promotion requires twelve distinct references, at least eight preference wins,
-median nDCG@10 relative improvement of 20%, at most two regressing cases,
-known-positive retention, complete coverage, warm p95 <=5 seconds and actual
-optional storage <=64 GiB. A Framing receipt does not activate a new Lab matcher.
-
-Optional storage admission counts physical indexes, cached/compact derivations,
-retained versions and scratch against `retrieval.optional_storage_gib` (64 by
-default). Cache eviction and native version pruning require the established
-idle reader/writer guards; measure actual reclaimed bytes. Queries never clean
-storage. An isolated IVF_FLAT benchmark cannot install a production index.
-Every evaluated ANN route/scope must retain >=99% of exact candidate units,
-all known positives and improve retrieval p95 >=30% before a separate rollout.
-No retrieval route may use `fast_search` to omit unindexed rows.
+Native version pruning requires the established idle reader/writer guards, and
+queries never clean storage. An isolated IVF_FLAT benchmark cannot install a
+production index. Every evaluated ANN route/scope must retain >=99% of exact
+candidate units, all known positives and improve retrieval p95 >=30% before a
+separate rollout. No retrieval route may use `fast_search` to omit unindexed
+rows.
 
 The PE visual tables are a frozen legacy exception. Frame rows contain only a
 coarse encoder name and unit rows lack exact visual-model lineage. The runtime
@@ -2483,8 +2413,8 @@ never a silent fallback.
   provider-resolved immutable revision.
 - Ordinary search matches up to three indexed keyframes per shot; only Match
   Cuts (ADR-0099) sees every 4 fps instant.
-- Framing grids are cached only for the frames of the 24 films the partial
-  cache (ADR-0082) covers; Framing encodes other candidates live.
+- Framing encodes its roughly 96 candidates live, about 3-4 s per search,
+  until it moves to the moments index (ADR-0120).
 - Match cuts are not offered in ordinary search. Framing cannot reliably match
   pose, temporal direction, brief action or camera movement.
 - Semantic dialogue is embedded at shot level; utterance rows serve the quote

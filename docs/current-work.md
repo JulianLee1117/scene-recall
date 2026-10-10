@@ -376,10 +376,9 @@ Can overlap with Phase 3 once the pilot evidence exists.
    light and lines at 4 fps for every shot and updates itself after ingest,
    so Framing should run on it. That needs ADR-0008's comparison on 10-15
    owner-reviewed references, plus a query-time moments pass for uploaded
-   images. It retires the 6x6 grids, both grid caches, the frozen compact
-   composition challenger and the framing pilot. The caches can go sooner:
-   on 2026-10-10 a Framing search took 3-4 s with or without cache hits, since
-   the partial cache holds 10% of frames and the complete one is never read.
+   images. It retires the 6x6 grids. The grid caches, the compact composition
+   challenger and the framing pilot are already retired (ADR-0120): a Framing
+   search took 3-4 s with or without cache hits.
 5. Priors step with calibrated famous/gems mixing and the three presets.
 6. Optional visual re-rank of the top ~50 behind a toggle, kept only if it wins
    on the eval set. Options: Qwen3-VL-Reranker locally, or GPT-5.6/Gemini with
@@ -459,10 +458,6 @@ Wish and Starjunk stay as regression passages. Supersedes LLM numeric cut timing
 
 ## Frozen (keep code and data; no new investment)
 
-- Framing representation pilot. Its 134 held preparation jobs were cancelled
-  on 2026-10-01; 23 films keep their prepared cache. Measured subject layout
-  replaces embedding grids for Framing. Reclaim that storage after Phase 1
-  layout works.
 - Jev/intent-routing experiments (ADR-0086 to ADR-0091).
 - Match Cuts cohorts (SAM/RAFT/DINOv3): removed on 2026-10-09 (ADR-0117); the
   DINOv3 challenger stays under `pipeline/experiments`.
@@ -474,8 +469,6 @@ Wish and Starjunk stay as regression passages. Supersedes LLM numeric cut timing
 
 ## Carried-over state
 
-- The 134 optional Framing jobs on operator hold were cancelled on
-  2026-10-01; 23 had completed earlier.
 - Earlier pilot runs remain under `pipeline/eval/runs/` and `.tmp/`; the
   archived plan lists them.
 - The last full backend run recorded in the archived plan passed; re-run the

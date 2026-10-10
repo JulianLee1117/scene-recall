@@ -72,6 +72,28 @@ def test_native_dry_run_and_pruning_keep_current_vectors_rows_and_fts(config):
     assert fresh.index_stats("text_idx").num_unindexed_rows == 0
 
 
+def test_apply_drops_retired_framing_derivations_before_pruning(config):
+    _native_runtime()
+    db, _ = _populated(config)
+    db.create_table("frame_framing_old_cache", data=[{"frame_id": "f-0", "film_id": "f"}])
+    manifests = config.paths.assets_dir / "feature-manifests" / "framing"
+    manifests.mkdir(parents=True)
+    (manifests / "old.json").write_text("{}", encoding="utf-8")
+    kept = config.paths.assets_dir / "feature-manifests" / "text"
+    kept.mkdir()
+
+    plan = maintain_database(config, Retention(None, 1))
+    assert plan["retired"]["tables"] == ["frame_framing_old_cache"]
+    assert plan["retired"]["paths"] == [str(manifests)] and plan["retired"]["bytes"] > 0
+    assert "frame_framing_old_cache" not in [item["table"] for item in plan["tables"]]
+    assert "frame_framing_old_cache" in _db(config).table_names(), "a dry run removes nothing"
+
+    result = maintain_database(config, Retention(None, 1), apply=True)
+    assert result["retired_removed"]["tables"] == ["frame_framing_old_cache"]
+    assert _db(config).table_names() == ["units"]
+    assert not manifests.exists() and kept.is_dir()
+
+
 def test_default_retention_preserves_recent_versions(config):
     _native_runtime()
     _db(config).create_table("films", [{"id": 1}]).add([{"id": 2}])

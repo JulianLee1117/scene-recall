@@ -9,6 +9,7 @@ Usage::
     python -m pipeline.cli recover-relink <film_id>
     python -m pipeline.cli index-frames [--film-id FILM_ID]
     python -m pipeline.cli index-text [--film-id FILM_ID]
+    python -m pipeline.cli index-lookups [--apply]
 
 The ``ingest`` command runs the full ingest pipeline and prints a summary.
 The ``ingest-batch`` command ingests every video in a directory, skipping
@@ -335,6 +336,21 @@ def index_text_cmd(film_id: str | None) -> None:
         f"Profile {result.profile_id}: "
         + ("active" if result.activated else "not active (coverage incomplete)")
     )
+
+
+@cli.command("index-lookups")
+@click.option("--apply", is_flag=True, help="Install missing managed lookups; default only inspects.")
+def index_lookups_cmd(apply: bool) -> None:
+    """Inspect or install the scalar lookup indexes on ID columns, without re-embedding evidence."""
+    from pipeline.index.search_indexes import install_lookup_indexes, lookup_plan
+
+    config = load_config()
+    try:
+        db = open_db(config)
+        result = install_lookup_indexes(config, db) if apply else lookup_plan(db)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(result, indent=2))
 
 
 @cli.command("backfill-temporal")

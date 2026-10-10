@@ -45,3 +45,20 @@ def test_index_frames_rejects_invalid_batch_size() -> None:
 
     assert command.exit_code == 2
     assert "Invalid value for '--batch-size'" in command.output
+
+
+def test_index_lookups_inspects_by_default_and_installs_with_apply(config) -> None:
+    plan = [{"table": "units", "column": "unit_id", "type": "BTREE", "name": "scene_lookup_unit_id_v1", "ready": True}]
+    with (
+        patch("pipeline.cli.load_config", return_value=config),
+        patch("pipeline.cli.open_db", return_value=object()),
+        patch("pipeline.index.search_indexes.lookup_plan", return_value=plan) as inspect,
+        patch("pipeline.index.search_indexes.install_lookup_indexes", return_value=[]) as install,
+    ):
+        inspected = CliRunner().invoke(cli, ["index-lookups"])
+        assert inspected.exit_code == 0, inspected.output
+        assert '"scene_lookup_unit_id_v1"' in inspected.output and not install.called
+        applied = CliRunner().invoke(cli, ["index-lookups", "--apply"])
+    assert applied.exit_code == 0, applied.output
+    install.assert_called_once()
+    assert inspect.call_count == 1

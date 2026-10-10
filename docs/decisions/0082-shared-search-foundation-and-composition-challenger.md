@@ -4,6 +4,7 @@
 - Date: 2026-09-20
 - Supersedes: ADR-0009's whole-cache requirement for the new source-hashed cache
 - Extends: ADR-0008, ADR-0020 and ADR-0059; their Match Cuts promotion gates remain
+- Superseded in part by: [ADR-0120](0120-framing-runs-live.md) (the source-hashed cache, preparation jobs and compact composition challenger are retired; shared snapshots and lookups stay)
 
 ## Context
 

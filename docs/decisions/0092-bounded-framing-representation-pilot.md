@@ -1,6 +1,7 @@
 # ADR-0092: Bounded framing representation pilot and operator hold
 
-- Status: Accepted for isolated evaluation; no serving promotion
+- Status: Superseded
+- Superseded by: [ADR-0120](0120-framing-runs-live.md) (the pilot and its code are retired)
 - Date: 2026-09-21
 - Extends: ADR-0082 and ADR-0059
 

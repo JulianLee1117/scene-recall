@@ -4,6 +4,10 @@ Run with ``uv run --group maintenance python -m pipeline.index.maintenance``.
 The default is a native read-only explanation retaining fourteen days. Apply
 requires all API readers and workers to be stopped; shared/lifetime locks make
 that requirement enforceable. No inferred manifest/file names are deleted.
+
+Apply first drops the derived tables and files that no current code reads,
+listed in ``_RETIRED_TABLE_PREFIXES`` and ``_RETIRED_PATHS``; a dry run lists
+them with their size.
 """
 
 from __future__ import annotations
@@ -15,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 import importlib.metadata
 import json
 import math
+from pathlib import Path
+import shutil
 from typing import Any
 
 from filelock import FileLock, Timeout
@@ -27,6 +33,12 @@ _STATS_FIELDS = (
     "bytes_removed", "old_versions", "data_files_removed",
     "transaction_files_removed", "index_files_removed", "deletion_files_removed",
 )
+
+
+# Framing's grid caches and compact composition challenger, retired by ADR-0120:
+# derived tables and files that no current code reads.
+_RETIRED_TABLE_PREFIXES = ("frame_framing_", "frame_composition_")
+_RETIRED_PATHS = ("feature-manifests/framing", "search-profiles", "search-builds", ".search-storage.lock")
 
 
 class MaintenanceUnavailable(RuntimeError):
@@ -149,6 +161,8 @@ def _run(db: Any, retention: Retention, *, apply: bool) -> dict[str, Any]:
     # Explain every table before deleting anything. A tagged-version conflict
     # or unsupported dataset therefore fails before a partial batch is applied.
     for name in sorted(table_names(db)):
+        if name.startswith(_RETIRED_TABLE_PREFIXES):
+            continue  # dropped whole on apply, never pruned
         table = db.open_table(name)
         identity = _current_identity(table)
         dataset = table.to_lance()
@@ -189,8 +203,46 @@ def _run(db: Any, retention: Retention, *, apply: bool) -> dict[str, Any]:
     return report
 
 
+def _disk_size(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    return sum(child.stat().st_size for child in path.rglob("*") if child.is_file())
+
+
+def _retired(db: Any, assets: Path) -> dict[str, Any]:
+    """The retired derived tables and files present, with their size on disk."""
+    from pipeline.index.writer import table_names
+
+    root = assets.resolve()
+    tables = sorted(name for name in table_names(db) if name.startswith(_RETIRED_TABLE_PREFIXES))
+    paths = []
+    for relative in _RETIRED_PATHS:
+        path = assets / relative
+        if path.is_symlink() or (path.exists() and not path.resolve().is_relative_to(root)):
+            raise MaintenanceUnavailable(f"Retired path {path} is a link or leaves the assets directory")
+        if path.exists():
+            paths.append(path)
+    sizes = [assets / "db" / f"{name}.lance" for name in tables] + paths
+    return {"tables": tables, "paths": [str(path) for path in paths],
+            "bytes": sum(_disk_size(path) for path in sizes if path.exists())}
+
+
+def _remove_retired(db: Any, retired: dict[str, Any]) -> None:
+    for name in retired["tables"]:
+        db.drop_table(name)
+    for raw in retired["paths"]:
+        path = Path(raw)
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
 def maintain_database(config: Config, retention: Retention = Retention(), *, apply: bool = False) -> dict[str, Any]:
-    """Explain or apply native pruning to the existing configured database."""
+    """Explain or apply native pruning to the existing configured database.
+
+    Applying first removes retired derived tables and files (see the module docstring).
+    """
     _require_native_pruning()
     root = config.paths.assets_dir / "db"
     if not root.is_dir():
@@ -198,10 +250,13 @@ def maintain_database(config: Config, retention: Retention = Retention(), *, app
     import lancedb
 
     db = lancedb.connect(str(root))
+    assets = Path(config.paths.assets_dir)
     if apply:
         with _idle_maintenance(config, db):
-            return _run(db, retention, apply=True)
-    return _run(db, retention, apply=False)
+            retired = _retired(db, assets)
+            _remove_retired(db, retired)
+            return {**_run(db, retention, apply=True), "retired_removed": retired}
+    return {**_run(db, retention, apply=False), "retired": _retired(db, assets)}
 
 
 def main(argv: list[str] | None = None) -> None:

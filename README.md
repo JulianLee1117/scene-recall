@@ -1249,7 +1249,11 @@ Reader, worker, ingestion and publication locks prevent cleanup during active
 use. Tagged versions and unverified files are protected. Cleanup preserves
 current rows and indexes and never runs the general `optimize()` compaction
 path. It removes database rollback history, not current search evidence.
-Maintenance is explicit; ingestion and ordinary API requests never prune history.
+Applying it also drops derived tables and files that no current code reads,
+such as the Framing grid caches retired by
+[ADR-0120](docs/decisions/0120-framing-runs-live.md); the preview lists them
+with their size. Maintenance is explicit; ingestion and ordinary API requests
+never prune history.
 
 Rejected releases (watermarked, duplicate or wrong cut) are deleted, not
 archived. One command withdraws the film from search and deletes its files; it
@@ -1414,12 +1418,10 @@ uv run python -m pipeline.cli index-frames
 This step is local, idempotent, and does not call OpenAI or Gemini. New ingests
 build the frame index automatically.
 
-Framing reads cached 6x6 spatial grids from the source-hashed partial cache
-([ADR-0082](docs/decisions/0082-shared-search-foundation-and-composition-challenger.md))
-and encodes any candidate without one live. The older complete cache
-(`index-framing`, [ADR-0009](docs/decisions/0009-complete-framing-spatial-cache.md))
-is superseded: the command refuses while a partial cache exists, because search
-would never read it.
+Framing has nothing to build: each search encodes its candidates' 6x6 grids
+live ([ADR-0120](docs/decisions/0120-framing-runs-live.md)). The scalar lookup
+indexes on ID columns are inspected with `uv run python -m pipeline.cli
+index-lookups` and installed with `--apply`; neither re-embeds evidence.
 
 Build or repair the independent Qwen semantic-text profile from already
 published captions, dialogue, OCR, broad facets, and dedicated mood/energy
@@ -1590,76 +1592,13 @@ becomes invented Scene, Words, or Mood evidence. Supporting images in those
 categories would require an explicit, versioned caption/OCR/mood adapter rather
 than silently pretending that the current visual models provide that meaning.
 
-Look and Framing use the existing local frame index; Framing adds a
-learned 6x6 spatial feature grid. The source-hashed optional cache reuses valid
-candidate grids and encodes only missing or changed entries. Live and cached
-grids use the same float16 numerical contract. Legacy complete caches remain
-readable during migration. Neither path calls OpenAI or Gemini or requires re-ingestion. Treat
-Framing as coarse framing and position similarity, not exact
-subject-relation, skeletal-pose, or motion matching.
-
-Optional search preparation uses the existing ingest worker, with one durable
-job per film and 32-frame batches behind foreground work. New ingestion queues
-preparation after successful publication. A paused job does not affect whether
-the film is searchable. These commands inspect by default unless stated:
-
-```powershell
-uv run python -m pipeline.cli search-features storage
-uv run python -m pipeline.cli search-features queue
-uv run python -m pipeline.cli search-features indexes --apply
-uv run python -m pipeline.cli search-features prepare --all-films --enqueue
-uv run python -m pipeline.cli search-features fit-composition --apply
-uv run python -m pipeline.cli search-features fit-composition --enqueue
-uv run python -m pipeline.cli search-features prepare --all-films --composition-profile PROFILE_ID --enqueue
-uv run python -m pipeline.cli search-features benchmark --output measurements.json
-```
-
-`fit-composition --apply` is an explicit local GPU/CPU experiment; run it while
-ingestion is idle. It saves frozen 32/64-dimensional challengers and never
-activates them. Alternatively `--enqueue` fits after foreground ingestion and
-cache preparation, then queues one compact-feature job per film and challenger.
-Fitting cancellation retains already-completed immutable profiles; retry may
-repeat local fitting but cannot replay hosted work. `benchmark --ann` builds an isolated IVF_FLAT trial, counts
-scratch against storage, then removes its own scratch. Production vector
-indexes remain unchanged. Benchmarks report retrieval-stage time, not end-to-end
-search latency. Use `review --profile ID --references references.json --output
-comparison.json` for twelve distinct `frame_id` records (optional `film_ids`
-scope), then supply actual human preferences and measured relevance. `promote
---receipt comparison.json` validates the acceptance gates; select the accepted
-identity with `retrieval.composition_profile` and reload services. It defaults
-to null; null rolls back. Incomplete profile coverage always uses baseline
-Framing, with a server diagnostic.
-
-To hold the current optional preparation batch while keeping film ingestion and
-the editor available, run `uv run python -m pipeline.lab.worker --role ingest
---stop`, wait for the active batch to finish, then run `uv run python -m
-pipeline.cli search-features pause`. Restart the ingest worker with `uv run
-python -m pipeline.lab.worker --role ingest`. The pause preserves completed
-features and each job's cursor, and survives restarts. `search-features queue`
-shows held jobs; `search-features resume` releases only these explicit holds,
-without retrying unrelated failed or storage-blocked jobs. New preparation
-requests are not globally disabled. A duplicate request for a held job keeps its
-hold until `resume`.
-
-Before resuming a bulk build, the isolated
-[framing representation pilot](docs/experiments/framing-representation-pilot.md)
-provides commands to compare frozen PE final/intermediate features and an
-explicitly staged small PE-Spatial checkpoint on 524 retained frames. It writes
-only experiment artifacts, checkpoints every 32 frames, respects the ingest
-lock and never activates a search profile. Human relevance remains a separate
-gate from successful extraction or faster inference.
-
-`retrieval.optional_storage_gib` defaults to 64. Physical optional storage,
-including retained versions and scratch, counts toward admission. Repeating
-the same `prepare --enqueue` request explicitly retries blocked/interrupted
-work without creating a job for each batch. After stopping the API and both
-workers, `search-features discard-cache --table EXACT_TABLE --apply` reclaims
-an identified full spatial cache using Lance's API. It cannot remove source or
-compact retrieval tables. Use the documented idle database maintenance command
-to prune eligible historical versions. Queries never perform disk cleanup.
-After choosing a winning profile, `search-features retire-profile --profile ID
---apply` reclaims an explicitly selected inactive challenger under the same idle
-guards. It refuses the configured profile and profiles with pending preparation.
+Look and Framing use the existing local frame index; Framing adds a learned 6x6
+spatial feature grid, encoded live for the query and its roughly 96 candidates
+(about 3-4 s per search; [ADR-0120](docs/decisions/0120-framing-runs-live.md)).
+Neither calls OpenAI or Gemini or requires re-ingestion. Treat Framing as coarse
+framing and position similarity, not exact subject-relation, skeletal-pose, or
+motion matching. Its next representation is the match-cut moments index, once
+that wins ADR-0008's comparison.
 
 Hover a result and use its bookmark action to save the displayed source moment. Saved
 scenes persist in `paths.state_dir` independently of search-index repair or a

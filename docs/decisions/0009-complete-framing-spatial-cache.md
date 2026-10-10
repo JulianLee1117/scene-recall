@@ -1,10 +1,11 @@
 # ADR-0009: Complete optional Framing spatial cache
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-29
 - Supersedes: None
 - Superseded by: ADR-0020 (unscoped uploaded-reference candidate intake only)
 - Superseded by: ADR-0082 for source-hashed partial cache reuse; legacy caches retain this contract
+- Superseded by: [ADR-0120](0120-framing-runs-live.md) (the cache is retired; Framing runs live)
 
 ## Context
 

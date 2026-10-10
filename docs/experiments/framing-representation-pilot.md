@@ -1,5 +1,8 @@
 # Framing representation pilot
 
+> Retired on 2026-10-10 by [ADR-0120](../decisions/0120-framing-runs-live.md);
+> its code and the commands below were removed. The findings stay as a record.
+
 Status: first mechanical comparison and an
 [AI visual audit](framing-visual-audit-20260921.md) completed, 2026-09-21;
 human preference remains unmeasured. The audit found complementary strengths

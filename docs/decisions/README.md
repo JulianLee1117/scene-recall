@@ -70,7 +70,7 @@ The accepted boundary or behavior.
 | [0006](0006-separate-durable-user-state.md) | Accepted | Keep bookmarks outside replaceable search indexes |
 | [0007](0007-typed-modular-search-recipes.md) | Accepted | Compose explicit search facets over current evidence |
 | [0008](0008-grounded-match-cut-and-temporal-motion-boundaries.md) | Accepted; layout profile code removed 2026-10-08 (covered by 0099) | Separate grounded still matching, exact-frame refinement, and temporal motion |
-| [0009](0009-complete-framing-spatial-cache.md) | Accepted | Cache production Framing grids only under complete profile activation |
+| [0009](0009-complete-framing-spatial-cache.md) | Superseded by 0120 | Cache production Framing grids only under complete profile activation |
 | [0010](0010-dedicated-mood-semantic-view.md) | Accepted | Isolate Mood to stored feeling and energy evidence |
 | [0011](0011-expose-resolved-source-inputs.md) | Accepted | Explain exact dragged-source inputs without inventing visual text |
 | [0012](0012-query-bound-uploaded-image-recipes.md) | Superseded | Use one uploaded still as a bounded broad-visual recipe signal |
@@ -143,7 +143,7 @@ The accepted boundary or behavior.
 | [0079](0079-validate-extracted-embedded-dialogue.md) | Accepted | Validate extracted embedded subtitle content, preserve rejected evidence and record cacheable audio-transcription fallback lineage |
 | [0080](0080-cancelled-acquisition-staging-cleanup.md) | Accepted | Clean explicitly cancelled managed staging after worker teardown and downloader detachment, preserving imported library sources |
 | [0081](0081-read-only-project-guide.md) | Accepted | Add an independent expandable technical guide with allowlisted loaded settings and no processing side effects |
-| [0082](0082-shared-search-foundation-and-composition-challenger.md) | Accepted | Share snapshots and lookups, reuse source-hashed partial caches, and gate independent compact composition retrieval |
+| [0082](0082-shared-search-foundation-and-composition-challenger.md) | Accepted; its caches and challenger superseded by 0120 | Share snapshots and lookups, reuse source-hashed partial caches, and gate independent compact composition retrieval |
 | [0083](0083-complete-filter-before-scalar-read-limit.md) | Accepted | Apply the complete scalar filter before bounded reads, retaining indexed and unindexed matches |
 | [0084](0084-confirmed-movie-scope-in-search.md) | Accepted | Suggest explicit movie scope in the search input and browse selected films without a fabricated query |
 | [0085](0085-inline-confirmed-movie-mentions.md) | Accepted | Keep confirmed movie identity inline using native text and validated ranges |
@@ -153,7 +153,7 @@ The accepted boundary or behavior.
 | [0089](0089-personal-search-assistance-trial.md) | Superseded by 0090 | Historical personal category-assistance trial |
 | [0090](0090-retire-personal-search-trial.md) | Accepted | Remove the interactive trial and distinguish candidate coverage from ranking before another search experiment |
 | [0091](0091-intent-guided-retrieval-comparison.md) | Superseded by 0094 | Compare ordinary, fixed expansion and Jev-guided evidence retrieval with frozen playable result lists |
-| [0092](0092-bounded-framing-representation-pilot.md) | Frozen | Hold the optional bulk batch and compare frozen framing representations independently of Jev |
+| [0092](0092-bounded-framing-representation-pilot.md) | Superseded by 0120 | Hold the optional bulk batch and compare frozen framing representations independently of Jev |
 | [0093](0093-evidence-v2.md) | Accepted | Versioned per-film evidence artifacts, open metadata with world knowledge, measured-over-guessed facts and compiled search tables |
 | [0094](0094-search-v2.md) | Accepted | Search v2: evidence views fused by rank, quote channel, bounded priors and presets, scene cards, resident vectors, cross-encoder rerank; retire the intent experiments |
 | [0095](0095-serve-last-complete-generation.md) | Accepted | Compile from the newest available profile while a new one backfills; API search keeps its last complete snapshot during publication |
@@ -182,3 +182,4 @@ The accepted boundary or behavior.
 | [0117](0117-matched-words-and-shot-dialogue.md) | Accepted; amended by 0118 | Main-query and explicit Words evidence share a minimal hover; clause-owned text and timing survive fusion; shot details read bounded source dialogue on demand |
 | [0119](0119-grounded-subjects-for-drawn-films.md) | Accepted | Two subject backends with one record: RF-DETR for live action, a grounder plus RF-DETR silhouettes and ViTPose keypoints for films in the configured genre families (Animation); chosen per film from its Wikidata genres and form, keyed into grounded artifacts' cache inputs |
 | [0118](0118-consistent-result-moments.md) | Accepted | Show sole spoken-word support, browse folded matches chronologically with their own context, and keep displayed, played and saved source moments consistent |
+| [0120](0120-framing-runs-live.md) | Accepted | Framing encodes its candidates live; the complete and partial grid caches, the search-features preparation jobs and CLI, the compact composition challenger, the framing pilot and the optional-storage budget are retired; Framing moves to the moments index after ADR-0008's comparison |
