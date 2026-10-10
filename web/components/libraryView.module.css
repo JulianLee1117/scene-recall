@@ -10,9 +10,13 @@
 .viewSwitch button:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 2px; }
 .count { color: var(--page-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .attention { color: #d7ac72; font-size: 12px; }
-.addPanel { margin-bottom: 24px; }
-.addHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.addDialog { width: min(680px, calc(100vw - 32px)); border-color: #36322a; background: var(--page-surface); overscroll-behavior: contain; color-scheme: dark; }
+.addDialog::backdrop { background: #0009; }
+.addPanel, .addDialog :global(.film-review-form) { padding: 24px; }
+.addDialog :global(#acquisition-add-form) { margin: 0; padding: 0; border: 0; background: transparent; }
+.addHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .addHeading h2 { margin: 0; color: #e6e1d8; font-size: 16px; font-weight: 500; }
+.reviewBack { margin-right: auto; }
 .page .incomingShortcut { margin: 0 0 16px; padding-left: 0; color: var(--page-accent); }
 .incoming h3 { margin: 0; font-size: 14px; font-weight: 500; }
 .incomingNote { margin: 8px 0 0; color: var(--page-muted); font-size: 13px; line-height: 1.6; }
@@ -51,6 +55,7 @@
 .libraryList :global(.film-row-error) { grid-column: 1 / -1; }
 .libraryList :global(.film-status) { min-width: 110px; justify-content: flex-end; }
 @media (max-width: 600px) {
+  .addPanel, .addDialog :global(.film-review-form) { padding: 16px; }
   .headerActions { flex-wrap: wrap; }
   .viewSwitch button { min-height: 44px; }
   .page :global(.films-section-header) { flex-wrap: wrap; align-items: flex-start; }

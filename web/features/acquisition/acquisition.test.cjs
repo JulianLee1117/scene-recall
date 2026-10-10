@@ -34,7 +34,7 @@ const emptyQueue = () => ({ status, items: [], busy: null, error: null, loading:
 
 function harness(file, renderEntry, modules = {}, globals = {}) {
   const hooks = [];
-  let cursor = 0, scheduled = false, output, disposed = false, effects = [];
+  let cursor = 0, scheduled = false, output, disposed = false, effects = [], layoutEffects = [];
   const schedule = () => { if (!scheduled && !disposed) { scheduled = true; queueMicrotask(render); } };
   const react = {
     useState(initial) {
@@ -50,12 +50,17 @@ function harness(file, renderEntry, modules = {}, globals = {}) {
       if (!hooks[i] || !same(deps, hooks[i].deps)) { const old = hooks[i]; hooks[i] = { deps, cleanup: old?.cleanup };
         effects.push(() => { hooks[i].cleanup?.(); hooks[i].cleanup = effect(); }); }
     },
+    useLayoutEffect(effect, deps) {
+      const i = cursor++;
+      if (!hooks[i] || !same(deps, hooks[i].deps)) { const old = hooks[i]; hooks[i] = { deps, cleanup: old?.cleanup };
+        layoutEffects.push(() => { hooks[i].cleanup?.(); hooks[i].cleanup = effect(); }); }
+    },
   };
   const exports = load(file, { react, ...modules }, globals);
   function render() {
     if (disposed) return;
     scheduled = false; cursor = 0; output = renderEntry(exports);
-    const run = effects; effects = []; run.forEach((effect) => effect());
+    const run = [...layoutEffects, ...effects]; layoutEffects = []; effects = []; run.forEach((effect) => effect());
   }
   const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
   render();
@@ -82,6 +87,16 @@ function libraryHarness({ queue = emptyQueue(), films = [], incoming = [], jobs 
     window: { requestAnimationFrame: (callback) => callback(), setTimeout: () => 1, clearTimeout() {} },
     ...globals,
   });
+}
+
+function attachDialog(app) {
+  const native = {
+    open: false, opened: 0, closed: 0,
+    showModal() { this.open = true; this.opened++; },
+    close() { this.open = false; this.closed++; },
+  };
+  app.find((node) => node.type === "dialog").props.ref.current = native;
+  return native;
 }
 
 test("film metadata requires an explicit valid title/year and preserves optional edition", () => {
@@ -258,6 +273,7 @@ for (const scenario of [
       },
       window: { requestAnimationFrame: (callback) => callback() },
     });
+    const native = attachDialog(app);
     try {
       await app.flush();
       app.button("Add films").props.onClick(); await app.flush();
@@ -273,7 +289,8 @@ for (const scenario of [
       }
       app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); await app.flush();
       assert.equal(calls.length, 0, "automatic subtitles do not waive source-move confirmation");
-      assert.ok(app.find((node) => node.type === "AddFilmForm"), "validation keeps the source form available");
+      assert.ok(app.find((node) => node.type === "form"), "validation keeps the review form available");
+      assert.equal(native.open, true);
       app.input("Torrenting and seeding are finished.").props.onChange({ target: { checked: true } }); await app.flush();
       app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); await app.flush();
       assert.equal(calls.length, 1);
@@ -281,6 +298,7 @@ for (const scenario of [
       assert.equal(calls[0].confirm_finished, true);
       assert.equal(calls[0].ingest, true);
       assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined);
+      assert.equal(native.open, false);
       assert.equal(app.find((node) => node.props?.id === "films-queue-view").props["aria-pressed"], true);
     } finally { app.dispose(); }
   });
@@ -655,11 +673,122 @@ test("downloaded files stay behind Add films and their shortcut opens that sourc
   } finally { app.dispose(); }
 });
 
+test("a failed downloaded-file rescan explains the failure inside the dialog and allows retry", async () => {
+  const candidate = { relative_path: "Film.mkv", filename: "Film.mkv", suggested_title: "Film", suggested_year: 1985, size_gb: 1, subtitle_review_candidates: [] };
+  let scans = 0;
+  const app = libraryHarness({ fetch: async (url) => {
+    if (url === "/incoming" && ++scans === 2) return { ok: false, status: 503, json: async () => ({ detail: "The incoming folder is unavailable." }) };
+    return { ok: true, json: async () => url === "/incoming" ? [candidate] : [] };
+  } });
+  const native = attachDialog(app);
+  const downloaded = () => app.find((node) => node.type === "AddFilmForm").props.downloadedFiles;
+  const rescan = () => nodes(downloaded()).find((node) => node.type === "button" && text(node) === "Rescan");
+  try {
+    await app.flush();
+    app.button("1 downloaded file to review").props.onClick(); await app.flush();
+    rescan().props.onClick(); await app.flush();
+    assert.equal(native.open, true);
+    const alert = nodes(downloaded()).find((node) => node.props?.role === "alert");
+    assert.match(text(alert), /incoming folder is unavailable/);
+    assert.match(text(downloaded()), /Film\.mkv/, "a failed scan preserves known files");
+    assert.equal(rescan().props.disabled, false);
+    rescan().props.onClick(); await app.flush();
+    assert.equal(scans, 3);
+    assert.doesNotMatch(text(downloaded()), /incoming folder is unavailable/);
+  } finally { app.dispose(); }
+});
+
+test("Add films opens one native dialog and Escape preserves busy work before closing the flow", async () => {
+  const queue = emptyQueue();
+  const candidate = { relative_path: "Film.mkv", filename: "Film.mkv", suggested_title: "Film", suggested_year: 1985, size_gb: 1, subtitle_review_candidates: [] };
+  const app = libraryHarness({ queue, incoming: [candidate] });
+  const dialog = () => app.find((node) => node.type === "dialog");
+  const native = attachDialog(app);
+  let prevented = 0;
+  try {
+    await app.flush();
+    assert.equal(app.button("Add films").props["aria-haspopup"], "dialog");
+    assert.equal(native.open, false);
+    app.button("Add films").props.onClick(); await app.flush();
+    assert.equal(native.open, true);
+    assert.equal(native.opened, 1);
+    assert.equal(dialog().props.id, "films-add-panel");
+    const forms = nodes(app.state).filter((node) => node.type === "AddFilmForm");
+    assert.equal(forms.length, 1);
+    assert.ok(nodes(dialog()).includes(forms[0]), "the source form belongs inside the modal");
+    assert.ok(app.button("1 downloaded file to review"), "the background shortcut does not shift when the modal opens");
+    queue.busy = "add"; app.render();
+    dialog().props.onCancel({ preventDefault() { prevented++; } }); await app.flush();
+    assert.equal(prevented, 1);
+    assert.equal(native.open, true);
+    assert.ok(app.find((node) => node.type === "AddFilmForm"));
+    queue.busy = null; app.render();
+    dialog().props.onCancel({ preventDefault() { prevented++; } }); await app.flush();
+    assert.equal(prevented, 2);
+    assert.equal(native.open, false);
+    assert.equal(native.closed, 1);
+    assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined);
+  } finally { app.dispose(); }
+});
+
+test("a delayed native close event cannot dismiss a reopened Add films dialog", async () => {
+  const app = libraryHarness();
+  const dialog = () => app.find((node) => node.type === "dialog");
+  const native = attachDialog(app);
+  try {
+    await app.flush();
+    app.button("Add films").props.onClick(); await app.flush();
+    const delayedClose = dialog().props.onClose;
+    app.button("Close").props.onClick(); await app.flush();
+    assert.equal(native.open, false);
+    app.button("Add films").props.onClick(); await app.flush();
+    delayedClose({ currentTarget: native }); await app.flush();
+    assert.equal(native.open, true);
+    assert.ok(app.find((node) => node.type === "AddFilmForm"));
+    native.close();
+    dialog().props.onClose({ currentTarget: native }); await app.flush();
+    assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined, "an actual native close clears the source form");
+  } finally { app.dispose(); }
+});
+
+test("downloaded-file review stays in the same dialog and Back returns to its source", async () => {
+  const candidate = { relative_path: "Film.mkv", filename: "Film.mkv", suggested_filename: "Film (1985).mkv", suggested_title: "Film", suggested_year: 1985, size_gb: 1, subtitle_review_candidates: [] };
+  const app = libraryHarness({ incoming: [candidate] });
+  const native = attachDialog(app);
+  const openReview = async () => {
+    const form = app.find((node) => node.type === "AddFilmForm");
+    nodes(form.props.downloadedFiles).find((node) => node.type === "button" && text(node) === "Review & add").props.onClick();
+    await app.flush();
+  };
+  try {
+    await app.flush();
+    app.button("1 downloaded file to review").props.onClick(); await app.flush();
+    await openReview();
+    assert.equal(native.open, true);
+    assert.equal(native.opened, 1, "review reuses the existing modal");
+    assert.equal(nodes(app.state).filter((node) => node.type === "dialog").length, 1);
+    assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined);
+    app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); await app.flush();
+    assert.match(text(app.state), /Confirm that torrenting and seeding are finished/);
+    app.find((node) => node.type === "button" && node.props["aria-label"] === "Back to downloaded files").props.onClick(); await app.flush();
+    assert.equal(native.open, true);
+    assert.equal(native.closed, 0);
+    assert.equal(app.find((node) => node.type === "AddFilmForm").props.initialSource, "downloaded");
+    await openReview();
+    assert.doesNotMatch(text(app.state), /Confirm that torrenting and seeding are finished/);
+    app.find((node) => node.type === "button" && node.props["aria-label"] === "Close review").props.onClick(); await app.flush();
+    assert.equal(native.open, false);
+    assert.equal(app.find((node) => node.type === "form"), undefined);
+    assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined);
+  } finally { app.dispose(); }
+});
+
 test("adding returns to the queue only after success and keeps failures beside the form", async () => {
   const focus = [], scroll = [], calls = [];
   let succeeds = false;
   const queue = { ...emptyQueue(), execute: async (...args) => { calls.push(args); return succeeds; } };
   const app = libraryHarness({ queue });
+  const native = attachDialog(app);
   const switcher = (name) => app.find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith(name));
   try {
     await app.flush();
@@ -669,14 +798,14 @@ test("adding returns to the queue only after success and keeps failures beside t
     assert.equal(await app.find((node) => node.type === "AddFilmForm").props.onQueue("/release", {}), false);
     app.render(); await app.flush();
     assert.equal(app.find((node) => node.type === "AddFilmForm").props.requestError, queue.error);
-    assert.equal(app.find((node) => node.type === "AcquisitionPanel").props.showError, false);
+    assert.equal(native.open, true, "rejected additions keep the dialog available to correct");
     assert.equal(switcher("Library").props["aria-pressed"], true);
     assert.equal(focus.length, 0);
     succeeds = true; queue.error = null;
     assert.equal(await app.find((node) => node.type === "AddFilmForm").props.onQueue("/release", {}), true);
     await app.flush();
     assert.equal(app.find((node) => node.type === "AddFilmForm"), undefined);
-    assert.equal(app.find((node) => node.type === "AcquisitionPanel").props.showError, true);
+    assert.equal(native.open, false);
     assert.equal(switcher("Queue").props["aria-pressed"], true);
     assert.equal(focus.length, 1); assert.equal(focus[0].preventScroll, true); assert.equal(scroll[0].block, "nearest");
     assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["add", "/release", {}], ["add", "/release", {}]]);

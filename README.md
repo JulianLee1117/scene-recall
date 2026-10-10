@@ -925,8 +925,10 @@ are empty, try the title and release year; a magnet bypasses release search.
 
 **Films** opens to **Library**, with a title filter and a **Queue** view beside it.
 The queue's active count and any items needing attention remain visible in either
-view; switching views keeps live updates running. After a successful addition,
-the form closes and **Queue** shows progress. Downloads and existing ingestion
+view; switching views keeps live updates running. **Add films** opens a dialog,
+keeping the current view and scroll position in place. Downloaded-file review
+stays in the same dialog. After a successful addition, the dialog closes and
+**Queue** shows progress. Downloads and existing ingestion
 jobs share this view, with items needing attention first, then work in progress
 and waiting films in queue order. Row details and download settings expand when
 needed. Completed acquisitions leave the queue; failed and cancelled ones retain

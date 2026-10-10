@@ -23,6 +23,10 @@ html {
   scrollbar-gutter: stable;
 }
 
+html:has(#films-add-panel[open]) {
+  overflow: hidden;
+}
+
 button,
 input {
   font: inherit;

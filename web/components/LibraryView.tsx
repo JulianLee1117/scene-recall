@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -114,6 +115,7 @@ export default function LibraryView() {
   const [loading, setLoading] = useState(true);
   const [storageRevision, setStorageRevision] = useState(0);
   const [rescanning, setRescanning] = useState(false);
+  const [rescanError, setRescanError] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingIngestPaths, setPendingIngestPaths] = useState<Set<string>>(
@@ -138,7 +140,6 @@ export default function LibraryView() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const yearInputRef = useRef<HTMLInputElement>(null);
   const confirmationRef = useRef<HTMLInputElement>(null);
-  const addButtonRef = useRef<HTMLButtonElement>(null);
   const queueButtonRef = useRef<HTMLButtonElement>(null);
   const libraryButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -153,8 +154,10 @@ export default function LibraryView() {
 
   function closeAdd() {
     if (queue.busy || importing) return;
+    dialogRef.current?.close();
     setAdding(null);
-    addButtonRef.current?.focus({ preventScroll: true });
+    setSelectedCandidate(null);
+    setImportError(null);
   }
 
   const fetchLibrary = useCallback(async () => {
@@ -305,16 +308,19 @@ export default function LibraryView() {
     };
   }, [fetchJobs, hasActiveJobs, refreshCatalog]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
 
-    if (selectedCandidate && !dialog.open) {
+    if (adding && !dialog.open) {
       dialog.showModal();
-      window.requestAnimationFrame(() => titleInputRef.current?.focus());
-    } else if (!selectedCandidate && dialog.open) {
+    } else if (!adding && dialog.open) {
       dialog.close();
     }
+  }, [adding]);
+
+  useEffect(() => {
+    if (selectedCandidate) titleInputRef.current?.focus({ preventScroll: true });
   }, [selectedCandidate]);
 
   const jobsByPath = useMemo(() => {
@@ -334,17 +340,18 @@ export default function LibraryView() {
 
   const handleRescan = useCallback(async () => {
     setRescanning(true);
-    setPageError(null);
+    setRescanError(null);
     try {
       await fetchIncoming();
     } catch (error) {
-      setPageError(errorMessage(error, "Could not scan the incoming folder"));
+      setRescanError(errorMessage(error, "Could not scan the incoming folder"));
     } finally {
       setRescanning(false);
     }
   }, [fetchIncoming]);
 
   const openReview = useCallback((candidate: IncomingFilm) => {
+    setAdding("downloaded");
     setSelectedCandidate(candidate);
     setTitle(candidate.suggested_title);
     setYear(candidate.suggested_year?.toString() ?? "");
@@ -354,9 +361,8 @@ export default function LibraryView() {
     setImportError(null);
   }, []);
 
-  const closeReview = useCallback(() => {
+  const backToDownloaded = useCallback(() => {
     if (importing) return;
-    dialogRef.current?.close();
     setSelectedCandidate(null);
     setImportError(null);
   }, [importing]);
@@ -569,6 +575,7 @@ export default function LibraryView() {
           {rescanning ? "Scanning…" : "Rescan"}
         </button>
       </div>
+      {rescanError && <p className="films-message films-message--error" role="alert">{rescanError}</p>}
       {loading ? <p className={styles.incomingNote}>Scanning incoming…</p>
         : incomingEmpty ? <p className={styles.incomingNote}>No downloaded files to review.</p>
         : <div className="films-list">{incoming.map((candidate) => (
@@ -592,10 +599,9 @@ export default function LibraryView() {
         <h1 className={chrome.title}>Films</h1>
         <div className={styles.headerActions}>
           {!loading && <LibraryStorage refreshKey={storageRevision} />}
-          <button ref={addButtonRef} type="button" className="films-button films-button--primary" aria-expanded={adding !== null} aria-controls="films-add-panel"
+          <button type="button" className="films-button films-button--primary" aria-haspopup="dialog" aria-controls="films-add-panel"
             disabled={Boolean(queue.busy) || importing} onClick={() => {
-              if (adding) closeAdd();
-              else { setAdding("online"); setNotice(null); queue.clearMutationError(); }
+              setAdding("online");
             }}>Add films</button>
         </div>
       </header>
@@ -607,31 +613,13 @@ export default function LibraryView() {
           </p>
         )}
         {notice && <p className="films-message films-message--success">{notice}</p>}
-        {queue.error && view === "library" && !adding && <p className="films-message films-message--error" role="alert">{queue.error}</p>}
+        {queue.error && view === "library" && <p className="films-message films-message--error" role="alert">{queue.error}</p>}
       </div>
 
-      {!adding && incoming.length > 0 && <button type="button" className={`films-button films-button--quiet ${styles.incomingShortcut}`}
-        disabled={Boolean(queue.busy)} onClick={() => { setAdding("downloaded"); setNotice(null); queue.clearMutationError(); }}>
+      {incoming.length > 0 && <button type="button" className={`films-button films-button--quiet ${styles.incomingShortcut}`} aria-haspopup="dialog" aria-controls="films-add-panel"
+        disabled={Boolean(queue.busy)} onClick={() => setAdding("downloaded")}>
         {incoming.length} downloaded file{incoming.length === 1 ? "" : "s"} to review
       </button>}
-
-      {adding && <section className={styles.addPanel} id="films-add-panel" aria-labelledby="films-add-heading">
-        <div className={styles.addHeading}>
-          <h2 id="films-add-heading">Add films</h2>
-          <button type="button" className="films-button films-button--quiet" disabled={Boolean(queue.busy) || importing} onClick={closeAdd}>Close</button>
-        </div>
-        <AddFilmForm key={adding} status={queue.status} busy={Boolean(queue.busy) || importing} requestError={queue.error}
-          downloadedFiles={downloadedFiles} initialSource={adding === "downloaded" ? "downloaded" : undefined}
-          onClearRequestError={queue.clearMutationError} onQueue={async (path, body) => {
-            const success = await queue.execute("add", path, body);
-            if (success) {
-              setAdding(null);
-              setNotice("Film added to the queue. You can leave this page while it prepares.");
-              showView("queue");
-            }
-            return success;
-          }} />
-      </section>}
 
       <div className={styles.toolbar}>
         <div className={styles.viewSwitch} role="group" aria-label="Films view">
@@ -656,7 +644,7 @@ export default function LibraryView() {
       </div>
 
       <div id="films-queue-panel" hidden={view !== "queue"}>
-        <AcquisitionPanel queue={queue} jobs={jobs} films={films} showError={!adding} />
+        <AcquisitionPanel queue={queue} jobs={jobs} films={films} />
       </div>
 
       <section id="films-library-panel" aria-labelledby="films-library-view" hidden={view !== "library"}>
@@ -728,20 +716,41 @@ export default function LibraryView() {
 
       <dialog
         ref={dialogRef}
-        className="film-review-dialog"
-        aria-labelledby="film-review-title"
-        aria-describedby="film-review-description"
-        aria-busy={importing}
+        id="films-add-panel"
+        className={`film-review-dialog ${styles.addDialog}`}
+        aria-labelledby={selectedCandidate ? "film-review-title" : "films-add-heading"}
+        aria-describedby={selectedCandidate ? "film-review-description" : undefined}
+        aria-busy={Boolean(queue.busy) || importing}
         onCancel={(event) => {
-          if (importing) event.preventDefault();
+          event.preventDefault();
+          closeAdd();
         }}
-        onClose={() => {
-          if (!importing) setSelectedCandidate(null);
-        }}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) closeReview();
+        onClose={(event) => {
+          // A queued close event must not dismiss a dialog that has reopened.
+          if (event.currentTarget.open) return;
+          setAdding(null);
+          setSelectedCandidate(null);
+          setImportError(null);
         }}
       >
+        {adding && !selectedCandidate && <section className={styles.addPanel}>
+          <div className={styles.addHeading}>
+            <h2 id="films-add-heading">Add films</h2>
+            <button type="button" className="films-button films-button--quiet" disabled={Boolean(queue.busy) || importing} onClick={closeAdd}>Close</button>
+          </div>
+          <AddFilmForm key={adding} status={queue.status} busy={Boolean(queue.busy) || importing} requestError={queue.error}
+            downloadedFiles={downloadedFiles} initialSource={adding === "downloaded" ? "downloaded" : undefined}
+            onClearRequestError={queue.clearMutationError} onQueue={async (path, body) => {
+              const success = await queue.execute("add", path, body);
+              if (success) {
+                dialogRef.current?.close();
+                setAdding(null);
+                setNotice("Film added to the queue. You can leave this page while it prepares.");
+                showView("queue");
+              }
+              return success;
+            }} />
+        </section>}
         {selectedCandidate && (
           <form className="film-review-form" onSubmit={handleImportSubmit}>
             <div className="film-review-heading">
@@ -752,7 +761,7 @@ export default function LibraryView() {
               <button
                 type="button"
                 className="film-review-close"
-                onClick={closeReview}
+                onClick={closeAdd}
                 disabled={importing}
                 aria-label="Close review"
               >
@@ -903,6 +912,7 @@ export default function LibraryView() {
             )}
 
             <div className="film-review-actions">
+              <button type="button" className={`films-button films-button--quiet ${styles.reviewBack}`} aria-label="Back to downloaded files" onClick={backToDownloaded} disabled={importing}>Back</button>
               <button
                 type="button"
                 className="films-button films-button--secondary"
