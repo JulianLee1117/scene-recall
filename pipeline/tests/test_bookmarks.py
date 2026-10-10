@@ -37,7 +37,7 @@ def test_bookmark_store_is_versioned_idempotent_and_deletable(tmp_path) -> None:
     assert store.list_all() == [repeated]
 
     with sqlite3.connect(store.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
 
     assert store.delete(first.bookmark_id) is True
     assert store.delete(first.bookmark_id) is False
@@ -122,7 +122,7 @@ def test_bookmark_store_migrates_v1_and_reconciles_duplicate_anchors(
     assert reconciled.film_title_snapshot == "Film A"
 
     with sqlite3.connect(store.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
         assert connection.execute(
             "SELECT COUNT(*) FROM sqlite_master "
             "WHERE type = 'table' AND name = 'bookmarks_v1'"
@@ -480,3 +480,89 @@ def test_large_saved_collection_uses_chunked_metadata_reads_not_per_bookmark_sca
     assert all("img_vec" not in columns and "visual_vec" not in columns for _, _, _, columns in calls)
     assert all(result["scene"]["matched_frame_timestamp"] == result["evidence_timestamp"] for result in results)
     assert all(result["scene"]["keyframe_index"] == 1 for result in results)
+
+
+def test_bookmark_store_keeps_unplaced_saves_first_then_the_users_order(tmp_path) -> None:
+    import time
+
+    store = BookmarkStore(tmp_path / "state")
+    store.initialize()
+
+    def save(name: str, timestamp: float):
+        time.sleep(0.002)  # distinct creation times
+        return store.save(film_id="film-a", source_unit_id=f"film-a_{name}", evidence_timestamp=timestamp,
+                          frame_index=None, film_title_snapshot="Film A")
+
+    a, b, c = save("a", 1), save("b", 2), save("c", 3)
+    ids = lambda items: [item.bookmark_id for item in items]  # noqa: E731
+    assert ids(store.list_all()) == ids([c, b, a]), "newest first until the user places anything"
+
+    ordered = store.reorder([c.bookmark_id, a.bookmark_id])
+    assert ids(ordered) == ids([b, c, a]), "an unplaced save stays on top of the user's order"
+    assert [item.position for item in ordered] == [None, 0, 1]
+
+    d = save("d", 4)
+    assert ids(store.list_all()) == ids([d, b, c, a]), "a new save lands on top"
+    placed = store.reorder(["missing", d.bookmark_id, b.bookmark_id, c.bookmark_id, a.bookmark_id])
+    assert ids(placed) == ids([d, b, c, a]) and [item.position for item in placed] == [1, 2, 3, 4]
+    resaved = store.save(film_id="film-a", source_unit_id="film-a_c-again", evidence_timestamp=3,
+                         frame_index=None, film_title_snapshot="Film A")
+    assert resaved.position == 3, "re-saving a placed moment keeps its place"
+
+    assert all(item.position is None for item in store.reorder([]))
+    assert ids(store.list_all()) == ids([d, c, b, a]), "a cleared board is newest first again"
+
+
+def test_bookmark_store_migrates_v2_by_adding_the_board_order(tmp_path) -> None:
+    from pipeline.bookmarks import BOOKMARK_DATABASE_NAME, _create_schema_v2
+
+    state = tmp_path / "state"
+    state.mkdir()
+    with sqlite3.connect(state / BOOKMARK_DATABASE_NAME) as connection:
+        _create_schema_v2(connection)
+        connection.execute(
+            "INSERT INTO bookmarks VALUES ('b1', 'film-a', 'film-a_0001', 1000, NULL, 'Film A', 5)"
+        )
+        connection.execute("PRAGMA user_version = 2")
+
+    store = BookmarkStore(state)
+    store.initialize()
+    assert [(item.bookmark_id, item.position) for item in store.list_all()] == [("b1", None)]
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
+def test_saved_order_endpoint_sets_and_clears_the_board_order(config) -> None:
+    from fastapi.testclient import TestClient
+
+    db = open_db(config)
+    create_tables(db)
+    db.open_table("films").add([
+        {"film_id": "film-a", "title": "Film A", "path": str(config.paths.films_dir / "Film A.mkv"),
+         "duration": 120.0, "fps": 24.0},
+    ])
+    db.open_table("units").add([
+        _unit_row("film-a_0001", start=10, end=20),
+        _unit_row("film-a_0002", start=30, end=40),
+    ])
+
+    with (
+        patch("pipeline.api.main.load_config", return_value=config),
+        patch("pipeline.api.main.open_db", return_value=db),
+        patch("pipeline.api.main.ensure_search_indexes"),
+    ):
+        import pipeline.api.main as api_mod
+
+        with TestClient(api_mod.app) as client:
+            first = client.put("/bookmarks/film-a_0001", json={}).json()["bookmark_id"]
+            second = client.put("/bookmarks/film-a_0002", json={}).json()["bookmark_id"]
+            assert [item["bookmark_id"] for item in client.get("/bookmarks").json()["bookmarks"]] == [second, first]
+
+            ordered = client.post("/bookmarks/order", json={"bookmark_ids": [first, second]}).json()["bookmarks"]
+            assert [(item["bookmark_id"], item["position"]) for item in ordered] == [(first, 0), (second, 1)]
+            assert [item["bookmark_id"] for item in client.get("/bookmarks").json()["bookmarks"]] == [first, second]
+
+            assert client.post("/bookmarks/order", json={"bookmark_ids": [first, first]}).status_code == 422
+
+            cleared = client.post("/bookmarks/order", json={"bookmark_ids": []}).json()["bookmarks"]
+            assert [(item["bookmark_id"], item["position"]) for item in cleared] == [(second, None), (first, None)]

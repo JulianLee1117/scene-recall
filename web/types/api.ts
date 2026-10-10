@@ -270,6 +270,8 @@ export interface BookmarkRecord {
   evidence_timestamp: number;
   frame_index?: number | null;
   created_at: string;
+  /** The board's own order; null until the user places this scene. */
+  position: number | null;
   availability: BookmarkAvailability;
   /** Current indexed scene resolved from the durable film + timestamp anchor. */
   scene: SearchResult | null;

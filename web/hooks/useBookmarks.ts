@@ -148,6 +148,7 @@ export function useBookmarks() {
         evidence_timestamp: evidenceTimestamp,
         frame_index: frameIndex,
         created_at: new Date().toISOString(),
+        position: null,
         availability: "indexed",
         scene: shot,
       };
@@ -194,6 +195,47 @@ export function useBookmarks() {
     [commitBookmarks, markPending, removeBookmark],
   );
 
+  /**
+   * Store the board's order: the listed bookmarks in this sequence, with
+   * anything unlisted kept ahead of them as the server keeps it. An empty
+   * list clears the order, so the board is newest first again. The board
+   * shows the new order at once and goes back if the request fails.
+   */
+  const reorderBookmarks = useCallback(
+    async (bookmarkIds: string[]): Promise<boolean> => {
+      const previous = bookmarksRef.current;
+      const byId = new Map(previous.map((bookmark) => [bookmark.bookmark_id, bookmark]));
+      const listed = bookmarkIds
+        .map((id) => byId.get(id))
+        .filter((bookmark): bookmark is BookmarkRecord => Boolean(bookmark));
+      const unlisted = previous.filter((bookmark) => !bookmarkIds.includes(bookmark.bookmark_id));
+      commitBookmarks(
+        bookmarkIds.length
+          ? [...unlisted, ...listed]
+          : [...previous].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)),
+      );
+      setError(null);
+      try {
+        const response = await fetch(`${API_URL}/bookmarks/order`, {
+          method: "POST",
+          headers: { ...APP_CLIENT_HEADERS, "Content-Type": "application/json" },
+          body: JSON.stringify({ bookmark_ids: bookmarkIds }),
+        });
+        if (!response.ok) throw new Error(await apiError(response));
+        const result = (await response.json()) as BookmarkResponse;
+        // A save still in flight stays on top, where the server will list it.
+        const pending = bookmarksRef.current.filter((bookmark) => bookmark.bookmark_id.startsWith("pending:"));
+        commitBookmarks([...pending, ...result.bookmarks]);
+        return true;
+      } catch (reason) {
+        commitBookmarks(previous);
+        setError(reason instanceof Error ? reason.message : "Could not reorder");
+        return false;
+      }
+    },
+    [commitBookmarks],
+  );
+
   return {
     bookmarks,
     bookmarkByUnit,
@@ -202,5 +244,6 @@ export function useBookmarks() {
     error,
     toggleBookmark,
     removeBookmark,
+    reorderBookmarks,
   };
 }

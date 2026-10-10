@@ -76,3 +76,35 @@ test("Save sends the displayed hero time without a conflicting indexed-frame hin
     assert.equal(moments.displayMoment(app.current.bookmarks[0].scene), 1105);
   } finally { app.dispose(); }
 });
+
+test("Reorder shows the new order at once, stores it, and goes back if the server refuses", async () => {
+  const app = harness();
+  const records = ["a", "b", "c"].map((id, i) => ({
+    bookmark_id: id, film_id: "f", film_title: "F", source_unit_id: `u-${id}`, evidence_timestamp: i,
+    created_at: `2026-10-0${i + 1}T00:00:00Z`, position: null, availability: "indexed",
+    scene: { unit_id: `u-${id}`, film_id: "f", t_start: i, t_end: i + 1 },
+  }));
+  try {
+    await app.resolve(0, { bookmarks: records });
+    const pending = app.current.reorderBookmarks(["c", "a", "b"]); await app.flush();
+    assert.deepEqual([...app.current.bookmarks].map((b) => b.bookmark_id), ["c", "a", "b"], "the board reflows before the server answers");
+    assert.equal(app.requests[1].url, "http://api.invalid/bookmarks/order");
+    assert.equal(app.requests[1].init.method, "POST");
+    assert.deepEqual(JSON.parse(app.requests[1].init.body), { bookmark_ids: ["c", "a", "b"] });
+    await app.resolve(1, { bookmarks: [records[2], records[0], records[1]].map((b, i) => ({ ...b, position: i })) });
+    assert.equal(await pending, true);
+    assert.deepEqual([...app.current.bookmarks].map((b) => b.position), [0, 1, 2], "the stored places come back with the board");
+
+    const refused = app.current.reorderBookmarks(["b", "c", "a"]); await app.flush();
+    assert.deepEqual([...app.current.bookmarks].map((b) => b.bookmark_id), ["b", "c", "a"]);
+    app.requests[2].resolve({ ok: false, status: 404, json: async () => ({ detail: "Not found" }) });
+    assert.equal(await refused, false); await app.flush();
+    assert.deepEqual([...app.current.bookmarks].map((b) => b.bookmark_id), ["c", "a", "b"], "the order goes back");
+    assert.equal(app.current.error, "Not found");
+
+    const cleared = app.current.reorderBookmarks([]); await app.flush();
+    assert.deepEqual([...app.current.bookmarks].map((b) => b.bookmark_id), ["c", "b", "a"], "a cleared board is newest first at once");
+    await app.resolve(3, { bookmarks: [records[2], records[1], records[0]] });
+    assert.equal(await cleared, true);
+  } finally { app.dispose(); }
+});

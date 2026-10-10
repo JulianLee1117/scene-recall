@@ -9,6 +9,7 @@ POST /search/image?q=...            Reference composition + optional text
 GET /bookmarks                      List durable saved scenes
 PUT /bookmarks/{unit_id}            Save one indexed scene
 DELETE /bookmarks/{bookmark_id}     Remove one saved scene
+POST /bookmarks/order               Set the Saved board's order
 GET /unit/{unit_id}                 Full unit record from the LanceDB units table
 GET /media/keyframe/{shot_id}/{n}   Serve a WebP keyframe image
 GET /media/frame/{film_id}?t=...    Serve a saved source-moment thumbnail
@@ -669,6 +670,7 @@ def _bookmark_response(
             "evidence_timestamp": bookmark.evidence_timestamp,
             "frame_index": bookmark.frame_index,
             "created_at": created_at,
+            "position": bookmark.position,
             "availability": (
                 "source_only" if bookmark.film_id in titles else "missing"
             ),
@@ -713,6 +715,7 @@ def _bookmark_response(
         "evidence_timestamp": bookmark.evidence_timestamp,
         "frame_index": bookmark.frame_index,
         "created_at": created_at,
+        "position": bookmark.position,
         "availability": "indexed",
         "scene": scene,
     }
@@ -911,6 +914,15 @@ class BookmarkRequest(BaseModel):
         allow_inf_nan=False,
     )
     frame_index: int | None = Field(default=None, ge=0)
+
+
+class BookmarkOrderRequest(BaseModel):
+    """The Saved board's order: every listed bookmark, first to last. Empty clears it."""
+
+    bookmark_ids: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(
+        default_factory=list,
+        max_length=10000,
+    )
 
 
 _RECIPE_CLAUSE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
@@ -1466,6 +1478,25 @@ def delete_bookmark_endpoint(
         raise HTTPException(status_code=404, detail="Bookmark not found")
     _log_interaction(request, "unsave", context={"bookmark_id": bookmark_id})
     return Response(status_code=204)
+
+
+@app.post("/bookmarks/order")
+def order_bookmarks_endpoint(
+    request: Request,
+    payload: BookmarkOrderRequest,
+) -> dict[str, list[dict[str, Any]]]:
+    """Set the Saved board's own order and return the board in it.
+
+    POST rather than PUT: ``PUT /bookmarks/{unit_id}`` saves a scene.
+    """
+    from pipeline.index.snapshot import acquire_search_snapshot
+
+    if len(set(payload.bookmark_ids)) != len(payload.bookmark_ids):
+        raise HTTPException(status_code=422, detail="A bookmark can take only one place")
+    bookmarks: BookmarkStore = request.app.state.bookmarks
+    ordered = bookmarks.reorder(payload.bookmark_ids)
+    snapshot = acquire_search_snapshot(request.app.state.config, request.app.state.db)
+    return {"bookmarks": _bookmark_responses(request, ordered, snapshot)}
 
 
 class InteractionEvent(BaseModel):

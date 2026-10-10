@@ -12,11 +12,14 @@ import math
 from pathlib import Path
 import sqlite3
 import time
+from typing import Sequence
+from typing import Sequence
+from typing import Sequence
 from uuid import uuid4
 
 
 BOOKMARK_DATABASE_NAME = "scene-recall.sqlite3"
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,8 @@ class Bookmark:
     frame_index: int | None
     film_title_snapshot: str
     created_at_ms: int
+    # The board's own order; None until the user places this bookmark.
+    position: int | None = None
 
     @property
     def evidence_timestamp(self) -> float:
@@ -51,9 +56,12 @@ class BookmarkStore:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version == 0:
                 _create_schema_v2(connection)
-                connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+                _migrate_v2_to_v3(connection)
             elif version == 1:
                 _migrate_v1_to_v2(connection)
+                _migrate_v2_to_v3(connection)
+            elif version == 2:
+                _migrate_v2_to_v3(connection)
             elif version != _SCHEMA_VERSION:
                 raise RuntimeError(
                     "unsupported bookmark database schema "
@@ -123,15 +131,30 @@ class BookmarkStore:
         return _bookmark_from_row(row)
 
     def list_all(self) -> list[Bookmark]:
-        """Return every bookmark, newest first."""
+        """Return every bookmark in board order: saves the user has not placed
+        yet come first, newest first, then the user's own order."""
         with self._connect() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM bookmarks
-                ORDER BY created_at_ms DESC, bookmark_id
+                ORDER BY position IS NOT NULL, position, created_at_ms DESC, bookmark_id
                 """
             ).fetchall()
         return [_bookmark_from_row(row) for row in rows]
+
+    def reorder(self, bookmark_ids: Sequence[str]) -> list[Bookmark]:
+        """Give the listed bookmarks their places in this sequence; an empty
+        sequence clears the board's order. Unknown ids are ignored and
+        unlisted bookmarks keep their places."""
+        with self._connect() as connection:
+            if not bookmark_ids:
+                connection.execute("UPDATE bookmarks SET position = NULL")
+            else:
+                connection.executemany(
+                    "UPDATE bookmarks SET position = ? WHERE bookmark_id = ?",
+                    [(index, bookmark_id) for index, bookmark_id in enumerate(bookmark_ids)],
+                )
+        return self.list_all()
 
     def delete(self, bookmark_id: str) -> bool:
         """Delete one bookmark and report whether it existed."""
@@ -175,6 +198,42 @@ def _create_schema_v2(connection: sqlite3.Connection) -> None:
         ON bookmarks (created_at_ms DESC, bookmark_id)
         """
     )
+
+
+def _migrate_v2_to_v3(connection: sqlite3.Connection) -> None:
+    """Add the board's own order beside creation time (v3)."""
+    connection.execute("ALTER TABLE bookmarks ADD COLUMN position INTEGER")
+    connection.execute(
+        """
+        CREATE INDEX bookmarks_position_idx
+        ON bookmarks (position, created_at_ms DESC, bookmark_id)
+        """
+    )
+    connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+
+
+def _migrate_v2_to_v3(connection: sqlite3.Connection) -> None:
+    """Add the board's own order beside creation time (v3)."""
+    connection.execute("ALTER TABLE bookmarks ADD COLUMN position INTEGER")
+    connection.execute(
+        """
+        CREATE INDEX bookmarks_position_idx
+        ON bookmarks (position, created_at_ms DESC, bookmark_id)
+        """
+    )
+    connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+
+
+def _migrate_v2_to_v3(connection: sqlite3.Connection) -> None:
+    """Add the board's own order beside creation time (v3)."""
+    connection.execute("ALTER TABLE bookmarks ADD COLUMN position INTEGER")
+    connection.execute(
+        """
+        CREATE INDEX bookmarks_position_idx
+        ON bookmarks (position, created_at_ms DESC, bookmark_id)
+        """
+    )
+    connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
 
 def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
@@ -243,7 +302,7 @@ def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
         migrated_rows,
     )
     connection.execute("DROP TABLE bookmarks_v1")
-    connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+    connection.execute("PRAGMA user_version = 2")
 
 
 def _bookmark_from_row(row: sqlite3.Row) -> Bookmark:
@@ -259,4 +318,5 @@ def _bookmark_from_row(row: sqlite3.Row) -> Bookmark:
         ),
         film_title_snapshot=str(row["film_title_snapshot"]),
         created_at_ms=int(row["created_at_ms"]),
+        position=int(row["position"]) if row["position"] is not None else None,
     )

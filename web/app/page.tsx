@@ -214,6 +214,7 @@ export default function Home() {
     error: bookmarkError,
     toggleBookmark,
     removeBookmark,
+    reorderBookmarks,
   } = useBookmarks();
 
   const cancelPendingScopeSearch = useCallback(() => {
@@ -1018,6 +1019,7 @@ export default function Home() {
           disabledUseFacets={disabledUseFacets}
           onToggleBookmark={(shot) => void toggleBookmark(shot)}
           onRemoveBookmark={(bookmark) => void removeBookmark(bookmark)}
+          onReorder={reorderBookmarks}
         />
       )}
 

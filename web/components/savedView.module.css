@@ -1,3 +1,43 @@
+/* The Saved board: a justified moodboard with its own order, a size and an arrangement. */
+.header { align-items: center; flex-wrap: wrap; gap: 12px 24px; }
+.heading { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.tools { display: flex; align-items: center; gap: 16px; }
+
+/* One slider, quiet: a hairline track and a gold thumb. */
+.size { display: inline-flex; align-items: center; gap: 10px; color: var(--page-muted); font-size: 12px; }
+.size input { width: 120px; height: 20px; margin: 0; appearance: none; background: transparent; cursor: pointer; }
+.size input::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: #3a3833; }
+.size input::-moz-range-track { height: 2px; border-radius: 1px; background: #3a3833; }
+.size input::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -5px; appearance: none; border: 0; border-radius: 50%; background: var(--page-accent); }
+.size input::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--page-accent); }
+.size input:focus-visible { border-radius: 2px; outline: 2px solid var(--page-accent); outline-offset: 4px; }
+
+/* What just happened to the order, with the way back; it lives in the header's gap. */
+.notice { display: flex; align-items: center; gap: 10px; margin: -14px 0 14px; color: var(--page-muted); font-size: 12px; }
+.notice:empty { display: none; }
+.notice button { padding: 0; border: 0; background: none; color: var(--page-accent); font: inherit; font-size: 12px; cursor: pointer; }
+.notice button:hover { text-decoration: underline; }
+
+.group + .group { margin-top: 28px; }
+.groupTitle { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; color: var(--page-text); font-size: 13px; font-weight: 550; }
+.groupTitle span { color: var(--page-muted); font-size: 12px; font-weight: 400; }
+
+/* Reordering: the lifted tile floats under the pointer; the drop place is a gold edge. */
+.tile { position: relative; touch-action: pan-y pinch-zoom; }
+.movable :global(.result-card-primary) { cursor: grab; }
+.reordering { cursor: grabbing; user-select: none; }
+.reordering :global(.result-card) { pointer-events: none; }
+.lifted { z-index: 3; opacity: 0.85; box-shadow: 0 18px 40px #000000aa; }
+.lifted :global(.result-card) { transition: none; }
+/* A lifted scene is a picture in the hand, not a card with controls. */
+.lifted :global(.result-card-overlay),
+.lifted :global(.result-card-actions),
+.lifted :global(.result-card-marks) { visibility: hidden; }
+.dropBefore::before,
+.dropAfter::after { content: ""; position: absolute; top: 0; bottom: 0; z-index: 4; width: 3px; border-radius: 2px; background: var(--page-accent); }
+.dropBefore::before { left: -2px; }
+.dropAfter::after { right: -2px; }
+
 .page :global(.saved-grid) { padding: 0 0 16px; }
 .page :global(.saved-unavailable) { padding: 12px; border-color: var(--page-line); background: var(--page-surface); }
 .page :global(.saved-unavailable span) { overflow: hidden; color: var(--page-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -7,8 +47,14 @@
 .page :global(.saved-unavailable button:focus-visible) { outline: 2px solid var(--page-accent); outline-offset: 3px; }
 .page :global(.saved-unavailable button:disabled) { opacity: .45; cursor: default; }
 @media (max-width: 600px) {
+  .tools { gap: 12px; }
+  .size input { width: 90px; }
+  .notice { margin-top: -8px; }
   .page :global(.saved-unavailable) { padding: 10px; gap: 8px; }
   .page :global(.saved-unavailable span) { font-size: 11px; }
   .page :global(.saved-unavailable strong) { font-size: 13px; }
   .page :global(.saved-unavailable button) { min-height: 44px; padding: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lifted { box-shadow: none; }
 }

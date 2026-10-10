@@ -21,7 +21,7 @@ type Scene = Pick<SearchResult, "unit_id" | "film_id">;
  * Measures a grid and lays its scenes out in even justified rows. Returns no
  * layout until the grid has a width (hidden grids keep their last layout).
  */
-export function useJustifiedRows(scenes: Scene[], size: RowSize = "medium") {
+export function useJustifiedRows(scenes: Scene[], size: RowSize = "medium", scale = 1) {
   const ref = useRef<HTMLElement>(null);
   const { tileStyle, learnAspect, aspectOf } = useFrameAspects();
   const [frame, setFrame] = useState<GridFrame | null>(null);
@@ -37,7 +37,7 @@ export function useJustifiedRows(scenes: Scene[], size: RowSize = "medium") {
       const style = window.getComputedStyle(grid);
       const next: GridFrame = {
         width: bounds.width - (Number.parseFloat(style.paddingLeft) || 0) - (Number.parseFloat(style.paddingRight) || 0),
-        rowHeight: rowHeightFor(window.innerWidth, size),
+        rowHeight: Math.round(rowHeightFor(window.innerWidth, size) * scale),
         room: window.innerHeight - bounds.top - VIEWPORT_BOTTOM_GUTTER,
       };
       setFrame((current) =>
@@ -53,7 +53,7 @@ export function useJustifiedRows(scenes: Scene[], size: RowSize = "medium") {
       window.removeEventListener("resize", measure);
     };
     // Re-attach once rows replace the unmeasured list element.
-  }, [hasScenes, size, frame !== null]);
+  }, [hasScenes, size, scale, frame !== null]);
 
   const layout: RowLayout | null = frame
     ? layoutRows(scenes.map((scene) => cssAspect(aspectOf(scene))), frame.width, frame.rowHeight, ROW_GAP)

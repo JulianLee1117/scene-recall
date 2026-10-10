@@ -197,6 +197,12 @@ half-open ranges, so an exact shared boundary belongs to the following unit;
 the absolute final boundary of a film deterministically falls back to its last
 unit. Missing or temporarily unavailable source/index data leaves an explicit
 unavailable bookmark rather than silently rebinding or deleting user state.
+The Saved board has one durable order of its own, a nullable position on each
+bookmark: unplaced saves list first, newest first, then the user's order.
+`POST /bookmarks/order` sets it from a list of ids, or clears it when empty.
+Newest and By film are views in the browser that never write; a view becomes
+the order only by an explicit keep. Tile size and the chosen view stay in the
+browser.
 
 The shared display-moment resolver governs visual playback and Save (ADR-0118).
 It respects a Saved timestamp first, then the frame actually displayed. A frame
