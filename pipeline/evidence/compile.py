@@ -92,7 +92,9 @@ def _clean(text: Any) -> str:
 
 
 def _sentence(text: Any) -> str:
-    return _clean(text).rstrip(".") + "."
+    text = _clean(text).rstrip(".")
+    # A title that already ends a sentence keeps its own mark: "You Talkin' to Me?" not "...Me?."
+    return text if text.rstrip("\"'”’)").endswith(("?", "!", "…")) else text + "."
 
 
 def story_view_text(story: dict[str, Any], scene: dict[str, Any] | None, iconic_note: str, famous_line: str | None) -> str:

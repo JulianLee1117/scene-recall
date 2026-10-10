@@ -34,6 +34,13 @@ def _film(title):
     return FilmRef("0" * 64, title, Path("x.mkv"), 0.0, 0.0)
 
 
+def test_view_sentences_keep_their_own_closing_mark():
+    assert compiler._sentence("He walks away") == "He walks away."
+    assert compiler._sentence("He walks away.. ") == "He walks away."
+    assert compiler._sentence("You Talkin' to Me?") == "You Talkin' to Me?"
+    assert compiler._sentence('She shouts "Run!"') == 'She shouts "Run!"'
+
+
 def test_choose_film_entity_prefers_matching_title_and_year():
     candidates = {
         "Q1": _entity("Q1", "Singin' in the Rain", 1952),
