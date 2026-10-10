@@ -1717,10 +1717,17 @@ details[open] > summary:not(:has(svg))::before { transform: rotate(45deg); }
   display: flex;
   flex: 1;
   flex-direction: column;
+  /* So the picture box inside can shrink to the tile as well as grow to it. */
+  min-height: 0;
 }
 
+/* The picture box fills whatever height the tile gives the card, so the
+   hover shade (inset in the picture box) always covers the whole tile. A
+   picture whose shape differs from the tile's sits centred within, on the
+   picture box's dark ground, never beside a strip of card background. */
 .result-grid-item > .result-card .result-card-media {
-  flex: none;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .result-grid-item > .saved-unavailable {
