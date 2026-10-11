@@ -28,6 +28,23 @@ export function hoverPreviewUrl(shot: SearchResult): string | null {
     && end - start >= 1 && start <= anchor && anchor < end ? preview : null;
 }
 
+/**
+ * Where in the hover preview clip the displayed moment lies, in seconds from
+ * the clip's start, so playback begins on the picture the card shows. Zero
+ * when the backend has not said where the clip starts, or when the moment
+ * falls outside the clip (then the clip plays from its start).
+ */
+export function previewOffset(shot: SearchResult): number {
+  const { preview_start: start, preview_end: end } = shot;
+  if (!validTime(start) || !validTime(end) || end <= start) return 0;
+  const moment = displayMoment(shot);
+  if (moment < start || moment > end - PREVIEW_TAIL) return 0;
+  return Math.round((moment - start) * 1000) / 1000;
+}
+
+/** A moment this close to the clip's end would leave nothing to play. */
+const PREVIEW_TAIL = 0.25;
+
 /** Preserve the visible moment; a frame ID is only a hint when it names that moment. */
 export function bookmarkAnchor(shot: SearchResult): { evidence_timestamp: number; frame_index: number | null } {
   const timestamp = displayMoment(shot);

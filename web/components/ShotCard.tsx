@@ -11,7 +11,7 @@ import { hoverEvidence, matchedWordsEvidence, type MatchColumn } from "@/lib/mat
 import MatchBreakdown from "./MatchBreakdown";
 import type { RecipeMatchFacet, SearchResult } from "@/types/api";
 import { displayTitle, formatTime, filmLabel } from "@/lib/format";
-import { displayMoment, hoverPreviewUrl } from "@/lib/resultMoment";
+import { displayMoment, hoverPreviewUrl, previewOffset } from "@/lib/resultMoment";
 
 interface ShotCardProps {
   shot: SearchResult;
@@ -72,21 +72,26 @@ export default function ShotCard({
   );
   const pointerDrag = useScenePointerDrag(canDragSource ? sourceDraftFromShot("scene", shot) : null, { onDragging: setDragging });
 
+  // The preview starts on the picture the card shows, not at the clip's start.
+  const previewStart = previewOffset(shot);
   const handleMouseEnter = useCallback(() => {
     setHovered(true);
-    videoRef.current?.play().catch(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = previewStart;
+    video.play().catch(() => {
       setPlayingPreview((current) => current === previewUrl ? null : current);
     });
-  }, [previewUrl]);
+  }, [previewUrl, previewStart]);
 
   const handleMouseLeave = useCallback(() => {
     setHovered(false);
     setPlayingPreview(null);
     if (videoRef.current) {
       videoRef.current.pause();
-      videoRef.current.currentTime = 0;
+      videoRef.current.currentTime = previewStart;
     }
-  }, []);
+  }, [previewStart]);
 
   const handleClick = useCallback(() => {
     if (suppressClickRef.current) return;

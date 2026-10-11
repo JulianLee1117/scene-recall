@@ -35,6 +35,16 @@ test("Saved uses its durable time even if the nearest indexed frame or current h
   assert.deepEqual(plain(moments.bookmarkAnchor(saved)), { evidence_timestamp: 1104.4, frame_index: null });
 });
 
+test("the hover preview starts on the displayed moment when the clip holds it", () => {
+  const clip = { ...floating, preview_start: 1103, preview_end: 1107 };
+  assert.equal(moments.previewOffset(clip), 2, "the hero at 1105 sits two seconds into a clip from 1103");
+  assert.equal(moments.previewOffset({ ...clip, evidence_timestamp: 1104.4 }), 1.4, "a Saved moment likewise");
+  assert.equal(moments.previewOffset({ ...clip, evidence_timestamp: 1102.5 }), 0, "before the clip: it plays from its start");
+  assert.equal(moments.previewOffset({ ...clip, evidence_timestamp: 1106.9 }), 0, "too near the clip's end to play anything");
+  assert.equal(moments.previewOffset(floating), 0, "an older backend says nothing about the clip");
+  assert.equal(moments.previewOffset({ ...clip, preview_end: 1103 }), 0, "an empty clip");
+});
+
 test("a frame hint is accepted only for the same timestamp, including clause-owned frames", () => {
   const source = { ...floating, matches: [{ evidence: { type: "frame", frame_index: 0, timestamp: 1105 } }] };
   assert.deepEqual(plain(moments.bookmarkAnchor(source)), { evidence_timestamp: 1105, frame_index: 0 });

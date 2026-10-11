@@ -208,7 +208,11 @@ reads the film year from the title or id. Tile size and the chosen view stay
 in the browser.
 
 The shared display-moment resolver governs visual playback and Save (ADR-0118).
-It respects a Saved timestamp first, then the frame actually displayed. A frame
+It respects a Saved timestamp first, then the frame actually displayed. The
+hover preview starts on that moment too: results and saved scenes carry the
+served preview clip's span in film seconds (`preview_start`, `preview_end`,
+computed by the same rule that rendered the clip), and the card seeks to the
+displayed moment when it lies inside the clip, else plays from the clip's start. A frame
 index is only a hint when its real timestamp agrees with that moment. Hydration
 keeps the durable timestamp distinct from the indexed frame's actual timestamp.
 If no indexed still matches, `GET /media/frame/{film_id}?t=...` reads a still

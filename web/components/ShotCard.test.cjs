@@ -55,6 +55,7 @@ function harness(initial) {
     find: (type) => nodes(output).find((node) => node.type === type),
     event(type, event) { nodes(output).find((node) => node.type === type).props[event](); render(); },
     update(next) { props.shot = next; render(); },
+    video: videoElement,
   };
 }
 
@@ -84,6 +85,21 @@ test("Saved hover keeps its exact still when the current preview shows another p
     assert.match(app.find("button").props["aria-label"], /Chiron floats/,
       "the accessible description follows the same character-aware hover text");
   }
+});
+
+test("a hover seeks the preview to the moment the card shows, and leaving puts it back there", () => {
+  const app = harness({ ...shot, preview_start: 1103, preview_end: 1107 });
+  app.event("article", "onMouseEnter");
+  assert.equal(app.video.currentTime, 2, "the hero at 1105 in a clip from 1103");
+  app.video.currentTime = 3.5;
+  app.event("article", "onMouseLeave");
+  assert.equal(app.video.currentTime, 2, "ready for the next hover");
+  const saved = harness({ ...shot, evidence_timestamp: 1104.4, thumbnail_url: "/media/frame/moonlight?t=1104.4", preview_start: 1103, preview_end: 1107 });
+  saved.event("article", "onMouseEnter");
+  assert.equal(saved.video.currentTime, 1.4, "a Saved scene starts on its saved moment");
+  const older = harness(shot);
+  older.event("article", "onMouseEnter");
+  assert.equal(older.video.currentTime, 0, "an older backend: the clip plays from its start");
 });
 
 test("Saved retains previews for its current visual span and never reuses another asset's playback state", () => {

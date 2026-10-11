@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Iterable, TypeVar
 
+from pipeline.evidence.hero import ingest_preview_window, preview_window
 from pipeline.evidence.tables import SCENES, SHOT_EVIDENCE
 
 T = TypeVar("T")
@@ -141,6 +142,7 @@ def group_by_scene(items: list[T], evidence: dict[str, dict[str, Any]], *, unit_
 
 def decorate(result: dict[str, Any], evidence: dict[str, Any] | None, scene: dict[str, Any] | None) -> dict[str, Any]:
     """Add hero frame, badges, story and scene context to one API result (in place)."""
+    _preview_span(result, evidence)
     if not evidence:
         return result
     unit_id = str(result.get("unit_id") or "")
@@ -178,6 +180,30 @@ def decorate(result: dict[str, Any], evidence: dict[str, Any] | None, scene: dic
                            "summary": scene.get("summary") or "", "t_start": scene.get("t_start"),
                            "t_end": scene.get("t_end"), "shot_count": scene.get("shot_count")}
     return result
+
+
+def _preview_span(result: dict[str, Any], evidence: dict[str, Any] | None) -> None:
+    """Where the served hover preview starts and ends in film seconds, so a card can start on its displayed moment.
+
+    The ingest clip sits around the shot's midpoint; a compiled focus preview
+    (``preview_path``) sits around the peak inside the focus span, by the same
+    rule that rendered it.
+    """
+    try:
+        t_start, t_end = float(result["t_start"]), float(result["t_end"])
+    except (KeyError, TypeError, ValueError):
+        return
+    if not t_end > t_start:
+        return
+    window = ingest_preview_window(t_start, t_end)
+    focused_clip = bool(evidence and evidence.get("preview_path")
+                        and evidence.get("focus_start") is not None and evidence.get("focus_end") is not None)
+    if focused_clip:
+        focused = preview_window(t_start, t_end, (float(evidence["focus_start"]), float(evidence["focus_end"])),
+                                 evidence.get("peak_time"))
+        if focused is not None:
+            window = focused
+    result["preview_start"], result["preview_end"] = round(window[0], 3), round(window[1], 3)
 
 
 def hero_url(unit_id: str, evidence: dict[str, Any]) -> str:

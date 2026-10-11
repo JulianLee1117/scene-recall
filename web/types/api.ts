@@ -171,6 +171,9 @@ export interface SearchResult {
   /** Exact frame displayed by keyframe_url and used by source recipe clauses. */
   keyframe_index: number;
   preview_url: string;
+  /** The span of the hover preview clip in film seconds, from newer backends. */
+  preview_start?: number;
+  preview_end?: number;
   /** One-based rank in the backend's final result order. */
   rank?: number;
   /** Ranking internals are returned by newer backends and hidden by default. */

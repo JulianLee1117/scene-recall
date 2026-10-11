@@ -110,6 +110,22 @@ def test_query_signals_lift_satisfying_evidence_and_leave_unknowns_neutral():
     assert parsed.named_films() == {"matrix"}                               # a character names its film
 
 
+def test_decorate_says_where_the_hover_preview_clip_starts_and_ends():
+    plain = {"unit_id": "u", "t_start": 10.0, "t_end": 30.0, "preview_url": "/media/preview/u"}
+    priors.decorate(plain, None, None)
+    assert (plain["preview_start"], plain["preview_end"]) == (18.0, 22.0), "four seconds around the shot's midpoint"
+    short = {"unit_id": "u", "t_start": 10.0, "t_end": 12.0}
+    priors.decorate(short, None, None)
+    assert (short["preview_start"], short["preview_end"]) == (10.0, 12.0), "a short shot is its own clip"
+    focused = {"unit_id": "u", "t_start": 10.0, "t_end": 30.0}
+    priors.decorate(focused, {"focus_start": 24.0, "focus_end": 30.0, "peak_time": 27.0, "preview_path": "u.mp4"}, None)
+    assert (focused["preview_start"], focused["preview_end"]) == (25.0, 29.0), "a focus preview sits around the peak"
+    kept = {"unit_id": "u", "t_start": 10.0, "t_end": 30.0}
+    priors.decorate(kept, {"focus_start": 15.0, "focus_end": 25.0, "preview_path": "u.mp4"}, None)
+    assert (kept["preview_start"], kept["preview_end"]) == (18.0, 22.0), "the ingest clip already fits that span"
+    assert "preview_start" not in priors.decorate({"unit_id": "u"}, None, None), "no times, no span"
+
+
 def test_decorate_carries_the_focus_span_and_keys_a_replaced_preview():
     evidence = {"focus_start": 3775.1, "focus_end": 3781.07, "preview_path": "f/evidence/hero/p/u.mp4"}
     result = {"unit_id": "u", "preview_url": "/media/preview/u", "keyframe_url": "/media/keyframe/u/1"}
