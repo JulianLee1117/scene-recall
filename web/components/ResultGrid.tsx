@@ -32,6 +32,8 @@ interface ResultGridProps {
   size?: RowSize;
   /** Settings shaping these results, shown beside the count (fixed height: nothing moves). */
   status?: ReactNode;
+  /** On the way back to these results, how far down the page was: rows to that depth show at once. */
+  restoreDepth?: number;
 }
 
 
@@ -53,6 +55,7 @@ export default function ResultGrid({
   showDetails,
   size = "medium",
   status,
+  restoreDepth = 0,
 }: ResultGridProps) {
   const { ref: gridRef, frame, layout, tileStyle, learnAspect } = useJustifiedRows(results, size);
   // How many scenes the user has seen; a resize never hides them again.
@@ -67,7 +70,7 @@ export default function ResultGrid({
   if (layout && frame) {
     let filled = 0;
     let rows = 0;
-    while (rows < layout.heights.length && filled < frame.room) filled += layout.heights[rows++] + ROW_GAP;
+    while (rows < layout.heights.length && filled < frame.room + restoreDepth) filled += layout.heights[rows++] + ROW_GAP;
     minRows = Math.max(MIN_VISIBLE_ROWS, rows);
   }
   const shown = layout

@@ -269,6 +269,9 @@ The explanations stay available when the API is offline. Guide content lives
 in `web/features/info/guide.ts`, separate from its UI and the processing code.
 
 One bar tops every page: **Search**, **Saved**, **Films**, **Info** and **Lab**.
+Back and Forward step through searches, tabs and the player, each where it
+was left: Back closes the player first, and after a **Related** search it
+returns to the scene it came from.
 **Saved** is a board: drag scenes to place them (press and hold on a phone),
 the slider resizes the rows, and **Arrange** shows the board in your order,
 newest first, by colour (a gradient around the wheel, then the greys from

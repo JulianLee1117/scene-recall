@@ -31,6 +31,9 @@ vm.runInNewContext(compile("../lib/viewPrefs.ts"), { exports: viewPrefs, window:
 const compiled = compile("page.tsx");
 const compiledMovieInput = compile("../components/MovieSearchInput.tsx");
 const compiledAppBar = compile("../components/AppBar.tsx");
+const historyLib = {};
+vm.runInNewContext(compile("../lib/searchHistory.ts"), { exports: historyLib });
+const compiledHistoryHook = compile("../hooks/useSearchHistory.ts");
 const result = (id, main = false) => ({ unit_id: id, film_id: "film", caption: "A scene", matches: [{ clause_id: "composition", facet: "composition" }, ...(main ? [{ clause_id: "main", facet: "all" }] : [])] });
 const response = (results, hasMore = false) => ({ results, has_more: hasMore, next_limit: hasMore ? 96 : null, source_evidence: [] });
 
@@ -124,7 +127,7 @@ test("Escape dismisses a movie suggestion without editing the query or selecting
   } finally { app.dispose(); }
 });
 
-function harness({ search = "", replaceState = () => {} } = {}) {
+function harness({ search = "", replaceState = () => {}, historyState = null } = {}) {
   const hooks = [], requests = [];
   const timers = new Map();
   let nextTimerId = 0;
@@ -162,6 +165,24 @@ function harness({ search = "", replaceState = () => {} } = {}) {
   const bookmarks = { bookmarks: [], bookmarkByUnit: new Map(), pendingUnitIds: new Set(), loading: false, error: null };
   const speech = { status: "idle", error: null, isSupported: false, cancel() {}, clearError() {} };
   const referenceSearch = { facet: null, query: "", results: [], close() {} };
+  // A browser history: Back and Forward fire popstate a moment later, as in the browser.
+  const historyEntries = [{ state: historyState }];
+  let historyIndex = 0;
+  const listeners = new Map();
+  const traverse = (step) => {
+    const next = historyIndex + step;
+    if (next < 0 || next >= historyEntries.length) return;
+    historyIndex = next;
+    queueMicrotask(() => listeners.get("popstate")?.forEach((listener) => listener()));
+  };
+  const browserHistory = {
+    scrollRestoration: "auto",
+    get state() { return historyEntries[historyIndex].state; },
+    pushState(data) { historyEntries.splice(historyIndex + 1, historyEntries.length, { state: data }); historyIndex += 1; },
+    replaceState(data, _title, url) { historyEntries[historyIndex] = { state: data }; if (url !== undefined) replaceState(url); },
+    back: () => traverse(-1),
+  };
+  const historyHook = {};
   const exports = {};
   const movieInputExports = {};
   const appBarExports = {};
@@ -172,7 +193,9 @@ function harness({ search = "", replaceState = () => {} } = {}) {
     fetch(url, init) { return new Promise((resolve) => requests.push({ url, init, resolve })); },
     window: {
       location: { search },
-      history: { replaceState: (_state, _title, url) => replaceState(url) },
+      history: browserHistory,
+      addEventListener(type, listener) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(listener); },
+      removeEventListener(type, listener) { listeners.get(type)?.delete(listener); },
       scrollY: 0,
       scrollTo({ top }) { this.scrollY = top; },
       clearTimeout(id) { timers.delete(id); },
@@ -203,6 +226,8 @@ function harness({ search = "", replaceState = () => {} } = {}) {
       if (name === "@/hooks/useBookmarks") return { useBookmarks: () => bookmarks };
       if (name === "@/hooks/useSpeechRecognition") return { useSpeechRecognition: () => speech };
       if (name === "@/hooks/useFacetSourceSearch") return { useFacetSourceSearch: () => referenceSearch };
+      if (name === "@/hooks/useSearchHistory") return historyHook;
+      if (name === "@/lib/searchHistory") return historyLib;
       if (name === "next/link") return { default: "Link" };
       if (name === "@/components/AppBar") return appBarExports;
       if (name.endsWith(".module.css")) return { default: new Proxy({}, { get: (_, key) => key }) };
@@ -212,6 +237,7 @@ function harness({ search = "", replaceState = () => {} } = {}) {
   };
   vm.runInNewContext(compiledMovieInput, { ...context, exports: movieInputExports });
   vm.runInNewContext(compiledAppBar, { ...context, exports: appBarExports });
+  vm.runInNewContext(compiledHistoryHook, { ...context, exports: historyHook });
   vm.runInNewContext(compiled, context);
   function render() {
     if (disposed) return;
@@ -226,6 +252,9 @@ function harness({ search = "", replaceState = () => {} } = {}) {
     async setFilms(next) { films = [...next]; schedule(); await flush(); },
     async runTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach((callback) => callback()); await flush(); },
     requests, flush, find,
+    async back() { traverse(-1); await flush(); },
+    async forward() { traverse(1); await flush(); },
+    historyLength: () => historyEntries.length,
     setScroll(top) { context.window.scrollY = top; },
     get scrollY() { return context.window.scrollY; },
     get state() { return output; },
@@ -775,5 +804,157 @@ test("a Lab link to a view lands on that view and leaves the address at /", asyn
     assert.deepEqual(replaced, ["/"]);
     assert.equal(app.find((node) => node.type === "Link" && text(node) === "Lab").props.href, "/lab");
     assert.equal(app.requests.length, 0);
+    app.find((node) => node.type === "button" && text(node) === "Search").props.onClick();
+    await app.flush();
+    await app.back();
+    assert.ok(app.find((node) => node.type === "SavedView"), "Back returns to the view it landed on");
   } finally { app.dispose(); }
+});
+
+const ids = (results) => results.map((shot) => shot.unit_id);
+const inputValue = (app) => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props.value;
+/** Type a search and submit it. */
+async function submit(app, value) {
+  app.find((node) => node.props?.["aria-label"] === "Describe a scene").props.onChange({ target: { value } });
+  await app.flush();
+  app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
+  await app.flush();
+}
+
+test("Back returns to the earlier search as it was and where it was, without searching again; Forward returns", async () => {
+  const app = harness();
+  try {
+    await submit(app, "rain at night");
+    await app.resolve(0, response([result("a"), result("b")], true));
+    app.setScroll(640);
+    await submit(app, "snow");
+    await app.resolve(1, response([result("s")]));
+    assert.equal(app.historyLength(), 3, "home, rain, snow");
+    app.setScroll(90);
+    await app.back();
+    assert.equal(inputValue(app), "rain at night");
+    assert.deepEqual(ids(app.grid().props.results), ["a", "b"]);
+    assert.equal(app.grid().props.hasMore, true, "Look deeper continues from there");
+    assert.equal(app.grid().props.restoreDepth, 640, "rows down to where the page was show at once");
+    assert.equal(app.scrollY, 640);
+    assert.equal(app.requests.length, 2, "from memory: no search");
+    await app.forward();
+    assert.equal(inputValue(app), "snow");
+    assert.deepEqual(ids(app.grid().props.results), ["s"]);
+    assert.equal(app.scrollY, 90);
+    await app.back();
+    await app.back();
+    assert.equal(inputValue(app), "", "the first page is home");
+  } finally { app.dispose(); }
+});
+
+test("Look deeper stays on its page, and a failed search is a page that is searched again", async () => {
+  const app = harness();
+  try {
+    await submit(app, "rain at night");
+    await app.resolve(0, response([result("a"), result("b")], true));
+    app.grid().props.onRequestMore();
+    await app.flush();
+    await app.resolve(1, response([result("a"), result("b"), result("c")]));
+    await submit(app, "snow");
+    app.requests[2].resolve({ ok: false, status: 503, json: async () => ({ detail: "Library is being published" }) });
+    await app.flush();
+    assert.equal(app.historyLength(), 3, "home, rain with its deeper results, the failed snow");
+    await app.back();
+    assert.deepEqual(ids(app.grid().props.results), ["a", "b", "c"]);
+    assert.doesNotMatch(text(app.state), /Library is being published/);
+    assert.equal(app.requests.length, 3);
+    await app.forward();
+    assert.equal(app.requests.length, 4, "the failed search is searched again");
+    assert.equal(JSON.parse(app.requests[3].init.body).clauses[0].text, "snow");
+  } finally { app.dispose(); }
+});
+
+test("Back closes the player first, and a Related search returns to the scene it came from", async () => {
+  const app = harness();
+  const modal = () => app.find((node) => node.type === "VideoModal");
+  try {
+    await submit(app, "rain at night");
+    const scene = { ...result("a"), keyframe_index: 4, t_start: 12 };
+    await app.resolve(0, response([scene, result("b")]));
+    app.setScroll(300);
+    app.grid().props.onShotClick(scene);
+    await app.flush();
+    assert.equal(modal().props.shot, scene);
+    modal().props.onClose();
+    assert.equal(app.historyLength(), 3);
+    await app.flush();
+    assert.equal(modal(), undefined);
+    app.grid().props.onShotClick(scene);
+    await app.flush();
+    assert.equal(app.historyLength(), 3, "opening it again replaces the page closing stepped back over");
+    modal().props.onUseInSearch(scene, "scene");
+    await app.flush();
+    // Each opened scene also logs a play; the Related search is the last request.
+    assert.match(app.requests.at(-1).url, /\/search\/recipe$/);
+    await app.resolve(app.requests.length - 1, response([result("r")]));
+    assert.deepEqual(ids(app.grid().props.results), ["r"]);
+    assert.equal(modal(), undefined);
+    await app.back();
+    assert.equal(inputValue(app), "rain at night");
+    assert.deepEqual(ids(app.grid().props.results), ["a", "b"]);
+    assert.equal(modal().props.shot, scene, "the scene it came from is open again");
+    assert.equal(app.scrollY, 300);
+    await app.back();
+    assert.equal(modal(), undefined, "then Back closes the player");
+    assert.deepEqual(ids(app.grid().props.results), ["a", "b"]);
+  } finally { app.dispose(); }
+});
+
+test("tabs are pages: Back from Saved returns to the search it left, where it was", async () => {
+  const app = harness();
+  const tab = (label) => app.find((node) => node.type === "button" && text(node) === label);
+  try {
+    await submit(app, "rain at night");
+    await app.resolve(0, response([result("a")]));
+    app.setScroll(500);
+    tab("Saved").props.onClick();
+    await app.flush();
+    assert.ok(app.find((node) => node.type === "SavedView"));
+    assert.equal(app.scrollY, 0);
+    await app.back();
+    assert.equal(app.find((node) => node.type === "SavedView"), undefined);
+    assert.equal(app.scrollY, 500);
+    assert.equal(inputValue(app), "rain at night");
+    assert.equal(app.requests.length, 1);
+    await app.forward();
+    assert.ok(app.find((node) => node.type === "SavedView"));
+  } finally { app.dispose(); }
+});
+
+test("Home is a page, and a reload shows its screen again", async () => {
+  const app = harness();
+  try {
+    await submit(app, "rain at night");
+    await app.resolve(0, response([result("a")]));
+    app.find((node) => node.props?.className?.startsWith?.("search-wordmark")).props.onClick();
+    await app.flush();
+    assert.equal(inputValue(app), "");
+    await app.back();
+    assert.equal(inputValue(app), "rain at night");
+    assert.deepEqual(ids(app.grid().props.results), ["a"]);
+  } finally { app.dispose(); }
+
+  // A reload keeps the entry but not the results: the search runs again.
+  const snapshot = { draft: { text: "rain at night", mentions: [] }, drafts: {}, filmFilters: {}, shotFilters: {}, image: null };
+  const reloaded = harness({ historyState: { sceneRecallV1: { search: { id: "s1", snapshot }, tab: "search", shot: null } } });
+  try {
+    await reloaded.flush();
+    assert.equal(inputValue(reloaded), "rain at night");
+    assert.equal(JSON.parse(reloaded.requests[0].init.body).clauses[0].text, "rain at night");
+  } finally { reloaded.dispose(); }
+
+  // An uploaded image is not kept: the page asks for it again.
+  const image = { facet: "look", label: "still.jpg", size: 2048 };
+  const upload = harness({ historyState: { sceneRecallV1: { search: { id: "s2", snapshot: { ...snapshot, draft: { text: "", mentions: [] }, image } }, tab: "search", shot: null } } });
+  try {
+    await upload.flush();
+    assert.equal(upload.requests.length, 0);
+    assert.match(text(upload.state), /Add the image again to repeat this search/);
+  } finally { upload.dispose(); }
 });

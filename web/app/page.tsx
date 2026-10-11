@@ -27,6 +27,8 @@ import { useSearchFilms } from "@/hooks/useSearchFilms";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useShotFacets } from "@/hooks/useShotFacets";
 import { useGlide } from "@/hooks/useGlide";
+import { useSearchHistory } from "@/hooks/useSearchHistory";
+import type { HistoryScreen, HistoryView, SearchOutcome, SearchSnapshot } from "@/lib/searchHistory";
 import { type MovieSuggestion } from "@/lib/movieSuggestions";
 import { EMPTY_MOVIE_DRAFT, acceptMovieMention, compileMovieDraft, editMovieText, setMovieScope, type MovieSearchDraft } from "@/lib/movieMentions";
 import { APP_CLIENT_HEADERS } from "@/lib/appClient";
@@ -123,27 +125,17 @@ function focusFacetBrowse(facet: RecipeMatchFacet) {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("search");
-  // A link from the Lab lands on its view (/?tab=saved); the address then
-  // returns to plain /, so the tabs behave as always from there.
+  // Screens: a search, a tab, a scene in the player. Tabs, Home and the
+  // player move through history, so Back and Forward step through them all,
+  // and each returns to where it was left (lib/searchHistory.ts).
+  const historyViewRef = useRef<Omit<HistoryView, "scrollY"> | null>(null);
+  const searchHistory = useSearchHistory(historyViewRef);
+  const [screenScroll, setScreenScroll] = useState<{ top: number } | null>(null);
   useLayoutEffect(() => {
-    const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab !== "saved" && tab !== "films" && tab !== "info") return;
-    setActiveTab(tab);
-    window.history.replaceState(null, "", "/");
-  }, []);
-  // The search stays as you left it while another tab is open; these keep
-  // your place in its results for the way back.
-  const searchScrollRef = useRef(0);
-  const restoreScrollRef = useRef<number | null>(null);
-  useLayoutEffect(() => {
-    if (activeTab !== "search") {
-      if (typeof window.scrollTo === "function") window.scrollTo({ top: 0 });
-      return;
-    }
-    if (restoreScrollRef.current === null) return;
-    if (typeof window.scrollTo === "function") window.scrollTo({ top: restoreScrollRef.current });
-    restoreScrollRef.current = null;
-  }, [activeTab]);
+    if (screenScroll && typeof window.scrollTo === "function") window.scrollTo({ top: screenScroll.top });
+  }, [screenScroll]);
+  // Results shown again reveal rows down to where the page was.
+  const [restoreDepth, setRestoreDepth] = useState(0);
   const [movieDraft, setMovieDraft] = useState<MovieSearchDraft>(EMPTY_MOVIE_DRAFT);
   const movieDraftRef = useRef(movieDraft);
   const compositionScopePendingRef = useRef(false);
@@ -251,6 +243,15 @@ export default function Home() {
         setRecipeNotice("Use up to three matches at once.");
         return;
       }
+      // What made this search, for Back and Forward.
+      const snapshot: SearchSnapshot = {
+        draft: movieDraftRef.current,
+        drafts,
+        filmFilters: filmFiltersRef.current,
+        shotFilters: shotFiltersRef.current,
+        image: image ? { facet: image.facet, label: image.display.label, size: image.file.size } : null,
+      };
+      if (!isDeepening) searchHistory.leave();
       const narrowed = narrowScope(scope, filterableRef.current, filmFiltersRef.current);
       if (narrowed.excludesAll) {
         // The filters leave no movie to search; the page says so.
@@ -264,6 +265,7 @@ export default function Home() {
         setSourceEvidenceByFacet({});
         setHasCompletedSearch(false);
         setResultWindow(EMPTY_RESULT_WINDOW);
+        searchHistory.record(snapshot, { results: [], window: EMPTY_RESULT_WINDOW, evidence: {}, image });
         return;
       }
 
@@ -277,6 +279,7 @@ export default function Home() {
       setRecipeNotice(null);
       if (!isDeepening) {
         setResultStreamKey((current) => current + 1);
+        setRestoreDepth(0);
         setResultWindow(EMPTY_RESULT_WINDOW);
         setSourceEvidenceByFacet({});
         setHasCompletedSearch(false);
@@ -319,27 +322,23 @@ export default function Home() {
         if (!response.ok) throw new Error(await searchError(response));
         const data: SearchRecipeResponse = await response.json();
         if (searchAbortRef.current !== controller) return;
+        const nextWindow = { hasMore: data.has_more, nextLimit: data.next_limit, maxLimit: data.max_limit };
+        const evidence = Object.fromEntries(
+          (data.source_evidence ?? []).map((item) => [item.facet, item]),
+        ) as Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>;
         setResults(data.results);
-        setResultWindow({
-          hasMore: data.has_more,
-          nextLimit: data.next_limit,
-          maxLimit: data.max_limit,
-        });
-        setSourceEvidenceByFacet(
-          Object.fromEntries(
-            (data.source_evidence ?? []).map((evidence) => [
-              evidence.facet,
-              evidence,
-            ]),
-          ) as Partial<Record<RecipeMatchFacet, ResolvedSourceEvidence>>,
-        );
+        setResultWindow(nextWindow);
+        setSourceEvidenceByFacet(evidence);
         setHasCompletedSearch(true);
+        if (isDeepening) searchHistory.update({ results: data.results, window: nextWindow, evidence });
+        else searchHistory.record(snapshot, { results: data.results, window: nextWindow, evidence, image });
       } catch (reason) {
         if (controller.signal.aborted) return;
         setError(reason instanceof Error ? reason.message : "Search failed");
         if (!isDeepening) {
           setResults([]);
           setSourceEvidenceByFacet({});
+          searchHistory.record(snapshot);
         }
       } finally {
         if (searchAbortRef.current === controller) {
@@ -348,7 +347,7 @@ export default function Home() {
         }
       }
     },
-    [cancelPendingScopeSearch, selectedFilmIds],
+    [cancelPendingScopeSearch, searchHistory, selectedFilmIds],
   );
 
   /**
@@ -381,7 +380,7 @@ export default function Home() {
   // Plays feed the local taste log (pipeline/interactions.py); never blocks playback.
   const handleShotOpen = useCallback(
     (shot: SearchResult) => {
-      setActiveShot(shot);
+      searchHistory.openShot(shot);
       void fetch(`${API_URL}/events`, {
         method: "POST",
         headers: { ...APP_CLIENT_HEADERS, "Content-Type": "application/json" },
@@ -396,7 +395,7 @@ export default function Home() {
         }),
       }).catch(() => {});
     },
-    [query],
+    [query, searchHistory],
   );
 
   const handleRecipeLimit = useCallback(() => {
@@ -527,9 +526,9 @@ export default function Home() {
   );
 
   const handleSourceReferenceCancel = useCallback(() => {
-    setActiveShot(null);
+    searchHistory.closeShot();
     facetSourceSearch.close();
-  }, [facetSourceSearch]);
+  }, [facetSourceSearch, searchHistory]);
 
   const handleMovieScopeChange = useCallback(
     (filmIds: string[], nextQuery: string, search = true) => {
@@ -669,11 +668,11 @@ export default function Home() {
   const handleBrowseFacet = useCallback(
     (facet: RecipeMatchFacet) => {
       speech.cancel();
-      setActiveShot(null);
+      searchHistory.closeShot();
       facetSourceSearch.open(facet);
       window.requestAnimationFrame(() => referenceInputRef.current?.focus());
     },
-    [facetSourceSearch, speech],
+    [facetSourceSearch, searchHistory, speech],
   );
 
   const resetSearchHome = useCallback(() => {
@@ -705,6 +704,59 @@ export default function Home() {
     setActiveShot(null);
     window.requestAnimationFrame(() => inputRef.current?.focus());
   }, [cancelPendingScopeSearch, commitMovieDraft, facetSourceSearch, speech]);
+
+  // The wordmark, and Search on Search: a fresh home page.
+  const goHome = useCallback(() => searchHistory.home("search"), [searchHistory]);
+
+  // An earlier search as it was: from memory while it still is, else searched again.
+  const showHistorySearch = useCallback(
+    (snapshot: SearchSnapshot | null, outcome: SearchOutcome | undefined) => {
+      if (!snapshot) {
+        resetSearchHome();
+        return;
+      }
+      speech.cancel();
+      cancelPendingScopeSearch();
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
+      facetSourceSearch.close();
+      setFilterView(null);
+      commitMovieDraft(snapshot.draft);
+      filmFiltersRef.current = snapshot.filmFilters;
+      setFilmFilters(snapshot.filmFilters);
+      shotFiltersRef.current = snapshot.shotFilters;
+      setShotFilters(snapshot.shotFilters);
+      setMatchDrafts(snapshot.drafts);
+      // A kept upload gets a fresh preview: the old one was released when it was replaced.
+      const image = outcome?.image
+        ? { ...outcome.image, display: { ...outcome.image.display, previewUrl: URL.createObjectURL(outcome.image.file) } }
+        : null;
+      revokeImageInput(mainImageRef.current);
+      mainImageRef.current = image;
+      setMainImage(image);
+      setError(null);
+      setLoading(false);
+      setSearchWorkspaceActive(true);
+      if (outcome) {
+        setRecipeNotice(null);
+        setResults(outcome.results);
+        setResultWindow(outcome.window);
+        setSourceEvidenceByFacet(outcome.evidence);
+        setResultStreamKey((key) => key + 1);
+        setHasCompletedSearch(true);
+        return;
+      }
+      if (snapshot.image) {
+        setResults([]);
+        setHasCompletedSearch(false);
+        setRecipeNotice("Add the image again to repeat this search.");
+        return;
+      }
+      const compiled = compileMovieDraft(snapshot.draft);
+      void runRecipe(compiled.query, snapshot.drafts, compiled.filmIds, null);
+    },
+    [cancelPendingScopeSearch, commitMovieDraft, facetSourceSearch, resetSearchHome, runRecipe, speech],
+  );
 
   const handleMainImageFile = useCallback(
     (file: File, facet: RecipeImageFacet = "look") => {
@@ -937,19 +989,42 @@ export default function Home() {
 
   const selectTab = (tab: AppTab) => {
     if (tab === "lab") { speech.cancel(); return; }
-    if (tab === "search") {
-      // From another tab, Search returns to your search; on Search
-      // itself it goes home, like the wordmark.
-      if (activeTab === "search") { resetSearchHome(); return; }
-      restoreScrollRef.current = searchScrollRef.current;
-      setActiveTab("search");
-      return;
-    }
-    if (activeTab === "search") searchScrollRef.current = window.scrollY ?? 0;
-    speech.cancel();
-    facetSourceSearch.close();
-    setActiveTab(tab);
+    // Search on Search goes home, like the wordmark.
+    if (tab === activeTab) { if (tab === "search") goHome(); return; }
+    searchHistory.switchTab(tab);
   };
+
+  // A screen from history: its search, tab and scene, where it was left.
+  const showScreen = (screen: HistoryScreen) => {
+    const tab = screen.tab as Tab;
+    if (screen.search) showHistorySearch(screen.search.snapshot, screen.search.outcome);
+    if (tab !== "search") {
+      speech.cancel();
+      facetSourceSearch.close();
+    }
+    setActiveTab(tab);
+    setActiveShot(screen.shot);
+    if (screen.scrollY === undefined) return;
+    // A search that has to run again starts at the top.
+    const top = screen.search && !screen.search.outcome ? 0 : screen.scrollY;
+    if (tab === "search") setRestoreDepth(top);
+    setScreenScroll({ top });
+  };
+  useLayoutEffect(() => {
+    historyViewRef.current = { show: showScreen, tab: () => activeTab };
+  });
+  // A link from the Lab lands on its view (/?tab=saved); the address then
+  // returns to plain /, so the tabs behave as always from there. A reload
+  // shows its screen again.
+  useLayoutEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    const landing = tab === "saved" || tab === "films" || tab === "info" ? tab : null;
+    if (landing) {
+      setActiveTab(landing);
+      window.history.replaceState(window.history.state, "", "/");
+    }
+    searchHistory.start(landing ?? "search");
+  }, [searchHistory]);
 
   return (
     <main
@@ -1032,7 +1107,7 @@ export default function Home() {
             <button
               type="button"
               className={`search-wordmark${isHome ? " is-home" : ""}`}
-              onClick={resetSearchHome}
+              onClick={goHome}
               aria-label="Return to Scene Recall home"
               title="Home"
             >
@@ -1366,7 +1441,7 @@ export default function Home() {
                           revealDisabled={facetSourceSearch.loading}
                           hasMore={facetSourceSearch.hasMore}
                           onRequestMore={facetSourceSearch.loadMore}
-                          onShotClick={setActiveShot}
+                          onShotClick={searchHistory.openShot}
                           onUseInSearch={handleSourceReferenceChoose}
                           sourceReferenceFacet={sourceReferenceFacet}
                           onToggleBookmark={(shot) => void toggleBookmark(shot)}
@@ -1482,6 +1557,7 @@ export default function Home() {
               revealDisabled={loading}
               hasMore={resultWindow.hasMore}
               onRequestMore={handleLoadMoreResults}
+              restoreDepth={restoreDepth}
               onShotClick={handleShotOpen}
               onUseInSearch={handleUseInSearch}
               disabledUseFacets={disabledUseFacets}
@@ -1525,7 +1601,7 @@ export default function Home() {
       {activeShot && (
         <VideoModal
           shot={activeShot}
-          onClose={() => setActiveShot(null)}
+          onClose={searchHistory.closeShot}
           onUseInSearch={
             sourceReferenceFacet
               ? handleSourceReferenceChoose
