@@ -93,6 +93,11 @@ function dragLeftElement(event: React.DragEvent<HTMLElement>): boolean {
   );
 }
 
+/** Nothing left to search: no words, details, scenes, image or movie. */
+function isEmptySearch(text: string, drafts: MatchDrafts, image: RecipeImageInput | null, scope: readonly string[]): boolean {
+  return recipeClauseCount(text, drafts, image) === 0 && scope.length === 0;
+}
+
 function revokeImageInput(image: RecipeImageInput | null | undefined) {
   if (image) URL.revokeObjectURL(image.display.previewUrl);
 }
@@ -130,6 +135,9 @@ export default function Home() {
   // and each returns to where it was left (lib/searchHistory.ts).
   const historyViewRef = useRef<Omit<HistoryView, "scrollY"> | null>(null);
   const searchHistory = useSearchHistory(historyViewRef);
+  // The wordmark, Search on Search, and removing the last thing a search is
+  // made of: a fresh home page, where Back restores the search.
+  const goHome = useCallback(() => searchHistory.home("search"), [searchHistory]);
   const [screenScroll, setScreenScroll] = useState<{ top: number } | null>(null);
   useLayoutEffect(() => {
     if (screenScroll && typeof window.scrollTo === "function") window.scrollTo({ top: screenScroll.top });
@@ -226,8 +234,8 @@ export default function Home() {
       const clauses = buildRecipeClauses(mainText, drafts, image);
       const isDeepening = limit !== undefined;
       if (clauses.length === 0 && scope.length === 0) {
-        // Clearing the draft leaves the current scenes and layout in place.
-        // Only an explicit Home action resets the result workspace.
+        // Clearing the typed draft leaves the current scenes and layout in
+        // place; removing the last of a search goes home instead.
         cancelPendingScopeSearch();
         searchAbortRef.current?.abort();
         searchAbortRef.current = null;
@@ -357,7 +365,7 @@ export default function Home() {
    */
   const scheduleSearch = useCallback(() => {
     cancelPendingScopeSearch();
-    if (recipeClauseCount(query, matchDrafts, mainImageRef.current) === 0 && selectedFilmIds.length === 0) return;
+    if (isEmptySearch(query, matchDrafts, mainImageRef.current, selectedFilmIds)) return;
     scopeSearchTimerRef.current = window.setTimeout(() => {
       scopeSearchTimerRef.current = null;
       void runRecipe(query, matchDrafts);
@@ -418,6 +426,10 @@ export default function Home() {
       }
       const oldImage = mainImageRef.current;
       const nextImage = oldImage?.facet === facet ? null : oldImage;
+      if (!normalizedText && matchDraftHasClause(matchDrafts[facet]) && isEmptySearch(query, nextDrafts, nextImage, selectedFilmIds)) {
+        goHome();
+        return;
+      }
       if (
         recipeClauseCount(query, nextDrafts, nextImage) > MAX_RECIPE_CLAUSES
       ) {
@@ -433,20 +445,27 @@ export default function Home() {
       setRecipeNotice(null);
       void runRecipe(query, nextDrafts, selectedFilmIds, nextImage);
     },
-    [facetSourceSearch, matchDrafts, query, runRecipe, selectedFilmIds],
+    [facetSourceSearch, goHome, matchDrafts, query, runRecipe, selectedFilmIds],
   );
 
+  // Removing what a search is made of reruns it with the rest. Removing the
+  // last of it goes home: results with nothing left to search would ignore
+  // every control. Clearing typed words still leaves the scenes in place.
   const handleRemoveFacet = useCallback(
     (facet: RecipeMatchFacet) => {
       const removedClause = matchDraftHasClause(matchDrafts[facet]);
       const nextDrafts = { ...matchDrafts };
       delete nextDrafts[facet];
+      if (removedClause && isEmptySearch(query, nextDrafts, mainImageRef.current, selectedFilmIds)) {
+        goHome();
+        return;
+      }
       setMatchDrafts(nextDrafts);
       setRecipeNotice(null);
       setHasCompletedSearch(false);
       if (removedClause) void runRecipe(query, nextDrafts);
     },
-    [matchDrafts, query, runRecipe],
+    [goHome, matchDrafts, query, runRecipe, selectedFilmIds],
   );
 
   const applySourceFacet = useCallback(
@@ -705,8 +724,6 @@ export default function Home() {
     window.requestAnimationFrame(() => inputRef.current?.focus());
   }, [cancelPendingScopeSearch, commitMovieDraft, facetSourceSearch, speech]);
 
-  // The wordmark, and Search on Search: a fresh home page.
-  const goHome = useCallback(() => searchHistory.home("search"), [searchHistory]);
 
   // An earlier search as it was: from memory while it still is, else searched again.
   const showHistorySearch = useCallback(
@@ -826,13 +843,17 @@ export default function Home() {
   const handleRemoveMainImage = useCallback(() => {
     const previousImage = mainImageRef.current;
     if (!previousImage) return;
+    if (isEmptySearch(query, matchDrafts, null, selectedFilmIds)) {
+      goHome();
+      return;
+    }
     mainImageRef.current = null;
     setMainImage(null);
     revokeImageInput(previousImage);
     setRecipeNotice(null);
     setHasCompletedSearch(false);
     void runRecipe(query, matchDrafts, selectedFilmIds, null);
-  }, [matchDrafts, query, runRecipe, selectedFilmIds]);
+  }, [goHome, matchDrafts, query, runRecipe, selectedFilmIds]);
 
   useEffect(
     () => () => {

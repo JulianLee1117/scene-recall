@@ -36,6 +36,15 @@ vm.runInNewContext(compile("../lib/searchHistory.ts"), { exports: historyLib });
 const compiledHistoryHook = compile("../hooks/useSearchHistory.ts");
 const result = (id, main = false) => ({ unit_id: id, film_id: "film", caption: "A scene", matches: [{ clause_id: "composition", facet: "composition" }, ...(main ? [{ clause_id: "main", facet: "all" }] : [])] });
 const response = (results, hasMore = false) => ({ results, has_more: hasMore, next_limit: hasMore ? 96 : null, source_evidence: [] });
+const ids = (results) => results.map((shot) => shot.unit_id);
+const inputValue = (app) => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props.value;
+/** Type a search and submit it. */
+async function submit(app, value) {
+  app.find((node) => node.props?.["aria-label"] === "Describe a scene").props.onChange({ target: { value } });
+  await app.flush();
+  app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
+  await app.flush();
+}
 
 test("movie suggestions preserve plain Enter and apply a hard scope only on explicit selection", async () => {
   for (const accept of [false, true]) {
@@ -476,45 +485,61 @@ test("the overlap advisory requires both main text and a Framing reference", asy
   }
 });
 
-test("clearing the last search input keeps results and layout until an explicit Home reset", async () => {
-  for (const kind of ["main text", "category text", "category reference", "uploaded image", "empty category text"]) {
+test("clearing the typed words keeps results and layout until a new search or Home", async () => {
+  const app = harness();
+  const rail = () => app.find((node) => node.type === "MatchByRail").props;
+  const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
+  try {
+    input().onChange({ target: { value: "red" } }); await app.flush();
+    app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
+    await app.flush();
+    const results = [result("main text")];
+    await app.resolve(0, response(results, true));
+    const streamKey = app.grid().props.streamKey;
+
+    input().onChange({ target: { value: "" } });
+    await app.flush();
+
+    assert.equal(app.grid().props.results, results);
+    assert.equal(app.grid().props.streamKey, streamKey, "clearing must not collapse already revealed results");
+    assert.equal(app.find((node) => node.props?.className === "search-hero")?.type, "div");
+    assert.equal(rail().clauseCount, 0);
+    assert.equal(app.requests.length, 1, "an empty draft must not submit a new search");
+    assert.equal(app.grid().props.hasMore, false, "old pagination must not run against the empty draft");
+    assert.equal(app.find((node) => node.props?.["aria-label"] === "Search").props.disabled, true);
+
+    app.find((node) => node.props?.["aria-label"] === "Return to Scene Recall home").props.onClick();
+    await app.flush();
+    assert.equal(app.grid().props.results.length, 0);
+    assert.ok(app.find((node) => node.props?.className === "search-hero is-home"));
+  } finally { app.dispose(); }
+});
+
+test("removing the last thing a search is made of goes home, where every control works again, and Back restores it", async () => {
+  for (const kind of ["category text", "category reference", "uploaded image", "empty category text"]) {
     const app = harness();
     const rail = () => app.find((node) => node.type === "MatchByRail").props;
-    const input = () => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props;
     try {
-      if (kind === "main text") {
-        input().onChange({ target: { value: "red" } }); await app.flush();
-        app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
-      } else if (kind === "uploaded image") {
-        rail().onImageFile(new Blob(["image"], { type: "image/png" }), "look");
-      } else if (kind === "category reference") {
-        await app.search("", "look");
-      } else {
-        rail().onCommitText("look", "red");
-      }
+      if (kind === "uploaded image") rail().onImageFile(new Blob(["image"], { type: "image/png" }), "look");
+      else if (kind === "category reference") await app.search("", "look");
+      else rail().onCommitText("look", "red");
       await app.flush();
-      const results = [result(kind)];
-      await app.resolve(0, response(results, true));
-      const streamKey = app.grid().props.streamKey;
+      await app.resolve(0, response([result(kind)]));
 
-      if (kind === "main text") input().onChange({ target: { value: "" } });
-      else if (kind === "uploaded image") rail().onRemoveImage();
+      if (kind === "uploaded image") rail().onRemoveImage();
       else if (kind === "empty category text") rail().onCommitText("look", "");
       else rail().onRemove("look");
       await app.flush();
 
-      assert.equal(app.grid().props.results, results, kind);
-      assert.equal(app.grid().props.streamKey, streamKey, "clearing must not collapse already revealed results");
-      assert.equal(app.find((node) => node.props?.className === "search-hero")?.type, "div", kind);
+      assert.ok(app.find((node) => node.props?.className === "search-hero is-home"), kind);
+      assert.equal(app.grid()?.props.results.length ?? 0, 0, kind);
       assert.equal(rail().clauseCount, 0);
-      assert.equal(app.requests.length, 1, "an empty draft must not submit a new search");
-      assert.equal(app.grid().props.hasMore, false, "old pagination must not run against the empty draft");
-      assert.equal(app.find((node) => node.props?.["aria-label"] === "Search").props.disabled, true);
+      assert.equal(app.requests.length, 1, "an empty search is not run");
 
-      app.find((node) => node.props?.["aria-label"] === "Return to Scene Recall home").props.onClick();
-      await app.flush();
-      assert.equal(app.grid().props.results.length, 0);
-      assert.ok(app.find((node) => node.props?.className === "search-hero is-home"));
+      await app.back();
+      assert.deepEqual(ids(app.grid().props.results), [kind], "Back shows the search again");
+      assert.equal(rail().clauseCount, 1);
+      assert.equal(app.requests.length, 1, "from memory");
     } finally { app.dispose(); }
   }
 });
@@ -811,15 +836,6 @@ test("a Lab link to a view lands on that view and leaves the address at /", asyn
   } finally { app.dispose(); }
 });
 
-const ids = (results) => results.map((shot) => shot.unit_id);
-const inputValue = (app) => app.find((node) => node.props?.["aria-label"] === "Describe a scene").props.value;
-/** Type a search and submit it. */
-async function submit(app, value) {
-  app.find((node) => node.props?.["aria-label"] === "Describe a scene").props.onChange({ target: { value } });
-  await app.flush();
-  app.find((node) => node.type === "form").props.onSubmit({ preventDefault() {} });
-  await app.flush();
-}
 
 test("Back returns to the earlier search as it was and where it was, without searching again; Forward returns", async () => {
   const app = harness();
