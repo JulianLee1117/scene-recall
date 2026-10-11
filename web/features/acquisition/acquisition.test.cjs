@@ -119,11 +119,11 @@ test("cancellation can abandon failed downloads but cannot be sent twice", () =>
 
 test("cancellation hints promise cleanup only after its completion receipt", () => {
   const item = { status: "cancelling", cancellation_cleanup: "pending", film_path: "V:/films/Film.mkv" };
-  assert.match(model.acquisitionHint(item), /cleaning up downloaded files.*imported film is kept/);
+  assert.match(model.acquisitionHint(item), /cleaning up downloaded files.*imported file stays until you dismiss this/);
   assert.match(model.acquisitionHint({ ...item, error: "File locked" }), /will retry automatically/);
   assert.doesNotMatch(model.cancellationNotice(item), /were cleaned up/);
   assert.doesNotMatch(model.cancellationNotice({ ...item, status: "cancelled", cancellation_cleanup: null }), /were cleaned up/);
-  assert.match(model.cancellationNotice({ ...item, status: "cancelled", cancellation_cleanup: "complete" }), /were cleaned up.*imported film is kept/);
+  assert.match(model.cancellationNotice({ ...item, status: "cancelled", cancellation_cleanup: "complete" }), /were cleaned up.*imported file stays until you dismiss this/);
 });
 
 test("unknown byte counts and downloader sentinel ETA never become misleading progress", () => {
@@ -487,7 +487,7 @@ test("cancel accepts failed acquisitions, reports pending cleanup, and keeps the
     assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["film", "/film/cancel", { revision: 7 }]]);
     assert.match(text(app.state), /Cancellation requested/);
     assert.match(text(app.state), /Cancelling…/);
-    assert.match(text(app.state), /Your imported film is kept/);
+    assert.match(text(app.state), /imported file stays until you dismiss this/);
     assert.doesNotMatch(text(app.state), /were cleaned up/);
     assert.equal(app.button("Try again"), undefined);
     assert.equal(app.button("Cancel"), undefined);
@@ -503,7 +503,8 @@ test("cancel accepts failed acquisitions, reports pending cleanup, and keeps the
     assert.doesNotMatch(text(app.state), /Cancelling…/);
     assert.ok(app.button("Try again"));
     assert.match(text(app.state), /Cancelled\. Downloaded files were cleaned up/);
-    assert.match(text(app.state), /Your imported film is kept/);
+    // Dismissing removes an import that never became searchable, and says so.
+    assert.match(text(app.state), /imported file stays until you dismiss this; dismissing removes it unless the film is already searchable/);
   } finally { app.dispose(); }
 });
 
@@ -618,6 +619,25 @@ test("workspace counts reconcile managed jobs once and keep attention visible fr
     assert.match(text(switcher("Queue")), /Queue\s*2/);
     assert.doesNotMatch(text(switcher("Queue")), /attention/i);
     assert.equal(switcher("Library").props["aria-pressed"], true);
+  } finally { app.dispose(); }
+});
+
+test("a cancelled preparation reads Cancelled, not a problem, and can be made searchable again", async () => {
+  const films = [{ path: "V:/films/Stopped.mkv", filename: "Stopped.mkv", title: "Stopped", status: "not_indexed" }];
+  const jobs = [{ job_id: "stopped", path: films[0].path, filename: films[0].filename, status: "cancelled", error: "Job cancelled" }];
+  const app = libraryHarness({ fetch: async (url) => ({
+    ok: true, json: async () => url === "/library" ? films : url === "/ingest/jobs" ? jobs : [],
+  }) });
+  const switcher = (name) => app.find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith(name));
+  try {
+    await app.flush();
+    const library = app.find((node) => node.props?.id === "films-library-panel");
+    const rows = nodes(library).filter((node) => node.type === "article");
+    assert.equal(rows.length, 1);
+    assert.match(text(rows[0]), /Stopped.*Cancelled/);
+    assert.doesNotMatch(text(rows[0]), /Needs attention|Job cancelled/);
+    assert.ok(nodes(rows[0]).some((node) => node.type === "button" && text(node) === "Make searchable"));
+    assert.doesNotMatch(text(switcher("Library")), /attention/i);
   } finally { app.dispose(); }
 });
 
